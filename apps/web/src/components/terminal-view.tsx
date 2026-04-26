@@ -301,13 +301,7 @@ export const TerminalView = ({ sessionId, isActive }: TerminalViewProps) => {
   }, [connectionState]);
 
   return (
-    <div
-      className="relative h-full w-full bg-[#101010]"
-      style={{ display: isActive ? "block" : "none" }}
-      role="tabpanel"
-      id={`terminal-panel-${sessionId}`}
-      aria-label="terminal session"
-    >
+    <div className="relative h-full w-full bg-[#101010]" aria-label="terminal session">
       <div ref={containerRef} className="h-full w-full" />
       {overlay ? (
         <div

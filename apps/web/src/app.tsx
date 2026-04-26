@@ -3,6 +3,8 @@ import { useShallow } from "zustand/react/shallow";
 import { TabBar } from "@/components/tab-bar";
 import { TerminalView } from "@/components/terminal-view";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useTabKeybindings } from "@/lib/use-tab-keybindings";
 import { useSessions } from "@/lib/use-sessions";
 
@@ -79,8 +81,9 @@ export const App = () => {
 
   const closeActive = useCallback(() => {
     if (!activeId) return;
+    if (tabIds.length <= 1) return;
     void remove(activeId);
-  }, [activeId, remove]);
+  }, [activeId, tabIds.length, remove]);
 
   const cycleTab = useCallback(
     (direction: 1 | -1) => {
@@ -136,20 +139,29 @@ export const App = () => {
     );
   }
 
+  const activeTabValue = activeId ?? "";
+
   return (
-    <div className="flex h-dvh flex-col bg-[#101010] text-foreground">
-      <TabBar onNew={() => void handleNewTab()} />
-      <div className="relative flex-1 overflow-hidden bg-[#101010]">
-        {tabIds.map((tabId) => (
-          <div
-            key={tabId}
-            className="absolute inset-0"
-            style={{ display: tabId === activeId ? "block" : "none" }}
-          >
-            <TerminalView sessionId={tabId} isActive={tabId === activeId} />
-          </div>
-        ))}
-      </div>
-    </div>
+    <TooltipProvider delayDuration={400}>
+      <Tabs
+        value={activeTabValue}
+        onValueChange={setActive}
+        className="flex h-dvh flex-col gap-0 bg-[#101010] text-foreground"
+      >
+        <TabBar onNew={() => void handleNewTab()} />
+        <div className="relative flex-1 overflow-hidden bg-[#101010]">
+          {tabIds.map((tabId) => (
+            <TabsContent
+              key={tabId}
+              value={tabId}
+              forceMount
+              className="absolute inset-0 m-0 outline-none data-[state=inactive]:hidden"
+            >
+              <TerminalView sessionId={tabId} isActive={tabId === activeId} />
+            </TabsContent>
+          ))}
+        </div>
+      </Tabs>
+    </TooltipProvider>
   );
 };
