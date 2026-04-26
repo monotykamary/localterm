@@ -1,0 +1,30 @@
+{
+  "name": "localterm",
+  "version": "0.0.0",
+  "bin": {
+    "localterm": "./bin/localterm.mjs"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@localterm/server": "workspace:*",
+    "commander": "^12.1.0",
+    "kleur": "^4.1.5",
+    "open": "^10.1.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.19"
+  }
+}

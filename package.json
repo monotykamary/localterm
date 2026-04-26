@@ -1,0 +1,52 @@
+{
+  "name": "localterm",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "postinstall": "node scripts/fix-node-pty.mjs",
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "start": "node packages/cli/bin/localterm.mjs start",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "lint": "vp lint",
+    "lint:fix": "vp lint --fix",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
+    "check": "vp check",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.30.0",
+    "@types/node": "^25.5.0",
+    "@voidzero-dev/vite-plus-core": "^0.1.12",
+    "turbo": "^2.9.3",
+    "typescript": "^5.9.3",
+    "vite-plus": "^0.1.12"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=8"
+  },
+  "packageManager": "pnpm@10.24.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@parcel/watcher",
+      "esbuild",
+      "node-pty",
+      "sharp",
+      "spawn-sync",
+      "unrs-resolver"
+    ],
+    "overrides": {
+      "vite": "npm:@voidzero-dev/vite-plus-core",
+      "vitest": "npm:@voidzero-dev/vite-plus-test"
+    }
+  }
+}
