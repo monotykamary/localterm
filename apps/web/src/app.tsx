@@ -73,11 +73,11 @@ export const App = () => {
 
   const handleNewTab = useCallback(async () => {
     try {
-      await create({});
+      await create(activeId ? { inheritCwdFromSessionId: activeId } : {});
     } catch (creationError) {
       console.error(creationError);
     }
-  }, [create]);
+  }, [activeId, create]);
 
   const closeActive = useCallback(() => {
     if (!activeId) return;

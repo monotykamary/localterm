@@ -10,6 +10,7 @@ export interface CreateSessionInput {
   rows?: number;
   shell?: string;
   env?: Record<string, string>;
+  inheritCwdFromSessionId?: string;
 }
 
 export type ClientToServerMessage =

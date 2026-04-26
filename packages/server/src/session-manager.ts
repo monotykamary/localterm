@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { resolveCwdForPid } from "./cwd-resolver.js";
 import { Session } from "./session.js";
 import type { CreateSessionInput, SessionMetadata } from "./types.js";
 
@@ -10,14 +11,24 @@ interface ManagerEvents {
 export class SessionManager extends EventEmitter<ManagerEvents> {
   private readonly sessions = new Map<string, Session>();
 
-  create(input: CreateSessionInput = {}): Session {
-    const session = new Session(input);
+  async create(input: CreateSessionInput = {}): Promise<Session> {
+    const resolvedCwd = await this.resolveSpawnCwd(input);
+    const session = new Session({ ...input, cwd: resolvedCwd });
     this.sessions.set(session.id, session);
     session.once("exit", () => {
       setTimeout(() => this.remove(session.id), 0);
     });
     this.emit("created", session);
     return session;
+  }
+
+  private async resolveSpawnCwd(input: CreateSessionInput): Promise<string | undefined> {
+    if (input.cwd) return input.cwd;
+    if (!input.inheritCwdFromSessionId) return undefined;
+    const source = this.sessions.get(input.inheritCwdFromSessionId);
+    if (!source || source.isExited) return undefined;
+    const inherited = await resolveCwdForPid(source.pid);
+    return inherited ?? undefined;
   }
 
   get(id: string): Session | undefined {

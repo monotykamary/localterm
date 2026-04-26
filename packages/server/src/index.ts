@@ -109,7 +109,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           HTTP_STATUS_BAD_REQUEST,
         );
       }
-      const session = manager.create(parsed.data);
+      const session = await manager.create(parsed.data);
       return context.json(session.metadata(), HTTP_STATUS_CREATED);
     },
   );

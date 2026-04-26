@@ -38,6 +38,7 @@ export const createSessionInputSchema = z
     rows: z.number().int().positive().max(MAX_ROWS).optional(),
     shell: z.string().max(MAX_PATH_BYTES).optional(),
     env: z.record(z.string(), z.string().max(MAX_ENV_VALUE_BYTES)).optional(),
+    inheritCwdFromSessionId: z.string().min(1).max(64).optional(),
   })
   .strict();
 
