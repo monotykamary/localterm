@@ -2,7 +2,7 @@
 
 A browser-based terminal: one browser tab is one PTY session. Persistent xterm.js front-end, hono + node-pty back-end. pnpm monorepo built on [vite-plus](https://github.com/voidzero-dev/vite-plus) and [turbo](https://turbo.build).
 
-The mental model is "shell = browser tab". Spawn another shell by opening a new browser tab and visiting localterm again; close a tab to retire its shell (the daemon reaps it after a short grace window). Reload restores the same shell because the page writes its session id into the URL path — e.g. `http://localterm.localhost:3417/jolly-chipmunk-trea`.
+The mental model is "shell = browser tab". Spawn another shell by opening a new browser tab and visiting localterm again; close a tab to retire its shell (the daemon reaps it after a short grace window). Reload restores the same shell because the page writes its session id into the URL path, e.g. `http://localterm.localhost:3417/jolly-chipmunk-trea`.
 
 ## Quick start
 
@@ -12,7 +12,7 @@ pnpm build
 pnpm start
 ```
 
-Opens `http://localterm.localhost:3417` in your browser. (`*.localhost` is reserved by RFC 6761 and resolves to `127.0.0.1` in every modern browser — no `/etc/hosts` edit needed.) `Ctrl+C` stops the daemon and tears down all sessions. Pass CLI flags through with `pnpm start -- --no-open`.
+Opens `http://localterm.localhost:3417` in your browser. (`*.localhost` is reserved by RFC 6761 and resolves to `127.0.0.1` in every modern browser, so no `/etc/hosts` edit needed.) `Ctrl+C` stops the daemon and tears down all sessions. Pass CLI flags through with `pnpm start -- --no-open`.
 
 ## CLI
 
@@ -32,10 +32,6 @@ State lives in `~/.localterm/` (PID, port, server log).
 
 `localterm` only binds loopback hosts (`127.0.0.1`, `localhost`, `*.localhost`, `::1`); non-loopback values are rejected. All `/api` and `/ws` routes additionally check the `Host` and `Origin` headers to defeat DNS-rebinding attacks.
 
-## Tabs and shortcuts
-
-There are no app-level keybindings — the browser is the tab manager. `Cmd+T` opens a browser tab; navigate it to your localterm URL to spawn a shell. `Cmd+W` closes a tab and `beforeunload` will ask before it goes. `Cmd+1`–`9` switch between tabs. Closing a tab without a refresh leaves the PTY idle; the server reaps it 30s after the last WebSocket disconnects.
-
 ## Structure
 
 ```
@@ -46,12 +42,12 @@ packages/
   cli/          # commander entry: start/stop/status/restart/list/new/kill
 ```
 
-The server keeps a `@xterm/headless` instance per session, fed from every PTY chunk. On reconnect, the WebSocket sends a `serialize()` snapshot before live output resumes — so reloading the page (or even restarting the browser) restores vim/htop/less state exactly.
+The server keeps a `@xterm/headless` instance per session, fed from every PTY chunk. On reconnect, the WebSocket sends a `serialize()` snapshot before live output resumes, so reloading the page (or even restarting the browser) restores vim/htop/less state exactly.
 
 ## Scripts
 
-- `pnpm build` — turbo build (web → server → cli)
-- `pnpm dev` — turbo watch all packages
+- `pnpm build`: turbo build (web, then server, then cli)
+- `pnpm dev`: turbo watch all packages
 - `pnpm test` / `pnpm typecheck` / `pnpm lint` / `pnpm format`
 
 See `AGENTS.md` for code style and `CONTRIBUTING.md` for the contribution flow.

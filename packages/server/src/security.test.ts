@@ -16,7 +16,7 @@ describe("isLoopbackHost", () => {
     expect(isLoopbackHost("::1")).toBe(true);
   });
 
-  it("accepts *.localhost (RFC 6761 — always resolves to loopback)", () => {
+  it("accepts *.localhost (RFC 6761, always resolves to loopback)", () => {
     expect(isLoopbackHost("localterm.localhost")).toBe(true);
     expect(isLoopbackHost("api.myapp.localhost")).toBe(true);
   });

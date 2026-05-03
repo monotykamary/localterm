@@ -65,7 +65,7 @@ export const App = () => {
         className="grid h-dvh place-items-center text-sm"
         style={{ background: TERMINAL_BACKGROUND_HEX, color: "#ffffff" }}
       >
-        cannot reach localterm — reload to retry ({error})
+        cannot reach localterm. reload to retry ({error})
       </div>
     );
   }

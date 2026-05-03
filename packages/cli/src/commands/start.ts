@@ -43,7 +43,7 @@ export const runStart = async (options: StartOptions): Promise<void> => {
     if (existingPort === null) {
       console.log(
         kleur.yellow(
-          `localterm pid ${existingPid} is alive but the port file is missing — state is inconsistent. run ${kleur.bold("localterm stop")} and try again.`,
+          `localterm pid ${existingPid} is alive but the port file is missing. state is inconsistent; run ${kleur.bold("localterm stop")} and try again.`,
         ),
       );
       return;
