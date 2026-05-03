@@ -8,7 +8,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XtermTerminal } from "@xterm/xterm";
 import { Check, ChevronDown, ChevronUp, Copy, Plus, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -139,12 +139,12 @@ export const Terminal = () => {
     resultIndex: -1,
     resultCount: 0,
   });
+  const isMac = useMemo(detectIsMacPlatform, []);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const isMac = detectIsMacPlatform();
     let disposed = false;
     let exited = false;
     let wasEverConnected = false;
@@ -388,6 +388,11 @@ export const Terminal = () => {
 
   const handleSearchKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (isFindShortcut(event.nativeEvent, isMac)) {
+        event.preventDefault();
+        event.currentTarget.select();
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         closeSearch();
@@ -402,7 +407,7 @@ export const Terminal = () => {
         }
       }
     },
-    [closeSearch, findNextMatch, findPreviousMatch, searchQuery],
+    [closeSearch, findNextMatch, findPreviousMatch, isMac, searchQuery],
   );
 
   const triggerManualReconnect = useCallback(() => {

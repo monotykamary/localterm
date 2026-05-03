@@ -1,6 +1,12 @@
 import { openSync } from "node:fs";
+import { isLoopbackHost } from "localterm-server";
 import kleur from "kleur";
-import { DAEMON_PROBE_INTERVAL_MS, DAEMON_PROBE_MAX_WAIT_MS, EXIT_FAILURE } from "../constants.js";
+import {
+  DAEMON_PROBE_INTERVAL_MS,
+  DAEMON_PROBE_MAX_WAIT_MS,
+  EXIT_FAILURE,
+  EXIT_USAGE_ERROR,
+} from "../constants.js";
 import { ensureLogFile, isAlive, readPort } from "../state.js";
 import { buildDaemonStartArgs } from "../utils/build-daemon-args.js";
 import { pollForDaemonReady } from "../utils/poll-for-daemon-ready.js";
@@ -15,6 +21,14 @@ export interface RestartOptions {
 }
 
 export const runRestart = async (options: RestartOptions): Promise<void> => {
+  if (!isLoopbackHost(options.host)) {
+    console.log(
+      kleur.red(
+        `refusing to restart on '${options.host}'. localterm only accepts loopback hosts (127.0.0.1, localhost, *.localhost, ::1).`,
+      ),
+    );
+    process.exit(EXIT_USAGE_ERROR);
+  }
   await runStop();
   const portBeforeSpawn = readPort();
   const logPath = ensureLogFile();

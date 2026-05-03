@@ -442,4 +442,23 @@ describe("Terminal Cmd+F search", () => {
     expect(selectSpy).toHaveBeenCalled();
     expect(input.value).toBe("needle");
   });
+
+  it("intercepts Cmd+F inside the find input so the browser's native find bar stays out", () => {
+    render(<Terminal />);
+    act(() => {
+      dispatchFindShortcut(fakeXterms[0]);
+    });
+
+    const input = screen.getByLabelText("find query") as HTMLInputElement;
+    act(() => {
+      fireEvent.change(input, { target: { value: "needle" } });
+    });
+
+    const selectSpy = vi.spyOn(input, "select");
+    const wasNotPrevented = fireEvent.keyDown(input, { key: "f", metaKey: true });
+
+    expect(selectSpy).toHaveBeenCalled();
+    expect(wasNotPrevented).toBe(false);
+    expect(input.value).toBe("needle");
+  });
 });

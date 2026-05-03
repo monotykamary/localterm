@@ -138,6 +138,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   );
 
   if (staticRoot) {
+    app.use("*", loopbackMiddleware);
     app.get("*", (context) => {
       const requestPath = context.req.path;
       if (requestPath.startsWith("/api/") || requestPath.startsWith("/ws")) {

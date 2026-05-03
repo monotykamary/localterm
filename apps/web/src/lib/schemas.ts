@@ -1,1 +1,4 @@
-export { serverToClientMessageSchema } from "localterm-server/protocol";
+export {
+  clientToServerMessageSchema,
+  serverToClientMessageSchema,
+} from "localterm-server/protocol";

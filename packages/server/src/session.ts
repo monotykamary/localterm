@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn, type IPty } from "node-pty";
 import {
   COLORTERM_VALUE,
+  CWD_RESOLVE_BACKOFF_MS,
   DEFAULT_COLS,
   DEFAULT_ROWS,
   PTY_ENV_DENYLIST,
@@ -34,6 +35,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private exited = false;
   private titlePollTimer: NodeJS.Timeout | null = null;
   private lastEmittedTitle = "";
+  private nextCwdResolveAt = 0;
 
   constructor(input: SpawnPtyInput) {
     super();
@@ -124,6 +126,7 @@ export class Session extends EventEmitter<SessionEvents> {
   }
 
   dispose(): void {
+    this.exited = true;
     this.stopTitlePolling();
     this.kill();
     this.removeAllListeners();
@@ -146,6 +149,8 @@ export class Session extends EventEmitter<SessionEvents> {
         this.lastEmittedTitle = nextTitle;
         this.emit("output", encodeOscTitle(nextTitle));
       }
+    } catch {
+      /* polling errors are non-fatal; the next tick will retry */
     } finally {
       this.scheduleTitlePoll(TITLE_POLL_INTERVAL_MS);
     }
@@ -154,8 +159,20 @@ export class Session extends EventEmitter<SessionEvents> {
   private async computeTitle(): Promise<string | null> {
     const foreground = this.pty.process?.trim() ?? "";
     if (foreground && foreground !== this.shellName) return foreground;
-    const liveCwd = await resolveCwdForPid(this.pid).catch(() => null);
+    const liveCwd = await this.resolveLiveCwd();
     return formatWorkingDirectoryTitle(liveCwd ?? this.cwd);
+  }
+
+  private async resolveLiveCwd(): Promise<string | null> {
+    const now = Date.now();
+    if (now < this.nextCwdResolveAt) return null;
+    const liveCwd = await resolveCwdForPid(this.pid).catch(() => null);
+    if (liveCwd === null) {
+      this.nextCwdResolveAt = now + CWD_RESOLVE_BACKOFF_MS;
+    } else {
+      this.nextCwdResolveAt = 0;
+    }
+    return liveCwd;
   }
 
   private stopTitlePolling(): void {
