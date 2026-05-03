@@ -1,171 +1,70 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { useShallow } from "zustand/react/shallow";
-import { TabSidebar } from "@/components/tab-sidebar";
-import { TerminalView } from "@/components/terminal-view";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { TOOLTIP_DELAY_MS } from "@/lib/constants";
-import { useTabKeybindings } from "@/lib/use-tab-keybindings";
-import { useSessions } from "@/lib/use-sessions";
+import { useEffect, useRef, useState } from "react";
+import { Terminal } from "@/components/terminal";
+import { TERMINAL_BACKGROUND_HEX } from "@/lib/constants";
+import { createSession } from "@/lib/api";
 
-const NO_ACTIVE_TAB = "";
+const URL_PARAM_PRIMARY = "id";
+const URL_PARAM_LEGACY = "tab";
 
-const writeUrlTab = (id: string | null) => {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  const current = url.searchParams.get("tab");
-  if (id === current) return;
-  if (id) url.searchParams.set("tab", id);
-  else url.searchParams.delete("tab");
-  window.history.replaceState({}, "", url);
+const readSessionIdFromUrl = (): string | null => {
+  const params = new URL(window.location.href).searchParams;
+  return params.get(URL_PARAM_PRIMARY) ?? params.get(URL_PARAM_LEGACY);
+};
+
+const writeSessionIdToUrl = (id: string) => {
+  const next = new URL(window.location.href);
+  next.searchParams.set(URL_PARAM_PRIMARY, id);
+  next.searchParams.delete(URL_PARAM_LEGACY);
+  window.history.replaceState({}, "", next);
 };
 
 export const App = () => {
-  const tabIds = useSessions(useShallow((state) => state.sessions.map((session) => session.id)));
-  const activeId = useSessions((state) => state.activeId);
-  const isLoading = useSessions((state) => state.isLoading);
-  const hasLoaded = useSessions((state) => state.hasLoaded);
-  const error = useSessions((state) => state.error);
-  const refresh = useSessions((state) => state.refresh);
-  const create = useSessions((state) => state.create);
-  const remove = useSessions((state) => state.remove);
-  const setActive = useSessions((state) => state.setActive);
+  const [sessionId, setSessionId] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : readSessionIdFromUrl(),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const bootstrappedRef = useRef(false);
 
   useEffect(() => {
-    void refresh();
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") void refresh();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!hasLoaded) return;
-    writeUrlTab(activeId);
-  }, [hasLoaded, activeId]);
-
-  useEffect(() => {
-    const onPopState = () => {
-      const url = new URL(window.location.href);
-      const desired = url.searchParams.get("tab");
-      if (!desired) return;
-      const exists = useSessions.getState().sessions.some((session) => session.id === desired);
-      if (exists) setActive(desired);
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [setActive]);
-
-  const ensureCreatingRef = useRef(false);
-  useEffect(() => {
-    if (!hasLoaded) return;
-    if (error) return;
-    if (tabIds.length > 0) {
-      ensureCreatingRef.current = false;
+    if (sessionId) {
+      writeSessionIdToUrl(sessionId);
       return;
     }
-    if (ensureCreatingRef.current) return;
-    ensureCreatingRef.current = true;
-    create({}).catch((creationError) => {
-      console.error(creationError);
-      ensureCreatingRef.current = false;
-    });
-  }, [hasLoaded, error, tabIds.length, create]);
+    if (bootstrappedRef.current) return;
+    bootstrappedRef.current = true;
+    void createSession()
+      .then((session) => {
+        writeSessionIdToUrl(session.id);
+        setSessionId(session.id);
+      })
+      .catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      });
+  }, [sessionId]);
 
-  const handleNewTab = useCallback(async () => {
-    try {
-      await create(activeId ? { inheritCwdFromSessionId: activeId } : {});
-    } catch (creationError) {
-      console.error(creationError);
-    }
-  }, [activeId, create]);
-
-  const closeActive = useCallback(() => {
-    if (!activeId) return;
-    if (tabIds.length <= 1) return;
-    void remove(activeId);
-  }, [activeId, tabIds.length, remove]);
-
-  const cycleTab = useCallback(
-    (direction: 1 | -1) => {
-      if (tabIds.length === 0) return;
-      const currentIndex = tabIds.findIndex((tabId) => tabId === activeId);
-      const nextIndex = (currentIndex + direction + tabIds.length) % tabIds.length;
-      const nextTabId = tabIds[nextIndex];
-      if (nextTabId) setActive(nextTabId);
-    },
-    [tabIds, activeId, setActive],
-  );
-
-  const jumpTo = useCallback(
-    (index: number) => {
-      const target = tabIds[index];
-      if (target) setActive(target);
-    },
-    [tabIds, setActive],
-  );
-
-  useTabKeybindings(
-    useMemo(
-      () => ({
-        onNewTab: () => void handleNewTab(),
-        onCloseTab: closeActive,
-        onNextTab: () => cycleTab(1),
-        onPrevTab: () => cycleTab(-1),
-        onJumpTo: jumpTo,
-      }),
-      [handleNewTab, closeActive, cycleTab, jumpTo],
-    ),
-  );
-
-  if (!hasLoaded && isLoading) {
-    return (
-      <div className="grid h-dvh place-items-center bg-background text-sm text-muted-foreground">
-        loading…
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (!sessionId) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [sessionId]);
 
   if (error) {
     return (
-      <div className="grid h-dvh place-items-center bg-background text-sm text-destructive-foreground">
-        <div className="flex flex-col items-center gap-2 text-center">
-          <p>cannot reach localterm server</p>
-          <p className="text-xs text-muted-foreground">{error}</p>
-          <Button size="sm" onClick={() => void refresh()}>
-            retry
-          </Button>
-        </div>
+      <div
+        className="grid h-dvh place-items-center text-sm"
+        style={{ background: TERMINAL_BACKGROUND_HEX, color: "#ffffff" }}
+      >
+        cannot reach localterm — reload to retry ({error})
       </div>
     );
   }
 
-  const activeTabValue = activeId ?? NO_ACTIVE_TAB;
+  if (!sessionId) {
+    return <div className="h-dvh w-dvw" style={{ background: TERMINAL_BACKGROUND_HEX }} />;
+  }
 
-  return (
-    <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
-      <Tabs
-        value={activeTabValue}
-        onValueChange={setActive}
-        orientation="vertical"
-        className="flex h-dvh flex-row gap-0 bg-term-chrome pt-1 pb-1 text-foreground"
-      >
-        <TabSidebar onNew={() => void handleNewTab()} />
-        <div className="relative min-w-0 flex-1 overflow-hidden rounded-tl-lg border-t border-b-0 border-l border-term-panel-border bg-term-panel">
-          {tabIds.map((tabId) => (
-            <TabsContent
-              key={tabId}
-              value={tabId}
-              forceMount
-              className="absolute inset-0 m-0 outline-none data-[state=inactive]:hidden"
-            >
-              <TerminalView sessionId={tabId} isActive={tabId === activeId} />
-            </TabsContent>
-          ))}
-        </div>
-      </Tabs>
-    </TooltipProvider>
-  );
+  return <Terminal sessionId={sessionId} />;
 };

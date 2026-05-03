@@ -8,6 +8,8 @@ export const DEFAULT_TITLE = "shell";
 
 export const SESSION_ID_LENGTH = 10;
 
+export const SESSION_IDLE_REAP_MS = 30_000;
+
 export const MAX_INPUT_BYTES = 64 * 1024;
 export const MAX_BODY_BYTES = 4 * 1024;
 export const MAX_PATH_BYTES = 4096;

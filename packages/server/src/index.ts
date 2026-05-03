@@ -142,6 +142,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             ws.close(WS_CLOSE_SESSION_NOT_FOUND, "session_not_found");
             return;
           }
+          manager.attach(sessionId);
           safeSend(ws, session.snapshot());
 
           const onOutput = (data: string) => safeSend(ws, { type: "output", data });
@@ -154,6 +155,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             session.off("output", onOutput);
             session.off("title", onTitle);
             session.off("exit", onExit);
+            manager.detach(sessionId);
           };
         },
         onMessage(event) {

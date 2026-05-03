@@ -45,6 +45,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private currentRows: number;
   private exited = false;
   private exitCode: number | null = null;
+  private attachmentCount = 0;
 
   constructor(input: CreateSessionInput) {
     super();
@@ -122,6 +123,19 @@ export class Session extends EventEmitter<SessionEvents> {
 
   get isExited(): boolean {
     return this.exited;
+  }
+
+  get hasAttachments(): boolean {
+    return this.attachmentCount > 0;
+  }
+
+  attach(): void {
+    this.attachmentCount += 1;
+  }
+
+  detach(): void {
+    if (this.attachmentCount <= 0) return;
+    this.attachmentCount -= 1;
   }
 
   metadata(): SessionMetadata {

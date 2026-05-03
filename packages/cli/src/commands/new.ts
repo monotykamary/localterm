@@ -25,7 +25,7 @@ export const runNew = async (options: NewOptions): Promise<void> => {
   console.log(kleur.green(`✔ created session ${kleur.bold(session.id)}`));
   if (options.open) {
     try {
-      await open(`http://127.0.0.1:${port}/?tab=${session.id}`);
+      await open(`http://127.0.0.1:${port}/?id=${session.id}`);
     } catch {
       /* headless environments (CI, ssh) have no browser to open; not fatal */
     }

@@ -1,6 +1,8 @@
 # localterm
 
-A browser-based terminal hub: persistent PTY sessions on the server, xterm.js + shadcn UI in the browser. Built as a pnpm monorepo on top of [vite-plus](https://github.com/voidzero-dev/vite-plus) and [turbo](https://turbo.build).
+A browser-based terminal: one browser tab is one PTY session. Persistent xterm.js front-end, hono + node-pty back-end. pnpm monorepo built on [vite-plus](https://github.com/voidzero-dev/vite-plus) and [turbo](https://turbo.build).
+
+The mental model is "shell = browser tab". Spawn another shell by opening a new browser tab and visiting localterm again; close a tab to retire its shell (the daemon reaps it after a short grace window). Reload restores the same shell because the page writes its session id into the URL as `?id=…`.
 
 ## Quick start
 
@@ -28,21 +30,9 @@ State lives in `~/.localterm/` (PID, port, server log).
 
 `localterm` only binds loopback hosts (`127.0.0.1`, `localhost`, `::1`); non-loopback values are rejected. All `/api` and `/ws` routes additionally check the `Host` and `Origin` headers to defeat DNS-rebinding attacks.
 
-## Keybindings
+## Tabs and shortcuts
 
-`Cmd+T`, `Cmd+W`, and `Cmd+1`–`9` are claimed by the browser before the page can see them, so the in-browser bindings are mapped to combos the browser leaves alone. If you want the native versions, install localterm as a standalone PWA — once it's a separate window the shortcuts work as expected.
-
-| In-browser tab              | PWA / standalone | Action          |
-| --------------------------- | ---------------- | --------------- |
-| `Cmd/Ctrl+Option+T`         | `Cmd+T`          | new tab         |
-| `Cmd/Ctrl+Option+W`         | `Cmd+W`          | close tab       |
-| `Cmd/Ctrl+]` / `Cmd/Ctrl+[` | same             | next / prev tab |
-| `Cmd/Ctrl+Option+1`–`9`     | `Cmd+1`–`9`      | jump to tab N   |
-| `Cmd/Ctrl+F`                | same             | find in tab     |
-| Middle-click tab            | same             | close tab       |
-| `Esc`                       | same             | close find bar  |
-
-To install on Chrome/Edge: open `localterm`, click the install icon in the URL bar (or `⋮` → "Install localterm"). On Safari: `File → Add to Dock`.
+There are no app-level keybindings — the browser is the tab manager. `Cmd+T` opens a browser tab; navigate it to your localterm URL to spawn a shell. `Cmd+W` closes a tab and `beforeunload` will ask before it goes. `Cmd+1`–`9` switch between tabs. Closing a tab without a refresh leaves the PTY idle; the server reaps it 30s after the last WebSocket disconnects.
 
 ## Structure
 
