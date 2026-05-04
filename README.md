@@ -7,7 +7,7 @@ Your terminal should just be a browser tab.
 
 Run `npx localterm start` and every browser tab is one shell. Open a new tab to spawn another. Close the tab to kill it. That's the whole product.
 
-![demo](https://www.localterm.com/demo.png)
+![demo](https://www.localterm.dev/demo.png)
 
 ## Install
 
