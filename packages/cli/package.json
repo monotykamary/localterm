@@ -1,6 +1,6 @@
 {
   "name": "localterm",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "A browser-based terminal: one browser tab is one PTY session. Friendly URL, persistent xterm.js front-end, hono + node-pty back-end.",
   "keywords": [
     "browser-terminal",
