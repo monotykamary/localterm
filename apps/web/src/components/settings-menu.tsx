@@ -24,7 +24,7 @@ import {
   isTerminalCursorStyle,
   type TerminalCursorStyle,
 } from "@/lib/terminal-cursor";
-import { DEFAULT_TERMINAL_FONT_ID, TERMINAL_FONTS } from "@/lib/terminal-fonts";
+import { TERMINAL_FONTS } from "@/lib/terminal-fonts";
 import { TERMINAL_SCROLLBACK_PRESETS, isTerminalScrollbackValue } from "@/lib/terminal-scrollback";
 import { TERMINAL_THEMES } from "@/lib/terminal-themes";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
@@ -61,8 +61,6 @@ const ROW_LABEL_CLASSES = "text-xs font-normal text-muted-foreground";
 const FONT_ITEM_STYLE_BY_ID: Record<string, CSSProperties> = Object.fromEntries(
   TERMINAL_FONTS.map((font) => [font.id, { fontFamily: font.family }]),
 );
-
-const DEFAULT_FONT_STYLE: CSSProperties = FONT_ITEM_STYLE_BY_ID[DEFAULT_TERMINAL_FONT_ID] ?? {};
 
 const THEME_ITEMS: readonly SettingsSelectItem[] = TERMINAL_THEMES.map((theme) => ({
   id: theme.id,
@@ -131,7 +129,6 @@ export const SettingsMenu = ({
   sessionInfo,
 }: SettingsMenuProps) => {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-  const activeFontStyle = FONT_ITEM_STYLE_BY_ID[fontId] ?? DEFAULT_FONT_STYLE;
 
   const handlePopoverOpenChange = (open: boolean) => {
     setIsPopoverOpen(open);
@@ -235,7 +232,6 @@ export const SettingsMenu = ({
               items={FONT_ITEMS}
               ariaLabel="select font"
               placeholder="Font"
-              triggerStyle={activeFontStyle}
               onValueChange={handleFontChange}
               onOpenChange={handleFontSelectOpenChange}
               onItemHover={onFontPreview ? (id) => onFontPreview(id) : undefined}

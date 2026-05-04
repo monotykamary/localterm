@@ -696,7 +696,12 @@ describe("Terminal scrollOnUserInput", () => {
 });
 
 describe("Terminal scroll preservation through hot-swaps", () => {
-  it("does not snap to the bottom when font size changes while the user is scrolled up", () => {
+  // The fake fitAddon doesn't simulate column reflow, so we can't measure the
+  // EXACT post-fit viewportY here. The test below is a regression guard for the
+  // visible bug — "scrolled-up users got snapped to the bottom on every fit()" —
+  // by asserting scrollToBottom is NOT called. Full reflow-aware verification
+  // lives in tests/utils/fit-terminal-preserving-scroll.test.ts.
+  it("does not call scrollToBottom on font size change when the user is scrolled up", () => {
     installFakeLocalStorage();
     render(<Terminal />);
     const handle = fakeXterms[0];

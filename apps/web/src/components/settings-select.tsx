@@ -46,33 +46,48 @@ export const SettingsSelect = ({
   onItemHover,
   triggerClassName,
   triggerStyle,
-}: SettingsSelectProps) => (
-  <Select value={value} onValueChange={onValueChange} onOpenChange={onOpenChange}>
-    <SelectTrigger
-      size="sm"
-      aria-label={ariaLabel}
-      className={cn(TRIGGER_BASE_CLASSES, "w-full", triggerClassName)}
-      style={triggerStyle}
-    >
-      <SelectValue placeholder={placeholder} />
-    </SelectTrigger>
-    <SelectContent
-      alignItemWithTrigger={false}
-      sideOffset={4}
-      className={cn(CONTENT_CLASSES, TRANSLUCENT_PANEL_CLASSES, PANEL_ANIMATION_CLASSES)}
-    >
-      {items.map((item) => (
-        <SelectItem
-          key={item.id}
-          value={item.id}
-          className={ITEM_CLASSES}
-          style={item.itemStyle}
-          onPointerEnter={onItemHover ? () => onItemHover(item.id) : undefined}
-          onFocus={onItemHover ? () => onItemHover(item.id) : undefined}
-        >
-          {item.label}
-        </SelectItem>
-      ))}
-    </SelectContent>
-  </Select>
-);
+}: SettingsSelectProps) => {
+  // Without our own label rendering, Base UI's <SelectValue> falls back to the raw
+  // value (e.g. "vesper") instead of the human-readable label ("Vesper").
+  const activeItem = items.find((item) => item.id === value);
+  // Auto-merge the active item's itemStyle into the trigger so per-item visuals
+  // (e.g. font-family on the Font picker) appear on the trigger too. Caller's
+  // explicit `triggerStyle` still wins.
+  const mergedTriggerStyle = activeItem?.itemStyle
+    ? { ...activeItem.itemStyle, ...triggerStyle }
+    : triggerStyle;
+  return (
+    <Select value={value} onValueChange={onValueChange} onOpenChange={onOpenChange}>
+      <SelectTrigger
+        size="sm"
+        aria-label={ariaLabel}
+        className={cn(TRIGGER_BASE_CLASSES, "w-full", triggerClassName)}
+        style={mergedTriggerStyle}
+      >
+        <SelectValue placeholder={placeholder}>
+          {/* Function form is the documented Base UI contract; static-node form
+              works today but isn't guaranteed across versions. */}
+          {() => activeItem?.label || placeholder}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent
+        alignItemWithTrigger={false}
+        sideOffset={4}
+        className={cn(CONTENT_CLASSES, TRANSLUCENT_PANEL_CLASSES, PANEL_ANIMATION_CLASSES)}
+      >
+        {items.map((item) => (
+          <SelectItem
+            key={item.id}
+            value={item.id}
+            className={ITEM_CLASSES}
+            style={item.itemStyle}
+            onPointerEnter={onItemHover ? () => onItemHover(item.id) : undefined}
+            onFocus={onItemHover ? () => onItemHover(item.id) : undefined}
+          >
+            {item.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+};

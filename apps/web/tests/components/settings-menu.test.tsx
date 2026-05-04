@@ -101,6 +101,48 @@ describe("SettingsMenu trigger", () => {
   });
 });
 
+describe("SettingsSelect trigger label", () => {
+  // Regression guard: Base UI's <SelectValue> renders the raw value (the id) when
+  // it can't resolve a label. Our SettingsSelect explicitly looks up the active
+  // item and renders its `label`, so the trigger button shows "Vesper" instead of
+  // "vesper", "Geist Mono" instead of "geist-mono", etc. If anyone refactors away
+  // the active-item lookup or Base UI changes its children semantics, this catches it.
+
+  it("Theme trigger shows the formatted label, not the raw id", () => {
+    renderSettingsMenu({ initialThemeId: "vesper" });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    const trigger = screen.getByLabelText("select theme");
+    expect(trigger.textContent).toContain("Vesper");
+    expect(trigger.textContent).not.toContain("vesper");
+  });
+
+  it("Font trigger shows the formatted label, not the raw id", () => {
+    renderSettingsMenu({ initialFontId: "geist-mono" });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    const trigger = screen.getByLabelText("select font");
+    expect(trigger.textContent).toContain("Geist Mono");
+    expect(trigger.textContent).not.toContain("geist-mono");
+  });
+
+  it("Cursor style trigger shows the formatted label, not the raw id", () => {
+    renderSettingsMenu({ initialCursorStyle: "block" });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    const trigger = screen.getByLabelText("select cursor style");
+    expect(trigger.textContent).toContain("Block");
+    expect(trigger.textContent).not.toContain("block");
+  });
+
+  it("Scrollback trigger shows a formatted label, not just the raw number string", () => {
+    renderSettingsMenu({ initialScrollback: 10000 });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    const trigger = screen.getByLabelText("select scrollback");
+    // Scrollback labels include digit grouping or units (e.g. "10,000 lines"),
+    // so the rendered text differs from the raw "10000".
+    expect(trigger.textContent ?? "").not.toBe("10000");
+    expect((trigger.textContent ?? "").length).toBeGreaterThan(0);
+  });
+});
+
 describe("SettingsMenu font size stepper", () => {
   it("calls onFontSizeChange with the next step when the increment button is clicked", () => {
     const onFontSizeChange = vi.fn();
