@@ -26,6 +26,12 @@ interface FakeWebSocketHandle {
   fireError: () => void;
 }
 
+interface FakeCsiHandlerEntry {
+  prefix: string | undefined;
+  final: string;
+  callback: (params: (number | number[])[]) => boolean | Promise<boolean>;
+}
+
 interface FakeXtermHandle {
   customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null;
   fireTitleChange: (title: string) => void;
@@ -33,6 +39,7 @@ interface FakeXtermHandle {
   setBufferState: (state: { baseY: number; viewportY: number }) => void;
   scrollLines: ReturnType<typeof vi.fn>;
   scrollToBottom: ReturnType<typeof vi.fn>;
+  invokeCsiHandler: (prefix: string | undefined, final: string, params: number[]) => boolean;
 }
 
 interface FakeSearchAddonHandle {
@@ -110,7 +117,24 @@ vi.mock("@xterm/xterm", () => {
     scrollLines = vi.fn();
     scrollToBottom = vi.fn();
     private titleListeners = new Set<(title: string) => void>();
+    private csiHandlers: FakeCsiHandlerEntry[] = [];
     private handle: FakeXtermHandle;
+
+    parser = {
+      registerCsiHandler: (
+        id: { prefix?: string; final: string },
+        callback: (params: (number | number[])[]) => boolean | Promise<boolean>,
+      ) => {
+        const entry: FakeCsiHandlerEntry = { prefix: id.prefix, final: id.final, callback };
+        this.csiHandlers.push(entry);
+        return {
+          dispose: () => {
+            const indexToRemove = this.csiHandlers.indexOf(entry);
+            if (indexToRemove !== -1) this.csiHandlers.splice(indexToRemove, 1);
+          },
+        };
+      },
+    };
 
     constructor(options: Record<string, unknown> = {}) {
       this.options = { ...options };
@@ -125,6 +149,17 @@ vi.mock("@xterm/xterm", () => {
         },
         scrollLines: this.scrollLines,
         scrollToBottom: this.scrollToBottom,
+        invokeCsiHandler: (prefix, final, params) => {
+          for (let entryIndex = this.csiHandlers.length - 1; entryIndex >= 0; entryIndex -= 1) {
+            const entry = this.csiHandlers[entryIndex];
+            if (!entry) continue;
+            if (entry.prefix === prefix && entry.final === final) {
+              const result = entry.callback(params);
+              if (typeof result === "boolean" && result) return true;
+            }
+          }
+          return false;
+        },
       };
       fakeXterms.push(this.handle);
     }
@@ -487,6 +522,154 @@ describe("Terminal Cmd+F search", () => {
     expect(selectSpy).toHaveBeenCalled();
     expect(wasNotPrevented).toBe(false);
     expect(input.value).toBe("needle");
+  });
+});
+
+const dispatchEnterKey = (
+  handle: FakeXtermHandle | undefined,
+  modifiers: { shiftKey?: boolean; ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean } = {},
+): { preventDefaultCalls: number; handlerResult: boolean } | undefined => {
+  if (!handle?.customKeyEventHandler) return undefined;
+  const event = new KeyboardEvent("keydown", { key: "Enter", ...modifiers });
+  let preventDefaultCalls = 0;
+  Object.defineProperty(event, "preventDefault", { value: () => preventDefaultCalls++ });
+  const handlerResult = handle.customKeyEventHandler(event);
+  return { preventDefaultCalls, handlerResult };
+};
+
+describe("Terminal kitty keyboard Shift+Enter", () => {
+  it("emits CSI u for Shift+Enter once the TUI pushes the kitty disambiguate flag", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeXterms[0]?.invokeCsiHandler(">", "u", [1]);
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    const result = dispatchEnterKey(fakeXterms[0], { shiftKey: true });
+
+    expect(result?.handlerResult).toBe(false);
+    expect(result?.preventDefaultCalls).toBe(1);
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "input", data: "\x1b[13;2u" }),
+    );
+  });
+
+  it("emits CSI u for Ctrl+Enter and Cmd+Enter when kitty mode is active", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeXterms[0]?.invokeCsiHandler(">", "u", [1]);
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    dispatchEnterKey(fakeXterms[0], { ctrlKey: true });
+    dispatchEnterKey(fakeXterms[0], { metaKey: true });
+
+    expect(fakeWebSockets[0]?.send).toHaveBeenNthCalledWith(
+      1,
+      JSON.stringify({ type: "input", data: "\x1b[13;5u" }),
+    );
+    expect(fakeWebSockets[0]?.send).toHaveBeenNthCalledWith(
+      2,
+      JSON.stringify({ type: "input", data: "\x1b[13;9u" }),
+    );
+  });
+
+  it("leaves plain Enter to the xterm.js default handler regardless of kitty mode", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeXterms[0]?.invokeCsiHandler(">", "u", [1]);
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    const plainResult = dispatchEnterKey(fakeXterms[0]);
+
+    expect(plainResult?.handlerResult).toBe(true);
+    expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
+  });
+
+  it("emits CSI u for Alt+Enter when kitty mode is active so the TUI gets the new protocol", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeXterms[0]?.invokeCsiHandler(">", "u", [1]);
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    const result = dispatchEnterKey(fakeXterms[0], { altKey: true });
+
+    expect(result?.handlerResult).toBe(false);
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "input", data: "\x1b[13;3u" }),
+    );
+  });
+
+  it("falls through Alt-only Enter to xterm.js when kitty mode is off so legacy \\e\\r is preserved", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    const result = dispatchEnterKey(fakeXterms[0], { altKey: true });
+
+    expect(result?.handlerResult).toBe(true);
+    expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
+  });
+
+  it("emits LF for Shift+Enter without kitty mode so Ink-based TUIs treat it as multi-line", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    const result = dispatchEnterKey(fakeXterms[0], { shiftKey: true });
+
+    expect(result?.handlerResult).toBe(false);
+    expect(result?.preventDefaultCalls).toBe(1);
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "input", data: "\n" }),
+    );
+  });
+
+  it("does not fall back to LF for Ctrl+Shift+Enter so app-specific bindings stay intact", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    const result = dispatchEnterKey(fakeXterms[0], { shiftKey: true, ctrlKey: true });
+
+    expect(result?.handlerResult).toBe(true);
+    expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
+  });
+
+  it("falls back from CSI u to LF for Shift+Enter after the TUI pops its kitty flag", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeXterms[0]?.invokeCsiHandler(">", "u", [1]);
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    dispatchEnterKey(fakeXterms[0], { shiftKey: true });
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "input", data: "\x1b[13;2u" }),
+    );
+
+    act(() => {
+      fakeXterms[0]?.invokeCsiHandler("<", "u", [1]);
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    dispatchEnterKey(fakeXterms[0], { shiftKey: true });
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "input", data: "\n" }),
+    );
   });
 });
 

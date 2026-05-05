@@ -35,9 +35,15 @@ import {
   DEAD_SESSION_TITLE_PREFIX,
   DEFAULT_DOCUMENT_TITLE,
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
+  ENTER_KEY_CODE,
   FALLBACK_TERMINAL_BACKGROUND_HEX,
   FAVICON_ACTIVE_DEBOUNCE_MS,
   FAVICON_IDLE_DEBOUNCE_MS,
+  KEYBOARD_MODIFIER_SHIFT_BIT,
+  KITTY_KEYBOARD_DISAMBIGUATE_FLAG,
+  KITTY_KEYBOARD_SET_MODE_AND_NOT,
+  KITTY_KEYBOARD_SET_MODE_OR,
+  KITTY_KEYBOARD_SET_MODE_REPLACE,
   RECONNECT_DELAY_MS,
   RESIZE_DEBOUNCE_MS,
   RESTART_COMMAND,
@@ -53,6 +59,8 @@ import { findTerminalFontById } from "@/lib/terminal-fonts";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
 import { findTerminalThemeById } from "@/lib/terminal-themes";
 import { awaitFontReady } from "@/utils/await-font-ready";
+import { buildKittyKeySequence } from "@/utils/build-kitty-key-sequence";
+import { extractKeyboardModifiers } from "@/utils/extract-keyboard-modifiers";
 import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
 import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { clampTerminalFontSize } from "@/utils/clamp-terminal-font-size";
@@ -188,6 +196,13 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     let faviconActiveTimer: number | null = null;
     let faviconIdleTimer: number | null = null;
     let faviconState: "idle" | "active" = "idle";
+    // Kitty keyboard protocol (https://sw.kovidgoyal.net/kitty/keyboard-protocol/)
+    // tracks a stack of flags so a TUI can push/pop reporting modes. We only
+    // care that *some* flags are active when intercepting modifier+Enter so
+    // shells (which never push flags) keep getting bare \r and don't see CSI u
+    // garbage in their input. Stack always has at least one entry per spec.
+    const kittyFlagStack: number[] = [0];
+    const getKittyFlags = (): number => kittyFlagStack[kittyFlagStack.length - 1] ?? 0;
 
     const noteOutputActivity = () => {
       if (faviconIdleTimer !== null) {
@@ -270,6 +285,54 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       /* webgl unavailable; xterm falls back to canvas */
     }
 
+    const kittyPushDisposable = terminal.parser.registerCsiHandler(
+      { prefix: ">", final: "u" },
+      (params) => {
+        const first = params[0];
+        const flags = typeof first === "number" ? first : 1;
+        kittyFlagStack.push(flags);
+        return true;
+      },
+    );
+    const kittyPopDisposable = terminal.parser.registerCsiHandler(
+      { prefix: "<", final: "u" },
+      (params) => {
+        const first = params[0];
+        const count = typeof first === "number" && first > 0 ? first : 1;
+        for (let popIndex = 0; popIndex < count && kittyFlagStack.length > 1; popIndex += 1) {
+          kittyFlagStack.pop();
+        }
+        return true;
+      },
+    );
+    const kittySetDisposable = terminal.parser.registerCsiHandler(
+      { prefix: "=", final: "u" },
+      (params) => {
+        const first = params[0];
+        const second = params[1];
+        // Sub-params (number arrays) aren't defined for kitty `=`. Bail rather
+        // than coerce them to 0, which would silently nuke the stack entry.
+        if (typeof first !== "number") return true;
+        const flags = first;
+        const mode =
+          typeof second === "number" && second > 0 ? second : KITTY_KEYBOARD_SET_MODE_REPLACE;
+        const top = kittyFlagStack.length - 1;
+        const current = kittyFlagStack[top] ?? 0;
+        if (mode === KITTY_KEYBOARD_SET_MODE_REPLACE) {
+          kittyFlagStack[top] = flags;
+        } else if (mode === KITTY_KEYBOARD_SET_MODE_OR) {
+          kittyFlagStack[top] = current | flags;
+        } else if (mode === KITTY_KEYBOARD_SET_MODE_AND_NOT) {
+          kittyFlagStack[top] = current & ~flags;
+        }
+        return true;
+      },
+    );
+
+    const send = (message: ClientToServerMessage) => {
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+    };
+
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.key === "Tab" && (event.metaKey || event.ctrlKey)) return false;
       if (isFindShortcut(event, isMac)) {
@@ -278,6 +341,34 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
           openSearchOverlayRef.current?.();
         }
         return false;
+      }
+      // xterm.js's default keyboard handler ignores Shift/Ctrl/Meta on Enter
+      // and sends bare \r for all of them, so TUIs can't distinguish Shift+Enter
+      // from Enter. Three-tier dispatch:
+      //   1. Kitty disambiguate flag is active -> emit `CSI 13;mods+1 u` for any
+      //      modifier+Enter (including Alt, since the TUI explicitly asked for
+      //      the new protocol and prefers it over the legacy \e\r form).
+      //   2. Plain Shift+Enter without kitty -> emit LF. This matches the
+      //      iTerm2/VS Code/Terminal.app convention that Ink-based TUIs (Claude
+      //      Code, Cursor Agent) read as "newline within input". Bash/zsh/fish
+      //      bind \n to accept-line just like \r so shells are unaffected.
+      //   3. Anything else (plain Enter, Alt-only, Ctrl/Cmd+Enter without
+      //      kitty) -> fall through to xterm.js so app-specific bindings keep
+      //      working.
+      if (event.type === "keydown" && event.key === "Enter") {
+        const modifierBits = extractKeyboardModifiers(event);
+        const isKittyDisambiguateActive =
+          (getKittyFlags() & KITTY_KEYBOARD_DISAMBIGUATE_FLAG) !== 0;
+        if (modifierBits !== 0 && isKittyDisambiguateActive) {
+          event.preventDefault();
+          send({ type: "input", data: buildKittyKeySequence(ENTER_KEY_CODE, modifierBits) });
+          return false;
+        }
+        if (modifierBits === KEYBOARD_MODIFIER_SHIFT_BIT) {
+          event.preventDefault();
+          send({ type: "input", data: "\n" });
+          return false;
+        }
       }
       return true;
     });
@@ -293,10 +384,6 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     const titleDisposable = terminal.onTitleChange(applyIncomingTitle);
 
     refocusTerminalRef.current = () => terminal.focus();
-
-    const send = (message: ClientToServerMessage) => {
-      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
-    };
 
     const sendResize = (cols: number, rows: number) => send({ type: "resize", cols, rows });
 
@@ -428,6 +515,9 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       fitAddonRef.current = null;
       titleDisposable.dispose();
       searchResultsDisposable.dispose();
+      kittyPushDisposable.dispose();
+      kittyPopDisposable.dispose();
+      kittySetDisposable.dispose();
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       resetFavicon();
