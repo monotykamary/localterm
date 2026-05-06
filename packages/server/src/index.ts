@@ -7,10 +7,16 @@ import {
   DEFAULT_PORT,
   HTTP_STATUS_NOT_FOUND,
   MAX_CONCURRENT_SESSIONS,
+  SERVER_STOP_GRACE_MS,
   WS_BACKPRESSURE_THRESHOLD_BYTES,
   WS_CLOSE_BACKPRESSURE,
   WS_CLOSE_CAPACITY_REACHED,
   WS_CLOSE_POLICY_VIOLATION,
+  WS_HEARTBEAT_INTERVAL_MS,
+  WS_HEARTBEAT_TIMEOUT_MS,
+  WS_OUTBOUND_DRAIN_POLL_MS,
+  WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES,
+  WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
   WS_READY_STATE_OPEN,
 } from "./constants.js";
 import { ServerErrorException, serverError } from "./errors.js";
@@ -47,6 +53,33 @@ const getRawBufferedAmount = (raw: unknown): number => {
   return typeof candidate === "number" ? candidate : 0;
 };
 
+const callRawMethod = (raw: unknown, method: "ping" | "terminate"): boolean => {
+  if (!raw || typeof raw !== "object") return false;
+  const candidate = Reflect.get(raw, method);
+  if (typeof candidate !== "function") return false;
+  try {
+    candidate.call(raw);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const onRawEvent = (raw: unknown, event: "pong", listener: () => void): (() => void) | null => {
+  if (!raw || typeof raw !== "object") return null;
+  const on = Reflect.get(raw, "on");
+  const off = Reflect.get(raw, "off");
+  if (typeof on !== "function" || typeof off !== "function") return null;
+  on.call(raw, event, listener);
+  return () => {
+    try {
+      off.call(raw, event, listener);
+    } catch {
+      /* socket already torn down */
+    }
+  };
+};
+
 const safeSend = (ws: BroadcastSocket, payload: ServerToClientMessage) => {
   if (ws.readyState !== WS_READY_STATE_OPEN) return;
   if (getRawBufferedAmount(ws.raw) > WS_BACKPRESSURE_THRESHOLD_BYTES) {
@@ -72,7 +105,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   const registry = new SessionRegistry();
   const app = new Hono();
-  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+  const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
 
   const api = new Hono();
   api.use("*", loopbackMiddleware);
@@ -89,6 +122,26 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       }
 
       let session: Session | null = null;
+      let drainPollTimer: NodeJS.Timeout | null = null;
+      let heartbeatTimer: NodeJS.Timeout | null = null;
+      let stopHeartbeat: (() => void) | null = null;
+
+      const stopDrainPoll = () => {
+        if (drainPollTimer === null) return;
+        clearInterval(drainPollTimer);
+        drainPollTimer = null;
+      };
+
+      const stopHeartbeatChecks = () => {
+        if (heartbeatTimer !== null) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+        if (stopHeartbeat) {
+          stopHeartbeat();
+          stopHeartbeat = null;
+        }
+      };
 
       return {
         onOpen(_event, ws) {
@@ -96,28 +149,89 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             ws.close(WS_CLOSE_CAPACITY_REACHED, "session capacity reached");
             return;
           }
-          session = new Session({});
-          registry.register(session);
+          const newSession = new Session({});
+          session = newSession;
+          registry.register(newSession);
+
+          // Heartbeat. Without this, half-open sockets (laptop sleep, network
+          // dropout) never surface as a `close` event and the daemon keeps
+          // streaming PTY output into the void. We only enable it if the raw
+          // socket exposes `on("pong")` — otherwise the timer would tick with
+          // no pongs ever observed and kill healthy connections after the
+          // first idle window.
+          let lastPongAt = Date.now();
+          stopHeartbeat = onRawEvent(ws.raw, "pong", () => {
+            lastPongAt = Date.now();
+          });
+          if (stopHeartbeat) {
+            heartbeatTimer = setInterval(() => {
+              if (ws.readyState !== WS_READY_STATE_OPEN) return;
+              const idleMs = Date.now() - lastPongAt;
+              if (idleMs > WS_HEARTBEAT_TIMEOUT_MS) {
+                console.warn(
+                  `ws heartbeat timeout: no pong for ${idleMs}ms (pid ${newSession.pid}); terminating`,
+                );
+                stopHeartbeatChecks();
+                if (!callRawMethod(ws.raw, "terminate")) ws.close();
+                return;
+              }
+              callRawMethod(ws.raw, "ping");
+            }, WS_HEARTBEAT_INTERVAL_MS);
+            heartbeatTimer.unref?.();
+          }
+
+          // Outbound flow control. When the WS buffer climbs past the high
+          // water mark we pause the PTY (OS pipe back-pressure stops the
+          // child process producing more output) and start polling for the
+          // buffer to drain back below the low water mark. This way bursty
+          // output (`cat`, build logs, npm install) doesn't kill the
+          // connection — only a genuinely wedged receiver eventually trips
+          // the WS_BACKPRESSURE_THRESHOLD_BYTES emergency in safeSend.
+          const ensureDrainPoll = () => {
+            if (drainPollTimer !== null) return;
+            drainPollTimer = setInterval(() => {
+              if (!newSession.isPaused) {
+                stopDrainPoll();
+                return;
+              }
+              if (getRawBufferedAmount(ws.raw) <= WS_OUTBOUND_RESUME_LOW_WATER_BYTES) {
+                newSession.resume();
+                stopDrainPoll();
+              }
+            }, WS_OUTBOUND_DRAIN_POLL_MS);
+            drainPollTimer.unref?.();
+          };
 
           // Wire listeners BEFORE the first safeSend so any synchronous emit
           // from Session (current or future) reaches the client. Today
           // node-pty's data/exit are async, but this guards against drift.
-          const onOutput = (data: string) => safeSend(ws, { type: "output", data });
+          const onOutput = (data: string) => {
+            safeSend(ws, { type: "output", data });
+            if (
+              !newSession.isPaused &&
+              getRawBufferedAmount(ws.raw) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES
+            ) {
+              newSession.pause();
+              ensureDrainPoll();
+            }
+          };
           const onTitle = (title: string) => safeSend(ws, { type: "title", title });
           const onExit = (code: number | null) => {
+            stopDrainPoll();
+            stopHeartbeatChecks();
             safeSend(ws, { type: "exit", code });
             ws.close();
           };
-          session.on("output", onOutput);
-          session.on("title", onTitle);
-          session.on("exit", onExit);
+          newSession.on("output", onOutput);
+          newSession.on("title", onTitle);
+          newSession.on("exit", onExit);
 
           safeSend(ws, {
             type: "session",
-            shell: session.shell,
-            shellName: session.shellBaseName,
-            pid: session.pid,
-            cwd: session.cwd,
+            shell: newSession.shell,
+            shellName: newSession.shellBaseName,
+            pid: newSession.pid,
+            cwd: newSession.cwd,
           });
         },
         onMessage(event) {
@@ -137,13 +251,30 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             session.resize(parsed.data.cols, parsed.data.rows);
           }
         },
-        onClose() {
+        onClose(event) {
+          stopDrainPoll();
+          stopHeartbeatChecks();
+          // Most "the terminal randomly died" reports are actually the WS
+          // closing for a reason we never surfaced; logging code+reason+
+          // wasClean here makes the next incident a 1-line lookup in
+          // ~/.localterm/server.log.
+          const pidLabel = session ? ` pid ${session.pid}` : "";
+          console.info(
+            `ws closed${pidLabel}: code=${event.code} reason=${JSON.stringify(event.reason)} wasClean=${event.wasClean}`,
+          );
           if (!session) return;
           registry.unregister(session);
           session.dispose();
           session = null;
         },
-        onError() {
+        onError(event) {
+          stopDrainPoll();
+          stopHeartbeatChecks();
+          const errorValue =
+            event && typeof event === "object" ? (Reflect.get(event, "error") ?? event) : event;
+          const message = errorValue instanceof Error ? errorValue.message : String(errorValue);
+          const pidLabel = session ? ` pid ${session.pid}` : "";
+          console.error(`ws error${pidLabel}: ${message}`);
           if (!session) return;
           registry.unregister(session);
           session.dispose();
@@ -201,6 +332,22 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   const stop = async () => {
     registry.disposeAll();
+    // Forcibly tear down every WS first. node-pty + ws upgraded sockets
+    // aren't tracked in http.Server's keep-alive set, so target.close() would
+    // otherwise wait forever for them and the CLI's force-exit fallback would
+    // fire on every shutdown.
+    for (const client of wss.clients) {
+      try {
+        client.terminate();
+      } catch {
+        /* socket already torn down */
+      }
+    }
+    try {
+      wss.close();
+    } catch {
+      /* idempotent close — wss may already be closed */
+    }
     if (!httpServer) return;
     const target = httpServer;
     const closeAllConnections = Reflect.get(target, "closeAllConnections");
@@ -208,7 +355,18 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       closeAllConnections.call(target);
     }
     await new Promise<void>((resolve) => {
-      target.close(() => resolve());
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const grace = setTimeout(settle, SERVER_STOP_GRACE_MS);
+      grace.unref?.();
+      target.close(() => {
+        clearTimeout(grace);
+        settle();
+      });
     });
   };
 

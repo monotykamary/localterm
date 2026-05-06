@@ -64,6 +64,8 @@ import { awaitFontReady } from "@/utils/await-font-ready";
 import { buildKittyKeySequence } from "@/utils/build-kitty-key-sequence";
 import { extractKeyboardModifiers } from "@/utils/extract-keyboard-modifiers";
 import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
+import { formatConnectionLostMarker } from "@/utils/format-connection-lost-marker";
+import { formatShellExitMarker } from "@/utils/format-shell-exit-marker";
 import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { clampTerminalFontSize } from "@/utils/clamp-terminal-font-size";
 import { clampTerminalLineHeight } from "@/utils/clamp-terminal-line-height";
@@ -92,11 +94,6 @@ import { storeTerminalThemeId } from "@/utils/store-terminal-theme-id";
 import { MAX_INPUT_BYTES, type ClientToServerMessage } from "localterm-server/protocol";
 import "@xterm/xterm/css/xterm.css";
 
-const formatExitMarker = (code: number | null): string => {
-  const description = code === null ? "shell exited" : `shell exited with code ${code}`;
-  return `\r\n\x1b[2;31m[${description}]\x1b[0m\r\n`;
-};
-
 const titleForLiveSession = (raw: string): string => raw || DEFAULT_DOCUMENT_TITLE;
 const titleForDeadSession = (raw: string): string =>
   `${DEAD_SESSION_TITLE_PREFIX}${raw || DEFAULT_DOCUMENT_TITLE}`;
@@ -124,9 +121,14 @@ interface SearchResultState {
   resultCount: number;
 }
 
-interface ExitInfo {
-  code: number | null;
-}
+type ExitInfo =
+  | { reason: "shell-exited"; exitCode: number | null }
+  | {
+      reason: "connection-lost";
+      closeCode: number;
+      closeReason: string;
+      wasClean: boolean;
+    };
 
 interface TerminalProps {
   onModalOpenChange?: (open: boolean) => void;
@@ -440,15 +442,26 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     fitToContainer();
     terminal.focus();
 
-    const markShellDead = (code: number | null) => {
+    const markShellDead = (exitCode: number | null) => {
       if (exited) return;
       exited = true;
       resetFavicon();
       setTabFaviconState("dead");
-      terminal.write(formatExitMarker(code));
+      terminal.write(formatShellExitMarker(exitCode));
       document.title = titleForDeadSession(lastTitle);
-      setExitInfo({ code });
+      setExitInfo({ reason: "shell-exited", exitCode });
       // Clear so the Settings → Shell section doesn't show a stale dead PID/cwd.
+      setSessionInfo(null);
+    };
+
+    const markConnectionLost = (closeCode: number, closeReason: string, wasClean: boolean) => {
+      if (exited) return;
+      exited = true;
+      resetFavicon();
+      setTabFaviconState("dead");
+      terminal.write(formatConnectionLostMarker(closeCode, closeReason));
+      document.title = titleForDeadSession(lastTitle);
+      setExitInfo({ reason: "connection-lost", closeCode, closeReason, wasClean });
       setSessionInfo(null);
     };
 
@@ -493,20 +506,27 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
         }
       });
 
-      nextSocket.addEventListener("close", () => {
+      nextSocket.addEventListener("close", (event) => {
         if (socket !== nextSocket) return;
         socket = null;
         if (disposed) return;
         if (exited) return;
         if (wasEverConnected) {
-          markShellDead(null);
+          // Surface close metadata in DevTools so "the terminal randomly dies"
+          // reports always come back with a concrete code/reason instead of
+          // the previous black-box `null` exit.
+          console.warn(
+            `[localterm] websocket closed: code=${event.code} reason=${JSON.stringify(event.reason)} wasClean=${event.wasClean}`,
+          );
+          markConnectionLost(event.code, event.reason, event.wasClean);
           return;
         }
         setConsecutiveFailures((previous) => previous + 1);
         reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
       });
 
-      nextSocket.addEventListener("error", () => {
+      nextSocket.addEventListener("error", (event) => {
+        console.warn("[localterm] websocket error", event);
         try {
           nextSocket.close();
         } catch {
@@ -516,7 +536,17 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     };
 
     manualReconnectRef.current = () => {
-      if (disposed || exited) return;
+      if (disposed) return;
+      // Reset the per-session "we're done" flags so a Reconnect after a shell
+      // exit *or* a transport-level connection loss actually opens a fresh WS.
+      // The server always spawns a new PTY on connect; the alternative ("must
+      // open a new tab") loses the user's tab state for a recoverable failure.
+      exited = false;
+      wasEverConnected = false;
+      setExitInfo(null);
+      setSessionInfo(null);
+      setConsecutiveFailures(0);
+      setTabFaviconState("idle");
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -788,9 +818,10 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     };
   }, []);
 
-  const isShellDead = exitInfo !== null;
-  const isDisconnected = !isShellDead && consecutiveFailures >= DISCONNECT_MODAL_THRESHOLD_FAILURES;
-  const isModalOpen = isShellDead || isDisconnected;
+  const isSessionOver = exitInfo !== null;
+  const isDisconnected =
+    !isSessionOver && consecutiveFailures >= DISCONNECT_MODAL_THRESHOLD_FAILURES;
+  const isModalOpen = isSessionOver || isDisconnected;
 
   useEffect(() => {
     onModalOpenChange?.(isModalOpen);
@@ -814,7 +845,11 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
             aria-live="polite"
             className="absolute top-2 left-3 z-10"
           >
-            {exitInfo.code === null ? "exited" : `exited · code ${exitInfo.code}`}
+            {exitInfo.reason === "shell-exited"
+              ? exitInfo.exitCode === null
+                ? "exited"
+                : `exited · code ${exitInfo.exitCode}`
+              : `disconnected · code ${exitInfo.closeCode}`}
           </Badge>
         ) : null}
         {isSearchOpen ? null : (
@@ -934,19 +969,42 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       <AlertDialog open={isModalOpen}>
         <AlertDialogContent>
           {exitInfo !== null ? (
-            <>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Shell ended</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {exitInfo.code === null || exitInfo.code === 0
-                    ? "Open a new shell to keep going, or close this tab."
-                    : `Exit code ${exitInfo.code}. Open a new shell to keep going.`}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogAction onClick={openNewShellInNewTab}>New shell</AlertDialogAction>
-              </AlertDialogFooter>
-            </>
+            exitInfo.reason === "shell-exited" ? (
+              <>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Shell ended</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {exitInfo.exitCode === null || exitInfo.exitCode === 0
+                      ? "Open a new shell to keep going, or close this tab."
+                      : `Exit code ${exitInfo.exitCode}. Open a new shell to keep going.`}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogAction onClick={openNewShellInNewTab}>New shell</AlertDialogAction>
+                </AlertDialogFooter>
+              </>
+            ) : (
+              <>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Connection lost</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    The browser lost its connection to the localterm daemon (close code{" "}
+                    {exitInfo.closeCode}
+                    {exitInfo.closeReason ? ` · ${exitInfo.closeReason}` : ""}). Reconnecting spawns
+                    a fresh shell — the previous one can't be reattached.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogAction
+                    onClick={triggerManualReconnect}
+                    disabled={isRetryingConnection}
+                  >
+                    {isRetryingConnection ? <Spinner data-icon="inline-start" /> : null}
+                    Reconnect
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </>
+            )
           ) : (
             <>
               <AlertDialogHeader>

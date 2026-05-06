@@ -62,10 +62,11 @@ describe("fitTerminalPreservingScroll", () => {
     expect(scrollLines).toHaveBeenCalledWith(-20);
   });
 
-  it("clamps the target viewportY to 0 when the new buffer is shorter than the saved distance", () => {
+  it("falls back to scrollToBottom when the new buffer is shorter than the saved distance", () => {
     // Before: 30 lines from bottom on a 100-row buffer
     // After fit: baseY shrinks to 10 (reflow collapsed many lines) — distance > new baseY
-    // Target: max(0, 10 - 30) = 0; current viewportY = 5 → delta = -5
+    // The saved distance is no longer reachable. Snap to bottom (xterm.js's
+    // default resize behavior) instead of jumping to the very top of scrollback.
     const { terminal, scrollLines, scrollToBottom, swapBuffer } = createFakeTerminal(
       { baseY: 100, viewportY: 70 },
       { baseY: 10, viewportY: 5 },
@@ -74,8 +75,8 @@ describe("fitTerminalPreservingScroll", () => {
 
     fitTerminalPreservingScroll(terminal, addon);
 
-    expect(scrollToBottom).not.toHaveBeenCalled();
-    expect(scrollLines).toHaveBeenCalledWith(-5);
+    expect(scrollToBottom).toHaveBeenCalledTimes(1);
+    expect(scrollLines).not.toHaveBeenCalled();
   });
 
   it("does not call scrollLines when the post-fit viewport already lands on the target", () => {

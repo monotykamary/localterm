@@ -11,7 +11,11 @@ import type { Terminal } from "@xterm/xterm";
  *
  * Strategy: snapshot the viewport's distance from the bottom before fit(), then
  * scroll the same distance up after fit(). If the user was already at the
- * bottom, keep them at the bottom (matches xterm.js's default behavior).
+ * bottom, keep them at the bottom (matches xterm.js's default behavior). If
+ * reflow shrank the buffer below the saved distance, the user's exact position
+ * is unreachable — fall back to the bottom (xterm's default resize behavior)
+ * rather than slamming them to the very top of scrollback, which is jarring
+ * and makes random container reflows look like a wild scroll glitch.
  *
  * Returns `true` if the resize was applied, `false` if `fit()` threw (typically
  * an unmeasured container during the very first paint). Callers that need to
@@ -42,7 +46,12 @@ export const fitTerminalPreservingScroll = (terminal: Terminal, fitAddon: FitAdd
     }
 
     const afterBuffer = terminal.buffer.active;
-    const targetViewportY = Math.max(0, afterBuffer.baseY - distanceFromBottom);
+    if (distanceFromBottom > afterBuffer.baseY) {
+      terminal.scrollToBottom();
+      return true;
+    }
+
+    const targetViewportY = afterBuffer.baseY - distanceFromBottom;
     const delta = targetViewportY - afterBuffer.viewportY;
     if (delta !== 0) terminal.scrollLines(delta);
   } catch {

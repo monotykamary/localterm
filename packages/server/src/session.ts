@@ -38,6 +38,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private currentCols: number;
   private currentRows: number;
   private exited = false;
+  private paused = false;
   private titlePollTimer: NodeJS.Timeout | null = null;
   private lastEmittedTitle = "";
   private nextCwdResolveAt = 0;
@@ -107,9 +108,45 @@ export class Session extends EventEmitter<SessionEvents> {
     return this.exited;
   }
 
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
   write(data: string): void {
     if (this.exited) return;
     this.pty.write(data);
+  }
+
+  /**
+   * Stop reading data from the PTY. node-pty buffers further child output in
+   * the OS pipe; once that fills, write() in the child process blocks, which
+   * propagates flow control all the way back to the producing program (e.g.
+   * `cat large_file`). Used by the WS layer to pause heavy output streams
+   * when the outbound socket buffer is filling, so we don't have to kill the
+   * connection just to recover memory.
+   */
+  pause(): void {
+    if (this.exited || this.paused) return;
+    this.paused = true;
+    try {
+      this.pty.pause();
+    } catch {
+      /* PTY may have died between the exited check and the call */
+    }
+  }
+
+  /**
+   * Reverse of `pause()`. Buffered child output starts flowing again and the
+   * child process unblocks if it was stuck in write().
+   */
+  resume(): void {
+    if (this.exited || !this.paused) return;
+    this.paused = false;
+    try {
+      this.pty.resume();
+    } catch {
+      /* see pause() */
+    }
   }
 
   resize(cols: number, rows: number): void {

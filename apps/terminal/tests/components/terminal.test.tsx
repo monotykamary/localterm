@@ -22,7 +22,7 @@ interface FakeWebSocketHandle {
   close: ReturnType<typeof vi.fn>;
   fireOpen: () => void;
   fireMessage: (payload: unknown) => void;
-  fireClose: (code?: number) => void;
+  fireClose: (code?: number, reason?: string, wasClean?: boolean) => void;
   fireError: () => void;
 }
 
@@ -83,9 +83,9 @@ const installFakeWebSocket = () => {
         fireMessage: (payload) => {
           this.dispatch("message", { data: JSON.stringify(payload) });
         },
-        fireClose: (code = 1006) => {
+        fireClose: (code = 1006, reason = "", wasClean = false) => {
           this.readyState = FakeWebSocket.CLOSED;
-          this.dispatch("close", { code });
+          this.dispatch("close", { code, reason, wasClean });
         },
         fireError: () => {
           this.dispatch("error", {});
@@ -353,13 +353,22 @@ describe("Terminal modal", () => {
     expect(screen.queryByText(/exited · code 137/i)).not.toBeNull();
   });
 
-  it("treats a WebSocket close after a successful open as the shell ending", () => {
+  it("renders the 'Connection lost' modal (not 'Shell ended') when the WebSocket drops mid-session", () => {
+    // Regression: previously any post-connect WS close was misreported as the
+    // shell exiting, so users saw "Shell ended / Open a new shell" with no
+    // hint that the actual cause was a transport-level disconnect (sleep,
+    // network blip, daemon restart). The two failure modes now have distinct
+    // modals and the close code is surfaced for diagnostics.
     render(<Terminal />);
     act(() => {
       fakeWebSockets[0]?.fireOpen();
-      fakeWebSockets[0]?.fireClose();
+      fakeWebSockets[0]?.fireClose(4429, "backpressure");
     });
-    expect(screen.queryByText(/Shell ended/i)).not.toBeNull();
+    expect(screen.queryByText(/Shell ended/i)).toBeNull();
+    expect(screen.queryByText(/Connection lost/i)).not.toBeNull();
+    expect(screen.queryByText(/close code 4429/i)).not.toBeNull();
+    expect(screen.queryByText(/backpressure/i)).not.toBeNull();
+    expect(screen.queryByText(/disconnected · code 4429/i)).not.toBeNull();
   });
 
   it("blocks the auto-reconnect loop after the shell exits", () => {
@@ -371,6 +380,36 @@ describe("Terminal modal", () => {
       vi.advanceTimersByTime(5000);
     });
     expect(fakeWebSockets).toHaveLength(1);
+  });
+
+  it("blocks the auto-reconnect loop after the WebSocket drops mid-session (no auto-respawn)", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireClose(1006);
+      vi.advanceTimersByTime(5000);
+    });
+    expect(fakeWebSockets).toHaveLength(1);
+  });
+
+  it("clicking 'Reconnect' on the connection-lost modal opens a fresh WebSocket in-place", () => {
+    // The auto-reconnect loop is intentionally blocked after a mid-session
+    // drop, but the user must still be able to recover without losing the tab
+    // (and its xterm scrollback). Reconnect closes the dead state and opens
+    // the next WS; the server spawns a fresh PTY for it.
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireClose(1006);
+    });
+    expect(fakeWebSockets).toHaveLength(1);
+    expect(screen.queryByText(/Connection lost/i)).not.toBeNull();
+
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: /Reconnect/i }));
+    });
+    expect(fakeWebSockets).toHaveLength(2);
+    expect(screen.queryByText(/Connection lost/i)).toBeNull();
   });
 });
 

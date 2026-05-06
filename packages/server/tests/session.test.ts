@@ -186,4 +186,39 @@ describe("Session", () => {
     session.off("title", onTitle);
     expect(postDisposeTitleCount).toBe(0);
   });
+
+  it("pause() suppresses output emissions and resume() lets them flow again", async () => {
+    const session = new Session({ shell: "/bin/sh" });
+    try {
+      await collectOutput(session);
+
+      session.pause();
+      expect(session.isPaused).toBe(true);
+
+      const chunksWhilePaused: string[] = [];
+      const collectWhilePaused = (chunk: string) => chunksWhilePaused.push(chunk);
+      session.on("output", collectWhilePaused);
+      session.write("printf PAUSED_MARKER_DOES_NOT_LEAK\n");
+      // Generous window: even on a slow runner, paused output should never arrive.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      session.off("output", collectWhilePaused);
+      expect(chunksWhilePaused.join("")).not.toContain("PAUSED_MARKER_DOES_NOT_LEAK");
+
+      session.resume();
+      expect(session.isPaused).toBe(false);
+      const observed = await collectOutput(session, 3000);
+      expect(observed).toContain("PAUSED_MARKER_DOES_NOT_LEAK");
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("pause() and resume() are no-ops after the session has exited", () => {
+    const session = new Session({ shell: "/bin/sh" });
+    session.dispose();
+    expect(session.isExited).toBe(true);
+    expect(() => session.pause()).not.toThrow();
+    expect(session.isPaused).toBe(false);
+    expect(() => session.resume()).not.toThrow();
+  });
 });
