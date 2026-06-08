@@ -64,6 +64,7 @@ interface SettingsMenuProps {
   scrollOnUserInput: boolean;
   onScrollOnUserInputChange: (scrollOnUserInput: boolean) => void;
   sessionInfo?: TerminalSessionInfo | null;
+  onPopoverOpenChange?: (open: boolean) => void;
   onClose?: () => void;
 }
 
@@ -160,6 +161,7 @@ export const SettingsMenu = ({
   scrollOnUserInput,
   onScrollOnUserInputChange,
   sessionInfo,
+  onPopoverOpenChange,
   onClose,
 }: SettingsMenuProps) => {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -174,6 +176,7 @@ export const SettingsMenu = ({
 
   const handlePopoverOpenChange = (open: boolean) => {
     setIsPopoverOpen(open);
+    onPopoverOpenChange?.(open);
     if (!open) {
       setIsFontSelectOpen(false);
       setIsLocalFontPickerOpen(false);

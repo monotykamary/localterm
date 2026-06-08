@@ -9,6 +9,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XtermTerminal } from "@xterm/xterm";
 import { Check, ChevronDown, ChevronUp, Copy, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +29,6 @@ import {
   InputGroupText,
 } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SettingsMenu } from "@/components/settings-menu";
 import {
   COPY_FEEDBACK_MS,
@@ -54,7 +54,7 @@ import {
   SEARCH_ACTIVE_MATCH_BACKGROUND_HEX,
   SEARCH_ACTIVE_MATCH_BORDER_HEX,
   SEARCH_MATCH_BACKGROUND_HEX,
-  TOOLTIP_SIDE_OFFSET_PX,
+  TOOLBAR_HIDE_DELAY_MS,
 } from "@/lib/constants";
 import { serverToClientMessageSchema } from "@/lib/schemas";
 import type { TerminalCursorStyle } from "@/lib/terminal-cursor";
@@ -191,6 +191,12 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   const [isRetryingConnection, setIsRetryingConnection] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchOpenAttempt, setSearchOpenAttempt] = useState(0);
+  const [isToolbarHovered, setIsToolbarHovered] = useState(false);
+  const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
+  const toolbarHoverTimeoutRef = useRef<number | null>(null);
+  const isSettingsPopoverOpenRef = useRef(false);
+  const isToolbarVisible = isToolbarHovered || isSettingsPopoverOpen;
+  isSettingsPopoverOpenRef.current = isSettingsPopoverOpen;
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultState>({
     resultIndex: -1,
@@ -1010,6 +1016,36 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     refocusTerminalRef.current?.();
   }, []);
 
+  const handleToolbarAreaEnter = useCallback(() => {
+    if (toolbarHoverTimeoutRef.current !== null) {
+      window.clearTimeout(toolbarHoverTimeoutRef.current);
+      toolbarHoverTimeoutRef.current = null;
+    }
+    setIsToolbarHovered(true);
+  }, []);
+
+  const handleToolbarAreaLeave = useCallback(() => {
+    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
+      toolbarHoverTimeoutRef.current = null;
+      if (!isSettingsPopoverOpenRef.current) {
+        setIsToolbarHovered(false);
+      }
+    }, TOOLBAR_HIDE_DELAY_MS);
+  }, []);
+
+  const handleSettingsPopoverOpenChange = useCallback((open: boolean) => {
+    setIsSettingsPopoverOpen(open);
+    if (!open) {
+      if (toolbarHoverTimeoutRef.current !== null) {
+        window.clearTimeout(toolbarHoverTimeoutRef.current);
+      }
+      toolbarHoverTimeoutRef.current = window.setTimeout(() => {
+        toolbarHoverTimeoutRef.current = null;
+        setIsToolbarHovered(false);
+      }, TOOLBAR_HIDE_DELAY_MS);
+    }
+  }, []);
+
   const openSearchOverlay = useCallback(() => {
     setIsSearchOpen(true);
     setSearchOpenAttempt((previous) => previous + 1);
@@ -1081,6 +1117,10 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
 
   useEffect(() => {
     return () => {
+      if (toolbarHoverTimeoutRef.current !== null) {
+        window.clearTimeout(toolbarHoverTimeoutRef.current);
+        toolbarHoverTimeoutRef.current = null;
+      }
       if (retryFeedbackTimerRef.current !== null) {
         window.clearTimeout(retryFeedbackTimerRef.current);
         retryFeedbackTimerRef.current = null;
@@ -1169,132 +1209,137 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
               : `disconnected · code ${exitInfo.closeCode}`}
           </Badge>
         ) : null}
-        {isSearchOpen ? null : (
+        <div
+          className={cn(
+            "absolute right-0 top-0 z-10 flex flex-col items-end pr-3 pt-1",
+            isToolbarVisible ? "pointer-events-auto" : "pointer-events-none",
+          )}
+          onMouseEnter={handleToolbarAreaEnter}
+          onMouseLeave={handleToolbarAreaLeave}
+        >
           <div
-            role="toolbar"
-            aria-label="terminal actions"
-            onMouseDown={(event) => event.preventDefault()}
-            onKeyDown={() => refocusTerminalRef.current?.()}
-            className="absolute top-2 right-3 z-10 flex items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md"
-          >
-            <SettingsMenu
-              themeId={activeThemeId}
-              onThemeChange={handleThemeChange}
-              onThemePreview={setPreviewThemeId}
-              fontId={activeFontId}
-              onFontChange={handleFontChange}
-              onFontPreview={setPreviewFontId}
-              localFontFamily={activeLocalFontFamily}
-              onLocalFontChange={handleLocalFontChange}
-              fontSize={activeFontSize}
-              onFontSizeChange={handleFontSizeChange}
-              lineHeight={activeLineHeight}
-              onLineHeightChange={handleLineHeightChange}
-              cursorStyle={activeCursorStyle}
-              onCursorStyleChange={handleCursorStyleChange}
-              onCursorStylePreview={setPreviewCursorStyle}
-              cursorBlink={activeCursorBlink}
-              onCursorBlinkChange={handleCursorBlinkChange}
-              scrollback={activeScrollback}
-              onScrollbackChange={handleScrollbackChange}
-              scrollOnUserInput={activeScrollOnUserInput}
-              onScrollOnUserInputChange={handleScrollOnUserInputChange}
-              paddingX={activePaddingX}
-              onPaddingXChange={handlePaddingXChange}
-              paddingY={activePaddingY}
-              onPaddingYChange={handlePaddingYChange}
-              sessionInfo={sessionInfo}
-              onClose={refocusTerminalRef.current ?? undefined}
-            />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={openSearchOverlay}
-                    aria-label="find in terminal"
-                    className="hover:text-foreground"
-                  />
-                }
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-auto mr-0.5 h-[2px] w-5 rounded-full bg-muted-foreground/25 transition-opacity duration-150",
+              isToolbarVisible || isSearchOpen ? "opacity-0" : "opacity-100",
+            )}
+          />
+          {!isSearchOpen && (
+            <div
+              role="toolbar"
+              aria-label="terminal actions"
+              className={cn(
+                "mt-1 flex items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md",
+                "transition-[opacity,transform] duration-200 ease-snappy",
+                isToolbarVisible
+                  ? "translate-y-0 opacity-100"
+                  : "pointer-events-none -translate-y-1 opacity-0",
+              )}
+              onMouseDown={(event) => event.preventDefault()}
+              onKeyDown={() => refocusTerminalRef.current?.()}
+            >
+              <SettingsMenu
+                themeId={activeThemeId}
+                onThemeChange={handleThemeChange}
+                onThemePreview={setPreviewThemeId}
+                fontId={activeFontId}
+                onFontChange={handleFontChange}
+                onFontPreview={setPreviewFontId}
+                localFontFamily={activeLocalFontFamily}
+                onLocalFontChange={handleLocalFontChange}
+                fontSize={activeFontSize}
+                onFontSizeChange={handleFontSizeChange}
+                lineHeight={activeLineHeight}
+                onLineHeightChange={handleLineHeightChange}
+                cursorStyle={activeCursorStyle}
+                onCursorStyleChange={handleCursorStyleChange}
+                onCursorStylePreview={setPreviewCursorStyle}
+                cursorBlink={activeCursorBlink}
+                onCursorBlinkChange={handleCursorBlinkChange}
+                scrollback={activeScrollback}
+                onScrollbackChange={handleScrollbackChange}
+                scrollOnUserInput={activeScrollOnUserInput}
+                onScrollOnUserInputChange={handleScrollOnUserInputChange}
+                paddingX={activePaddingX}
+                onPaddingXChange={handlePaddingXChange}
+                paddingY={activePaddingY}
+                onPaddingYChange={handlePaddingYChange}
+                sessionInfo={sessionInfo}
+                onPopoverOpenChange={handleSettingsPopoverOpenChange}
+                onClose={refocusTerminalRef.current ?? undefined}
+              />
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={openSearchOverlay}
+                aria-label="find in terminal"
+                className="hover:text-foreground"
               >
                 <Search />
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX}>
-                Find {isMac ? "(\u2318F)" : "(Ctrl+F)"}
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                nativeButton={false}
+                aria-label="open a new shell in a new browser tab"
                 render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    nativeButton={false}
-                    aria-label="open a new shell in a new browser tab"
-                    render={
-                      <a
-                        id="new-shell-link"
-                        href={newTabUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      />
-                    }
-                    className="hover:text-foreground"
+                  <a
+                    id="new-shell-link"
+                    href={newTabUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
                   />
                 }
+                className="hover:text-foreground"
               >
                 <Plus />
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX}>
-                New shell (Alt+T)
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        )}
-        {isSearchOpen ? (
-          <InputGroup
-            role="search"
-            aria-label="find in terminal"
-            className="absolute top-2 right-3 z-10 w-80 border-border/60 bg-background/70 text-muted-foreground shadow-xs backdrop-blur-md dark:bg-background/70"
-          >
-            <InputGroupInput
-              ref={searchInputRef}
-              type="search"
-              value={searchQuery}
-              onChange={handleSearchInputChange}
-              onKeyDown={handleSearchKeyDown}
-              placeholder="Find"
-              aria-label="find query"
-              className="text-xs"
-            />
-            <InputGroupAddon align="inline-end">
-              <InputGroupText
-                role="status"
-                aria-label="match count"
-                className="text-xs tabular-nums"
-              >
-                {matchLabel}
-              </InputGroupText>
-              <InputGroupButton
-                size="icon-xs"
-                onClick={() => findPreviousMatch(searchQuery)}
-                disabled={searchResults.resultCount === 0}
-                aria-label="previous match"
-              >
-                <ChevronUp />
-              </InputGroupButton>
-              <InputGroupButton
-                size="icon-xs"
-                onClick={() => findNextMatch(searchQuery)}
-                disabled={searchResults.resultCount === 0}
-                aria-label="next match"
-              >
-                <ChevronDown />
-              </InputGroupButton>
-            </InputGroupAddon>
-          </InputGroup>
-        ) : null}
+              </Button>
+            </div>
+          )}
+          {isSearchOpen && (
+            <InputGroup
+              role="search"
+              aria-label="find in terminal"
+              className="mt-1 w-80 border-border/60 bg-background/70 text-muted-foreground shadow-xs backdrop-blur-md dark:bg-background/70"
+            >
+              <InputGroupInput
+                ref={searchInputRef}
+                type="search"
+                value={searchQuery}
+                onChange={handleSearchInputChange}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Find"
+                aria-label="find query"
+                className="text-xs"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText
+                  role="status"
+                  aria-label="match count"
+                  className="text-xs tabular-nums"
+                >
+                  {matchLabel}
+                </InputGroupText>
+                <InputGroupButton
+                  size="icon-xs"
+                  onClick={() => findPreviousMatch(searchQuery)}
+                  disabled={searchResults.resultCount === 0}
+                  aria-label="previous match"
+                >
+                  <ChevronUp />
+                </InputGroupButton>
+                <InputGroupButton
+                  size="icon-xs"
+                  onClick={() => findNextMatch(searchQuery)}
+                  disabled={searchResults.resultCount === 0}
+                  aria-label="next match"
+                >
+                  <ChevronDown />
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+          )}
+        </div>
       </div>
 
       <AlertDialog open={isModalOpen}>
