@@ -304,7 +304,11 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       initialFontIdRef.current,
       initialLocalFontFamilyRef.current,
     );
-    void awaitFontReady(initialFont);
+    void awaitFontReady(initialFont).then(() => {
+      if (disposed) return;
+      terminal.options.fontFamily = initialFont.family;
+      fitToContainer();
+    });
 
     const terminal = new XtermTerminal({
       allowProposedApi: true,
