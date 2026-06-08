@@ -579,6 +579,14 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
 
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.key === "Tab" && (event.metaKey || event.ctrlKey)) return false;
+      if (event.altKey && event.code === "KeyT") {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          const newShellLink = document.getElementById("new-shell-link");
+          if (newShellLink instanceof HTMLAnchorElement) newShellLink.click();
+        }
+        return false;
+      }
       if (isFindShortcut(event, isMac)) {
         if (event.type === "keydown") {
           event.preventDefault();
@@ -1224,7 +1232,14 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
                     size="icon-sm"
                     nativeButton={false}
                     aria-label="open a new shell in a new browser tab"
-                    render={<a href={newTabUrl} target="_blank" rel="noopener noreferrer" />}
+                    render={
+                      <a
+                        id="new-shell-link"
+                        href={newTabUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      />
+                    }
                     className="hover:text-foreground"
                   />
                 }
@@ -1232,7 +1247,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
                 <Plus />
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX}>
-                New shell (new tab)
+                New shell (Alt+T)
               </TooltipContent>
             </Tooltip>
           </div>
