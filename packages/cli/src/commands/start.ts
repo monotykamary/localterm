@@ -199,6 +199,6 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
 export const startDefaults: StartOptions = {
   port: DEFAULT_PORT,
   host: DEFAULT_HOST,
-  open: true,
+  open: false,
   foreground: false,
 };

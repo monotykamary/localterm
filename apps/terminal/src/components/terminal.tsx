@@ -91,6 +91,7 @@ import { loadStoredTerminalThemeId } from "@/utils/load-stored-terminal-theme-id
 import { loadStoredTerminalPaddingX } from "@/utils/load-stored-terminal-padding-x";
 import { loadStoredTerminalPaddingY } from "@/utils/load-stored-terminal-padding-y";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
+import { probeServerHealth } from "@/utils/probe-server-health";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
 import { storeLocalFontFamily } from "@/utils/store-local-font-family";
 import { storeTerminalCursorBlink } from "@/utils/store-terminal-cursor-blink";
@@ -161,6 +162,7 @@ interface ResizeScrollRestoreState {
 export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XtermTerminal | null>(null);
+  const terminalInitializedRef = useRef(false);
   const manualReconnectRef = useRef<(() => void) | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const refocusTerminalRef = useRef<(() => void) | null>(null);
@@ -333,12 +335,13 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       if (!fitAddon.proposeDimensions) return;
       fitAddon.proposeDimensions = () => {
         if (!terminal || !terminal.element || !terminal.element.parentElement) return undefined;
-        const terminalInternals = (terminal as unknown as {
+        const terminalInternals = terminal as unknown as {
           _core: {
             _renderService: {
-              dimensions: { css: { cell: { width: number; height: number } } } };
+              dimensions: { css: { cell: { width: number; height: number } } };
+            };
           };
-        });
+        };
         const cellWidth = terminalInternals._core._renderService.dimensions.css.cell.width;
         const cellHeight = terminalInternals._core._renderService.dimensions.css.cell.height;
         if (cellWidth === 0 || cellHeight === 0) return undefined;
@@ -434,7 +437,10 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       const totalLines = buffer.length;
       const targetViewportY = Math.max(
         0,
-        Math.min(totalLines - terminal.rows, Math.round(clickRatio * totalLines) - Math.floor(terminal.rows / 2)),
+        Math.min(
+          totalLines - terminal.rows,
+          Math.round(clickRatio * totalLines) - Math.floor(terminal.rows / 2),
+        ),
       );
       terminal.scrollLines(targetViewportY - buffer.viewportY);
     };
@@ -652,7 +658,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     const observer = new ResizeObserver(scheduleFit);
     observer.observe(container);
     fitToContainer();
-    terminal.focus();
+    requestAnimationFrame(() => terminal.focus());
 
     const markShellDead = (exitCode: number | null) => {
       if (exited) return;
@@ -777,6 +783,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     };
 
     connect();
+    terminalInitializedRef.current = true;
 
     return () => {
       disposed = true;
@@ -784,6 +791,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       refocusTerminalRef.current = null;
       searchAddonRef.current = null;
       terminalRef.current = null;
+      terminalInitializedRef.current = false;
       fitAddonRef.current = null;
       scrollbarTrackRef.current = null;
       scrollbarThumbRef.current = null;
@@ -821,12 +829,14 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   }, []);
 
   useEffect(() => {
+    if (!terminalInitializedRef.current) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.theme = effectiveTheme.colors;
   }, [effectiveTheme]);
 
   useEffect(() => {
+    if (!terminalInitializedRef.current) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     let cancelled = false;
@@ -864,6 +874,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   }, []);
 
   useEffect(() => {
+    if (!terminalInitializedRef.current) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.fontSize = activeFontSize;
@@ -878,6 +889,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   }, []);
 
   useEffect(() => {
+    if (!terminalInitializedRef.current) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.lineHeight = activeLineHeight;
@@ -892,6 +904,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   }, []);
 
   useEffect(() => {
+    if (!terminalInitializedRef.current) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.cursorStyle = effectiveCursorStyle;
@@ -904,6 +917,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   }, []);
 
   useEffect(() => {
+    if (!terminalInitializedRef.current) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.cursorBlink = activeCursorBlink;
@@ -915,6 +929,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   }, []);
 
   useEffect(() => {
+    if (!terminalInitializedRef.current) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.scrollback = activeScrollback;
@@ -926,6 +941,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   }, []);
 
   useEffect(() => {
+    if (!terminalInitializedRef.current) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.scrollOnUserInput = activeScrollOnUserInput;
@@ -937,6 +953,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   }, []);
 
   useEffect(() => {
+    if (!terminalInitializedRef.current) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     const fitAddon = fitAddonRef.current;
@@ -1083,14 +1100,17 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   const isModalOpen = isSessionOver || isDisconnected;
 
   const isConnectionLost = exitInfo !== null && exitInfo.reason !== "shell-exited";
+  const shouldAutoReconnect = isConnectionLost || isDisconnected;
 
   useEffect(() => {
-    if (!isConnectionLost) return;
+    if (!shouldAutoReconnect) return;
     const intervalId = window.setInterval(() => {
-      triggerManualReconnect();
+      void probeServerHealth().then((healthy) => {
+        if (healthy) window.location.reload();
+      });
     }, RECONNECT_POLL_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
-  }, [isConnectionLost, triggerManualReconnect]);
+  }, [shouldAutoReconnect]);
 
   useEffect(() => {
     onModalOpenChange?.(isModalOpen);
@@ -1145,6 +1165,8 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
           <div
             role="toolbar"
             aria-label="terminal actions"
+            onMouseDown={(event) => event.preventDefault()}
+            onKeyDown={() => refocusTerminalRef.current?.()}
             className="absolute top-2 right-3 z-10 flex items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md"
           >
             <SettingsMenu
@@ -1174,6 +1196,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
               paddingY={activePaddingY}
               onPaddingYChange={handlePaddingYChange}
               sessionInfo={sessionInfo}
+              onClose={refocusTerminalRef.current ?? undefined}
             />
             <Tooltip>
               <TooltipTrigger

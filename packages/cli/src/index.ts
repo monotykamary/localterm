@@ -20,7 +20,7 @@ program
   .description("start the localterm server (daemonizes by default)")
   .option("-p, --port <port>", "port to bind", parsePortOption, initialPort)
   .option("-H, --host <host>", "host to bind", DEFAULT_HOST)
-  .option("--no-open", "do not open browser on start")
+  .option("--open", "open browser on start")
   .option("-F, --foreground", "stay attached to this terminal (do not daemonize)", false)
   .action(async (options: { port: number; host: string; open: boolean; foreground: boolean }) => {
     await runStart({
@@ -50,7 +50,7 @@ program
   .description("restart the localterm server")
   .option("-p, --port <port>", "port to bind", parsePortOption, initialPort)
   .option("-H, --host <host>", "host to bind", DEFAULT_HOST)
-  .option("--no-open", "do not open browser on start")
+  .option("--open", "open browser on restart")
   .action(async (options: { port: number; host: string; open: boolean }) => {
     await runRestart({
       port: options.port,

@@ -64,6 +64,7 @@ interface SettingsMenuProps {
   scrollOnUserInput: boolean;
   onScrollOnUserInputChange: (scrollOnUserInput: boolean) => void;
   sessionInfo?: TerminalSessionInfo | null;
+  onClose?: () => void;
 }
 
 const SECTION_LABEL_CLASSES =
@@ -159,6 +160,7 @@ export const SettingsMenu = ({
   scrollOnUserInput,
   onScrollOnUserInputChange,
   sessionInfo,
+  onClose,
 }: SettingsMenuProps) => {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [isFontSelectOpen, setIsFontSelectOpen] = useState(false);
@@ -178,6 +180,7 @@ export const SettingsMenu = ({
       onThemePreview?.(null);
       onFontPreview?.(null);
       onCursorStylePreview?.(null);
+      onClose?.();
     }
   };
 
