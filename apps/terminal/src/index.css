@@ -201,6 +201,10 @@ body {
   display: none !important;
 }
 
+.xterm .xterm-screen {
+  margin: 0 auto;
+}
+
 .xterm-scrollbar-track {
   position: absolute;
   width: 10px;
