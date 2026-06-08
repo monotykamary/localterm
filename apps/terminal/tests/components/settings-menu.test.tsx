@@ -38,6 +38,8 @@ interface SettingsMenuHarnessProps {
   onCursorBlinkChange?: (blink: boolean) => void;
   onScrollbackChange?: (scrollback: number) => void;
   onScrollOnUserInputChange?: (scrollOnUserInput: boolean) => void;
+  onPaddingXChange?: (paddingX: number) => void;
+  onPaddingYChange?: (paddingY: number) => void;
   sessionInfo?: TerminalSessionInfo | null;
 }
 
@@ -61,6 +63,8 @@ const renderSettingsMenu = ({
   onCursorBlinkChange = () => {},
   onScrollbackChange = () => {},
   onScrollOnUserInputChange = () => {},
+  onPaddingXChange = () => {},
+  onPaddingYChange = () => {},
   sessionInfo,
 }: SettingsMenuHarnessProps = {}) =>
   render(
@@ -87,6 +91,10 @@ const renderSettingsMenu = ({
         onScrollbackChange={onScrollbackChange}
         scrollOnUserInput={initialScrollOnUserInput}
         onScrollOnUserInputChange={onScrollOnUserInputChange}
+        paddingX={0}
+        onPaddingXChange={onPaddingXChange}
+        paddingY={0}
+        onPaddingYChange={onPaddingYChange}
         sessionInfo={sessionInfo}
       />
     </TooltipProvider>,

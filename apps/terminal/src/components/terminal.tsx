@@ -76,6 +76,7 @@ import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anc
 import { shouldBlockTerminalScrollbackPurge } from "@/utils/should-block-terminal-scrollback-purge";
 import { clampTerminalFontSize } from "@/utils/clamp-terminal-font-size";
 import { clampTerminalLineHeight } from "@/utils/clamp-terminal-line-height";
+import { clampTerminalPaddingX, clampTerminalPaddingY } from "@/utils/clamp-terminal-padding";
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { loadStoredLocalFontFamily } from "@/utils/load-stored-local-font-family";
@@ -87,6 +88,8 @@ import { loadStoredTerminalLineHeight } from "@/utils/load-stored-terminal-line-
 import { loadStoredTerminalScrollback } from "@/utils/load-stored-terminal-scrollback";
 import { loadStoredTerminalScrollOnUserInput } from "@/utils/load-stored-terminal-scroll-on-user-input";
 import { loadStoredTerminalThemeId } from "@/utils/load-stored-terminal-theme-id";
+import { loadStoredTerminalPaddingX } from "@/utils/load-stored-terminal-padding-x";
+import { loadStoredTerminalPaddingY } from "@/utils/load-stored-terminal-padding-y";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
 import { storeLocalFontFamily } from "@/utils/store-local-font-family";
@@ -98,6 +101,8 @@ import { storeTerminalLineHeight } from "@/utils/store-terminal-line-height";
 import { storeTerminalScrollback } from "@/utils/store-terminal-scrollback";
 import { storeTerminalScrollOnUserInput } from "@/utils/store-terminal-scroll-on-user-input";
 import { storeTerminalThemeId } from "@/utils/store-terminal-theme-id";
+import { storeTerminalPaddingX } from "@/utils/store-terminal-padding-x";
+import { storeTerminalPaddingY } from "@/utils/store-terminal-padding-y";
 import { MAX_INPUT_BYTES, type ClientToServerMessage } from "localterm-server/protocol";
 import "@xterm/xterm/css/xterm.css";
 
@@ -172,8 +177,12 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   const initialCursorBlinkRef = useRef<boolean>(loadStoredTerminalCursorBlink());
   const initialScrollbackRef = useRef<number>(loadStoredTerminalScrollback());
   const initialScrollOnUserInputRef = useRef<boolean>(loadStoredTerminalScrollOnUserInput());
+  const initialPaddingXRef = useRef<number>(loadStoredTerminalPaddingX());
+  const initialPaddingYRef = useRef<number>(loadStoredTerminalPaddingY());
   const fitAddonRef = useRef<FitAddon | null>(null);
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
+  const scrollbarTrackRef = useRef<HTMLDivElement | null>(null);
+  const scrollbarThumbRef = useRef<HTMLDivElement | null>(null);
   const [exitInfo, setExitInfo] = useState<ExitInfo | null>(null);
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);
   const [hasCopiedRestartCommand, setHasCopiedRestartCommand] = useState(false);
@@ -213,6 +222,8 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   const [activeScrollOnUserInput, setActiveScrollOnUserInput] = useState<boolean>(
     initialScrollOnUserInputRef.current,
   );
+  const [activePaddingX, setActivePaddingX] = useState<number>(initialPaddingXRef.current);
+  const [activePaddingY, setActivePaddingY] = useState<number>(initialPaddingYRef.current);
   const [sessionInfo, setSessionInfo] = useState<TerminalSessionInfo | null>(null);
   const [liveCwd, setLiveCwd] = useState<string | null>(null);
   const liveCwdRef = useRef<string | null>(null);
@@ -298,6 +309,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       theme: findTerminalThemeById(initialThemeIdRef.current).colors,
       macOptionIsMeta: true,
       scrollOnUserInput: initialScrollOnUserInputRef.current,
+      overviewRuler: { width: 0 },
     });
     terminalRef.current = terminal;
     const fitAddon = new FitAddon();
@@ -316,6 +328,129 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     const searchResultsDisposable = searchAddon.onDidChangeResults(setSearchResults);
 
     terminal.open(container);
+
+    const patchFitAddonScrollbarWidth = () => {
+      if (!fitAddon.proposeDimensions) return;
+      fitAddon.proposeDimensions = () => {
+        if (!terminal || !terminal.element || !terminal.element.parentElement) return undefined;
+        const terminalInternals = (terminal as unknown as {
+          _core: {
+            _renderService: {
+              dimensions: { css: { cell: { width: number; height: number } } } };
+          };
+        });
+        const cellWidth = terminalInternals._core._renderService.dimensions.css.cell.width;
+        const cellHeight = terminalInternals._core._renderService.dimensions.css.cell.height;
+        if (cellWidth === 0 || cellHeight === 0) return undefined;
+        const parentStyle = window.getComputedStyle(terminal.element.parentElement);
+        const elementStyle = window.getComputedStyle(terminal.element);
+        const availableWidth =
+          Math.max(0, parseInt(parentStyle.getPropertyValue("width"))) -
+          (parseInt(elementStyle.getPropertyValue("padding-right")) +
+            parseInt(elementStyle.getPropertyValue("padding-left")));
+        const availableHeight =
+          parseInt(parentStyle.getPropertyValue("height")) -
+          (parseInt(elementStyle.getPropertyValue("padding-top")) +
+            parseInt(elementStyle.getPropertyValue("padding-bottom")));
+        return {
+          cols: Math.max(2, Math.floor(availableWidth / cellWidth)),
+          rows: Math.max(1, Math.floor(availableHeight / cellHeight)),
+        };
+      };
+    };
+    patchFitAddonScrollbarWidth();
+
+    const updateScrollbar = () => {
+      const buffer = terminal.buffer.active;
+      const totalLines = buffer.length;
+      const visibleLines = terminal.rows;
+      const isAtBottom = buffer.viewportY + visibleLines >= totalLines;
+      const hasScrollback = totalLines > visibleLines;
+
+      const track = scrollbarTrackRef.current;
+      const thumb = scrollbarThumbRef.current;
+      if (!track || !thumb) return;
+
+      track.classList.toggle("xterm-scrollbar-visible", !isAtBottom && hasScrollback);
+
+      if (hasScrollback) {
+        const thumbHeightRatio = visibleLines / totalLines;
+        const thumbTopRatio = buffer.viewportY / totalLines;
+        thumb.style.height = `${thumbHeightRatio * 100}%`;
+        thumb.style.top = `${thumbTopRatio * 100}%`;
+      }
+    };
+    updateScrollbar();
+    const scrollDisposable = terminal.onScroll(updateScrollbar);
+
+    let isDragging = false;
+    let dragStartY = 0;
+    let dragStartViewportY = 0;
+
+    const handleThumbPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      isDragging = true;
+      dragStartY = event.clientY;
+      dragStartViewportY = terminal.buffer.active.viewportY;
+      try {
+        (event.target as HTMLElement).setPointerCapture(event.pointerId);
+      } catch {
+        /* pointer capture not available */
+      }
+      event.preventDefault();
+    };
+
+    const handleThumbPointerMove = (event: PointerEvent) => {
+      if (!isDragging) return;
+      const trackEl = scrollbarTrackRef.current;
+      if (!trackEl) return;
+      const trackHeight = trackEl.clientHeight;
+      const buffer = terminal.buffer.active;
+      const totalLines = buffer.length - terminal.rows;
+      if (totalLines <= 0 || trackHeight <= 0) return;
+      const pixelsPerLine = trackHeight / totalLines;
+      const deltaY = event.clientY - dragStartY;
+      const targetViewportY = Math.max(
+        0,
+        Math.min(totalLines, dragStartViewportY + Math.round(deltaY / pixelsPerLine)),
+      );
+      if (targetViewportY !== terminal.buffer.active.viewportY) {
+        terminal.scrollLines(targetViewportY - terminal.buffer.active.viewportY);
+      }
+    };
+
+    const handleThumbPointerUp = () => {
+      isDragging = false;
+    };
+
+    const handleTrackPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      if (event.target === scrollbarThumbRef.current) return;
+      const trackEl = scrollbarTrackRef.current;
+      if (!trackEl) return;
+      const trackRect = trackEl.getBoundingClientRect();
+      const clickRatio = (event.clientY - trackRect.top) / trackRect.height;
+      const buffer = terminal.buffer.active;
+      const totalLines = buffer.length;
+      const targetViewportY = Math.max(
+        0,
+        Math.min(totalLines - terminal.rows, Math.round(clickRatio * totalLines) - Math.floor(terminal.rows / 2)),
+      );
+      terminal.scrollLines(targetViewportY - buffer.viewportY);
+    };
+
+    const thumbEl = scrollbarThumbRef.current;
+    const trackEl = scrollbarTrackRef.current;
+    if (thumbEl) {
+      thumbEl.addEventListener("pointerdown", handleThumbPointerDown);
+      thumbEl.addEventListener("pointermove", handleThumbPointerMove);
+      thumbEl.addEventListener("pointerup", handleThumbPointerUp);
+      thumbEl.addEventListener("pointercancel", handleThumbPointerUp);
+    }
+    if (trackEl) {
+      trackEl.addEventListener("pointerdown", handleTrackPointerDown);
+    }
+
     try {
       const webglAddon = new WebglAddon();
       webglAddon.onContextLoss(() => webglAddon.dispose());
@@ -650,8 +785,20 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       searchAddonRef.current = null;
       terminalRef.current = null;
       fitAddonRef.current = null;
+      scrollbarTrackRef.current = null;
+      scrollbarThumbRef.current = null;
+      if (thumbEl) {
+        thumbEl.removeEventListener("pointerdown", handleThumbPointerDown);
+        thumbEl.removeEventListener("pointermove", handleThumbPointerMove);
+        thumbEl.removeEventListener("pointerup", handleThumbPointerUp);
+        thumbEl.removeEventListener("pointercancel", handleThumbPointerUp);
+      }
+      if (trackEl) {
+        trackEl.removeEventListener("pointerdown", handleTrackPointerDown);
+      }
       titleDisposable.dispose();
       searchResultsDisposable.dispose();
+      scrollDisposable.dispose();
       kittyPushDisposable.dispose();
       kittyPopDisposable.dispose();
       kittySetDisposable.dispose();
@@ -787,6 +934,25 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   const handleScrollOnUserInputChange = useCallback((nextScrollOnUserInput: boolean) => {
     setActiveScrollOnUserInput(nextScrollOnUserInput);
     storeTerminalScrollOnUserInput(nextScrollOnUserInput);
+  }, []);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const fitAddon = fitAddonRef.current;
+    if (fitAddon) fitTerminalPreservingScroll(terminal, fitAddon);
+  }, [activePaddingX, activePaddingY]);
+
+  const handlePaddingXChange = useCallback((nextPaddingX: number) => {
+    const clamped = clampTerminalPaddingX(nextPaddingX);
+    setActivePaddingX(clamped);
+    storeTerminalPaddingX(clamped);
+  }, []);
+
+  const handlePaddingYChange = useCallback((nextPaddingY: number) => {
+    const clamped = clampTerminalPaddingY(nextPaddingY);
+    setActivePaddingY(clamped);
+    storeTerminalPaddingY(clamped);
   }, []);
 
   useEffect(() => {
@@ -939,7 +1105,28 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   return (
     <div className="h-dvh w-dvw" style={{ background: pageBackground }}>
       <div className="relative h-full w-full">
-        <div ref={containerRef} aria-label="terminal session" className="absolute inset-0" />
+        <div
+          ref={containerRef}
+          aria-label="terminal session"
+          className="absolute"
+          style={{
+            top: activePaddingY,
+            right: activePaddingX,
+            bottom: activePaddingY,
+            left: activePaddingX,
+          }}
+        />
+        <div
+          ref={scrollbarTrackRef}
+          className="xterm-scrollbar-track"
+          style={{
+            top: activePaddingY,
+            right: activePaddingX,
+            bottom: activePaddingY,
+          }}
+        >
+          <div ref={scrollbarThumbRef} className="xterm-scrollbar-thumb" />
+        </div>
         {exitInfo !== null ? (
           <Badge
             variant="destructive"
@@ -982,6 +1169,10 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
               onScrollbackChange={handleScrollbackChange}
               scrollOnUserInput={activeScrollOnUserInput}
               onScrollOnUserInputChange={handleScrollOnUserInputChange}
+              paddingX={activePaddingX}
+              onPaddingXChange={handlePaddingXChange}
+              paddingY={activePaddingY}
+              onPaddingYChange={handlePaddingYChange}
               sessionInfo={sessionInfo}
             />
             <Tooltip>

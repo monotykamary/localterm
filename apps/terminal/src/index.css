@@ -192,3 +192,44 @@ body {
     @apply font-sans;
   }
 }
+
+.xterm-viewport {
+  overflow: hidden !important;
+}
+
+.xterm .xterm-scrollable-element > .scrollbar {
+  display: none !important;
+}
+
+.xterm-scrollbar-track {
+  position: absolute;
+  width: 10px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  z-index: 5;
+}
+
+.xterm-scrollbar-visible {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+.xterm-scrollbar-thumb {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  min-height: 24px;
+  pointer-events: auto;
+  cursor: default;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+}
+
+.xterm-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.xterm-scrollbar-thumb:active {
+  background: rgba(255, 255, 255, 0.4);
+}

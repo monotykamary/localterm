@@ -20,6 +20,9 @@ import {
   TERMINAL_LINE_HEIGHT_MAX,
   TERMINAL_LINE_HEIGHT_MIN,
   TERMINAL_LINE_HEIGHT_STEP,
+  TERMINAL_PADDING_MAX_PX,
+  TERMINAL_PADDING_MIN_PX,
+  TERMINAL_PADDING_STEP_PX,
   TOOLTIP_SIDE_OFFSET_PX,
 } from "@/lib/constants";
 import {
@@ -47,6 +50,10 @@ interface SettingsMenuProps {
   onFontSizeChange: (size: number) => void;
   lineHeight: number;
   onLineHeightChange: (lineHeight: number) => void;
+  paddingX: number;
+  onPaddingXChange: (paddingX: number) => void;
+  paddingY: number;
+  onPaddingYChange: (paddingY: number) => void;
   cursorStyle: TerminalCursorStyle;
   onCursorStyleChange: (style: TerminalCursorStyle) => void;
   onCursorStylePreview?: (style: TerminalCursorStyle | null) => void;
@@ -138,6 +145,10 @@ export const SettingsMenu = ({
   onFontSizeChange,
   lineHeight,
   onLineHeightChange,
+  paddingX,
+  onPaddingXChange,
+  paddingY,
+  onPaddingYChange,
   cursorStyle,
   onCursorStyleChange,
   onCursorStylePreview,
@@ -310,6 +321,38 @@ export const SettingsMenu = ({
                 incrementAriaLabel="increase line height"
                 formatDisplay={formatLineHeight}
                 onValueChange={onLineHeightChange}
+              />
+            </div>
+          </Field>
+
+          <Separator className="bg-border/40" />
+
+          <Field orientation="vertical" className="gap-1.5">
+            <FieldLabel className={SECTION_LABEL_CLASSES}>Window</FieldLabel>
+            <div className="flex items-center justify-between gap-2">
+              <span className={ROW_LABEL_CLASSES}>Pad X</span>
+              <NumberStepper
+                value={paddingX}
+                min={TERMINAL_PADDING_MIN_PX}
+                max={TERMINAL_PADDING_MAX_PX}
+                step={TERMINAL_PADDING_STEP_PX}
+                ariaLabel="terminal horizontal padding"
+                decrementAriaLabel="decrease horizontal padding"
+                incrementAriaLabel="increase horizontal padding"
+                onValueChange={onPaddingXChange}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className={ROW_LABEL_CLASSES}>Pad Y</span>
+              <NumberStepper
+                value={paddingY}
+                min={TERMINAL_PADDING_MIN_PX}
+                max={TERMINAL_PADDING_MAX_PX}
+                step={TERMINAL_PADDING_STEP_PX}
+                ariaLabel="terminal vertical padding"
+                decrementAriaLabel="decrease vertical padding"
+                incrementAriaLabel="increase vertical padding"
+                onValueChange={onPaddingYChange}
               />
             </div>
           </Field>
