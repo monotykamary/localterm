@@ -293,6 +293,11 @@ beforeEach(() => {
   stubBrowserGlobals();
   installFakeWebSocket();
   Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+    cb(0);
+    return 0;
+  });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 });
 

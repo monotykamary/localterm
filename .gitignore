@@ -20,3 +20,4 @@ meta.json
 packages/cli/terminal
 packages/cli/README.md
 packages/cli/LICENSE
+packages/server/src/pty-reader-addon/build/

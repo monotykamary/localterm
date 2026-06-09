@@ -5,7 +5,7 @@ import { ProgressAddon } from "@xterm/addon-progress";
 import { SearchAddon } from "@xterm/addon-search";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { WebglAddon } from "@xterm/addon-webgl";
+import { CanvasAddon } from "@xterm/addon-canvas";
 import { Terminal as XtermTerminal } from "@xterm/xterm";
 import { Check, ChevronDown, ChevronUp, Copy, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -248,6 +248,8 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
     let resizeTimer: number | null = null;
+    let outputBuffer = "";
+    let outputRafId: number | null = null;
     let faviconActiveTimer: number | null = null;
     let faviconIdleTimer: number | null = null;
     let faviconState: "idle" | "active" = "idle";
@@ -468,11 +470,10 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     }
 
     try {
-      const webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => webglAddon.dispose());
-      terminal.loadAddon(webglAddon);
+      const canvasAddon = new CanvasAddon();
+      terminal.loadAddon(canvasAddon);
     } catch {
-      /* webgl unavailable; xterm falls back to canvas */
+      /* canvas2d unavailable; xterm falls back to dom renderer */
     }
 
     const kittyPushDisposable = terminal.parser.registerCsiHandler(
@@ -725,8 +726,17 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
         if (!parsed.success) return;
         const message = parsed.data;
         if (message.type === "output") {
-          const outputScrollAnchor = captureTerminalScrollAnchor(terminal);
-          terminal.write(message.data, () => restoreAfterOutputWrite(outputScrollAnchor));
+          outputBuffer += message.data;
+          if (outputRafId === null) {
+            const flush = () => {
+              outputRafId = null;
+              if (!outputBuffer || disposed) return;
+              const outputScrollAnchor = captureTerminalScrollAnchor(terminal);
+              terminal.write(outputBuffer, () => restoreAfterOutputWrite(outputScrollAnchor));
+              outputBuffer = "";
+            };
+            outputRafId = requestAnimationFrame(flush);
+          }
           noteOutputActivity();
         } else if (message.type === "title") {
           applyIncomingTitle(message.title);
@@ -805,6 +815,11 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
 
     return () => {
       disposed = true;
+      if (outputRafId !== null) {
+        cancelAnimationFrame(outputRafId);
+        outputRafId = null;
+      }
+      outputBuffer = "";
       manualReconnectRef.current = null;
       refocusTerminalRef.current = null;
       searchAddonRef.current = null;
