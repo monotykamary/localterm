@@ -716,13 +716,19 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
         } catch {
           return;
         }
+        if (
+          typeof raw === "object" && raw !== null &&
+          (raw as Record<string, unknown>).type === "output" &&
+          typeof (raw as Record<string, unknown>).data === "string"
+        ) {
+          terminal.write((raw as { type: "output"; data: string }).data);
+          noteOutputActivity();
+          return;
+        }
         const parsed = serverToClientMessageSchema.safeParse(raw);
         if (!parsed.success) return;
         const message = parsed.data;
-        if (message.type === "output") {
-          terminal.write(message.data);
-          noteOutputActivity();
-        } else if (message.type === "title") {
+        if (message.type === "title") {
           applyIncomingTitle(message.title);
         } else if (message.type === "session") {
           setSessionInfo({
