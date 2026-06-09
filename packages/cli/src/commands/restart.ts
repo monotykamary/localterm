@@ -1,5 +1,4 @@
 import { openSync } from "node:fs";
-import { isLoopbackHost } from "localterm-server";
 import kleur from "kleur";
 import { DAEMON_PROBE_INTERVAL_MS, DAEMON_PROBE_MAX_WAIT_MS } from "../constants.js";
 import { cliError, exitCodeForCliError } from "../errors.js";
@@ -18,11 +17,6 @@ export interface RestartOptions {
 }
 
 export const runRestart = async (options: RestartOptions): Promise<void> => {
-  if (!isLoopbackHost(options.host)) {
-    const error = cliError.invalidHost(options.host);
-    reportCliError(error);
-    process.exit(exitCodeForCliError(error));
-  }
   await runStop();
   const portBeforeSpawn = readPort();
   const logPath = ensureLogFile();

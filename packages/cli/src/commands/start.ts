@@ -56,7 +56,7 @@ export const runStart = async (options: StartOptions): Promise<void> => {
 };
 
 const runStartAsDaemon = async (options: StartOptions): Promise<void> => {
-  const preflightError = runStartPreflight(options.host);
+  const preflightError = runStartPreflight();
   if (preflightError !== null) {
     reportCliError(preflightError);
     process.exit(exitCodeForCliError(preflightError));
@@ -120,7 +120,7 @@ const openInBrowser = async (url: string): Promise<void> => {
 };
 
 const runStartInForeground = async (options: StartOptions): Promise<void> => {
-  const preflightError = runStartPreflight(options.host);
+  const preflightError = runStartPreflight();
   if (preflightError !== null) {
     reportCliError(preflightError);
     process.exit(exitCodeForCliError(preflightError));

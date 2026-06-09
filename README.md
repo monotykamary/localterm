@@ -49,8 +49,8 @@ State lives in `~/.localterm/` (PID, port, server log at `~/.localterm/server.lo
 
 ## Security
 
-- Binds loopback hosts only: `127.0.0.1`, `localhost`, `*.localhost`, `::1`. Non-loopback values are rejected.
-- `/api/*` and `/ws` enforce loopback `Host` and `Origin` headers to defeat DNS-rebinding attacks.
+- By default, binds loopback hosts only: `127.0.0.1`, `localhost`, `*.localhost`, `::1`, and enforces loopback `Host`/`Origin` headers to defeat DNS-rebinding attacks.
+- Pass `-H 0.0.0.0` (or any non-loopback address) to expose the server on all network interfaces. Loopback header enforcement is disabled in this mode — only use on trusted networks (e.g. Tailscale, a home LAN behind a firewall).
 - One PTY per WebSocket. Closing the tab kills the shell — no orphaned processes.
 
 ## Resources & Contributing Back

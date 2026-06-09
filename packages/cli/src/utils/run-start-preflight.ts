@@ -1,11 +1,7 @@
-import { isLoopbackHost } from "localterm-server";
 import { type CliError, cliError } from "../errors.js";
 import { clearPid, isAlive, readPid, readPort } from "../state.js";
 
-export const runStartPreflight = (host: string): CliError | null => {
-  if (!isLoopbackHost(host)) {
-    return cliError.invalidHost(host);
-  }
+export const runStartPreflight = (): CliError | null => {
   const existingPid = readPid();
   if (existingPid && isAlive(existingPid)) {
     const existingPort = readPort();

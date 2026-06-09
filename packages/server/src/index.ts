@@ -12,7 +12,6 @@ import {
   WS_BACKPRESSURE_THRESHOLD_BYTES,
   WS_CLOSE_BACKPRESSURE,
   WS_CLOSE_CAPACITY_REACHED,
-  WS_CLOSE_POLICY_VIOLATION,
   WS_HEARTBEAT_INTERVAL_MS,
   WS_HEARTBEAT_TIMEOUT_MS,
   WS_OUTBOUND_DRAIN_POLL_MS,
@@ -22,7 +21,6 @@ import {
 } from "./constants.js";
 import { ServerErrorException, serverError } from "./errors.js";
 import { clientToServerMessageSchema } from "./schemas.js";
-import { enforceLoopback, isLoopbackHost, loopbackMiddleware } from "./security.js";
 import { Session } from "./session.js";
 import { SessionRegistry } from "./session-registry.js";
 import { resolveStaticAsset } from "./static-resolver.js";
@@ -97,9 +95,6 @@ const safeSend = (ws: BroadcastSocket, payload: ServerToClientMessage) => {
 export const createServer = async (options: ServerOptions = {}): Promise<RunningServer> => {
   const port = options.port ?? DEFAULT_PORT;
   const host = options.host ?? DEFAULT_HOST;
-  if (!isLoopbackHost(host)) {
-    throw new ServerErrorException(serverError.nonLoopbackHost(host));
-  }
 
   const staticRoot =
     typeof options.staticRoot === "string" ? path.resolve(options.staticRoot) : null;
@@ -109,7 +104,6 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
 
   const api = new Hono();
-  api.use("*", loopbackMiddleware);
   api.get("/health", (context) => context.json({ ok: true, sessions: registry.size() }));
   api.notFound((context) => context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND));
   app.route("/api", api);
@@ -117,11 +111,6 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   app.get(
     "/ws",
     upgradeWebSocket((context) => {
-      const blocked = enforceLoopback(context);
-      if (blocked) {
-        return { onOpen: (_event, ws) => ws.close(WS_CLOSE_POLICY_VIOLATION, "forbidden") };
-      }
-
       let session: Session | null = null;
       let activeWs: BroadcastSocket | null = null;
       let drainPollTimer: NodeJS.Timeout | null = null;
@@ -339,7 +328,6 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   );
 
   if (staticRoot) {
-    app.use("*", loopbackMiddleware);
     app.get("*", (context) => {
       const requestPath = context.req.path;
       if (requestPath.startsWith("/api/") || requestPath.startsWith("/ws")) {
