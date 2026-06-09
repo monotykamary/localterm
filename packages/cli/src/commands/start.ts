@@ -1,7 +1,7 @@
 import { existsSync, openSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer, DEFAULT_HOST, DEFAULT_PORT } from "localterm-server";
+import { createServer, DEFAULT_HOST, DEFAULT_PORT } from "@monotykamary/localterm-server";
 import kleur from "kleur";
 import open from "open";
 import {

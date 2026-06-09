@@ -111,7 +111,10 @@ import { storeTerminalScrollOnUserInput } from "@/utils/store-terminal-scroll-on
 import { storeTerminalThemeId } from "@/utils/store-terminal-theme-id";
 import { storeTerminalPaddingX } from "@/utils/store-terminal-padding-x";
 import { storeTerminalPaddingY } from "@/utils/store-terminal-padding-y";
-import { MAX_INPUT_BYTES, type ClientToServerMessage } from "localterm-server/protocol";
+import {
+  MAX_INPUT_BYTES,
+  type ClientToServerMessage,
+} from "@monotykamary/localterm-server/protocol";
 import "@xterm/xterm/css/xterm.css";
 
 const titleForLiveSession = (raw: string): string => raw || DEFAULT_DOCUMENT_TITLE;

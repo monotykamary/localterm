@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { serverToClientMessageSchema } from "localterm-server/protocol";
+import type { serverToClientMessageSchema } from "@monotykamary/localterm-server/protocol";
 
 /**
  * Shape of the live shell session metadata pushed by the server on WS connect.

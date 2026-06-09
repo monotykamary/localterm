@@ -3,7 +3,7 @@ import {
   WS_CLOSE_BACKPRESSURE,
   WS_CLOSE_CAPACITY_REACHED,
   WS_CLOSE_POLICY_VIOLATION,
-} from "localterm-server/protocol";
+} from "@monotykamary/localterm-server/protocol";
 import {
   WebErrorException,
   formatWebError,

@@ -5,8 +5,11 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**"]
     },
-    "localterm#build": {
-      "dependsOn": ["localterm-server#build", "@localterm/terminal#build"]
+    "@monotykamary/localterm#build": {
+      "dependsOn": [
+        "@monotykamary/localterm-server#build",
+        "@monotykamary/localterm-terminal#build"
+      ]
     },
     "dev": {
       "cache": false,

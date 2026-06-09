@@ -2,10 +2,10 @@
   "$schema": "https://unpkg.com/@changesets/config@3.0.3/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [["localterm", "localterm-server"]],
+  "fixed": [["@monotykamary/localterm", "@monotykamary/localterm-server"]],
   "linked": [],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@localterm/terminal", "@localterm/website"]
+  "ignore": ["@monotykamary/localterm-terminal", "@monotykamary/localterm-website"]
 }

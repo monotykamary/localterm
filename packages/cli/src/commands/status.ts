@@ -1,5 +1,5 @@
 import kleur from "kleur";
-import { healthSchema } from "localterm-server";
+import { healthSchema } from "@monotykamary/localterm-server";
 import { getFriendlyUrl } from "../constants.js";
 import { cliError } from "../errors.js";
 import { isAlive, readPid, readPort } from "../state.js";

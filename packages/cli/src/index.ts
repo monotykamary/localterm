@@ -1,4 +1,4 @@
-import { DEFAULT_HOST, DEFAULT_PORT } from "localterm-server";
+import { DEFAULT_HOST, DEFAULT_PORT } from "@monotykamary/localterm-server";
 import { Command } from "commander";
 import { runRestart } from "./commands/restart.js";
 import { runStart } from "./commands/start.js";

@@ -1,4 +1,4 @@
 export {
   clientToServerMessageSchema,
   serverToClientMessageSchema,
-} from "localterm-server/protocol";
+} from "@monotykamary/localterm-server/protocol";

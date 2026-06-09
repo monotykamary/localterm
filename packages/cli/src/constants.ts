@@ -9,7 +9,7 @@ export const MIN_TCP_PORT = 0;
 export const MAX_TCP_PORT = 65535;
 
 export const FRIENDLY_HOSTNAME = "localterm.localhost";
-export const STOP_COMMAND = "npx localterm@latest stop";
+export const STOP_COMMAND = "npx @monotykamary/localterm@latest stop";
 export const DAEMON_CHILD_ENV_FLAG = "LOCALTERM_DAEMON_CHILD";
 /**
  * Distinctive process name set on the daemon at startup (via `process.title`).

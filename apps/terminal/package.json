@@ -1,5 +1,5 @@
 {
-  "name": "@localterm/terminal",
+  "name": "@monotykamary/localterm-terminal",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,6 +13,7 @@
   "dependencies": {
     "@base-ui/react": "^1.4.1",
     "@fontsource/geist-mono": "^5.2.7",
+    "@monotykamary/localterm-server": "workspace:*",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-clipboard": "^0.2.0",
     "@xterm/addon-fit": "^0.11.0",
@@ -26,7 +27,6 @@
     "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "localterm-server": "workspace:*",
     "lucide-react": "^1.14.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",

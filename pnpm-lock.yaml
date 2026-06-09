@@ -43,6 +43,9 @@ importers:
       '@fontsource/geist-mono':
         specifier: ^5.2.7
         version: 5.2.7
+      '@monotykamary/localterm-server':
+        specifier: workspace:*
+        version: link:../../packages/server
       '@xterm/addon-canvas':
         specifier: ^0.7.0
         version: 0.7.0(@xterm/xterm@6.0.0)
@@ -82,9 +85,6 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      localterm-server:
-        specifier: workspace:*
-        version: link:../../packages/server
       lucide-react:
         specifier: ^1.14.0
         version: 1.14.0(react@19.2.5)
@@ -145,15 +145,15 @@ importers:
 
   packages/cli:
     dependencies:
+      '@monotykamary/localterm-server':
+        specifier: workspace:*
+        version: link:../server
       commander:
         specifier: ^12.1.0
         version: 12.1.0
       kleur:
         specifier: ^4.1.5
         version: 4.1.5
-      localterm-server:
-        specifier: workspace:*
-        version: link:../server
       open:
         specifier: ^10.1.0
         version: 10.2.0
