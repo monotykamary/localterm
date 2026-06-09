@@ -1170,28 +1170,29 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     const reconnectStart = Date.now();
     let cancelled = false;
     let timeoutId: number | null = null;
-    const tick = () => {
-      void probeServerHealth().then((healthy) => {
-        if (cancelled || healthy) return;
-        const elapsed = Date.now() - reconnectStart;
-        const interval =
-          elapsed < RECONNECT_FAST_POLL_DURATION_MS
-            ? RECONNECT_FAST_POLL_INTERVAL_MS
-            : RECONNECT_POLL_INTERVAL_MS;
-        timeoutId = window.setTimeout(tick, interval);
-      });
-    };
-    // Fire immediately on mount so we don't wait for the first interval.
-    void probeServerHealth().then((healthy) => {
+    const reconnectOrScheduleNext = (healthy: boolean) => {
       if (cancelled) return;
       if (healthy) {
         const terminal = terminalRef.current;
-        if (terminal) terminal.write(formatReconnectedMarker());
+        if (terminal) {
+          terminal.write(formatReconnectedMarker(effectiveCursorStyle, activeCursorBlink));
+          terminal.refresh(0, terminal.rows - 1);
+          terminal.focus();
+        }
         manualReconnectRef.current?.();
         return;
       }
-      timeoutId = window.setTimeout(tick, RECONNECT_FAST_POLL_INTERVAL_MS);
-    });
+      const elapsed = Date.now() - reconnectStart;
+      const interval =
+        elapsed < RECONNECT_FAST_POLL_DURATION_MS
+          ? RECONNECT_FAST_POLL_INTERVAL_MS
+          : RECONNECT_POLL_INTERVAL_MS;
+      timeoutId = window.setTimeout(tick, interval);
+    };
+    const tick = () => {
+      void probeServerHealth().then(reconnectOrScheduleNext);
+    };
+    tick();
     return () => {
       cancelled = true;
       if (timeoutId !== null) window.clearTimeout(timeoutId);

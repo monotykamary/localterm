@@ -174,6 +174,7 @@ vi.mock("@xterm/xterm", () => {
 
     loadAddon = () => {};
     open = () => {};
+    refresh = () => {};
     onData = () => {};
     onResize = () => ({ dispose: () => {} });
     onScroll = () => ({ dispose: () => {} });
