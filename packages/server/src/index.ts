@@ -9,6 +9,7 @@ import {
   HTTP_STATUS_NOT_FOUND,
   MAX_CONCURRENT_SESSIONS,
   SERVER_STOP_GRACE_MS,
+  SYNC_OUTPUT_FLUSH_THRESHOLD_BYTES,
   WS_BACKPRESSURE_THRESHOLD_BYTES,
   WS_CLOSE_BACKPRESSURE,
   WS_CLOSE_CAPACITY_REACHED,
@@ -210,8 +211,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           const flushOutputBatch = () => {
             outputBatchTimer = null;
             if (!outputBatch) return;
-            safeSend(ws, { type: "output", data: outputBatch });
+            const payload =
+              outputBatch.length >= SYNC_OUTPUT_FLUSH_THRESHOLD_BYTES
+                ? `\x1b[?2026h${outputBatch}\x1b[?2026l`
+                : outputBatch;
             outputBatch = "";
+            safeSend(ws, { type: "output", data: payload });
             if (
               !newSession.isPaused &&
               getRawBufferedAmount(ws.raw) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES

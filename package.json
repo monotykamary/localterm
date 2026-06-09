@@ -28,7 +28,7 @@
     "@changesets/cli": "^2.30.0",
     "@types/node": "^25.5.0",
     "@voidzero-dev/vite-plus-core": "^0.1.12",
-    "turbo": "^2.9.3",
+    "turbo": "^2.9.16",
     "typescript": "^5.9.3",
     "vite-plus": "^0.1.12"
   },

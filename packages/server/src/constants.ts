@@ -54,6 +54,15 @@ export const WS_OUTBOUND_RESUME_LOW_WATER_BYTES = 1 * 1024 * 1024;
 export const WS_OUTBOUND_DRAIN_POLL_MS = 50;
 export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 
+// DEC 2026 synchronized output: flush threshold. When an output batch exceeds
+// this many bytes, the server wraps it with BSU (`CSI ? 2026 h`) and ESU
+// (`CSI ? 2026 l`) so xterm.js defers rendering until the full batch is parsed,
+// preventing torn frames during heavy output (e.g. ASCII animations, cat of
+// large files). Under this threshold the overhead of the 12 extra bytes would
+// never pay off — the data is small enough that xterm renders it within one
+// animation frame.
+export const SYNC_OUTPUT_FLUSH_THRESHOLD_BYTES = 8 * 1024;
+
 // Heartbeat: send a WS ping every N ms; if no pong arrives within the timeout
 // we tear down the socket. Without this, half-open connections (laptop sleep,
 // VPN dropout, kernel‑side TCP keepalives at 2h+) wedge the session — the
