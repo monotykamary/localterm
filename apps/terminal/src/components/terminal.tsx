@@ -64,6 +64,7 @@ import { TERMINAL_CURSOR_STYLES, type TerminalCursorStyle } from "@/lib/terminal
 import { TERMINAL_FONTS, findTerminalFontById } from "@/lib/terminal-fonts";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
 import { TERMINAL_THEMES, findTerminalThemeById } from "@/lib/terminal-themes";
+import { generateExtendedPalette } from "@/utils/generate-extended-palette";
 import { awaitFontReady } from "@/utils/await-font-ready";
 import { buildKittyKeySequence } from "@/utils/build-kitty-key-sequence";
 import {
@@ -219,6 +220,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const effectiveThemeId = previewThemeId ?? activeThemeId;
   const effectiveTheme = useMemo(() => findTerminalThemeById(effectiveThemeId), [effectiveThemeId]);
+  const effectiveThemeWithExtendedPalette = useMemo(
+    () => ({
+      ...effectiveTheme.colors,
+      extendedAnsi: generateExtendedPalette(effectiveTheme.colors),
+    }),
+    [effectiveTheme],
+  );
   const [activeFontId, setActiveFontId] = useState<string>(initialFontIdRef.current);
   const [previewFontId, setPreviewFontId] = useState<string | null>(null);
   const effectiveFontId = previewFontId ?? activeFontId;
@@ -330,7 +338,12 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       fontSize: initialFontSizeRef.current,
       lineHeight: initialLineHeightRef.current,
       scrollback: initialScrollbackRef.current,
-      theme: findTerminalThemeById(initialThemeIdRef.current).colors,
+      theme: {
+        ...findTerminalThemeById(initialThemeIdRef.current).colors,
+        extendedAnsi: generateExtendedPalette(
+          findTerminalThemeById(initialThemeIdRef.current).colors,
+        ),
+      },
       macOptionIsMeta: true,
       scrollOnUserInput: initialScrollOnUserInputRef.current,
       windowOptions: {
@@ -913,8 +926,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     if (!terminalInitializedRef.current) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
-    terminal.options.theme = effectiveTheme.colors;
-  }, [effectiveTheme]);
+    terminal.options.theme = effectiveThemeWithExtendedPalette;
+  }, [effectiveThemeWithExtendedPalette]);
 
   useEffect(() => {
     if (!terminalInitializedRef.current) return;
