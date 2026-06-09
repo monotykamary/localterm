@@ -658,7 +658,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       document.title = titleForLiveSession(trimmed);
     };
 
-    const titleDisposable = terminal.onTitleChange(applyIncomingTitle);
 
     refocusTerminalRef.current = () => terminal.focus();
 
@@ -859,7 +858,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       if (trackEl) {
         trackEl.removeEventListener("pointerdown", handleTrackPointerDown);
       }
-      titleDisposable.dispose();
       searchResultsDisposable.dispose();
       scrollDisposable.dispose();
       kittyPushDisposable.dispose();

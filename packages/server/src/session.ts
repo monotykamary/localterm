@@ -4,25 +4,23 @@ import path from "node:path";
 import { spawn, type IPty } from "node-pty";
 import {
   COLORTERM_VALUE,
-  CWD_RESOLVE_BACKOFF_MS,
-  CWD_RESOLVE_COOLDOWN_MS,
   DEFAULT_COLS,
   DEFAULT_ROWS,
   PTY_ENV_DENYLIST,
   TERM_TYPE,
-  TITLE_POLL_INTERVAL_MS,
 } from "./constants.js";
-// Note: titles are emitted on a dedicated `title` event so they travel as a
-// separate WebSocket frame. We deliberately do NOT splice OSC sequences into
-// the PTY output stream — doing so corrupts in-flight escape sequences from
-// modern TUIs (e.g. Cursor Agent / Claude Code use DECSET 2026 synchronized
-// output mode and any byte landing inside that frame breaks the parser state).
+// Titles are emitted on a dedicated `title` event so they travel as a separate
+// WebSocket frame. We deliberately do NOT splice OSC sequences into the PTY
+// output stream — doing so corrupts in-flight escape sequences from modern
+// TUIs (e.g. Cursor Agent / Claude Code use DECSET 2026 synchronized output
+// mode and any byte landing inside that frame breaks the parser state).
 import { ensureSpawnHelperExecutable } from "./ensure-spawn-helper-executable.js";
 import { getDefaultShell } from "./default-shell.js";
 import type { SpawnPtyInput } from "./types.js";
 import { formatWorkingDirectoryTitle } from "./utils/format-working-directory-title.js";
+import { parseAltScreenFromChunk } from "./utils/parse-alt-screen.js";
 import { parseOsc7FromChunk } from "./utils/parse-osc7.js";
-import { resolveCwdForPid } from "./utils/resolve-cwd-for-pid.js";
+import { parseOscTitleFromChunk } from "./utils/parse-osc-title.js";
 
 interface SessionEvents {
   output: [data: string];
@@ -43,15 +41,9 @@ export class Session extends EventEmitter<SessionEvents> {
   private currentRows: number;
   private exited = false;
   private paused = false;
-  private titlePollTimer: NodeJS.Timeout | null = null;
   private lastEmittedTitle = "";
   private lastEmittedCwd = "";
   private lastEmittedForeground: string | null | undefined = undefined;
-  private nextCwdResolveAt = 0;
-  // Set to true once OSC 7 is observed from the PTY output. Once the shell
-  // advertises its working directory via OSC 7 we stop polling lsof entirely —
-  // the stream is the source of truth and lsof is just an expensive fallback.
-  private osc7Detected = false;
 
   constructor(input: SpawnPtyInput) {
     super();
@@ -92,11 +84,10 @@ export class Session extends EventEmitter<SessionEvents> {
 
     this.pty.onExit(({ exitCode }) => {
       this.exited = true;
-      this.stopTitlePolling();
       this.emit("exit", exitCode);
     });
 
-    this.scheduleTitlePoll(0);
+    this.emitInitialMetadata();
   }
 
   get pid(): number {
@@ -128,14 +119,6 @@ export class Session extends EventEmitter<SessionEvents> {
     this.pty.write(data);
   }
 
-  /**
-   * Stop reading data from the PTY. node-pty buffers further child output in
-   * the OS pipe; once that fills, write() in the child process blocks, which
-   * propagates flow control all the way back to the producing program (e.g.
-   * `cat large_file`). Used by the WS layer to pause heavy output streams
-   * when the outbound socket buffer is filling, so we don't have to kill the
-   * connection just to recover memory.
-   */
   pause(): void {
     if (this.exited || this.paused) return;
     this.paused = true;
@@ -146,10 +129,6 @@ export class Session extends EventEmitter<SessionEvents> {
     }
   }
 
-  /**
-   * Reverse of `pause()`. Buffered child output starts flowing again and the
-   * child process unblocks if it was stuck in write().
-   */
   resume(): void {
     if (this.exited || !this.paused) return;
     this.paused = false;
@@ -185,86 +164,58 @@ export class Session extends EventEmitter<SessionEvents> {
   dispose(): void {
     this.kill();
     this.exited = true;
-    this.stopTitlePolling();
     this.removeAllListeners();
+  }
+
+  private emitInitialMetadata(): void {
+    const initialTitle = formatWorkingDirectoryTitle(this.cwd);
+    if (initialTitle) {
+      this.lastEmittedTitle = initialTitle;
+      this.emit("title", initialTitle);
+    }
+    this.lastEmittedCwd = this.cwd;
+    this.emit("cwd", this.cwd);
+
+    this.lastEmittedForeground = null;
+    this.emit("foreground", null);
   }
 
   private onPtyOutput(data: string): void {
     const osc7Path = parseOsc7FromChunk(data);
-    if (osc7Path) {
-      this.osc7Detected = true;
-      if (osc7Path !== this.lastEmittedCwd) {
-        this.lastEmittedCwd = osc7Path;
-        this.emit("cwd", osc7Path);
+    let cwdChanged = false;
+    if (osc7Path && osc7Path !== this.lastEmittedCwd) {
+      this.lastEmittedCwd = osc7Path;
+      this.emit("cwd", osc7Path);
+      cwdChanged = true;
+    }
+
+    const oscTitle = parseOscTitleFromChunk(data);
+    if (oscTitle) {
+      const trimmed = oscTitle.trim();
+      if (trimmed && trimmed !== this.lastEmittedTitle) {
+        this.lastEmittedTitle = trimmed;
+        this.emit("title", trimmed);
+      }
+    } else if (cwdChanged) {
+      const cwdTitle = formatWorkingDirectoryTitle(this.lastEmittedCwd);
+      if (cwdTitle && cwdTitle !== this.lastEmittedTitle) {
+        this.lastEmittedTitle = cwdTitle;
+        this.emit("title", cwdTitle);
+      }
+    }
+
+    const altScreen = parseAltScreenFromChunk(data);
+    if (altScreen !== null) {
+      const nextForeground = altScreen ? this.inferForegroundProcess() : null;
+      if (nextForeground !== this.lastEmittedForeground) {
+        this.lastEmittedForeground = nextForeground;
+        this.emit("foreground", nextForeground);
       }
     }
   }
 
-  private scheduleTitlePoll(delayMs: number): void {
-    if (this.exited) return;
-    this.titlePollTimer = setTimeout(() => {
-      void this.runTitlePoll();
-    }, delayMs);
-    this.titlePollTimer.unref();
-  }
-
-  private async runTitlePoll(): Promise<void> {
-    if (this.exited) return;
-    try {
-      // Once the shell advertises its CWD via OSC 7 we skip lsof — the stream
-      // is authoritative and lsof is expensive (spawns a child process that
-      // triggers syspolicyd validation on every call).
-      const liveCwd = this.osc7Detected ? this.lastEmittedCwd || null : await this.resolveLiveCwd();
-      if (this.exited) return;
-      if (!this.osc7Detected && liveCwd && liveCwd !== this.lastEmittedCwd) {
-        this.lastEmittedCwd = liveCwd;
-        this.emit("cwd", liveCwd);
-      }
-      const nextTitle = this.computeTitle(
-        this.osc7Detected ? this.lastEmittedCwd || this.cwd : (liveCwd ?? this.cwd),
-      );
-      if (nextTitle && nextTitle !== this.lastEmittedTitle) {
-        this.lastEmittedTitle = nextTitle;
-        this.emit("title", nextTitle);
-      }
-      this.pollForeground();
-    } catch {
-      /* polling errors are non-fatal; the next tick will retry */
-    } finally {
-      this.scheduleTitlePoll(TITLE_POLL_INTERVAL_MS);
-    }
-  }
-
-  private foregroundProcess(): string | null {
+  private inferForegroundProcess(): string | null {
     const raw = this.pty.process?.trim() ?? "";
     return raw && raw !== this.shellName ? raw : null;
-  }
-
-  private pollForeground(): void {
-    const next = this.foregroundProcess();
-    if (next === this.lastEmittedForeground) return;
-    this.lastEmittedForeground = next;
-    this.emit("foreground", next);
-  }
-
-  private computeTitle(liveCwd: string): string | null {
-    const foreground = this.foregroundProcess();
-    if (foreground) return foreground;
-    return formatWorkingDirectoryTitle(liveCwd);
-  }
-
-  private async resolveLiveCwd(): Promise<string | null> {
-    const now = Date.now();
-    if (now < this.nextCwdResolveAt) return null;
-    const liveCwd = await resolveCwdForPid(this.pid).catch(() => null);
-    this.nextCwdResolveAt =
-      now + (liveCwd === null ? CWD_RESOLVE_BACKOFF_MS : CWD_RESOLVE_COOLDOWN_MS);
-    return liveCwd;
-  }
-
-  private stopTitlePolling(): void {
-    if (this.titlePollTimer === null) return;
-    clearTimeout(this.titlePollTimer);
-    this.titlePollTimer = null;
   }
 }

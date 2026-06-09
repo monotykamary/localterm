@@ -445,13 +445,24 @@ describe("Terminal modal", () => {
 });
 
 describe("Terminal title", () => {
-  it("propagates xterm title changes into document.title for the browser tab", () => {
+  it("propagates server title messages into document.title for the browser tab", () => {
     render(<Terminal />);
 
     act(() => {
-      fakeXterms[0]?.fireTitleChange("vim foo.ts");
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({ type: "title", title: "vim foo.ts" });
     });
     expect(document.title).toBe("vim foo.ts");
+  });
+
+  it("ignores xterm onTitleChange events in favor of server title messages", () => {
+    render(<Terminal />);
+
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeXterms[0]?.fireTitleChange("user@host:~/projects");
+    });
+    expect(document.title).toBe("localterm");
   });
 });
 

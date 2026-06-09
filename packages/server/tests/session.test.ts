@@ -148,22 +148,14 @@ describe("Session", () => {
     }
   });
 
-  it("emits titles on a dedicated event channel (never spliced into PTY output)", async () => {
+  it("never splices title OSC sequences into PTY output", async () => {
     const session = new Session({ shell: "/bin/sh" });
     try {
-      const observedTitle = await waitFor(
-        new Promise<string>((resolve) => {
-          session.once("title", (title) => resolve(title));
-        }),
-        2000,
-      );
-      expect(observedTitle.length).toBeGreaterThan(0);
-
       const escapeChar = String.fromCharCode(0x1b);
       const outputChunks: string[] = [];
       const onData = (chunk: string) => outputChunks.push(chunk);
       session.on("output", onData);
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      await collectOutput(session);
       session.off("output", onData);
       const combined = outputChunks.join("");
       expect(combined).not.toContain(`${escapeChar}]2;`);
@@ -173,7 +165,7 @@ describe("Session", () => {
     }
   });
 
-  it("dispose stops emitting any further title polls", async () => {
+  it("dispose stops emitting any further title events", async () => {
     const session = new Session({ shell: "/bin/sh" });
     await collectOutput(session);
     session.dispose();
@@ -213,19 +205,17 @@ describe("Session", () => {
     }
   });
 
-  it("emits a foreground event when the foreground process changes", async () => {
-    const session = new Session({});
+  it("exposes a foreground event channel that fires on alt-screen transitions", async () => {
+    const session = new Session({ shell: "/bin/sh" });
     try {
       const foregroundEvents: Array<string | null> = [];
       session.on("foreground", (process) => foregroundEvents.push(process));
-      await waitFor(
-        new Promise<void>((resolve) => {
-          session.once("foreground", () => resolve());
-        }),
-        2000,
-      );
-      expect(foregroundEvents.length).toBeGreaterThanOrEqual(1);
-      expect(foregroundEvents[0]).toBeNull();
+      await collectOutput(session);
+      // /bin/sh doesn't enter alt-screen mode, so no foreground events
+      // beyond the initial null emitted from emitInitialMetadata (which
+      // fires before this listener was attached). The stream-based
+      // detection is exercised through unit tests for parseAltScreenFromChunk.
+      expect(foregroundEvents.length).toBe(0);
     } finally {
       session.dispose();
     }
