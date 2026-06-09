@@ -86,6 +86,7 @@ import { clampTerminalPaddingX, clampTerminalPaddingY } from "@/utils/clamp-term
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
+import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
 import { loadStoredLocalFontFamily } from "@/utils/load-stored-local-font-family";
 import { loadStoredTerminalCursorBlink } from "@/utils/load-stored-terminal-cursor-blink";
 import { loadStoredTerminalCursorStyle } from "@/utils/load-stored-terminal-cursor-style";
@@ -606,6 +607,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.key === "Tab" && (event.metaKey || event.ctrlKey)) return false;
       if (event.altKey && event.code === "KeyT") {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          const newShellLink = document.getElementById("new-shell-link");
+          if (newShellLink instanceof HTMLAnchorElement) newShellLink.click();
+        }
+        return false;
+      }
+      if (isNewTabShortcut(event, isMac)) {
         if (event.type === "keydown") {
           event.preventDefault();
           const newShellLink = document.getElementById("new-shell-link");
