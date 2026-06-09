@@ -22,82 +22,28 @@ export const buildLocalTerminalFont = (family: string): TerminalFont => ({
   source: "local",
 });
 
-const GEIST_MONO: TerminalFont = {
-  id: "geist-mono",
-  name: "Geist Mono",
-  family: buildFamily("Geist Mono"),
-  source: "fontsource",
-};
+const buildStaticFont = (id: string, name: string, source: TerminalFontSource): TerminalFont => ({
+  id,
+  name,
+  family: buildFamily(name),
+  source,
+});
 
-const JETBRAINS_MONO: TerminalFont = {
-  id: "jetbrains-mono",
-  name: "JetBrains Mono",
-  family: buildFamily("JetBrains Mono"),
-  source: "google",
-};
-
-const FIRA_CODE: TerminalFont = {
-  id: "fira-code",
-  name: "Fira Code",
-  family: buildFamily("Fira Code"),
-  source: "google",
-};
-
-const IBM_PLEX_MONO: TerminalFont = {
-  id: "ibm-plex-mono",
-  name: "IBM Plex Mono",
-  family: buildFamily("IBM Plex Mono"),
-  source: "google",
-};
-
-const SOURCE_CODE_PRO: TerminalFont = {
-  id: "source-code-pro",
-  name: "Source Code Pro",
-  family: buildFamily("Source Code Pro"),
-  source: "google",
-};
-
-const ROBOTO_MONO: TerminalFont = {
-  id: "roboto-mono",
-  name: "Roboto Mono",
-  family: buildFamily("Roboto Mono"),
-  source: "google",
-};
-
-const DM_MONO: TerminalFont = {
-  id: "dm-mono",
-  name: "DM Mono",
-  family: buildFamily("DM Mono"),
-  source: "google",
-};
-
-const INCONSOLATA: TerminalFont = {
-  id: "inconsolata",
-  name: "Inconsolata",
-  family: buildFamily("Inconsolata"),
-  source: "google",
-};
-
-const SPACE_MONO: TerminalFont = {
-  id: "space-mono",
-  name: "Space Mono",
-  family: buildFamily("Space Mono"),
-  source: "google",
-};
-
-const UBUNTU_MONO: TerminalFont = {
-  id: "ubuntu-mono",
-  name: "Ubuntu Mono",
-  family: buildFamily("Ubuntu Mono"),
-  source: "google",
-};
-
-const ANONYMOUS_PRO: TerminalFont = {
-  id: "anonymous-pro",
-  name: "Anonymous Pro",
-  family: buildFamily("Anonymous Pro"),
-  source: "google",
-};
+const GEIST_MONO: TerminalFont = buildStaticFont("geist-mono", "Geist Mono", "fontsource");
+const JETBRAINS_MONO: TerminalFont = buildStaticFont("jetbrains-mono", "JetBrains Mono", "google");
+const FIRA_CODE: TerminalFont = buildStaticFont("fira-code", "Fira Code", "google");
+const IBM_PLEX_MONO: TerminalFont = buildStaticFont("ibm-plex-mono", "IBM Plex Mono", "google");
+const SOURCE_CODE_PRO: TerminalFont = buildStaticFont(
+  "source-code-pro",
+  "Source Code Pro",
+  "google",
+);
+const ROBOTO_MONO: TerminalFont = buildStaticFont("roboto-mono", "Roboto Mono", "google");
+const DM_MONO: TerminalFont = buildStaticFont("dm-mono", "DM Mono", "google");
+const INCONSOLATA: TerminalFont = buildStaticFont("inconsolata", "Inconsolata", "google");
+const SPACE_MONO: TerminalFont = buildStaticFont("space-mono", "Space Mono", "google");
+const UBUNTU_MONO: TerminalFont = buildStaticFont("ubuntu-mono", "Ubuntu Mono", "google");
+const ANONYMOUS_PRO: TerminalFont = buildStaticFont("anonymous-pro", "Anonymous Pro", "google");
 
 export const TERMINAL_FONTS: TerminalFont[] = [
   GEIST_MONO,

@@ -97,6 +97,7 @@ import { loadStoredTerminalScrollOnUserInput } from "@/utils/load-stored-termina
 import { loadStoredTerminalThemeId } from "@/utils/load-stored-terminal-theme-id";
 import { loadStoredTerminalPaddingX } from "@/utils/load-stored-terminal-padding-x";
 import { loadStoredTerminalPaddingY } from "@/utils/load-stored-terminal-padding-y";
+import { loadStoredNerdFontEnabled } from "@/utils/load-stored-nerd-font-enabled";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
@@ -111,6 +112,7 @@ import { storeTerminalScrollOnUserInput } from "@/utils/store-terminal-scroll-on
 import { storeTerminalThemeId } from "@/utils/store-terminal-theme-id";
 import { storeTerminalPaddingX } from "@/utils/store-terminal-padding-x";
 import { storeTerminalPaddingY } from "@/utils/store-terminal-padding-y";
+import { storeNerdFontEnabled } from "@/utils/store-nerd-font-enabled";
 import {
   MAX_INPUT_BYTES,
   type ClientToServerMessage,
@@ -192,6 +194,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const initialScrollOnUserInputRef = useRef<boolean>(loadStoredTerminalScrollOnUserInput());
   const initialPaddingXRef = useRef<number>(loadStoredTerminalPaddingX());
   const initialPaddingYRef = useRef<number>(loadStoredTerminalPaddingY());
+  const initialNerdFontEnabledRef = useRef<boolean>(loadStoredNerdFontEnabled());
   const fitAddonRef = useRef<FitAddon | null>(null);
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
   const scrollbarTrackRef = useRef<HTMLDivElement | null>(null);
@@ -225,6 +228,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   );
   const [previewFontId, setPreviewFontId] = useState<string | null>(null);
   const effectiveFontId = previewFontId ?? activeFontId;
+  const [activeNerdFontEnabled, setActiveNerdFontEnabled] = useState<boolean>(
+    initialNerdFontEnabledRef.current,
+  );
   const effectiveFont = useMemo(
     () => findTerminalFontById(effectiveFontId, activeLocalFontFamily),
     [effectiveFontId, activeLocalFontFamily],
@@ -319,6 +325,12 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     );
     void awaitFontReady(initialFont).then(() => {
       if (disposed) return;
+      const liveTerminal = terminalRef.current;
+      if (liveTerminal) {
+        const prevFamily = liveTerminal.options.fontFamily;
+        liveTerminal.options.fontFamily = "monospace";
+        liveTerminal.options.fontFamily = prevFamily;
+      }
       const internals = terminal as unknown as {
         _core: { _charSizeService: { measure: () => void } };
       };
@@ -658,7 +670,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       document.title = titleForLiveSession(trimmed);
     };
 
-
     refocusTerminalRef.current = () => terminal.focus();
 
     const sendResize = (cols: number, rows: number) => send({ type: "resize", cols, rows });
@@ -906,7 +917,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     return () => {
       cancelled = true;
     };
-  }, [effectiveFont]);
+  }, [effectiveFont, activeNerdFontEnabled]);
 
   const handleThemeChange = useCallback((nextThemeId: string) => {
     setActiveThemeId(nextThemeId);
@@ -926,6 +937,11 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     setPreviewFontId(null);
     storeLocalFontFamily(family);
     storeTerminalFontId(LOCAL_FONT_ID);
+  }, []);
+
+  const handleNerdFontEnabledChange = useCallback((nextEnabled: boolean) => {
+    setActiveNerdFontEnabled(nextEnabled);
+    storeNerdFontEnabled(nextEnabled);
   }, []);
 
   useEffect(() => {
@@ -1409,6 +1425,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                 onFontPreview={setPreviewFontId}
                 localFontFamily={activeLocalFontFamily}
                 onLocalFontChange={handleLocalFontChange}
+                nerdFontEnabled={activeNerdFontEnabled}
+                onNerdFontEnabledChange={handleNerdFontEnabledChange}
                 fontSize={activeFontSize}
                 onFontSizeChange={handleFontSizeChange}
                 lineHeight={activeLineHeight}

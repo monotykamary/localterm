@@ -71,10 +71,7 @@ export class Session extends EventEmitter<SessionEvents> {
     env.TERM = TERM_TYPE;
     env.COLORTERM = COLORTERM_VALUE;
 
-    const [shellArgs, shellEnv] = this.prepareOsc7Hook(
-      this.shellName,
-      env,
-    );
+    const [shellArgs, shellEnv] = this.prepareOsc7Hook(this.shellName, env);
     if (shellEnv) {
       for (const [key, value] of Object.entries(shellEnv)) {
         env[key] = value;
@@ -254,10 +251,7 @@ export class Session extends EventEmitter<SessionEvents> {
         return [[], { ZDOTDIR: hookDir }];
       }
       case "bash": {
-        const hookPath = path.join(
-          os.tmpdir(),
-          `localterm-bashrc-${hookId}`,
-        );
+        const hookPath = path.join(os.tmpdir(), `localterm-bashrc-${hookId}`);
         const hookScript = this.bashOsc7Function();
         const lines = [
           "source /etc/bashrc 2>/dev/null",
@@ -277,7 +271,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private zshOsc7ChpwdFunction(): string {
     return [
       "__localterm_osc7_chpwd() {",
-      "  printf '\\e]7;file://%s%s\\a' \"${HOSTNAME:-localhost}\" \"${PWD}\"",
+      '  printf \'\\e]7;file://%s%s\\a\' "${HOSTNAME:-localhost}" "${PWD}"',
       "}",
     ].join("\n");
   }
@@ -285,7 +279,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private bashOsc7Function(): string {
     return [
       "__localterm_osc7_prompt() {",
-      "  printf '\\e]7;file://%s%s\\a' \"${HOSTNAME:-localhost}\" \"${PWD}\"",
+      '  printf \'\\e]7;file://%s%s\\a\' "${HOSTNAME:-localhost}" "${PWD}"',
       "}",
     ].join("\n");
   }

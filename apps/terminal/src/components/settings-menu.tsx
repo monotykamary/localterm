@@ -46,6 +46,8 @@ interface SettingsMenuProps {
   onFontPreview?: (fontId: string | null) => void;
   localFontFamily: string | null;
   onLocalFontChange: (family: string) => void;
+  nerdFontEnabled: boolean;
+  onNerdFontEnabledChange: (enabled: boolean) => void;
   fontSize: number;
   onFontSizeChange: (size: number) => void;
   lineHeight: number;
@@ -143,6 +145,8 @@ export const SettingsMenu = ({
   onFontPreview,
   localFontFamily,
   onLocalFontChange,
+  nerdFontEnabled,
+  onNerdFontEnabledChange,
   fontSize,
   onFontSizeChange,
   lineHeight,
@@ -327,6 +331,27 @@ export const SettingsMenu = ({
                 incrementAriaLabel="increase line height"
                 formatDisplay={formatLineHeight}
                 onValueChange={onLineHeightChange}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <Tooltip>
+                <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                  Nerd Font icons
+                </TooltipTrigger>
+                <TooltipContent
+                  side="bottom"
+                  sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                  className="max-w-xs"
+                >
+                  Appends a Symbols Only Nerd Font to the font stack. Icon glyphs (Private Use Area
+                  codepoints) are resolved by the symbols font while all other characters render
+                  from the primary font above.
+                </TooltipContent>
+              </Tooltip>
+              <Switch
+                aria-label="toggle nerd font icons"
+                checked={nerdFontEnabled}
+                onCheckedChange={onNerdFontEnabledChange}
               />
             </div>
           </Field>

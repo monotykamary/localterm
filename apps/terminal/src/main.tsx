@@ -12,6 +12,7 @@ import { loadGoogleFontsStylesheet } from "./utils/load-google-fonts-stylesheet"
 import "@fontsource/geist-mono/400.css";
 import "@fontsource/geist-mono/500.css";
 import "@fontsource/geist-mono/600.css";
+import "./nerd-font.css";
 import "./index.css";
 
 applyTabFavicon();

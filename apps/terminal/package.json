@@ -11,6 +11,7 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@azurity/pure-nerd-font": "^3.0.5",
     "@base-ui/react": "^1.4.1",
     "@fontsource/geist-mono": "^5.2.7",
     "@monotykamary/localterm-server": "workspace:*",
