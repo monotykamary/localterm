@@ -308,7 +308,10 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     );
     void awaitFontReady(initialFont).then(() => {
       if (disposed) return;
-      terminal.options.fontFamily = initialFont.family;
+      const internals = terminal as unknown as {
+        _core: { _charSizeService: { measure: () => void } };
+      };
+      internals._core._charSizeService.measure();
       fitToContainer();
     });
 
