@@ -73,6 +73,7 @@ import { formatConnectionLostMarker } from "@/utils/format-connection-lost-marke
 import { formatShellExitMarker } from "@/utils/format-shell-exit-marker";
 import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anchor";
+import { flushOutput } from "@/utils/write-terminal-output";
 import { shouldBlockTerminalScrollbackPurge } from "@/utils/should-block-terminal-scrollback-purge";
 import { clampTerminalFontSize } from "@/utils/clamp-terminal-font-size";
 import { clampTerminalLineHeight } from "@/utils/clamp-terminal-line-height";
@@ -721,7 +722,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
           (raw as Record<string, unknown>).type === "output" &&
           typeof (raw as Record<string, unknown>).data === "string"
         ) {
-          terminal.write((raw as { type: "output"; data: string }).data);
+          flushOutput(terminal, (raw as { type: "output"; data: string }).data);
           noteOutputActivity();
           return;
         }
