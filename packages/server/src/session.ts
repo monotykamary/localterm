@@ -88,6 +88,7 @@ export class Session extends EventEmitter<SessionEvents> {
     });
 
     this.emitInitialMetadata();
+    this.injectOsc7Hook();
   }
 
   get pid(): number {
@@ -212,6 +213,54 @@ export class Session extends EventEmitter<SessionEvents> {
         this.emit("foreground", nextForeground);
       }
     }
+  }
+
+  private injectOsc7Hook(): void {
+    // Fish emits OSC 7 natively; zsh and bash do not. Inject a small
+    // chpwd / PROMPT_COMMAND hook so every directory change produces an
+    // OSC 7 sequence that our stream parser can pick up.
+    const hook = this.osc7HookForShell(this.shellName);
+    if (hook) this.pty.write(hook);
+  }
+
+  private osc7HookForShell(shellName: string): string | null {
+    switch (shellName) {
+      case "zsh": {
+        const register =
+          "chpwd_functions=(${chpwd_functions[@]} __localterm_osc7_chpwd)";
+        const fire = "__localterm_osc7_chpwd";
+        return [
+          this.zshOsc7ChpwdFunction(),
+          register,
+          fire,
+        ].join("\n") + "\n";
+      }
+      case "bash": {
+        const func = this.bashOsc7Function();
+        const assign =
+          'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt"';
+        const fire = "__localterm_osc7_prompt";
+        return [func, assign, fire].join("\n") + "\n";
+      }
+      default:
+        return null;
+    }
+  }
+
+  private zshOsc7ChpwdFunction(): string {
+    return [
+      "__localterm_osc7_chpwd() {",
+      "  printf '\\e]7;file://%s%s\\a' \"${HOSTNAME:-localhost}\" \"${PWD}\"",
+      "}",
+    ].join("\n");
+  }
+
+  private bashOsc7Function(): string {
+    return [
+      "__localterm_osc7_prompt() {",
+      "  printf '\\e]7;file://%s%s\\a' \"${HOSTNAME:-localhost}\" \"${PWD}\"",
+      "}",
+    ].join("\n");
   }
 
   private inferForegroundProcess(): string | null {
