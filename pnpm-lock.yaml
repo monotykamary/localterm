@@ -9,7 +9,7 @@ overrides:
 
 patchedDependencies:
   '@xterm/addon-webgl@0.19.0':
-    hash: b93a9ac0ac0c4306906ff01295791413932a6b1e85d79bdd8e9af1a3fe2587eb
+    hash: 3e91d3f741bc8612840ef3ccb6438b4cf179730ea65f0db0910c90763f7b23dd
     path: patches/@xterm__addon-webgl@0.19.0.patch
 
 importers:
@@ -72,7 +72,7 @@ importers:
         version: 0.12.0
       '@xterm/addon-webgl':
         specifier: ^0.19.0
-        version: 0.19.0(patch_hash=b93a9ac0ac0c4306906ff01295791413932a6b1e85d79bdd8e9af1a3fe2587eb)
+        version: 0.19.0(patch_hash=3e91d3f741bc8612840ef3ccb6438b4cf179730ea65f0db0910c90763f7b23dd)
       '@xterm/xterm':
         specifier: ^6.0.0
         version: 6.0.0
@@ -4366,7 +4366,7 @@ snapshots:
 
   '@xterm/addon-web-links@0.12.0': {}
 
-  '@xterm/addon-webgl@0.19.0(patch_hash=b93a9ac0ac0c4306906ff01295791413932a6b1e85d79bdd8e9af1a3fe2587eb)': {}
+  '@xterm/addon-webgl@0.19.0(patch_hash=3e91d3f741bc8612840ef3ccb6438b4cf179730ea65f0db0910c90763f7b23dd)': {}
 
   '@xterm/xterm@6.0.0': {}
 

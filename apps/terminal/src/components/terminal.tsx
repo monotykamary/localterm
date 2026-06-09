@@ -472,7 +472,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     }
 
     try {
-      const webglAddon = new WebglAddon(true);
+      const webglAddon = new WebglAddon();
       webglAddon.onContextLoss(() => webglAddon.dispose());
       terminal.loadAddon(webglAddon);
     } catch {
@@ -722,7 +722,8 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
           (raw as Record<string, unknown>).type === "output" &&
           typeof (raw as Record<string, unknown>).data === "string"
         ) {
-          flushOutput(terminal, (raw as { type: "output"; data: string }).data);
+          const outputData = (raw as { type: "output"; data: string }).data;
+          flushOutput(terminal, outputData);
           noteOutputActivity();
           return;
         }
