@@ -1,5 +1,11 @@
 # localterm-server
 
+## 0.1.4
+
+### Patch Changes
+
+- Include initial title in the session WebSocket message so document.title updates immediately on load instead of staying as the default.
+
 ## 0.1.3
 
 ### Patch Changes
