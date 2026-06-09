@@ -274,7 +274,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           if (parsed.data.type === "input") {
             session.write(parsed.data.data);
           } else {
-            session.resize(parsed.data.cols, parsed.data.rows);
+            session.resize(
+              parsed.data.cols,
+              parsed.data.rows,
+              parsed.data.pixelWidth,
+              parsed.data.pixelHeight,
+            );
           }
         },
         onClose(event) {

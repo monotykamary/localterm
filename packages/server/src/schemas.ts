@@ -27,6 +27,8 @@ const resizeMessageSchema = z
     type: z.literal("resize"),
     cols: z.number().int().positive().max(MAX_COLS),
     rows: z.number().int().positive().max(MAX_ROWS),
+    pixelWidth: z.number().int().nonnegative().optional(),
+    pixelHeight: z.number().int().nonnegative().optional(),
   })
   .strict();
 

@@ -1,0 +1,185 @@
+diff --git a/lib/unixTerminal.js b/lib/unixTerminal.js
+index 1ec12f796a822c78fba9ad7f6448c3987e325c23..1f0fb038613b4188da01cf6903093602f74a75a8 100644
+--- a/lib/unixTerminal.js
++++ b/lib/unixTerminal.js
+@@ -246,11 +246,11 @@ var UnixTerminal = /** @class */ (function (_super) {
+     /**
+      * TTY
+      */
+-    UnixTerminal.prototype.resize = function (cols, rows) {
++    UnixTerminal.prototype.resize = function (cols, rows, xpixel, ypixel) {
+         if (cols <= 0 || rows <= 0 || isNaN(cols) || isNaN(rows) || cols === Infinity || rows === Infinity) {
+             throw new Error('resizing must be done using positive cols and rows');
+         }
+-        pty.resize(this._fd, cols, rows);
++        pty.resize(this._fd, cols, rows, xpixel || 0, ypixel || 0);
+         this._cols = cols;
+         this._rows = rows;
+     };
+diff --git a/prebuilds/darwin-arm64/pty.node b/prebuilds/darwin-arm64/pty.node
+deleted file mode 100644
+index c058361216800a0b3e74305db413a4c9495bf135..0000000000000000000000000000000000000000
+diff --git a/prebuilds/darwin-arm64/spawn-helper b/prebuilds/darwin-arm64/spawn-helper
+deleted file mode 100644
+index 7a0df325bac7abc7b7550ac62b137234f96181a6..0000000000000000000000000000000000000000
+diff --git a/prebuilds/darwin-x64/pty.node b/prebuilds/darwin-x64/pty.node
+deleted file mode 100644
+index 1e8827167f43d0e304b8e8860b89b7022ff7e177..0000000000000000000000000000000000000000
+diff --git a/prebuilds/darwin-x64/spawn-helper b/prebuilds/darwin-x64/spawn-helper
+deleted file mode 100644
+index 6c67ef79a4cea679f83998becc62c62de829ebb5..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/conpty/OpenConsole.exe b/prebuilds/win32-arm64/conpty/OpenConsole.exe
+deleted file mode 100644
+index 40217d33623a46c18d3e91db5a16303dd3503f9f..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/conpty/conpty.dll b/prebuilds/win32-arm64/conpty/conpty.dll
+deleted file mode 100644
+index f8ea864b168813f7815ea00c9a1c3d10296e718c..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/conpty.node b/prebuilds/win32-arm64/conpty.node
+deleted file mode 100644
+index 6a44cd7b00a8b755f5fe1704a8e8721b4098dabf..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/conpty.pdb b/prebuilds/win32-arm64/conpty.pdb
+deleted file mode 100644
+index 9766aa988a7473284f7fbc3451a810ff923978ee..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/conpty_console_list.node b/prebuilds/win32-arm64/conpty_console_list.node
+deleted file mode 100644
+index 959d55bbedb65626ab1cb83f696cb8a5231992b8..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/conpty_console_list.pdb b/prebuilds/win32-arm64/conpty_console_list.pdb
+deleted file mode 100644
+index 5223204cdba792da7f0f15a53237194089ab293b..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/pty.node b/prebuilds/win32-arm64/pty.node
+deleted file mode 100644
+index e0f13722f4daa2f11c79b6bc7261339168b7fb97..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/pty.pdb b/prebuilds/win32-arm64/pty.pdb
+deleted file mode 100644
+index e13db7f6d4fbcf0e46c3c6ae241c5f2e9b998246..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/winpty-agent.exe b/prebuilds/win32-arm64/winpty-agent.exe
+deleted file mode 100644
+index 72d3e5387f31afda7e00e09d97c4785ca9dbb69f..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/winpty-agent.pdb b/prebuilds/win32-arm64/winpty-agent.pdb
+deleted file mode 100644
+index cf4060042d869ee17c0ff6ad20119287cde424be..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/winpty.dll b/prebuilds/win32-arm64/winpty.dll
+deleted file mode 100644
+index db82607cc20d21217c1d0d78a757fb19513133d0..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-arm64/winpty.pdb b/prebuilds/win32-arm64/winpty.pdb
+deleted file mode 100644
+index 5d18fd9603bbe06a35082525fbd867bfe9851428..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/conpty/OpenConsole.exe b/prebuilds/win32-x64/conpty/OpenConsole.exe
+deleted file mode 100644
+index 3db21937e6a868df8f89db497464f74fa1527141..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/conpty/conpty.dll b/prebuilds/win32-x64/conpty/conpty.dll
+deleted file mode 100644
+index eb66b1625cc26866f13316cfec138146dbc23d03..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/conpty.node b/prebuilds/win32-x64/conpty.node
+deleted file mode 100644
+index 409cffbae9fddf3b54ab1454693786f75558c58c..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/conpty.pdb b/prebuilds/win32-x64/conpty.pdb
+deleted file mode 100644
+index f1a948881fc22fa67d9495bd0c66ee5a50a590d4..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/conpty_console_list.node b/prebuilds/win32-x64/conpty_console_list.node
+deleted file mode 100644
+index 361129db5c243ac395fc375ed65b6945aa911a1d..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/conpty_console_list.pdb b/prebuilds/win32-x64/conpty_console_list.pdb
+deleted file mode 100644
+index 91aa7b3f0814dd81bf2b306d462a63b7cd94f998..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/pty.node b/prebuilds/win32-x64/pty.node
+deleted file mode 100644
+index e363064e3dc950f107fd035835d6131616409274..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/pty.pdb b/prebuilds/win32-x64/pty.pdb
+deleted file mode 100644
+index 97855326b830bdb0c0a889a0e0f35e8888f0afeb..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/winpty-agent.exe b/prebuilds/win32-x64/winpty-agent.exe
+deleted file mode 100644
+index 505d35aa4bd0506a44b1f4b130e5a352e06bacac..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/winpty-agent.pdb b/prebuilds/win32-x64/winpty-agent.pdb
+deleted file mode 100644
+index 537482ac7143bb6327cf0ac24fe9a546ec3598fa..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/winpty.dll b/prebuilds/win32-x64/winpty.dll
+deleted file mode 100644
+index a63a2f75de62042c39ff442f8bb887cd39d3d103..0000000000000000000000000000000000000000
+diff --git a/prebuilds/win32-x64/winpty.pdb b/prebuilds/win32-x64/winpty.pdb
+deleted file mode 100644
+index 17d24d14fd67414af920aa62015e7c1f557ad1ac..0000000000000000000000000000000000000000
+diff --git a/scripts/prebuild.js b/scripts/prebuild.js
+index 17f1d980e62e017d77058627a7a15c4c29f9470c..2f5b37f624a713a72017c33e3296b33cd2246736 100644
+--- a/scripts/prebuild.js
++++ b/scripts/prebuild.js
+@@ -3,32 +3,8 @@
+ const fs = require('fs');
+ const path = require('path');
+ 
+-/**
+- * This script checks for the prebuilt binaries for the current platform and
+- * architecture. It exits with 0 if prebuilds are found and 1 if not.
+- *
+- * If npm_config_build_from_source is set then it removes the prebuilds for the
+- * current platform so they are not loaded at runtime.
+- *
+- * Usage:
+- *     node scripts/prebuild.js
+- */
+-
++// Force rebuild from source (prebuilds lack our xpixel/ypixel patch)
+ const PREBUILDS_ROOT = path.join(__dirname, '..', 'prebuilds');
+-const PREBUILD_DIR = path.join(__dirname, '..', 'prebuilds', `${process.platform}-${process.arch}`);
+-
+-// Do not use prebuilds when npm_config_build_from_source is set
+-if (process.env.npm_config_build_from_source === 'true') {
+-  console.log('\x1b[33m> Removing prebuilds and rebuilding because npm_config_build_from_source is set\x1b[0m');
+-  fs.rmSync(PREBUILDS_ROOT, { recursive: true, force: true });
+-  process.exit(1);
+-}
+-
+-// Check whether the correct prebuilt files exist
+-console.log('\x1b[32m> Checking prebuilds...\x1b[0m');
+-if (!fs.existsSync(PREBUILD_DIR)) {
+-  console.log(`\x1b[33m> Rebuilding because directory ${PREBUILD_DIR} does not exist\x1b[0m`);
+-  process.exit(1);
+-}
+-
+-process.exit(0);
++fs.rmSync(PREBUILDS_ROOT, { recursive: true, force: true });
++console.log('\x1b[33m> Rebuilding from source (prebuilds removed)\x1b[0m');
++process.exit(1);
+diff --git a/src/unix/pty.cc b/src/unix/pty.cc
+index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..58cdd45fcd38b86edba119516bccf6ffc58afb6c 100644
+--- a/src/unix/pty.cc
++++ b/src/unix/pty.cc
+@@ -504,11 +504,11 @@ Napi::Value PtyResize(const Napi::CallbackInfo& info) {
+   Napi::Env env(info.Env());
+   Napi::HandleScope scope(env);
+ 
+-  if (info.Length() != 3 ||
++  if (info.Length() < 3 || info.Length() > 5 ||
+       !info[0].IsNumber() ||
+       !info[1].IsNumber() ||
+       !info[2].IsNumber()) {
+-    throw Napi::Error::New(env, "Usage: pty.resize(fd, cols, rows)");
++    throw Napi::Error::New(env, "Usage: pty.resize(fd, cols, rows[, xpixel, ypixel])");
+   }
+ 
+   int fd = info[0].As<Napi::Number>().Int32Value();
+@@ -516,8 +516,8 @@ Napi::Value PtyResize(const Napi::CallbackInfo& info) {
+   struct winsize winp;
+   winp.ws_col = info[1].As<Napi::Number>().Int32Value();
+   winp.ws_row = info[2].As<Napi::Number>().Int32Value();
+-  winp.ws_xpixel = 0;
+-  winp.ws_ypixel = 0;
++  winp.ws_xpixel = info.Length() >= 5 ? info[3].As<Napi::Number>().Int32Value() : 0;
++  winp.ws_ypixel = info.Length() >= 5 ? info[4].As<Napi::Number>().Int32Value() : 0;
+ 
+   if (ioctl(fd, TIOCSWINSZ, &winp) == -1) {
+     switch (errno) {
+diff --git a/typings/node-pty.d.ts b/typings/node-pty.d.ts
+index 6f050ff1d97b8d3477be7ee95d2af516bd9517b7..d9f23f6b4eb4784576c9e348976e10d827cc8951 100644
+--- a/typings/node-pty.d.ts
++++ b/typings/node-pty.d.ts
+@@ -159,7 +159,7 @@ declare module 'node-pty' {
+      * @param columns The number of columns to use.
+      * @param rows The number of rows to use.
+      */
+-    resize(columns: number, rows: number): void;
++    resize(columns: number, rows: number, xpixel?: number, ypixel?: number): void;
+ 
+     /**
+      * Clears the pty's internal representation of its buffer. This is a no-op

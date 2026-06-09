@@ -152,14 +152,14 @@ export class Session extends EventEmitter<SessionEvents> {
     }
   }
 
-  resize(cols: number, rows: number): void {
+  resize(cols: number, rows: number, pixelWidth?: number, pixelHeight?: number): void {
     if (this.exited) return;
     if (cols <= 0 || rows <= 0) return;
-    if (cols === this.currentCols && rows === this.currentRows) return;
+    if (cols === this.currentCols && rows === this.currentRows && pixelWidth === undefined) return;
     this.currentCols = cols;
     this.currentRows = rows;
     try {
-      this.pty.resize(cols, rows);
+      this.pty.resize(cols, rows, pixelWidth, pixelHeight);
     } catch {
       /* PTY may have died between checks */
     }

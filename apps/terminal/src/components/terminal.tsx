@@ -333,7 +333,12 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       theme: findTerminalThemeById(initialThemeIdRef.current).colors,
       macOptionIsMeta: true,
       scrollOnUserInput: initialScrollOnUserInputRef.current,
-      overviewRuler: { width: 0 },
+      windowOptions: {
+        getWinSizePixels: true,
+        getCellSizePixels: true,
+        getWinSizeChars: true,
+      },
+      scrollbar: { showScrollbar: false },
     });
     terminalRef.current = terminal;
     const fitAddon = new FitAddon();
@@ -664,7 +669,25 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
     refocusTerminalRef.current = () => terminal.focus();
 
-    const sendResize = (cols: number, rows: number) => send({ type: "resize", cols, rows });
+    const sendResize = (cols: number, rows: number) => {
+      const terminalInternals = terminal as unknown as {
+        _core: {
+          _renderService: {
+            dimensions: { css: { canvas: { width: number; height: number } } };
+          };
+        };
+      };
+      const canvasWidth = terminalInternals._core._renderService?.dimensions?.css?.canvas?.width;
+      const canvasHeight = terminalInternals._core._renderService?.dimensions?.css?.canvas?.height;
+      send({
+        type: "resize",
+        cols,
+        rows,
+        ...(canvasWidth != null && canvasHeight != null
+          ? { pixelWidth: Math.round(canvasWidth), pixelHeight: Math.round(canvasHeight) }
+          : {}),
+      });
+    };
 
     const fitToContainer = () => {
       const resizeScrollAnchor = captureTerminalScrollAnchor(terminal);
