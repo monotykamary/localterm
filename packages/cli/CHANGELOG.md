@@ -1,5 +1,16 @@
 # localterm
 
+## 1.2.0
+
+### Minor Changes
+
+- Generate 256-color palette from base16 theme via CIELAB interpolation
+
+### Patch Changes
+
+- Updated dependencies
+  - @monotykamary/localterm-server@1.2.0
+
 ## 1.0.0
 
 ### Major Changes

@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.2.0
+
+### Minor Changes
+
+- Generate 256-color palette from base16 theme via CIELAB interpolation
+
 ## 1.0.0
 
 ### Major Changes
