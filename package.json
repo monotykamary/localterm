@@ -11,6 +11,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
     "start": "node packages/cli/bin/localterm.mjs stop && node packages/cli/bin/localterm.mjs start",
+    "stop": "node packages/cli/bin/localterm.mjs stop",
     "cli": "node packages/cli/bin/localterm.mjs",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
