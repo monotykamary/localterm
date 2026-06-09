@@ -79,6 +79,7 @@ import { formatShellExitMarker } from "@/utils/format-shell-exit-marker";
 import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anchor";
 import { flushOutput } from "@/utils/write-terminal-output";
+import { WorkerBridge } from "@/worker/worker-bridge";
 import { shouldBlockTerminalScrollbackPurge } from "@/utils/should-block-terminal-scrollback-purge";
 import { clampTerminalFontSize } from "@/utils/clamp-terminal-font-size";
 import { clampTerminalLineHeight } from "@/utils/clamp-terminal-line-height";
@@ -197,6 +198,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
   const scrollbarTrackRef = useRef<HTMLDivElement | null>(null);
   const scrollbarThumbRef = useRef<HTMLDivElement | null>(null);
+  const workerBridgeRef = useRef<WorkerBridge | null>(null);
   const [exitInfo, setExitInfo] = useState<ExitInfo | null>(null);
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);
   const [hasCopiedRestartCommand, setHasCopiedRestartCommand] = useState(false);
@@ -357,6 +359,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       scrollbar: { showScrollbar: false },
     });
     terminalRef.current = terminal;
+
+    const workerBridge = new WorkerBridge();
+    workerBridgeRef.current = workerBridge;
     const fitAddon = new FitAddon();
     fitAddonRef.current = fitAddon;
     terminal.loadAddon(fitAddon);
@@ -373,6 +378,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     const searchResultsDisposable = searchAddon.onDidChangeResults(setSearchResults);
 
     terminal.open(container);
+
+    workerBridge.setTerminal(terminal);
+    workerBridge.init({
+      cols: terminal.cols,
+      rows: terminal.rows,
+      scrollback: terminal.options.scrollback as number,
+    });
 
     const patchFitAddonScrollbarWidth = () => {
       if (!fitAddon.proposeDimensions) return;
@@ -727,7 +739,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         send({ type: "input", data: chunk });
       }
     });
-    terminal.onResize(({ cols, rows }) => sendResize(cols, rows));
+    terminal.onResize(({ cols, rows }) => {
+      sendResize(cols, rows);
+      workerBridgeRef.current?.resize(cols, rows);
+    });
 
     const observer = new ResizeObserver(scheduleFit);
     observer.observe(container);
@@ -796,7 +811,12 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           typeof (raw as Record<string, unknown>).data === "string"
         ) {
           const outputData = (raw as { type: "output"; data: string }).data;
-          flushOutput(terminal, outputData);
+          const bridge = workerBridgeRef.current;
+          if (bridge?.isReady()) {
+            bridge.feed(outputData);
+          } else {
+            flushOutput(terminal, outputData);
+          }
           noteOutputActivity();
           return;
         }
@@ -924,6 +944,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         /* socket already closed */
       }
       socket = null;
+      workerBridgeRef.current?.dispose();
+      workerBridgeRef.current = null;
       terminal.dispose();
       document.title = DEFAULT_DOCUMENT_TITLE;
     };
@@ -1032,6 +1054,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.scrollback = activeScrollback;
+    workerBridgeRef.current?.setScrollback(activeScrollback);
   }, [activeScrollback]);
 
   const handleScrollbackChange = useCallback((nextScrollback: number) => {

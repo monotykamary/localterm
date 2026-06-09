@@ -23,6 +23,7 @@
     "@xterm/addon-unicode-graphemes": "0.5.0-beta.285",
     "@xterm/addon-web-links": "0.13.0-beta.285",
     "@xterm/addon-webgl": "0.20.0-beta.284",
+    "@xterm/headless": "6.1.0-beta.285",
     "@xterm/xterm": "6.1.0-beta.285",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
