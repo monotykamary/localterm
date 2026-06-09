@@ -12,8 +12,10 @@ export interface TerminalFont {
 
 const MONO_FALLBACK = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
+const NERD_FONT_FAMILY = '"Symbols Nerd Font"';
+
 const buildFamily = (primary: string): string =>
-  `"${escapeCssFontFamily(primary)}", ${MONO_FALLBACK}`;
+  `"${escapeCssFontFamily(primary)}", ${NERD_FONT_FAMILY}, ${MONO_FALLBACK}`;
 
 export const buildLocalTerminalFont = (family: string): TerminalFont => ({
   id: LOCAL_FONT_ID,
