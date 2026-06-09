@@ -360,7 +360,7 @@ describe("Terminal modal", () => {
     expect(screen.queryByText(/Lost connection/i)).toBeNull();
   });
 
-  it("renders the dead-pill and 'Shell ended' modal when the server reports an exit", () => {
+  it("renders the dead-pill and 'Shell ended' modal when the server reports a non-zero exit", () => {
     render(<Terminal />);
     act(() => {
       fakeWebSockets[0]?.fireOpen();
@@ -368,6 +368,20 @@ describe("Terminal modal", () => {
     });
     expect(screen.queryByText(/Shell ended/i)).not.toBeNull();
     expect(screen.queryByText(/exited · code 137/i)).not.toBeNull();
+  });
+
+  it("closes the tab on clean exit and falls back to the 'Shell ended' modal", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({ type: "exit", code: 0 });
+    });
+    expect(globalThis.close).toHaveBeenCalled();
+    expect(screen.queryByText(/Shell ended/i)).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(screen.queryByText(/Shell ended/i)).not.toBeNull();
   });
 
   it("renders the 'Connection lost' modal (not 'Shell ended') when the WebSocket drops mid-session", () => {

@@ -693,18 +693,25 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     const markShellDead = (exitCode: number | null) => {
       if (exited) return;
       exited = true;
+      if (exitCode === null || exitCode === 0) {
+        window.close();
+        setTimeout(() => {
+          if (disposed) return;
+          resetFavicon();
+          setTabFaviconState("dead");
+          terminal.write(formatShellExitMarker(exitCode));
+          document.title = titleForDeadSession(lastTitle);
+          setExitInfo({ reason: "shell-exited", exitCode });
+          setSessionInfo(null);
+        }, 100);
+        return;
+      }
       resetFavicon();
       setTabFaviconState("dead");
       terminal.write(formatShellExitMarker(exitCode));
       document.title = titleForDeadSession(lastTitle);
       setExitInfo({ reason: "shell-exited", exitCode });
-      // Clear so the Settings → Shell section doesn't show a stale dead PID/cwd.
       setSessionInfo(null);
-      if (exitCode === null || exitCode === 0) {
-        onModalOpenChange?.(true);
-        window.open("", "_self");
-        window.close();
-      }
     };
 
     const markConnectionLost = (closeCode: number, closeReason: string, wasClean: boolean) => {
