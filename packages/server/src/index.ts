@@ -104,12 +104,6 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
 
-  app.use("*", async (context, next) => {
-    await next();
-    context.header("Cross-Origin-Opener-Policy", "same-origin");
-    context.header("Cross-Origin-Embedder-Policy", "require-corp");
-  });
-
   const api = new Hono();
   api.get("/health", (context) => context.json({ ok: true, sessions: registry.size() }));
   api.notFound((context) => context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND));

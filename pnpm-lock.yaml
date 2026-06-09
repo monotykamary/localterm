@@ -73,9 +73,6 @@ importers:
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.284
         version: 0.20.0-beta.284(@xterm/xterm@6.1.0-beta.285)
-      '@xterm/headless':
-        specifier: 6.1.0-beta.285
-        version: 6.1.0-beta.285
       '@xterm/xterm':
         specifier: 6.1.0-beta.285
         version: 6.1.0-beta.285
@@ -1495,9 +1492,6 @@ packages:
     resolution: {integrity: sha512-tzkUiEfdpHCY8mXCbuIaP9V67QDfBJvDr9jdxs5jjxNCIQvw+NCoKD97y5sUrQhrIlr7xrDGniPgPYThQ/1FWg==}
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.285
-
-  '@xterm/headless@6.1.0-beta.285':
-    resolution: {integrity: sha512-NJud+XEUjKMT2LwPqcIh/gazktV+R2AHjEPMQsn/l6+53rgFusuifmJjVkWLwZ228YYsUaN5+lJELeExS26q4A==}
 
   '@xterm/xterm@6.1.0-beta.285':
     resolution: {integrity: sha512-S3K58tepMkbpWRBzOGKd0In6AVvt9QPAnNs8DJ8rPUPODYtsCYWAtINHKYtC2OpXcE5EBKM35dl+Dgv03OoE/w==}
@@ -4384,8 +4378,6 @@ snapshots:
   '@xterm/addon-webgl@0.20.0-beta.284(@xterm/xterm@6.1.0-beta.285)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.285
-
-  '@xterm/headless@6.1.0-beta.285': {}
 
   '@xterm/xterm@6.1.0-beta.285': {}
 
