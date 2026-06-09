@@ -10,26 +10,26 @@ describe("formatWorkingDirectoryTitle", () => {
 
   it("uses zsh-style ~/... abbreviation under home", () => {
     expect(formatWorkingDirectoryTitle("/Users/tester/Developer/localterm", home)).toBe(
-      "~/Developer/localterm",
+      "…/localterm",
     );
   });
 
-  it("keeps paths with three or fewer display segments whole", () => {
-    expect(formatWorkingDirectoryTitle("/usr/local/bin", home)).toBe("/usr/local/bin");
+  it("truncates paths with more than one display segment", () => {
+    expect(formatWorkingDirectoryTitle("/usr/local/bin", home)).toBe("…/bin");
   });
 
-  it("keeps a path at the segment boundary (3 segments) whole", () => {
-    expect(formatWorkingDirectoryTitle("/Users/tester/Developer", home)).toBe("~/Developer");
+  it("truncates a path at the segment boundary (2 segments)", () => {
+    expect(formatWorkingDirectoryTitle("/Users/tester/Developer", home)).toBe("…/Developer");
   });
 
-  it("truncates deep paths to the last three display segments", () => {
+  it("truncates deep paths to the last display segment", () => {
     expect(
       formatWorkingDirectoryTitle("/Users/tester/Developer/localterm/packages/server", home),
-    ).toBe("…/localterm/packages/server");
+    ).toBe("…/server");
   });
 
   it("truncates a path that's exactly one segment over the cap", () => {
-    expect(formatWorkingDirectoryTitle("/a/b/c/d", home)).toBe("…/b/c/d");
+    expect(formatWorkingDirectoryTitle("/a/b/c/d", home)).toBe("…/d");
   });
 
   it("returns the input unchanged when cwd is empty", () => {
@@ -40,7 +40,7 @@ describe("formatWorkingDirectoryTitle", () => {
     expect(formatWorkingDirectoryTitle("/", home)).toBe("/");
   });
 
-  it("falls back to the absolute path when cwd is outside home", () => {
-    expect(formatWorkingDirectoryTitle("/var/log/system.log", home)).toBe("/var/log/system.log");
+  it("truncates paths outside home to the last display segment", () => {
+    expect(formatWorkingDirectoryTitle("/var/log/system.log", home)).toBe("…/system.log");
   });
 });
