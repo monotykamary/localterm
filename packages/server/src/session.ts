@@ -5,6 +5,7 @@ import { spawn, type IPty } from "node-pty";
 import {
   COLORTERM_VALUE,
   CWD_RESOLVE_BACKOFF_MS,
+  CWD_RESOLVE_COOLDOWN_MS,
   DEFAULT_COLS,
   DEFAULT_ROWS,
   PTY_ENV_DENYLIST,
@@ -20,6 +21,7 @@ import { ensureSpawnHelperExecutable } from "./ensure-spawn-helper-executable.js
 import { getDefaultShell } from "./default-shell.js";
 import type { SpawnPtyInput } from "./types.js";
 import { formatWorkingDirectoryTitle } from "./utils/format-working-directory-title.js";
+import { parseOsc7FromChunk } from "./utils/parse-osc7.js";
 import { resolveCwdForPid } from "./utils/resolve-cwd-for-pid.js";
 
 interface SessionEvents {
@@ -44,6 +46,10 @@ export class Session extends EventEmitter<SessionEvents> {
   private lastEmittedTitle = "";
   private lastEmittedCwd = "";
   private nextCwdResolveAt = 0;
+  // Set to true once OSC 7 is observed from the PTY output. Once the shell
+  // advertises its working directory via OSC 7 we stop polling lsof entirely —
+  // the stream is the source of truth and lsof is just an expensive fallback.
+  private osc7Detected = false;
 
   constructor(input: SpawnPtyInput) {
     super();
@@ -78,6 +84,7 @@ export class Session extends EventEmitter<SessionEvents> {
     });
 
     this.pty.onData((data) => {
+      this.onPtyOutput(data);
       this.emit("output", data);
     });
 
@@ -180,6 +187,17 @@ export class Session extends EventEmitter<SessionEvents> {
     this.removeAllListeners();
   }
 
+  private onPtyOutput(data: string): void {
+    const osc7Path = parseOsc7FromChunk(data);
+    if (osc7Path) {
+      this.osc7Detected = true;
+      if (osc7Path !== this.lastEmittedCwd) {
+        this.lastEmittedCwd = osc7Path;
+        this.emit("cwd", osc7Path);
+      }
+    }
+  }
+
   private scheduleTitlePoll(delayMs: number): void {
     if (this.exited) return;
     this.titlePollTimer = setTimeout(() => {
@@ -191,13 +209,16 @@ export class Session extends EventEmitter<SessionEvents> {
   private async runTitlePoll(): Promise<void> {
     if (this.exited) return;
     try {
-      const liveCwd = await this.resolveLiveCwd();
+      // Once the shell advertises its CWD via OSC 7 we skip lsof — the stream
+      // is authoritative and lsof is expensive (spawns a child process that
+      // triggers syspolicyd validation on every call).
+      const liveCwd = this.osc7Detected ? this.lastEmittedCwd || null : await this.resolveLiveCwd();
       if (this.exited) return;
-      if (liveCwd && liveCwd !== this.lastEmittedCwd) {
+      if (!this.osc7Detected && liveCwd && liveCwd !== this.lastEmittedCwd) {
         this.lastEmittedCwd = liveCwd;
         this.emit("cwd", liveCwd);
       }
-      const nextTitle = this.computeTitle(liveCwd);
+      const nextTitle = this.computeTitle(this.osc7Detected ? this.lastEmittedCwd || this.cwd : liveCwd ?? this.cwd);
       if (nextTitle && nextTitle !== this.lastEmittedTitle) {
         this.lastEmittedTitle = nextTitle;
         this.emit("title", nextTitle);
@@ -209,21 +230,17 @@ export class Session extends EventEmitter<SessionEvents> {
     }
   }
 
-  private computeTitle(liveCwd: string | null): string | null {
+  private computeTitle(liveCwd: string): string | null {
     const foreground = this.pty.process?.trim() ?? "";
     if (foreground && foreground !== this.shellName) return foreground;
-    return formatWorkingDirectoryTitle(liveCwd ?? this.cwd);
+    return formatWorkingDirectoryTitle(liveCwd);
   }
 
   private async resolveLiveCwd(): Promise<string | null> {
     const now = Date.now();
     if (now < this.nextCwdResolveAt) return null;
     const liveCwd = await resolveCwdForPid(this.pid).catch(() => null);
-    if (liveCwd === null) {
-      this.nextCwdResolveAt = now + CWD_RESOLVE_BACKOFF_MS;
-    } else {
-      this.nextCwdResolveAt = 0;
-    }
+    this.nextCwdResolveAt = now + (liveCwd === null ? CWD_RESOLVE_BACKOFF_MS : CWD_RESOLVE_COOLDOWN_MS);
     return liveCwd;
   }
 
