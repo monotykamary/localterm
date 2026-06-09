@@ -1,5 +1,16 @@
 # localterm
 
+## 0.1.1
+
+### Patch Changes
+
+- Replace title/cwd/foreground polling with stream-based detection
+
+  The title was not updating immediately (or flashing) on directory changes because the server only emitted titles on a 500ms polling interval, and the client had two competing title sources that produced different formats at different times. All polling is removed in favor of parsing OSC 7 (CWD), OSC 0/2 (title), and DECSET/DECRST 1049 (foreground process) directly from the PTY output stream. The lsof/proc CWD resolver is also removed, eliminating syspolicyd pressure on macOS.
+
+- Updated dependencies
+  - @monotykamary/localterm-server@0.1.1
+
 ## 0.1.0
 
 ### Minor Changes
