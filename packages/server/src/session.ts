@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn, type IPty } from "node-pty";
@@ -69,7 +70,17 @@ export class Session extends EventEmitter<SessionEvents> {
     env.TERM = TERM_TYPE;
     env.COLORTERM = COLORTERM_VALUE;
 
-    this.pty = spawn(this.shell, [], {
+    const [shellArgs, shellEnv] = this.prepareOsc7Hook(
+      this.shellName,
+      env,
+    );
+    if (shellEnv) {
+      for (const [key, value] of Object.entries(shellEnv)) {
+        env[key] = value;
+      }
+    }
+
+    this.pty = spawn(this.shell, shellArgs, {
       name: TERM_TYPE,
       cols: this.currentCols,
       rows: this.currentRows,
@@ -88,7 +99,6 @@ export class Session extends EventEmitter<SessionEvents> {
     });
 
     this.emitInitialMetadata();
-    this.injectOsc7Hook();
   }
 
   get pid(): number {
@@ -215,35 +225,46 @@ export class Session extends EventEmitter<SessionEvents> {
     }
   }
 
-  private injectOsc7Hook(): void {
-    // Fish emits OSC 7 natively; zsh and bash do not. Inject a small
-    // chpwd / PROMPT_COMMAND hook so every directory change produces an
-    // OSC 7 sequence that our stream parser can pick up.
-    const hook = this.osc7HookForShell(this.shellName);
-    if (hook) this.pty.write(hook);
-  }
-
-  private osc7HookForShell(shellName: string): string | null {
+  private prepareOsc7Hook(
+    shellName: string,
+    env: Record<string, string>,
+  ): [string[], Record<string, string> | null] {
+    const hookId = `${process.pid}-${Date.now()}`;
     switch (shellName) {
       case "zsh": {
-        const register =
-          "chpwd_functions=(${chpwd_functions[@]} __localterm_osc7_chpwd)";
-        const fire = "__localterm_osc7_chpwd";
-        return [
-          this.zshOsc7ChpwdFunction(),
-          register,
-          fire,
-        ].join("\n") + "\n";
+        const hookDir = path.join(os.tmpdir(), `localterm-zdot-${hookId}`);
+        mkdirSync(hookDir, { recursive: true });
+        const hookScript = this.zshOsc7ChpwdFunction();
+        const userZdotdir = env.ZDOTDIR || os.homedir();
+        const lines = [
+          `source '${userZdotdir}/.zshrc' 2>/dev/null`,
+          hookScript,
+          "chpwd_functions=(${chpwd_functions[@]} __localterm_osc7_chpwd)",
+          "__localterm_osc7_chpwd",
+        ];
+        writeFileSync(path.join(hookDir, ".zshrc"), lines.join("\n") + "\n", {
+          mode: 0o644,
+        });
+        return [[], { ZDOTDIR: hookDir }];
       }
       case "bash": {
-        const func = this.bashOsc7Function();
-        const assign =
-          'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt"';
-        const fire = "__localterm_osc7_prompt";
-        return [func, assign, fire].join("\n") + "\n";
+        const hookPath = path.join(
+          os.tmpdir(),
+          `localterm-bashrc-${hookId}`,
+        );
+        const hookScript = this.bashOsc7Function();
+        const lines = [
+          "source /etc/bashrc 2>/dev/null",
+          "source ~/.bashrc 2>/dev/null",
+          hookScript,
+          'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt"',
+          "__localterm_osc7_prompt",
+        ];
+        writeFileSync(hookPath, lines.join("\n") + "\n", { mode: 0o644 });
+        return [["--rcfile", hookPath], null];
       }
       default:
-        return null;
+        return [[], null];
     }
   }
 
