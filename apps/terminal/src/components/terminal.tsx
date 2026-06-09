@@ -46,6 +46,8 @@ import {
   KITTY_KEYBOARD_SET_MODE_OR,
   KITTY_KEYBOARD_SET_MODE_REPLACE,
   RECONNECT_DELAY_MS,
+  RECONNECT_FAST_POLL_DURATION_MS,
+  RECONNECT_FAST_POLL_INTERVAL_MS,
   RECONNECT_POLL_INTERVAL_MS,
   RESIZE_DEBOUNCE_MS,
   RESIZE_SCROLL_RESTORE_WINDOW_MS,
@@ -70,6 +72,7 @@ import {
 import { extractKeyboardModifiers } from "@/utils/extract-keyboard-modifiers";
 import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
 import { formatConnectionLostMarker } from "@/utils/format-connection-lost-marker";
+import { formatReconnectedMarker } from "@/utils/format-reconnected-marker";
 import { formatShellExitMarker } from "@/utils/format-shell-exit-marker";
 import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anchor";
@@ -686,7 +689,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       setSessionInfo(null);
       if (exitCode === null || exitCode === 0) {
         onModalOpenChange?.(true);
-        window.open('', '_self');
+        window.open("", "_self");
         window.close();
       }
     };
@@ -723,7 +726,8 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
           return;
         }
         if (
-          typeof raw === "object" && raw !== null &&
+          typeof raw === "object" &&
+          raw !== null &&
           (raw as Record<string, unknown>).type === "output" &&
           typeof (raw as Record<string, unknown>).data === "string"
         ) {
@@ -1163,12 +1167,35 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
 
   useEffect(() => {
     if (!shouldAutoReconnect) return;
-    const intervalId = window.setInterval(() => {
+    const reconnectStart = Date.now();
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    const tick = () => {
       void probeServerHealth().then((healthy) => {
-        if (healthy) window.location.reload();
+        if (cancelled || healthy) return;
+        const elapsed = Date.now() - reconnectStart;
+        const interval =
+          elapsed < RECONNECT_FAST_POLL_DURATION_MS
+            ? RECONNECT_FAST_POLL_INTERVAL_MS
+            : RECONNECT_POLL_INTERVAL_MS;
+        timeoutId = window.setTimeout(tick, interval);
       });
-    }, RECONNECT_POLL_INTERVAL_MS);
-    return () => window.clearInterval(intervalId);
+    };
+    // Fire immediately on mount so we don't wait for the first interval.
+    void probeServerHealth().then((healthy) => {
+      if (cancelled) return;
+      if (healthy) {
+        const terminal = terminalRef.current;
+        if (terminal) terminal.write(formatReconnectedMarker());
+        manualReconnectRef.current?.();
+        return;
+      }
+      timeoutId = window.setTimeout(tick, RECONNECT_FAST_POLL_INTERVAL_MS);
+    });
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
   }, [shouldAutoReconnect]);
 
   useEffect(() => {

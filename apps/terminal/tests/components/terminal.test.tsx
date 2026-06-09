@@ -170,6 +170,8 @@ vi.mock("@xterm/xterm", () => {
       fakeXterms.push(this.handle);
     }
 
+    _core = { _charSizeService: { measure: () => {} } };
+
     loadAddon = () => {};
     open = () => {};
     onData = () => {};
@@ -275,6 +277,12 @@ const stubBrowserGlobals = () => {
       disconnect() {}
     } as unknown as typeof ResizeObserver;
   }
+  vi.stubGlobal("open", vi.fn());
+  vi.stubGlobal("close", vi.fn());
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve(new Response(null, { status: 503 }))),
+  );
 };
 
 const dispatchFindShortcut = (handle: FakeXtermHandle | undefined): boolean | undefined => {
