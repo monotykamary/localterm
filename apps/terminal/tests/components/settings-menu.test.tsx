@@ -76,8 +76,6 @@ const renderSettingsMenu = ({
         fontId={initialFontId}
         onFontChange={onFontChange}
         onFontPreview={onFontPreview}
-        localFontFamily={null}
-        onLocalFontChange={() => {}}
         nerdFontEnabled={false}
         onNerdFontEnabledChange={() => {}}
         fontSize={initialFontSize}

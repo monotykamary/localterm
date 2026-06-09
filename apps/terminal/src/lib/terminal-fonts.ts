@@ -1,7 +1,6 @@
-import { LOCAL_FONT_ID } from "@/lib/constants";
 import { escapeCssFontFamily } from "@/utils/escape-css-font-family";
 
-type TerminalFontSource = "fontsource" | "google" | "local";
+type TerminalFontSource = "fontsource" | "google";
 
 export interface TerminalFont {
   id: string;
@@ -16,13 +15,6 @@ const NERD_FONT_FAMILY = '"Symbols Nerd Font"';
 
 const buildFamily = (primary: string): string =>
   `"${escapeCssFontFamily(primary)}", ${NERD_FONT_FAMILY}, ${MONO_FALLBACK}`;
-
-export const buildLocalTerminalFont = (family: string): TerminalFont => ({
-  id: LOCAL_FONT_ID,
-  name: family,
-  family: buildFamily(family),
-  source: "local",
-});
 
 const buildStaticFont = (id: string, name: string, source: TerminalFontSource): TerminalFont => ({
   id,
@@ -63,11 +55,7 @@ export const TERMINAL_FONTS: TerminalFont[] = [
 
 export const DEFAULT_TERMINAL_FONT_ID: string = GEIST_MONO.id;
 
-export const findTerminalFontById = (
-  id: string | null | undefined,
-  localFontFamily?: string | null,
-): TerminalFont => {
-  if (id === LOCAL_FONT_ID && localFontFamily) return buildLocalTerminalFont(localFontFamily);
+export const findTerminalFontById = (id: string | null | undefined): TerminalFont => {
   if (!id) return GEIST_MONO;
   return TERMINAL_FONTS.find((font) => font.id === id) ?? GEIST_MONO;
 };

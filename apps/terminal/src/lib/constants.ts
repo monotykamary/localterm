@@ -65,9 +65,6 @@ export const SEARCH_ACTIVE_MATCH_BORDER_HEX = "#ff8080";
 
 export const TERMINAL_THEME_STORAGE_KEY = "localterm:terminal-theme-id";
 export const TERMINAL_FONT_STORAGE_KEY = "localterm:terminal-font-id";
-export const LOCAL_FONT_FAMILY_STORAGE_KEY = "localterm:local-font-family";
-export const LOCAL_FONT_ID = "local";
-export const LOCAL_FONT_ROW_INTRINSIC_HEIGHT_PX = 28;
 export const TERMINAL_FONT_SIZE_STORAGE_KEY = "localterm:terminal-font-size";
 export const TERMINAL_LINE_HEIGHT_STORAGE_KEY = "localterm:terminal-line-height";
 export const TERMINAL_CURSOR_STYLE_STORAGE_KEY = "localterm:terminal-cursor-style";

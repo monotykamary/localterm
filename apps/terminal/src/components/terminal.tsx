@@ -43,7 +43,6 @@ import {
   FAVICON_IDLE_DEBOUNCE_MS,
   KEYBOARD_MODIFIER_SHIFT_BIT,
   KITTY_KEYBOARD_DISAMBIGUATE_FLAG,
-  LOCAL_FONT_ID,
   KITTY_KEYBOARD_SET_MODE_AND_NOT,
   KITTY_KEYBOARD_SET_MODE_OR,
   KITTY_KEYBOARD_SET_MODE_REPLACE,
@@ -87,7 +86,6 @@ import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
-import { loadStoredLocalFontFamily } from "@/utils/load-stored-local-font-family";
 import { loadStoredTerminalCursorBlink } from "@/utils/load-stored-terminal-cursor-blink";
 import { loadStoredTerminalCursorStyle } from "@/utils/load-stored-terminal-cursor-style";
 import { loadStoredTerminalFontId } from "@/utils/load-stored-terminal-font-id";
@@ -102,7 +100,6 @@ import { loadStoredNerdFontEnabled } from "@/utils/load-stored-nerd-font-enabled
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
-import { storeLocalFontFamily } from "@/utils/store-local-font-family";
 import { storeTerminalCursorBlink } from "@/utils/store-terminal-cursor-blink";
 import { storeTerminalCursorStyle } from "@/utils/store-terminal-cursor-style";
 import { storeTerminalFontId } from "@/utils/store-terminal-font-id";
@@ -186,7 +183,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const resizeScrollRestoreRef = useRef<ResizeScrollRestoreState | null>(null);
   const initialThemeIdRef = useRef<string>(loadStoredTerminalThemeId());
   const initialFontIdRef = useRef<string>(loadStoredTerminalFontId());
-  const initialLocalFontFamilyRef = useRef<string | null>(loadStoredLocalFontFamily());
   const initialFontSizeRef = useRef<number>(loadStoredTerminalFontSize());
   const initialLineHeightRef = useRef<number>(loadStoredTerminalLineHeight());
   const initialCursorStyleRef = useRef<TerminalCursorStyle>(loadStoredTerminalCursorStyle());
@@ -224,18 +220,12 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const effectiveThemeId = previewThemeId ?? activeThemeId;
   const effectiveTheme = useMemo(() => findTerminalThemeById(effectiveThemeId), [effectiveThemeId]);
   const [activeFontId, setActiveFontId] = useState<string>(initialFontIdRef.current);
-  const [activeLocalFontFamily, setActiveLocalFontFamily] = useState<string | null>(
-    initialLocalFontFamilyRef.current,
-  );
   const [previewFontId, setPreviewFontId] = useState<string | null>(null);
   const effectiveFontId = previewFontId ?? activeFontId;
   const [activeNerdFontEnabled, setActiveNerdFontEnabled] = useState<boolean>(
     initialNerdFontEnabledRef.current,
   );
-  const effectiveFont = useMemo(
-    () => findTerminalFontById(effectiveFontId, activeLocalFontFamily),
-    [effectiveFontId, activeLocalFontFamily],
-  );
+  const effectiveFont = useMemo(() => findTerminalFontById(effectiveFontId), [effectiveFontId]);
   const [activeFontSize, setActiveFontSize] = useState<number>(initialFontSizeRef.current);
   const [activeLineHeight, setActiveLineHeight] = useState<number>(initialLineHeightRef.current);
   const [activeCursorStyle, setActiveCursorStyle] = useState<TerminalCursorStyle>(
@@ -320,10 +310,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       }
     };
 
-    const initialFont = findTerminalFontById(
-      initialFontIdRef.current,
-      initialLocalFontFamilyRef.current,
-    );
+    const initialFont = findTerminalFontById(initialFontIdRef.current);
     void awaitFontReady(initialFont).then(() => {
       if (disposed) return;
       const liveTerminal = terminalRef.current;
@@ -937,14 +924,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     storeTerminalFontId(nextFontId);
   }, []);
 
-  const handleLocalFontChange = useCallback((family: string) => {
-    setActiveLocalFontFamily(family);
-    setActiveFontId(LOCAL_FONT_ID);
-    setPreviewFontId(null);
-    storeLocalFontFamily(family);
-    storeTerminalFontId(LOCAL_FONT_ID);
-  }, []);
-
   const handleNerdFontEnabledChange = useCallback((nextEnabled: boolean) => {
     setActiveNerdFontEnabled(nextEnabled);
     storeNerdFontEnabled(nextEnabled);
@@ -1429,8 +1408,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                 fontId={activeFontId}
                 onFontChange={handleFontChange}
                 onFontPreview={setPreviewFontId}
-                localFontFamily={activeLocalFontFamily}
-                onLocalFontChange={handleLocalFontChange}
                 nerdFontEnabled={activeNerdFontEnabled}
                 onNerdFontEnabledChange={handleNerdFontEnabledChange}
                 fontSize={activeFontSize}
