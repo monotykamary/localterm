@@ -8,6 +8,7 @@ import {
   DEFAULT_COLS,
   DEFAULT_ROWS,
   LOCALTERM_VALUE,
+  MAX_NOTIFICATION_LENGTH,
   PTY_ENV_DENYLIST,
   TERM_TYPE,
 } from "./constants.js";
@@ -22,6 +23,7 @@ import type { SpawnPtyInput } from "./types.js";
 import { formatWorkingDirectoryTitle } from "./utils/format-working-directory-title.js";
 import { parseAltScreenFromChunk } from "./utils/parse-alt-screen.js";
 import { parseOsc7FromChunk } from "./utils/parse-osc7.js";
+import { parseOscNotificationsFromChunk } from "./utils/parse-osc-notification.js";
 import { parseOscTitleFromChunk } from "./utils/parse-osc-title.js";
 
 interface SessionEvents {
@@ -30,6 +32,7 @@ interface SessionEvents {
   title: [title: string];
   cwd: [cwd: string];
   foreground: [process: string | null];
+  notification: [body: string];
 }
 
 export class Session extends EventEmitter<SessionEvents> {
@@ -227,6 +230,11 @@ export class Session extends EventEmitter<SessionEvents> {
         this.lastEmittedForeground = nextForeground;
         this.emit("foreground", nextForeground);
       }
+    }
+
+    const notifications = parseOscNotificationsFromChunk(data);
+    for (const body of notifications) {
+      this.emit("notification", body.slice(0, MAX_NOTIFICATION_LENGTH));
     }
   }
 

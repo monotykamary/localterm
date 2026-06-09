@@ -3,6 +3,7 @@ import {
   MAX_COLS,
   MAX_FOREGROUND_LENGTH,
   MAX_INPUT_BYTES,
+  MAX_NOTIFICATION_LENGTH,
   MAX_OUTPUT_BYTES,
   MAX_ROWS,
   MAX_TITLE_LENGTH,
@@ -83,6 +84,13 @@ const foregroundMessageSchema = z
   })
   .strict();
 
+const notificationMessageSchema = z
+  .object({
+    type: z.literal("notification"),
+    body: z.string().min(1).max(MAX_NOTIFICATION_LENGTH),
+  })
+  .strict();
+
 export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   outputMessageSchema,
   exitMessageSchema,
@@ -90,4 +98,5 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   sessionMessageSchema,
   cwdMessageSchema,
   foregroundMessageSchema,
+  notificationMessageSchema,
 ]);

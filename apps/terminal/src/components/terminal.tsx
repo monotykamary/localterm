@@ -251,6 +251,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [activePaddingX, setActivePaddingX] = useState<number>(initialPaddingXRef.current);
   const [activePaddingY, setActivePaddingY] = useState<number>(initialPaddingYRef.current);
   const [sessionInfo, setSessionInfo] = useState<TerminalSessionInfo | null>(null);
+  const [notificationsPermission, setNotificationsPermission] = useState<
+    NotificationPermission | "unsupported"
+  >("Notification" in window ? Notification.permission : "unsupported");
   const [liveCwd, setLiveCwd] = useState<string | null>(null);
   const liveCwdRef = useRef<string | null>(null);
   const isMac = useMemo(detectIsMacPlatform, []);
@@ -816,6 +819,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           setLiveCwd(message.cwd);
         } else if (message.type === "foreground") {
           onForegroundProcessChange?.(message.process !== null);
+        } else if (message.type === "notification") {
+          if ("Notification" in window && Notification.permission === "granted") {
+            new Notification(message.body);
+          }
         } else if (message.type === "exit") {
           resetFavicon();
           markShellDead(message.code);
@@ -1062,6 +1069,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     const clamped = clampTerminalPaddingY(nextPaddingY);
     setActivePaddingY(clamped);
     storeTerminalPaddingY(clamped);
+  }, []);
+
+  const handleNotificationsPermissionRequest = useCallback(() => {
+    if (!("Notification" in window)) return;
+    void Notification.requestPermission().then((result) => {
+      setNotificationsPermission(result);
+    });
   }, []);
 
   useEffect(() => {
@@ -1463,6 +1477,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                 onPaddingXChange={handlePaddingXChange}
                 paddingY={activePaddingY}
                 onPaddingYChange={handlePaddingYChange}
+                notificationsPermission={notificationsPermission}
+                onNotificationsPermissionRequest={handleNotificationsPermissionRequest}
                 sessionInfo={sessionInfo}
                 onPopoverOpenChange={handleSettingsPopoverOpenChange}
                 onClose={refocusTerminalRef.current ?? undefined}

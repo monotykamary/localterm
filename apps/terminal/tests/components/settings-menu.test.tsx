@@ -40,6 +40,8 @@ interface SettingsMenuHarnessProps {
   onScrollOnUserInputChange?: (scrollOnUserInput: boolean) => void;
   onPaddingXChange?: (paddingX: number) => void;
   onPaddingYChange?: (paddingY: number) => void;
+  notificationsPermission?: NotificationPermission | "unsupported";
+  onNotificationsPermissionRequest?: () => void;
   sessionInfo?: TerminalSessionInfo | null;
 }
 
@@ -65,6 +67,8 @@ const renderSettingsMenu = ({
   onScrollOnUserInputChange = () => {},
   onPaddingXChange = () => {},
   onPaddingYChange = () => {},
+  notificationsPermission = "default",
+  onNotificationsPermissionRequest = () => {},
   sessionInfo,
 }: SettingsMenuHarnessProps = {}) =>
   render(
@@ -95,6 +99,8 @@ const renderSettingsMenu = ({
         onPaddingXChange={onPaddingXChange}
         paddingY={0}
         onPaddingYChange={onPaddingYChange}
+        notificationsPermission={notificationsPermission}
+        onNotificationsPermissionRequest={onNotificationsPermissionRequest}
         sessionInfo={sessionInfo}
       />
     </TooltipProvider>,

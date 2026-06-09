@@ -59,6 +59,8 @@ interface SettingsMenuProps {
   onScrollbackChange: (scrollback: number) => void;
   scrollOnUserInput: boolean;
   onScrollOnUserInputChange: (scrollOnUserInput: boolean) => void;
+  notificationsPermission: NotificationPermission | "unsupported";
+  onNotificationsPermissionRequest: () => void;
   sessionInfo?: TerminalSessionInfo | null;
   onPopoverOpenChange?: (open: boolean) => void;
   onClose?: () => void;
@@ -143,6 +145,8 @@ export const SettingsMenu = ({
   onScrollbackChange,
   scrollOnUserInput,
   onScrollOnUserInputChange,
+  notificationsPermission,
+  onNotificationsPermissionRequest,
   sessionInfo,
   onPopoverOpenChange,
   onClose,
@@ -341,6 +345,38 @@ export const SettingsMenu = ({
                 decrementAriaLabel="decrease vertical padding"
                 incrementAriaLabel="increase vertical padding"
                 onValueChange={onPaddingYChange}
+              />
+            </div>
+          </Field>
+
+          <Separator className="bg-border/40" />
+
+          <Field orientation="vertical" className="gap-1.5">
+            <FieldLabel className={SECTION_LABEL_CLASSES}>Notifications</FieldLabel>
+            <div className="flex items-center justify-between gap-2">
+              <Tooltip>
+                <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                  Desktop alerts
+                </TooltipTrigger>
+                <TooltipContent
+                  side="bottom"
+                  sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                  className="max-w-xs"
+                >
+                  When on, OSC 9 sequences from the shell trigger browser notifications. Enable to
+                  receive alerts when the tab is in the background. Blocked permissions must be
+                  changed in browser settings.
+                </TooltipContent>
+              </Tooltip>
+              <Switch
+                aria-label="toggle desktop notifications"
+                checked={notificationsPermission === "granted"}
+                disabled={
+                  notificationsPermission === "unsupported" || notificationsPermission === "denied"
+                }
+                onCheckedChange={(checked) => {
+                  if (checked) onNotificationsPermissionRequest();
+                }}
               />
             </div>
           </Field>

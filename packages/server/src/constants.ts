@@ -40,6 +40,7 @@ export const MAX_INPUT_BYTES = 64 * 1024;
 export const MAX_OUTPUT_BYTES = 1 * 1024 * 1024;
 export const MAX_FOREGROUND_LENGTH = 256;
 export const MAX_TITLE_LENGTH = 4 * 1024;
+export const MAX_NOTIFICATION_LENGTH = 1024;
 export const MAX_COLS = 1000;
 export const MAX_ROWS = 1000;
 export const MAX_CONCURRENT_SESSIONS = 64;
