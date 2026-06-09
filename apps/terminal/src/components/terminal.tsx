@@ -248,8 +248,6 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
     let resizeTimer: number | null = null;
-    let outputBuffer = "";
-    let outputRafId: number | null = null;
     let faviconActiveTimer: number | null = null;
     let faviconIdleTimer: number | null = null;
     let faviconState: "idle" | "active" = "idle";
@@ -563,14 +561,6 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       restoreTerminalScrollAnchor(terminal, state.anchor);
     };
 
-    const restoreAfterOutputWrite = (outputScrollAnchor: TerminalScrollAnchor) => {
-      if (resizeScrollRestoreRef.current) {
-        restoreResizeScroll();
-        return;
-      }
-      if (outputScrollAnchor.wasAtBottom) restoreTerminalScrollAnchor(terminal, outputScrollAnchor);
-    };
-
     const beginResizeScrollRestore = (anchor: TerminalScrollAnchor) => {
       clearResizeScrollRestore();
       const timer = window.setTimeout(() => {
@@ -730,17 +720,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
         if (!parsed.success) return;
         const message = parsed.data;
         if (message.type === "output") {
-          outputBuffer += message.data;
-          if (outputRafId === null) {
-            const flush = () => {
-              outputRafId = null;
-              if (!outputBuffer || disposed) return;
-              const outputScrollAnchor = captureTerminalScrollAnchor(terminal);
-              terminal.write(outputBuffer, () => restoreAfterOutputWrite(outputScrollAnchor));
-              outputBuffer = "";
-            };
-            outputRafId = requestAnimationFrame(flush);
-          }
+          terminal.write(message.data);
           noteOutputActivity();
         } else if (message.type === "title") {
           applyIncomingTitle(message.title);
@@ -819,11 +799,6 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
 
     return () => {
       disposed = true;
-      if (outputRafId !== null) {
-        cancelAnimationFrame(outputRafId);
-        outputRafId = null;
-      }
-      outputBuffer = "";
       manualReconnectRef.current = null;
       refocusTerminalRef.current = null;
       searchAddonRef.current = null;

@@ -975,31 +975,22 @@ describe("Terminal scroll preservation through hot-swaps", () => {
     expect(handle.scrollToBottom).toHaveBeenCalled();
   });
 
-  it("restores bottom scroll after output arrives during a resize replay", () => {
+  it("writes output directly without RAF batching", () => {
     render(<Terminal />);
     const handle = fakeXterms[0];
     if (!handle) throw new Error("xterm not constructed");
-    handle.scrollToBottom.mockClear();
 
     act(() => {
-      handle.setBufferState({ baseY: 80, viewportY: 0 });
       fakeWebSockets[0]?.fireMessage({ type: "output", data: "replayed transcript" });
     });
 
-    expect(handle.write).toHaveBeenCalledWith("replayed transcript", expect.any(Function));
-    expect(handle.scrollToBottom).toHaveBeenCalled();
+    expect(handle.write).toHaveBeenCalledWith("replayed transcript");
   });
 
-  it("keeps bottom-pinned sessions at the bottom after output-driven clears", () => {
+  it("writes output escape sequences directly", () => {
     render(<Terminal />);
     const handle = fakeXterms[0];
     if (!handle) throw new Error("xterm not constructed");
-
-    act(() => {
-      vi.advanceTimersByTime(RESIZE_SCROLL_RESTORE_WINDOW_MS + 1);
-    });
-    handle.setBufferState({ baseY: 80, viewportY: 80 });
-    handle.scrollToBottom.mockClear();
 
     act(() => {
       fakeWebSockets[0]?.fireMessage({ type: "output", data: "\x1b[2J\x1b[H\x1b[3Jredraw" });
@@ -1007,7 +998,6 @@ describe("Terminal scroll preservation through hot-swaps", () => {
 
     const writtenData = handle.write.mock.calls.at(-1)?.[0];
     expect(writtenData).toBe("\x1b[2J\x1b[H\x1b[3Jredraw");
-    expect(handle.scrollToBottom).toHaveBeenCalled();
   });
 
   it("blocks scrollback purge CSI handlers without blocking normal screen clears", () => {
