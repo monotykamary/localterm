@@ -1,5 +1,16 @@
 # localterm
 
+## 1.0.0
+
+### Major Changes
+
+- feat: add kitty graphics protocol support via xterm image addon beta
+
+### Patch Changes
+
+- Updated dependencies
+  - @monotykamary/localterm-server@1.0.0
+
 ## 0.1.4
 
 ### Patch Changes
