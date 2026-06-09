@@ -123,9 +123,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       }
 
       let session: Session | null = null;
+      let activeWs: BroadcastSocket | null = null;
       let drainPollTimer: NodeJS.Timeout | null = null;
       let heartbeatTimer: NodeJS.Timeout | null = null;
       let stopHeartbeat: (() => void) | null = null;
+      let outputBatch = "";
+      let outputBatchTimer: NodeJS.Immediate | null = null;
 
       const stopDrainPoll = () => {
         if (drainPollTimer === null) return;
@@ -157,6 +160,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
       return {
         onOpen(_event, ws) {
+          activeWs = ws;
           if (registry.size() >= MAX_CONCURRENT_SESSIONS) {
             ws.close(WS_CLOSE_CAPACITY_REACHED, "session capacity reached");
             return;
@@ -214,11 +218,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             drainPollTimer.unref?.();
           };
 
-          // Wire listeners BEFORE the first safeSend so any synchronous emit
-          // from Session (current or future) reaches the client. Today
-          // node-pty's data/exit are async, but this guards against drift.
-          const onOutput = (data: string) => {
-            safeSend(ws, { type: "output", data });
+          const flushOutputBatch = () => {
+            outputBatchTimer = null;
+            if (!outputBatch) return;
+            safeSend(ws, { type: "output", data: outputBatch });
+            outputBatch = "";
             if (
               !newSession.isPaused &&
               getRawBufferedAmount(ws.raw) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES
@@ -227,9 +231,24 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               ensureDrainPoll();
             }
           };
+
+          // Wire listeners BEFORE the first safeSend so any synchronous emit
+          // from Session (current or future) reaches the client. Today
+          // node-pty's data/exit are async, but this guards against drift.
+          const onOutput = (data: string) => {
+            outputBatch += data;
+            if (outputBatchTimer === null) {
+              outputBatchTimer = setImmediate(flushOutputBatch);
+            }
+          };
           const onTitle = (title: string) => safeSend(ws, { type: "title", title });
           const onCwd = (cwd: string) => safeSend(ws, { type: "cwd", cwd });
           const onExit = (code: number | null) => {
+            if (outputBatchTimer !== null) {
+              clearImmediate(outputBatchTimer);
+              outputBatchTimer = null;
+            }
+            flushOutputBatch();
             stopDrainPoll();
             stopHeartbeatChecks();
             safeSend(ws, { type: "exit", code });
@@ -266,6 +285,14 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           }
         },
         onClose(event) {
+          if (outputBatchTimer !== null) {
+            clearImmediate(outputBatchTimer);
+            outputBatchTimer = null;
+          }
+          if (outputBatch && activeWs) {
+            safeSend(activeWs, { type: "output", data: outputBatch });
+            outputBatch = "";
+          }
           stopDrainPoll();
           stopHeartbeatChecks();
           // Most "the terminal randomly died" reports are actually the WS
@@ -280,8 +307,17 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           registry.unregister(session);
           session.dispose();
           session = null;
+          activeWs = null;
         },
         onError(event) {
+          if (outputBatchTimer !== null) {
+            clearImmediate(outputBatchTimer);
+            outputBatchTimer = null;
+          }
+          if (outputBatch && activeWs) {
+            safeSend(activeWs, { type: "output", data: outputBatch });
+            outputBatch = "";
+          }
           stopDrainPoll();
           stopHeartbeatChecks();
           const errorValue =
@@ -293,6 +329,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           registry.unregister(session);
           session.dispose();
           session = null;
+          activeWs = null;
         },
       };
     }),

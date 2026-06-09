@@ -218,7 +218,9 @@ export class Session extends EventEmitter<SessionEvents> {
         this.lastEmittedCwd = liveCwd;
         this.emit("cwd", liveCwd);
       }
-      const nextTitle = this.computeTitle(this.osc7Detected ? this.lastEmittedCwd || this.cwd : liveCwd ?? this.cwd);
+      const nextTitle = this.computeTitle(
+        this.osc7Detected ? this.lastEmittedCwd || this.cwd : (liveCwd ?? this.cwd),
+      );
       if (nextTitle && nextTitle !== this.lastEmittedTitle) {
         this.lastEmittedTitle = nextTitle;
         this.emit("title", nextTitle);
@@ -240,7 +242,8 @@ export class Session extends EventEmitter<SessionEvents> {
     const now = Date.now();
     if (now < this.nextCwdResolveAt) return null;
     const liveCwd = await resolveCwdForPid(this.pid).catch(() => null);
-    this.nextCwdResolveAt = now + (liveCwd === null ? CWD_RESOLVE_BACKOFF_MS : CWD_RESOLVE_COOLDOWN_MS);
+    this.nextCwdResolveAt =
+      now + (liveCwd === null ? CWD_RESOLVE_BACKOFF_MS : CWD_RESOLVE_COOLDOWN_MS);
     return liveCwd;
   }
 
