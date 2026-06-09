@@ -1,5 +1,11 @@
 # localterm-server
 
+## 0.1.0
+
+### Minor Changes
+
+- Show only the tail folder name in the titlebar instead of a truncated path
+
 ## 0.0.14
 
 ### Patch Changes
