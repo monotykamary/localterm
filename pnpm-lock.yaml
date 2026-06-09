@@ -7,6 +7,11 @@ settings:
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core
 
+patchedDependencies:
+  '@xterm/addon-webgl@0.19.0':
+    hash: b93a9ac0ac0c4306906ff01295791413932a6b1e85d79bdd8e9af1a3fe2587eb
+    path: patches/@xterm__addon-webgl@0.19.0.patch
+
 importers:
 
   .:
@@ -67,7 +72,7 @@ importers:
         version: 0.12.0
       '@xterm/addon-webgl':
         specifier: ^0.19.0
-        version: 0.19.0
+        version: 0.19.0(patch_hash=b93a9ac0ac0c4306906ff01295791413932a6b1e85d79bdd8e9af1a3fe2587eb)
       '@xterm/xterm':
         specifier: ^6.0.0
         version: 6.0.0
@@ -4361,7 +4366,7 @@ snapshots:
 
   '@xterm/addon-web-links@0.12.0': {}
 
-  '@xterm/addon-webgl@0.19.0': {}
+  '@xterm/addon-webgl@0.19.0(patch_hash=b93a9ac0ac0c4306906ff01295791413932a6b1e85d79bdd8e9af1a3fe2587eb)': {}
 
   '@xterm/xterm@6.0.0': {}
 

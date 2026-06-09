@@ -5,7 +5,7 @@ import { ProgressAddon } from "@xterm/addon-progress";
 import { SearchAddon } from "@xterm/addon-search";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { CanvasAddon } from "@xterm/addon-canvas";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XtermTerminal } from "@xterm/xterm";
 import { Check, ChevronDown, ChevronUp, Copy, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -470,10 +470,11 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     }
 
     try {
-      const canvasAddon = new CanvasAddon();
-      terminal.loadAddon(canvasAddon);
+      const webglAddon = new WebglAddon(true);
+      webglAddon.onContextLoss(() => webglAddon.dispose());
+      terminal.loadAddon(webglAddon);
     } catch {
-      /* canvas2d unavailable; xterm falls back to dom renderer */
+      /* webgl unavailable; xterm falls back to dom renderer */
     }
 
     const kittyPushDisposable = terminal.parser.registerCsiHandler(
