@@ -38,6 +38,8 @@ export const FAVICON_HUE_WHEEL_DEG = 360;
 export const FAVICON_BROADCAST_CHANNEL_NAME = "localterm:favicon";
 export const FAVICON_COLLISION_RESOLVE_TIMEOUT_MS = 250;
 
+export const COMMAND_PALETTE_CLOSE_TRANSITION_MS = 150;
+
 export const TOOLBAR_HIDE_DELAY_MS = 200;
 export const TOOLTIP_DELAY_MS = 300;
 export const TOOLTIP_SIDE_OFFSET_PX = 8;

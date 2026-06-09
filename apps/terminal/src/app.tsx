@@ -3,10 +3,12 @@ import { Terminal } from "@/components/terminal";
 
 export const App = () => {
   const isModalOpenRef = useRef(false);
+  const hasForegroundProcessRef = useRef(false);
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (isModalOpenRef.current) return;
+      if (!hasForegroundProcessRef.current) return;
       event.preventDefault();
     };
     const armBeforeUnload = () => window.addEventListener("beforeunload", handleBeforeUnload);
@@ -21,5 +23,14 @@ export const App = () => {
     isModalOpenRef.current = open;
   }, []);
 
-  return <Terminal onModalOpenChange={handleModalOpenChange} />;
+  const handleForegroundProcessChange = useCallback((hasProcess: boolean) => {
+    hasForegroundProcessRef.current = hasProcess;
+  }, []);
+
+  return (
+    <Terminal
+      onModalOpenChange={handleModalOpenChange}
+      onForegroundProcessChange={handleForegroundProcessChange}
+    />
+  );
 };

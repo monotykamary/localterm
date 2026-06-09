@@ -29,6 +29,7 @@ interface SessionEvents {
   exit: [code: number | null];
   title: [title: string];
   cwd: [cwd: string];
+  foreground: [process: string | null];
 }
 
 export class Session extends EventEmitter<SessionEvents> {
@@ -45,6 +46,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private titlePollTimer: NodeJS.Timeout | null = null;
   private lastEmittedTitle = "";
   private lastEmittedCwd = "";
+  private lastEmittedForeground: string | null | undefined = undefined;
   private nextCwdResolveAt = 0;
   // Set to true once OSC 7 is observed from the PTY output. Once the shell
   // advertises its working directory via OSC 7 we stop polling lsof entirely —
@@ -225,6 +227,7 @@ export class Session extends EventEmitter<SessionEvents> {
         this.lastEmittedTitle = nextTitle;
         this.emit("title", nextTitle);
       }
+      this.pollForeground();
     } catch {
       /* polling errors are non-fatal; the next tick will retry */
     } finally {
@@ -232,9 +235,21 @@ export class Session extends EventEmitter<SessionEvents> {
     }
   }
 
+  private foregroundProcess(): string | null {
+    const raw = this.pty.process?.trim() ?? "";
+    return raw && raw !== this.shellName ? raw : null;
+  }
+
+  private pollForeground(): void {
+    const next = this.foregroundProcess();
+    if (next === this.lastEmittedForeground) return;
+    this.lastEmittedForeground = next;
+    this.emit("foreground", next);
+  }
+
   private computeTitle(liveCwd: string): string | null {
-    const foreground = this.pty.process?.trim() ?? "";
-    if (foreground && foreground !== this.shellName) return foreground;
+    const foreground = this.foregroundProcess();
+    if (foreground) return foreground;
     return formatWorkingDirectoryTitle(liveCwd);
   }
 

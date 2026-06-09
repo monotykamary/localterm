@@ -213,6 +213,24 @@ describe("Session", () => {
     }
   });
 
+  it("emits a foreground event when the foreground process changes", async () => {
+    const session = new Session({});
+    try {
+      const foregroundEvents: Array<string | null> = [];
+      session.on("foreground", (process) => foregroundEvents.push(process));
+      await waitFor(
+        new Promise<void>((resolve) => {
+          session.once("foreground", () => resolve());
+        }),
+        2000,
+      );
+      expect(foregroundEvents.length).toBeGreaterThanOrEqual(1);
+      expect(foregroundEvents[0]).toBeNull();
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("pause() and resume() are no-ops after the session has exited", () => {
     const session = new Session({ shell: "/bin/sh" });
     session.dispose();

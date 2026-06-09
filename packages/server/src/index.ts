@@ -243,6 +243,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           };
           const onTitle = (title: string) => safeSend(ws, { type: "title", title });
           const onCwd = (cwd: string) => safeSend(ws, { type: "cwd", cwd });
+          const onForeground = (process: string | null) =>
+            safeSend(ws, { type: "foreground", process });
           const onExit = (code: number | null) => {
             if (outputBatchTimer !== null) {
               clearImmediate(outputBatchTimer);
@@ -257,6 +259,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           newSession.on("output", onOutput);
           newSession.on("title", onTitle);
           newSession.on("cwd", onCwd);
+          newSession.on("foreground", onForeground);
           newSession.on("exit", onExit);
 
           safeSend(ws, {

@@ -3,16 +3,25 @@ import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "../src/app";
 
-let lastTerminalProps: { onModalOpenChange?: (open: boolean) => void } | null = null;
+interface MockTerminalProps {
+  onModalOpenChange?: (open: boolean) => void;
+  onForegroundProcessChange?: (hasProcess: boolean) => void;
+}
+
+let lastTerminalProps: MockTerminalProps | null = null;
 let setMockModalOpen: ((open: boolean) => void) | null = null;
+let setMockForegroundProcess: ((hasProcess: boolean) => void) | null = null;
 
 vi.mock("../src/components/terminal", () => ({
-  Terminal: (props: { onModalOpenChange?: (open: boolean) => void }) => {
+  Terminal: (props: MockTerminalProps) => {
     lastTerminalProps = props;
     useEffect(() => {
       setMockModalOpen = (open: boolean) => props.onModalOpenChange?.(open);
+      setMockForegroundProcess = (hasProcess: boolean) =>
+        props.onForegroundProcessChange?.(hasProcess);
       return () => {
         setMockModalOpen = null;
+        setMockForegroundProcess = null;
       };
     }, [props]);
     return <div data-testid="terminal" />;
@@ -23,6 +32,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   lastTerminalProps = null;
   setMockModalOpen = null;
+  setMockForegroundProcess = null;
 });
 
 const armBeforeUnload = async () => {
@@ -64,17 +74,48 @@ describe("App", () => {
     });
   });
 
-  it("warns on unload while the shell is alive", async () => {
+  it("does not warn on unload when no foreground process is running", async () => {
     render(<App />);
     await armBeforeUnload();
+
+    const preventDefaultSpy = dispatchBeforeUnload();
+    expect(preventDefaultSpy).not.toHaveBeenCalled();
+  });
+
+  it("warns on unload when a foreground process is running", async () => {
+    render(<App />);
+    await armBeforeUnload();
+
+    act(() => {
+      setMockForegroundProcess?.(true);
+    });
 
     const preventDefaultSpy = dispatchBeforeUnload();
     expect(preventDefaultSpy).toHaveBeenCalled();
   });
 
+  it("stops warning when the foreground process exits back to the shell", async () => {
+    render(<App />);
+    await armBeforeUnload();
+
+    act(() => {
+      setMockForegroundProcess?.(true);
+    });
+    act(() => {
+      setMockForegroundProcess?.(false);
+    });
+
+    const preventDefaultSpy = dispatchBeforeUnload();
+    expect(preventDefaultSpy).not.toHaveBeenCalled();
+  });
+
   it("does not warn on unload while the shell-ended/disconnect modal is open", async () => {
     render(<App />);
     await armBeforeUnload();
+
+    act(() => {
+      setMockForegroundProcess?.(true);
+    });
 
     expect(lastTerminalProps?.onModalOpenChange).toBeTypeOf("function");
 
@@ -90,6 +131,9 @@ describe("App", () => {
     render(<App />);
     await armBeforeUnload();
 
+    act(() => {
+      setMockForegroundProcess?.(true);
+    });
     act(() => {
       setMockModalOpen?.(true);
     });

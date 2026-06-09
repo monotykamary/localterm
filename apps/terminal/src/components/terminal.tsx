@@ -7,7 +7,7 @@ import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XtermTerminal } from "@xterm/xterm";
-import { Check, ChevronDown, ChevronUp, Copy, Plus, Search } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Copy, MonitorCog, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
@@ -29,6 +29,7 @@ import {
   InputGroupText,
 } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
+import { CommandPalette, type CommandItem } from "@/components/command-palette";
 import { SettingsMenu } from "@/components/settings-menu";
 import {
   COPY_FEEDBACK_MS,
@@ -37,6 +38,7 @@ import {
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
   ENTER_KEY_CODE,
   FALLBACK_TERMINAL_BACKGROUND_HEX,
+  TERMINAL_FONT_SIZE_STEP_PX,
   FAVICON_ACTIVE_DEBOUNCE_MS,
   FAVICON_IDLE_DEBOUNCE_MS,
   KEYBOARD_MODIFIER_SHIFT_BIT,
@@ -59,10 +61,10 @@ import {
   TOOLBAR_HIDE_DELAY_MS,
 } from "@/lib/constants";
 import { serverToClientMessageSchema } from "@/lib/schemas";
-import type { TerminalCursorStyle } from "@/lib/terminal-cursor";
-import { findTerminalFontById } from "@/lib/terminal-fonts";
+import { TERMINAL_CURSOR_STYLES, type TerminalCursorStyle } from "@/lib/terminal-cursor";
+import { TERMINAL_FONTS, findTerminalFontById } from "@/lib/terminal-fonts";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
-import { findTerminalThemeById } from "@/lib/terminal-themes";
+import { TERMINAL_THEMES, findTerminalThemeById } from "@/lib/terminal-themes";
 import { awaitFontReady } from "@/utils/await-font-ready";
 import { buildKittyKeySequence } from "@/utils/build-kitty-key-sequence";
 import {
@@ -82,6 +84,7 @@ import { clampTerminalFontSize } from "@/utils/clamp-terminal-font-size";
 import { clampTerminalLineHeight } from "@/utils/clamp-terminal-line-height";
 import { clampTerminalPaddingX, clampTerminalPaddingY } from "@/utils/clamp-terminal-padding";
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
+import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { loadStoredLocalFontFamily } from "@/utils/load-stored-local-font-family";
 import { loadStoredTerminalCursorBlink } from "@/utils/load-stored-terminal-cursor-blink";
@@ -155,6 +158,7 @@ type ExitInfo =
 
 interface TerminalProps {
   onModalOpenChange?: (open: boolean) => void;
+  onForegroundProcessChange?: (hasProcess: boolean) => void;
 }
 
 interface ResizeScrollRestoreState {
@@ -163,7 +167,7 @@ interface ResizeScrollRestoreState {
   timer: number;
 }
 
-export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
+export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: TerminalProps = {}) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XtermTerminal | null>(null);
   const terminalInitializedRef = useRef(false);
@@ -194,6 +198,8 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
   const [hasCopiedRestartCommand, setHasCopiedRestartCommand] = useState(false);
   const [isRetryingConnection, setIsRetryingConnection] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const toggleCommandPaletteRef = useRef<(() => void) | null>(null);
   const [searchOpenAttempt, setSearchOpenAttempt] = useState(0);
   const [isToolbarHovered, setIsToolbarHovered] = useState(false);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
@@ -596,6 +602,13 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
         }
         return false;
       }
+      if (isCommandPaletteShortcut(event, isMac)) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          toggleCommandPaletteRef.current?.();
+        }
+        return false;
+      }
       if (isFindShortcut(event, isMac)) {
         if (event.type === "keydown") {
           event.preventDefault();
@@ -751,6 +764,8 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
           setLiveCwd(message.cwd);
         } else if (message.type === "cwd") {
           setLiveCwd(message.cwd);
+        } else if (message.type === "foreground") {
+          onForegroundProcessChange?.(message.process !== null);
         } else if (message.type === "exit") {
           resetFavicon();
           markShellDead(message.code);
@@ -798,6 +813,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       setSessionInfo(null);
       setConsecutiveFailures(0);
       setTabFaviconState("idle");
+      onForegroundProcessChange?.(false);
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -1061,8 +1077,19 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
     }
   }, []);
 
+  const toggleCommandPalette = useCallback(() => {
+    setIsCommandPaletteOpen((previous) => !previous);
+  }, []);
+  toggleCommandPaletteRef.current = toggleCommandPalette;
+
+  const closeCommandPalette = useCallback(() => {
+    setIsCommandPaletteOpen(false);
+    refocusTerminalRef.current?.();
+  }, []);
+
   const openSearchOverlay = useCallback(() => {
     setIsSearchOpen(true);
+    setIsCommandPaletteOpen(false);
     setSearchOpenAttempt((previous) => previous + 1);
   }, []);
   openSearchOverlayRef.current = openSearchOverlay;
@@ -1201,6 +1228,7 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
 
   useEffect(() => {
     onModalOpenChange?.(isModalOpen);
+    if (isModalOpen) setIsCommandPaletteOpen(false);
   }, [isModalOpen, onModalOpenChange]);
   const matchLabel =
     searchResults.resultCount === 0
@@ -1208,6 +1236,91 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       : `${searchResults.resultIndex + 1}/${searchResults.resultCount}`;
 
   const pageBackground = effectiveTheme.colors.background ?? FALLBACK_TERMINAL_BACKGROUND_HEX;
+
+  const commandPaletteCommands = useMemo<CommandItem[]>(() => {
+    const togglePrefix = isMac ? "⌘" : "Ctrl+";
+    const themeCommands: CommandItem[] = TERMINAL_THEMES.map((theme) => ({
+      id: `theme:${theme.id}`,
+      label: `Theme: ${theme.name}`,
+      category: "Theme",
+      action: () => handleThemeChange(theme.id),
+    }));
+    const fontCommands: CommandItem[] = TERMINAL_FONTS.map((font) => ({
+      id: `font:${font.id}`,
+      label: `Font: ${font.name}`,
+      category: "Font",
+      action: () => handleFontChange(font.id),
+    }));
+    return [
+      ...themeCommands,
+      ...fontCommands,
+      {
+        id: "find",
+        label: "Find in terminal",
+        category: "Search",
+        shortcut: `${togglePrefix}F`,
+        icon: <Search className="size-3.5" />,
+        action: openSearchOverlay,
+      },
+      {
+        id: "new-shell",
+        label: "Open new shell",
+        category: "Tab",
+        shortcut: "Alt+T",
+        icon: <Plus className="size-3.5" />,
+        action: () => {
+          const link = document.getElementById("new-shell-link");
+          if (link instanceof HTMLAnchorElement) link.click();
+        },
+      },
+      ...TERMINAL_CURSOR_STYLES.map((option) => ({
+        id: `cursor:${option.id}`,
+        label: `Cursor: ${option.name}`,
+        category: "Cursor",
+        action: () => handleCursorStyleChange(option.id),
+      })),
+      {
+        id: "cursor-blink",
+        label: `Cursor blink: ${activeCursorBlink ? "On" : "Off"}`,
+        category: "Cursor",
+        action: () => handleCursorBlinkChange(!activeCursorBlink),
+      },
+      {
+        id: "font-size-up",
+        label: "Increase font size",
+        category: "Font",
+        shortcut: `${togglePrefix}+`,
+        icon: <MonitorCog className="size-3.5" />,
+        action: () => handleFontSizeChange(activeFontSize + TERMINAL_FONT_SIZE_STEP_PX),
+      },
+      {
+        id: "font-size-down",
+        label: "Decrease font size",
+        category: "Font",
+        shortcut: `${togglePrefix}-`,
+        icon: <MonitorCog className="size-3.5" />,
+        action: () => handleFontSizeChange(activeFontSize - TERMINAL_FONT_SIZE_STEP_PX),
+      },
+      {
+        id: "scroll-on-input",
+        label: `Pin to bottom on input: ${activeScrollOnUserInput ? "On" : "Off"}`,
+        category: "Scrollback",
+        action: () => handleScrollOnUserInputChange(!activeScrollOnUserInput),
+      },
+    ];
+  }, [
+    isMac,
+    handleThemeChange,
+    handleFontChange,
+    openSearchOverlay,
+    handleCursorStyleChange,
+    activeCursorBlink,
+    handleCursorBlinkChange,
+    activeFontSize,
+    handleFontSizeChange,
+    activeScrollOnUserInput,
+    handleScrollOnUserInputChange,
+  ]);
 
   return (
     <div className="h-dvh w-dvw" style={{ background: pageBackground }}>
@@ -1380,6 +1493,12 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
           )}
         </div>
       </div>
+
+      <CommandPalette
+        open={isCommandPaletteOpen}
+        onClose={closeCommandPalette}
+        commands={commandPaletteCommands}
+      />
 
       <AlertDialog open={isModalOpen}>
         <AlertDialogContent>

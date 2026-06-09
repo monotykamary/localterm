@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { MAX_INPUT_BYTES, MAX_OUTPUT_BYTES, MAX_TITLE_LENGTH } from "../src/constants.js";
+import {
+  MAX_FOREGROUND_LENGTH,
+  MAX_INPUT_BYTES,
+  MAX_OUTPUT_BYTES,
+  MAX_TITLE_LENGTH,
+} from "../src/constants.js";
 import { clientToServerMessageSchema, serverToClientMessageSchema } from "../src/schemas.js";
 
 describe("clientToServerMessageSchema", () => {
@@ -130,6 +135,38 @@ describe("serverToClientMessageSchema", () => {
       shellName: "zsh",
       pid: 1,
       cwd: "/Users/tester",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a foreground frame with a process name", () => {
+    const result = serverToClientMessageSchema.safeParse({
+      type: "foreground",
+      process: "vim",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a foreground frame with null (idle shell)", () => {
+    const result = serverToClientMessageSchema.safeParse({
+      type: "foreground",
+      process: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects foreground frames missing the process field", () => {
+    const result = serverToClientMessageSchema.safeParse({
+      type: "foreground",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects oversized foreground payloads", () => {
+    const oversized = "a".repeat(MAX_FOREGROUND_LENGTH + 1);
+    const result = serverToClientMessageSchema.safeParse({
+      type: "foreground",
+      process: oversized,
     });
     expect(result.success).toBe(false);
   });

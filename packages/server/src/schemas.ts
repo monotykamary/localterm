@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   MAX_COLS,
+  MAX_FOREGROUND_LENGTH,
   MAX_INPUT_BYTES,
   MAX_OUTPUT_BYTES,
   MAX_ROWS,
@@ -72,10 +73,18 @@ const cwdMessageSchema = z
   })
   .strict();
 
+const foregroundMessageSchema = z
+  .object({
+    type: z.literal("foreground"),
+    process: z.string().max(MAX_FOREGROUND_LENGTH).nullable(),
+  })
+  .strict();
+
 export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   outputMessageSchema,
   exitMessageSchema,
   titleMessageSchema,
   sessionMessageSchema,
   cwdMessageSchema,
+  foregroundMessageSchema,
 ]);
