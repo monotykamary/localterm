@@ -684,6 +684,11 @@ export const Terminal = ({ onModalOpenChange }: TerminalProps = {}) => {
       setExitInfo({ reason: "shell-exited", exitCode });
       // Clear so the Settings → Shell section doesn't show a stale dead PID/cwd.
       setSessionInfo(null);
+      if (exitCode === null || exitCode === 0) {
+        onModalOpenChange?.(true);
+        window.open('', '_self');
+        window.close();
+      }
     };
 
     const markConnectionLost = (closeCode: number, closeReason: string, wasClean: boolean) => {
