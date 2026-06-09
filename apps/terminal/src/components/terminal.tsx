@@ -326,11 +326,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     void awaitFontReady(initialFont).then(() => {
       if (disposed) return;
       const liveTerminal = terminalRef.current;
-      if (liveTerminal) {
-        const prevFamily = liveTerminal.options.fontFamily;
-        liveTerminal.options.fontFamily = "monospace";
-        liveTerminal.options.fontFamily = prevFamily;
-      }
+      if (liveTerminal) liveTerminal.clearTextureAtlas();
       const internals = terminal as unknown as {
         _core: { _charSizeService: { measure: () => void } };
       };
@@ -911,6 +907,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       const liveTerminal = terminalRef.current;
       if (!liveTerminal) return;
       liveTerminal.options.fontFamily = effectiveFont.family;
+      liveTerminal.clearTextureAtlas();
       const liveFitAddon = fitAddonRef.current;
       if (liveFitAddon) fitTerminalPreservingScroll(liveTerminal, liveFitAddon);
     });

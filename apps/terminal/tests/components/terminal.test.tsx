@@ -190,6 +190,7 @@ vi.mock("@xterm/xterm", () => {
       this.handle.customWheelEventHandler = handler;
     };
     reset = () => {};
+    clearTextureAtlas = () => {};
     focus = () => {};
     dispose = () => {};
   }
