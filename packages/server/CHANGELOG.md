@@ -1,5 +1,11 @@
 # localterm-server
 
+## 0.1.3
+
+### Patch Changes
+
+- Fix OSC 7 hook injection to prevent commands being echoed to the terminal on startup. Uses ZDOTDIR for zsh and --rcfile for bash instead of writing to the PTY stdin.
+
 ## 0.1.2
 
 ### Patch Changes
