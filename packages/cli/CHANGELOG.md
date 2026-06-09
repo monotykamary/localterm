@@ -1,5 +1,13 @@
 # localterm
 
+## 0.1.2
+
+### Patch Changes
+
+- Inject OSC 7 chpwd/PROMPT_COMMAND hooks into zsh and bash so CWD changes are detected immediately without polling or child process spawning.
+- Updated dependencies
+  - @monotykamary/localterm-server@0.1.2
+
 ## 0.1.1
 
 ### Patch Changes
