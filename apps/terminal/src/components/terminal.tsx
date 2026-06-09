@@ -39,8 +39,8 @@ import {
   ENTER_KEY_CODE,
   FALLBACK_TERMINAL_BACKGROUND_HEX,
   TERMINAL_FONT_SIZE_STEP_PX,
-  FAVICON_ACTIVE_DEBOUNCE_MS,
-  FAVICON_IDLE_DEBOUNCE_MS,
+  FAVICON_RUNNING_DEBOUNCE_MS,
+  FAVICON_READY_DEBOUNCE_MS,
   KEYBOARD_MODIFIER_SHIFT_BIT,
   KITTY_KEYBOARD_DISAMBIGUATE_FLAG,
   KITTY_KEYBOARD_SET_MODE_AND_NOT,
@@ -266,9 +266,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
     let resizeTimer: number | null = null;
-    let faviconActiveTimer: number | null = null;
-    let faviconIdleTimer: number | null = null;
-    let faviconState: "idle" | "active" = "idle";
+    let faviconRunningTimer: number | null = null;
+    let faviconReadyTimer: number | null = null;
+    let faviconState: "ready" | "running" = "ready";
     // Kitty keyboard protocol (https://sw.kovidgoyal.net/kitty/keyboard-protocol/)
     // tracks a stack of flags so a TUI can push/pop reporting modes. We only
     // care that *some* flags are active when intercepting modifier+Enter so
@@ -278,43 +278,43 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     const getKittyFlags = (): number => kittyFlagStack[kittyFlagStack.length - 1] ?? 0;
 
     const noteOutputActivity = () => {
-      if (faviconIdleTimer !== null) {
-        window.clearTimeout(faviconIdleTimer);
-        faviconIdleTimer = null;
+      if (faviconReadyTimer !== null) {
+        window.clearTimeout(faviconReadyTimer);
+        faviconReadyTimer = null;
       }
-      if (faviconState === "idle" && faviconActiveTimer === null) {
-        faviconActiveTimer = window.setTimeout(() => {
-          faviconActiveTimer = null;
+      if (faviconState === "ready" && faviconRunningTimer === null) {
+        faviconRunningTimer = window.setTimeout(() => {
+          faviconRunningTimer = null;
           if (disposed || exited) return;
-          faviconState = "active";
-          setTabFaviconState("active");
-        }, FAVICON_ACTIVE_DEBOUNCE_MS);
+          faviconState = "running";
+          setTabFaviconState("running");
+        }, FAVICON_RUNNING_DEBOUNCE_MS);
       }
-      faviconIdleTimer = window.setTimeout(() => {
-        faviconIdleTimer = null;
-        if (faviconActiveTimer !== null) {
-          window.clearTimeout(faviconActiveTimer);
-          faviconActiveTimer = null;
+      faviconReadyTimer = window.setTimeout(() => {
+        faviconReadyTimer = null;
+        if (faviconRunningTimer !== null) {
+          window.clearTimeout(faviconRunningTimer);
+          faviconRunningTimer = null;
         }
-        if (faviconState === "active") {
-          faviconState = "idle";
-          setTabFaviconState("idle");
+        if (faviconState === "running") {
+          faviconState = "ready";
+          setTabFaviconState("ready");
         }
-      }, FAVICON_IDLE_DEBOUNCE_MS);
+      }, FAVICON_READY_DEBOUNCE_MS);
     };
 
     const resetFavicon = () => {
-      if (faviconActiveTimer !== null) {
-        window.clearTimeout(faviconActiveTimer);
-        faviconActiveTimer = null;
+      if (faviconRunningTimer !== null) {
+        window.clearTimeout(faviconRunningTimer);
+        faviconRunningTimer = null;
       }
-      if (faviconIdleTimer !== null) {
-        window.clearTimeout(faviconIdleTimer);
-        faviconIdleTimer = null;
+      if (faviconReadyTimer !== null) {
+        window.clearTimeout(faviconReadyTimer);
+        faviconReadyTimer = null;
       }
-      if (faviconState === "active") {
-        faviconState = "idle";
-        setTabFaviconState("idle");
+      if (faviconState === "running") {
+        faviconState = "ready";
+        setTabFaviconState("ready");
       }
     };
 
@@ -862,7 +862,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       setExitInfo(null);
       setSessionInfo(null);
       setConsecutiveFailures(0);
-      setTabFaviconState("idle");
+      setTabFaviconState("ready");
       onForegroundProcessChange?.(false);
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);

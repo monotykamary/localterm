@@ -28,15 +28,9 @@ export const RETRY_BUTTON_FEEDBACK_MS = 800;
 export const RECONNECT_FAST_POLL_INTERVAL_MS = 250;
 export const RECONNECT_FAST_POLL_DURATION_MS = 5000;
 export const RECONNECT_POLL_INTERVAL_MS = 5000;
-export const FAVICON_ACTIVE_DEBOUNCE_MS = 250;
-export const FAVICON_IDLE_DEBOUNCE_MS = 750;
+export const FAVICON_RUNNING_DEBOUNCE_MS = 250;
+export const FAVICON_READY_DEBOUNCE_MS = 750;
 export const FAVICON_DEAD_OPACITY = 0.35;
-export const FAVICON_RECENT_HUES_LIMIT = 16;
-export const FAVICON_HUE_GRID_STEP_DEG = 12;
-export const FAVICON_HUE_JITTER_RANGE_DEG = FAVICON_HUE_GRID_STEP_DEG;
-export const FAVICON_HUE_WHEEL_DEG = 360;
-export const FAVICON_BROADCAST_CHANNEL_NAME = "localterm:favicon";
-export const FAVICON_COLLISION_RESOLVE_TIMEOUT_MS = 250;
 
 export const COMMAND_PALETTE_CLOSE_TRANSITION_MS = 150;
 
@@ -78,5 +72,3 @@ export const NERD_FONT_ENABLED_STORAGE_KEY = "localterm:nerd-font-enabled";
 export const NERD_FONT_SYMBOLS_FAMILY = "Symbols Nerd Font";
 export const NERD_FONT_STYLESHEET_ID = "localterm-nerd-font";
 export const FONT_LOAD_PROBE_PX = 16;
-export const FAVICON_SESSION_HUE_STORAGE_KEY = "localterm:favicon-hue";
-export const FAVICON_RECENT_HUES_STORAGE_KEY = "localterm:recent-favicon-hues";
