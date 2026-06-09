@@ -7,6 +7,7 @@ import {
   COLORTERM_VALUE,
   DEFAULT_COLS,
   DEFAULT_ROWS,
+  LOCALTERM_VALUE,
   PTY_ENV_DENYLIST,
   TERM_TYPE,
 } from "./constants.js";
@@ -70,6 +71,7 @@ export class Session extends EventEmitter<SessionEvents> {
     }
     env.TERM = TERM_TYPE;
     env.COLORTERM = COLORTERM_VALUE;
+    env.LOCALTERM = LOCALTERM_VALUE;
 
     const [shellArgs, shellEnv] = this.prepareOsc7Hook(this.shellName, env);
     if (shellEnv) {

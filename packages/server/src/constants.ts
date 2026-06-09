@@ -6,6 +6,7 @@ export const DEFAULT_SHELL_FALLBACK = "/bin/sh";
 
 export const TERM_TYPE = "xterm-256color";
 export const COLORTERM_VALUE = "truecolor";
+export const LOCALTERM_VALUE = "1";
 
 export const TITLE_MAX_PATH_SEGMENTS = 1;
 

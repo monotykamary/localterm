@@ -30,6 +30,18 @@ const collectOutput = async (session: Session, timeoutMs = 1500): Promise<string
 };
 
 describe("Session", () => {
+  it("sets LOCALTERM in the PTY environment", async () => {
+    const session = new Session({ shell: "/bin/sh" });
+    try {
+      await collectOutput(session);
+      session.write("echo $LOCALTERM\n");
+      const output = await collectOutput(session);
+      expect(output).toContain("1");
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("spawns a shell and emits output for typed input", async () => {
     const session = new Session({ shell: "/bin/sh" });
     try {
