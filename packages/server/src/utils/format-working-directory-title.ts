@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { TITLE_MAX_PATH_SEGMENTS, TITLE_TRUNCATION_PREFIX } from "../constants.js";
+import { TITLE_MAX_PATH_SEGMENTS } from "../constants.js";
 
 const HOME_PREFIX = "~";
 const PATH_SEPARATOR = "/";
@@ -21,7 +21,5 @@ export const formatWorkingDirectoryTitle = (cwd: string, home = CACHED_HOME_DIRE
   const abbreviated = abbreviateHome(cwd, home);
   const segments = abbreviated.split(PATH_SEPARATOR).filter(Boolean);
   if (segments.length <= TITLE_MAX_PATH_SEGMENTS) return abbreviated;
-  return `${TITLE_TRUNCATION_PREFIX}${PATH_SEPARATOR}${segments
-    .slice(-TITLE_MAX_PATH_SEGMENTS)
-    .join(PATH_SEPARATOR)}`;
+  return segments.slice(-TITLE_MAX_PATH_SEGMENTS).join(PATH_SEPARATOR);
 };

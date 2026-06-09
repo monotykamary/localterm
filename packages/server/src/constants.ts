@@ -12,7 +12,6 @@ export const CWD_RESOLVE_TIMEOUT_MS = 250;
 export const CWD_RESOLVE_BACKOFF_MS = 30_000;
 export const CWD_RESOLVE_COOLDOWN_MS = 5_000;
 export const TITLE_MAX_PATH_SEGMENTS = 1;
-export const TITLE_TRUNCATION_PREFIX = "…";
 
 /**
  * Strip terminal-emulator identity env vars inherited from the daemon's parent.

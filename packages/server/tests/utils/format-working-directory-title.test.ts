@@ -8,28 +8,28 @@ describe("formatWorkingDirectoryTitle", () => {
     expect(formatWorkingDirectoryTitle(home, home)).toBe("~");
   });
 
-  it("uses zsh-style ~/... abbreviation under home", () => {
+  it("returns just the tail folder when under home", () => {
     expect(formatWorkingDirectoryTitle("/Users/tester/Developer/localterm", home)).toBe(
-      "…/localterm",
+      "localterm",
     );
   });
 
   it("truncates paths with more than one display segment", () => {
-    expect(formatWorkingDirectoryTitle("/usr/local/bin", home)).toBe("…/bin");
+    expect(formatWorkingDirectoryTitle("/usr/local/bin", home)).toBe("bin");
   });
 
   it("truncates a path at the segment boundary (2 segments)", () => {
-    expect(formatWorkingDirectoryTitle("/Users/tester/Developer", home)).toBe("…/Developer");
+    expect(formatWorkingDirectoryTitle("/Users/tester/Developer", home)).toBe("Developer");
   });
 
   it("truncates deep paths to the last display segment", () => {
     expect(
       formatWorkingDirectoryTitle("/Users/tester/Developer/localterm/packages/server", home),
-    ).toBe("…/server");
+    ).toBe("server");
   });
 
   it("truncates a path that's exactly one segment over the cap", () => {
-    expect(formatWorkingDirectoryTitle("/a/b/c/d", home)).toBe("…/d");
+    expect(formatWorkingDirectoryTitle("/a/b/c/d", home)).toBe("d");
   });
 
   it("returns the input unchanged when cwd is empty", () => {
@@ -41,6 +41,6 @@ describe("formatWorkingDirectoryTitle", () => {
   });
 
   it("truncates paths outside home to the last display segment", () => {
-    expect(formatWorkingDirectoryTitle("/var/log/system.log", home)).toBe("…/system.log");
+    expect(formatWorkingDirectoryTitle("/var/log/system.log", home)).toBe("system.log");
   });
 });
