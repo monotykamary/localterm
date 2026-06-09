@@ -1209,6 +1209,7 @@ describe("Terminal shell info", () => {
         shellName: "fish",
         pid: 54321,
         cwd: "/Users/tester/Developer/localterm",
+        title: "~",
       });
     });
 

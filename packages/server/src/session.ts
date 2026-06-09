@@ -42,6 +42,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private currentRows: number;
   private exited = false;
   private paused = false;
+  private initialTitle = "";
   private lastEmittedTitle = "";
   private lastEmittedCwd = "";
   private lastEmittedForeground: string | null | undefined = undefined;
@@ -107,6 +108,10 @@ export class Session extends EventEmitter<SessionEvents> {
 
   get shellBaseName(): string {
     return this.shellName;
+  }
+
+  get initialDocumentTitle(): string {
+    return this.initialTitle;
   }
 
   get cols(): number {
@@ -181,6 +186,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private emitInitialMetadata(): void {
     const initialTitle = formatWorkingDirectoryTitle(this.cwd);
     if (initialTitle) {
+      this.initialTitle = initialTitle;
       this.lastEmittedTitle = initialTitle;
       this.emit("title", initialTitle);
     }

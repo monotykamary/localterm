@@ -103,6 +103,7 @@ describe("serverToClientMessageSchema", () => {
       shellName: "zsh",
       pid: 12345,
       cwd: "/Users/tester",
+      title: "~",
     });
     expect(result.success).toBe(true);
   });
@@ -124,6 +125,7 @@ describe("serverToClientMessageSchema", () => {
       shellName: "zsh",
       pid: -1,
       cwd: "/Users/tester",
+      title: "~",
     });
     expect(result.success).toBe(false);
   });
@@ -135,6 +137,7 @@ describe("serverToClientMessageSchema", () => {
       shellName: "zsh",
       pid: 1,
       cwd: "/Users/tester",
+      title: "~",
     });
     expect(result.success).toBe(false);
   });

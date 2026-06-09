@@ -63,6 +63,7 @@ const sessionMessageSchema = z
     shellName: z.string().min(1),
     pid: z.number().int().nonnegative(),
     cwd: z.string().min(1),
+    title: z.string().max(MAX_TITLE_LENGTH),
   })
   .strict();
 

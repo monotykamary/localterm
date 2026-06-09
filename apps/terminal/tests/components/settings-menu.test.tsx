@@ -519,6 +519,7 @@ describe("SettingsMenu shell section", () => {
         shellName: "fish",
         pid: 12345,
         cwd: "/Users/tester/Developer/localterm",
+        title: "~",
       },
     });
     fireEvent.click(screen.getByLabelText("terminal settings"));
@@ -535,6 +536,7 @@ describe("SettingsMenu shell section", () => {
         shellName: "fish",
         pid: 12345,
         cwd: "/Users/tester/Developer/localterm",
+        title: "~",
       },
     });
     fireEvent.click(screen.getByLabelText("terminal settings"));

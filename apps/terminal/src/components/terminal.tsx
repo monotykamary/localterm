@@ -769,8 +769,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
             shellName: message.shellName,
             pid: message.pid,
             cwd: message.cwd,
+            title: message.title,
           });
           setLiveCwd(message.cwd);
+          applyIncomingTitle(message.title);
         } else if (message.type === "cwd") {
           setLiveCwd(message.cwd);
         } else if (message.type === "foreground") {

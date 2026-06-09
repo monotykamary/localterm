@@ -257,6 +257,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             shellName: newSession.shellBaseName,
             pid: newSession.pid,
             cwd: newSession.cwd,
+            title: newSession.initialDocumentTitle,
           });
         },
         onMessage(event) {

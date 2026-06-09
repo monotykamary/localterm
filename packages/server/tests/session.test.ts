@@ -67,6 +67,7 @@ describe("Session", () => {
         shellName: session.shellBaseName,
         pid: session.pid,
         cwd: session.cwd,
+        title: session.initialDocumentTitle,
       };
       const parsed = serverToClientMessageSchema.safeParse(frame);
       expect(parsed.success).toBe(true);
