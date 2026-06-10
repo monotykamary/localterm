@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn, type IPty } from "node-pty";
@@ -50,6 +50,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private lastEmittedTitle = "";
   private lastEmittedCwd = "";
   private lastEmittedForeground: string | null | undefined = undefined;
+  private hookCleanupPaths: string[] = [];
 
   constructor(input: SpawnPtyInput) {
     super();
@@ -182,6 +183,7 @@ export class Session extends EventEmitter<SessionEvents> {
   dispose(): void {
     this.kill();
     this.exited = true;
+    this.cleanUpHookFiles();
     this.removeAllListeners();
   }
 
@@ -247,10 +249,13 @@ export class Session extends EventEmitter<SessionEvents> {
       case "zsh": {
         const hookDir = path.join(os.tmpdir(), `localterm-zdot-${hookId}`);
         mkdirSync(hookDir, { recursive: true });
+        this.hookCleanupPaths.push(hookDir);
         const hookScript = this.zshOsc7ChpwdFunction();
         const userZdotdir = env.ZDOTDIR || os.homedir();
+        const escapedZdotdir = userZdotdir.replace(/'/g, "'\\''");
         const lines = [
-          `source '${userZdotdir}/.zshrc' 2>/dev/null`,
+          `source '${escapedZdotdir}/.zshenv' 2>/dev/null`,
+          `source '${escapedZdotdir}/.zshrc' 2>/dev/null`,
           hookScript,
           "chpwd_functions=(${chpwd_functions[@]} __localterm_osc7_chpwd)",
           "__localterm_osc7_chpwd",
@@ -258,13 +263,15 @@ export class Session extends EventEmitter<SessionEvents> {
         writeFileSync(path.join(hookDir, ".zshrc"), lines.join("\n") + "\n", {
           mode: 0o644,
         });
-        return [[], { ZDOTDIR: hookDir }];
+        return [[], { ZDOTDIR: hookDir, __LOCALTERM_ORIG_ZDOTDIR: userZdotdir }];
       }
       case "bash": {
         const hookPath = path.join(os.tmpdir(), `localterm-bashrc-${hookId}`);
+        this.hookCleanupPaths.push(hookPath);
         const hookScript = this.bashOsc7Function();
         const lines = [
           "source /etc/bashrc 2>/dev/null",
+          "source /etc/bash.bashrc 2>/dev/null",
           "source ~/.bashrc 2>/dev/null",
           hookScript,
           'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt"',
@@ -297,5 +304,16 @@ export class Session extends EventEmitter<SessionEvents> {
   private inferForegroundProcess(): string | null {
     const raw = this.pty.process?.trim() ?? "";
     return raw && raw !== this.shellName ? raw : null;
+  }
+
+  private cleanUpHookFiles(): void {
+    for (const hookPath of this.hookCleanupPaths) {
+      try {
+        rmSync(hookPath, { recursive: true, force: true });
+      } catch {
+        /* temp files may already be removed or inaccessible */
+      }
+    }
+    this.hookCleanupPaths = [];
   }
 }
