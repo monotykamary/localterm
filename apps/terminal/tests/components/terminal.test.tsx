@@ -4,7 +4,6 @@ import { Terminal } from "../../src/components/terminal";
 import {
   DEFAULT_TERMINAL_FONT_SIZE_PX,
   DEFAULT_TERMINAL_LINE_HEIGHT,
-  RESIZE_SCROLL_RESTORE_WINDOW_MS,
   TERMINAL_CURSOR_BLINK_STORAGE_KEY,
   TERMINAL_CURSOR_STYLE_STORAGE_KEY,
   TERMINAL_FONT_SIZE_MIN_PX,
@@ -1055,9 +1054,6 @@ describe("Terminal scroll preservation through hot-swaps", () => {
     const handle = fakeXterms[0];
     if (!handle) throw new Error("xterm not constructed");
 
-    act(() => {
-      vi.advanceTimersByTime(RESIZE_SCROLL_RESTORE_WINDOW_MS + 1);
-    });
     handle.setBufferState({ baseY: 100, viewportY: 70 });
     handle.scrollToBottom.mockClear();
 

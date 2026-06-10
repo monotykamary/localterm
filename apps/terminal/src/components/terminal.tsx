@@ -51,7 +51,6 @@ import {
   RECONNECT_FAST_POLL_INTERVAL_MS,
   RECONNECT_POLL_INTERVAL_MS,
   RESIZE_DEBOUNCE_MS,
-  RESIZE_SCROLL_RESTORE_WINDOW_MS,
   RESTART_COMMAND,
   RETRY_BUTTON_FEEDBACK_MS,
   SEARCH_ACTIVE_MATCH_BACKGROUND_HEX,
@@ -167,8 +166,7 @@ interface TerminalProps {
 
 interface ResizeScrollRestoreState {
   anchor: TerminalScrollAnchor;
-  expiresAtMs: number;
-  timer: number;
+  frameId: number;
 }
 
 export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: TerminalProps = {}) => {
@@ -579,31 +577,23 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
     const clearResizeScrollRestore = () => {
       const state = resizeScrollRestoreRef.current;
-      if (state) window.clearTimeout(state.timer);
+      if (state) cancelAnimationFrame(state.frameId);
       resizeScrollRestoreRef.current = null;
     };
 
     const restoreResizeScroll = () => {
       const state = resizeScrollRestoreRef.current;
       if (!state) return;
-      if (Date.now() > state.expiresAtMs) {
-        clearResizeScrollRestore();
-        return;
-      }
       restoreTerminalScrollAnchor(terminal, state.anchor);
     };
 
     const beginResizeScrollRestore = (anchor: TerminalScrollAnchor) => {
       clearResizeScrollRestore();
-      const timer = window.setTimeout(() => {
+      const frameId = requestAnimationFrame(() => {
         restoreResizeScroll();
         resizeScrollRestoreRef.current = null;
-      }, RESIZE_SCROLL_RESTORE_WINDOW_MS);
-      resizeScrollRestoreRef.current = {
-        anchor,
-        expiresAtMs: Date.now() + RESIZE_SCROLL_RESTORE_WINDOW_MS,
-        timer,
-      };
+      });
+      resizeScrollRestoreRef.current = { anchor, frameId };
     };
 
     terminal.attachCustomWheelEventHandler((event) => {
