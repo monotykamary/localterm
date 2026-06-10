@@ -82,9 +82,8 @@ export const SERVER_STOP_GRACE_MS = 1_500;
 export const LOOPBACK_HOSTS = new Set([
   "127.0.0.1",
   "localhost",
-  "::1",
   "[::1]",
-  "0:0:0:0:0:0:0:1",
+  "[0:0:0:0:0:0:0:1]",
 ]);
 
 export const HTTP_STATUS_NOT_FOUND = 404;

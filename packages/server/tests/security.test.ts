@@ -47,6 +47,11 @@ describe("loopbackMiddleware", () => {
     expect(response.status).toBe(200);
   });
 
+  it("normalizes bare IPv6 loopback Host (no brackets)", async () => {
+    const response = await probe({ host: "::1" });
+    expect(response.status).toBe(200);
+  });
+
   it("rejects forged Host header (DNS rebind)", async () => {
     const response = await probe({ host: "evil.example.com" });
     expect(response.status).toBe(403);

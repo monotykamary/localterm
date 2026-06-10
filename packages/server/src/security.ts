@@ -9,6 +9,9 @@ const stripPort = (hostHeader: string | undefined): string | null => {
     const end = trimmed.indexOf("]");
     return end === -1 ? trimmed : trimmed.slice(0, end + 1);
   }
+  if (trimmed.includes(":") && !trimmed.includes(".")) {
+    return `[${trimmed}]`;
+  }
   const colon = trimmed.lastIndexOf(":");
   if (colon === -1) return trimmed;
   return trimmed.slice(0, colon);
@@ -58,12 +61,18 @@ const isPrivateIpv6 = (hostname: string): boolean => {
   return false;
 };
 
-export const isLoopbackHost = (host: string): boolean => isLoopback(host);
+export const isLoopbackHost = (host: string): boolean => isLoopback(normalizeBareIpv6(host));
+
+const normalizeBareIpv6 = (host: string): string => {
+  if (host.includes(":") && !host.startsWith("[")) return `[${host}]`;
+  return host;
+};
 
 export const isPrivateHost = (host: string): boolean => {
-  if (isLoopback(host)) return true;
-  if (host.endsWith(".localhost")) return true;
-  const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  const normalized = normalizeBareIpv6(host);
+  if (isLoopback(normalized)) return true;
+  if (normalized.endsWith(".localhost")) return true;
+  const bare = normalized.startsWith("[") && normalized.endsWith("]") ? normalized.slice(1, -1) : normalized;
   if (bare.includes(":")) return isPrivateIpv6(bare);
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(bare)) return isPrivateIpv4(bare);
   return false;
