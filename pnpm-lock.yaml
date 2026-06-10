@@ -180,7 +180,7 @@ importers:
         specifier: ^4.6.13
         version: 4.12.15
       node-pty:
-        specifier: ^1.0.0
+        specifier: 1.1.0
         version: 1.1.0(patch_hash=dec0f8a94c03167ebf452f4fea5938b51a991e0463c91af0883da869114dc8d1)
       zod:
         specifier: ^4.3.6
