@@ -31,7 +31,43 @@ const isLoopback = (hostname: string | null): boolean => {
   return false;
 };
 
+const IPV4_OCTET = /(\d+)/g;
+
+const isPrivateIpv4 = (ip: string): boolean => {
+  const octets: number[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = IPV4_OCTET.exec(ip)) !== null) {
+    octets.push(Number.parseInt(match[1], 10));
+  }
+  if (octets.length !== 4) return false;
+  const [first, second] = octets;
+  if (first === 10) return true;
+  if (first === 172 && second >= 16 && second <= 31) return true;
+  if (first === 192 && second === 168) return true;
+  if (first === 100 && second >= 64 && second <= 127) return true;
+  if (first === 127) return true;
+  if (first === 169 && second === 254) return true;
+  return false;
+};
+
+const isPrivateIpv6 = (hostname: string): boolean => {
+  if (hostname === "::1") return true;
+  if (hostname.startsWith("fc") || hostname.startsWith("fd")) return true;
+  if (hostname.startsWith("fe80")) return true;
+  if (hostname.startsWith("::ffff:")) return isPrivateIpv4(hostname.slice(7));
+  return false;
+};
+
 export const isLoopbackHost = (host: string): boolean => isLoopback(host);
+
+export const isPrivateHost = (host: string): boolean => {
+  if (isLoopback(host)) return true;
+  if (host.endsWith(".localhost")) return true;
+  const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  if (bare.includes(":")) return isPrivateIpv6(bare);
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(bare)) return isPrivateIpv4(bare);
+  return false;
+};
 
 export const enforceLoopback = (context: Context): Response | null => {
   const hostHeader = context.req.header("host");
@@ -53,4 +89,36 @@ export const loopbackMiddleware: MiddlewareHandler = async (context, next) => {
   const blocked = enforceLoopback(context);
   if (blocked) return blocked;
   await next();
+};
+
+export const createNetworkPolicyMiddleware = (bindHost: string): MiddlewareHandler => {
+  const loopbackBind = isLoopback(bindHost);
+  const hostAllowed = loopbackBind ? isLoopback : isPrivateHost;
+
+  return async (context, next) => {
+    const hostHeader = context.req.header("host");
+    const hostname = stripPort(hostHeader);
+    if (!hostname || !hostAllowed(hostname)) {
+      return new Response("forbidden: host not allowed", { status: 403 });
+    }
+    const origin = context.req.header("origin");
+    if (origin !== undefined) {
+      const originHost = originHostname(origin);
+      if (!originHost || !hostAllowed(originHost)) {
+        return new Response("forbidden: cross-origin", { status: 403 });
+      }
+    }
+    await next();
+  };
+};
+
+export const isAllowedSourceIp = (remoteAddress: string, bindHost: string): boolean => {
+  if (isLoopback(bindHost)) return true;
+  const bare =
+    remoteAddress.startsWith("[") && remoteAddress.endsWith("]")
+      ? remoteAddress.slice(1, -1)
+      : remoteAddress;
+  const withoutZone = bare.split("%")[0];
+  if (withoutZone.includes(":")) return isPrivateIpv6(withoutZone) || isLoopback(withoutZone);
+  return isPrivateIpv4(withoutZone) || isLoopback(withoutZone);
 };

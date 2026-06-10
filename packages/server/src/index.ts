@@ -13,6 +13,7 @@ import {
   WS_BACKPRESSURE_THRESHOLD_BYTES,
   WS_CLOSE_BACKPRESSURE,
   WS_CLOSE_CAPACITY_REACHED,
+  WS_CLOSE_POLICY_VIOLATION,
   WS_HEARTBEAT_INTERVAL_MS,
   WS_HEARTBEAT_TIMEOUT_MS,
   WS_OUTBOUND_DRAIN_POLL_MS,
@@ -23,6 +24,7 @@ import {
 import { ServerErrorException, serverError } from "./errors.js";
 import { clientToServerMessageSchema } from "./schemas.js";
 import { Session } from "./session.js";
+import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
 import { SessionRegistry } from "./session-registry.js";
 import { resolveStaticAsset } from "./static-resolver.js";
 import type { ServerToClientMessage } from "./types.js";
@@ -80,6 +82,14 @@ const onRawEvent = (raw: unknown, event: "pong", listener: () => void): (() => v
   };
 };
 
+const extractRemoteAddress = (raw: unknown): string | null => {
+  if (!raw || typeof raw !== "object") return null;
+  const socket = Reflect.get(raw, "_socket");
+  if (!socket || typeof socket !== "object") return null;
+  const addr = Reflect.get(socket, "remoteAddress");
+  return typeof addr === "string" ? addr : null;
+};
+
 const safeSend = (ws: BroadcastSocket, payload: ServerToClientMessage) => {
   if (ws.readyState !== WS_READY_STATE_OPEN) return;
   if (getRawBufferedAmount(ws.raw) > WS_BACKPRESSURE_THRESHOLD_BYTES) {
@@ -100,8 +110,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const staticRoot =
     typeof options.staticRoot === "string" ? path.resolve(options.staticRoot) : null;
 
+  const isLoopbackBind = isLoopbackHost(host);
+
   const registry = new SessionRegistry();
   const app = new Hono();
+  app.use("*", createNetworkPolicyMiddleware(host));
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
 
   const api = new Hono();
@@ -151,6 +164,13 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       return {
         onOpen(_event, ws) {
           activeWs = ws;
+          if (!isLoopbackBind) {
+            const remoteAddress = extractRemoteAddress(ws.raw);
+            if (remoteAddress && !isAllowedSourceIp(remoteAddress, host)) {
+              ws.close(WS_CLOSE_POLICY_VIOLATION, "source IP not allowed");
+              return;
+            }
+          }
           if (registry.size() >= MAX_CONCURRENT_SESSIONS) {
             ws.close(WS_CLOSE_CAPACITY_REACHED, "session capacity reached");
             return;
@@ -432,7 +452,7 @@ export type { Session } from "./session.js";
 export type { SessionRegistry } from "./session-registry.js";
 export type * from "./types.js";
 export { DEFAULT_HOST, DEFAULT_PORT, WS_CLOSE_BACKPRESSURE } from "./constants.js";
-export { isLoopbackHost } from "./security.js";
+export { isLoopbackHost, isPrivateHost, isAllowedSourceIp } from "./security.js";
 export { healthSchema } from "./schemas.js";
 export {
   ServerErrorException,

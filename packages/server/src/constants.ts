@@ -1,5 +1,5 @@
 export const DEFAULT_PORT = 3417;
-export const DEFAULT_HOST = "0.0.0.0";
+export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_COLS = 120;
 export const DEFAULT_ROWS = 32;
 export const DEFAULT_SHELL_FALLBACK = "/bin/sh";
