@@ -1,6 +1,6 @@
 {
   "name": "@monotykamary/localterm-server",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "PTY-backed HTTP/WebSocket server that powers localterm, built on Hono + node-pty.",
   "keywords": [
     "hono",
