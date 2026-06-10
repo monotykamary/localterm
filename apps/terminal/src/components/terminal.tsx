@@ -269,7 +269,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     let resizeTimer: number | null = null;
     let faviconRunningTimer: number | null = null;
     let faviconReadyTimer: number | null = null;
-    let faviconState: "ready" | "running" | "notified" = "ready";
+    let faviconState: "ready" | "running" | "alive-quiet" = "ready";
+    let faviconBadge = false;
+    let hasForegroundProcess = false;
     // Kitty keyboard protocol (https://sw.kovidgoyal.net/kitty/keyboard-protocol/)
     // tracks a stack of flags so a TUI can push/pop reporting modes. We only
     // care that *some* flags are active when intercepting modifier+Enter so
@@ -283,11 +285,12 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         window.clearTimeout(faviconReadyTimer);
         faviconReadyTimer = null;
       }
-      if (faviconState === "ready" && faviconRunningTimer === null) {
+      if (faviconState !== "running" && faviconRunningTimer === null) {
         faviconRunningTimer = window.setTimeout(() => {
           faviconRunningTimer = null;
           if (disposed || exited) return;
           faviconState = "running";
+          faviconBadge = false;
           setTabFaviconState("running");
         }, FAVICON_RUNNING_DEBOUNCE_MS);
       }
@@ -298,9 +301,16 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           faviconRunningTimer = null;
         }
         if (faviconState === "running") {
-          const nextState = document.hidden ? "notified" : "ready";
-          faviconState = nextState;
-          setTabFaviconState(nextState);
+          if (document.hidden) {
+            faviconBadge = true;
+          }
+          if (hasForegroundProcess) {
+            faviconState = "alive-quiet";
+            setTabFaviconState("alive-quiet", faviconBadge);
+          } else {
+            faviconState = "ready";
+            setTabFaviconState("ready", faviconBadge);
+          }
         }
       }, FAVICON_READY_DEBOUNCE_MS);
     };
@@ -314,8 +324,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         window.clearTimeout(faviconReadyTimer);
         faviconReadyTimer = null;
       }
-      if (faviconState === "running" || faviconState === "notified") {
+      if (faviconState !== "ready" || faviconBadge) {
         faviconState = "ready";
+        faviconBadge = false;
         setTabFaviconState("ready");
       }
     };
@@ -723,9 +734,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
     const observer = new ResizeObserver(scheduleFit);
     const onVisibilityChange = () => {
-      if (!document.hidden && faviconState === "notified") {
-        faviconState = "ready";
-        setTabFaviconState("ready");
+      if (!document.hidden && faviconBadge) {
+        faviconBadge = false;
+        setTabFaviconState(faviconState);
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -818,7 +829,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         } else if (message.type === "cwd") {
           setLiveCwd(message.cwd);
         } else if (message.type === "foreground") {
-          onForegroundProcessChange?.(message.process !== null);
+          const nowHasProcess = message.process !== null;
+          onForegroundProcessChange?.(nowHasProcess);
+          if (!nowHasProcess && faviconState === "alive-quiet") {
+            faviconState = "ready";
+            setTabFaviconState("ready", faviconBadge);
+          }
+          hasForegroundProcess = nowHasProcess;
         } else if (message.type === "notification") {
           if ("Notification" in window && Notification.permission === "granted") {
             new Notification(message.body);

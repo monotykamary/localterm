@@ -7,6 +7,7 @@ import {
   COLORTERM_VALUE,
   DEFAULT_COLS,
   DEFAULT_ROWS,
+  FOREGROUP_POLL_INTERVAL_MS,
   LOCALTERM_VALUE,
   MAX_NOTIFICATION_LENGTH,
   MAX_PENDING_PARSE_BYTES,
@@ -53,6 +54,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private lastEmittedForeground: string | null | undefined = undefined;
   private hookCleanupPaths: string[] = [];
   private pendingParse = "";
+  private foregroundPollTimer: NodeJS.Timeout | null = null;
 
   constructor(input: SpawnPtyInput) {
     super();
@@ -105,6 +107,7 @@ export class Session extends EventEmitter<SessionEvents> {
     });
 
     this.emitInitialMetadata();
+    this.startForegroundPoll();
   }
 
   get pid(): number {
@@ -185,6 +188,10 @@ export class Session extends EventEmitter<SessionEvents> {
   dispose(): void {
     this.kill();
     this.exited = true;
+    if (this.foregroundPollTimer !== null) {
+      clearInterval(this.foregroundPollTimer);
+      this.foregroundPollTimer = null;
+    }
     this.cleanUpHookFiles();
     this.removeAllListeners();
   }
@@ -227,12 +234,8 @@ export class Session extends EventEmitter<SessionEvents> {
     }
 
     const altScreen = parseAltScreenFromChunk(combined);
-    if (altScreen !== null) {
-      const nextForeground = altScreen ? this.inferForegroundProcess() : null;
-      if (nextForeground !== this.lastEmittedForeground) {
-        this.lastEmittedForeground = nextForeground;
-        this.emit("foreground", nextForeground);
-      }
+    if (altScreen !== null && !altScreen) {
+      this.emitForegroundIfChanged(null);
     }
 
     const notifications = parseOscNotificationsFromChunk(combined);
@@ -314,6 +317,26 @@ export class Session extends EventEmitter<SessionEvents> {
       '  printf \'\\e]7;file://%s%s\\a\' "${HOSTNAME:-localhost}" "${PWD}"',
       "}",
     ].join("\n");
+  }
+
+  private startForegroundPoll(): void {
+    this.foregroundPollTimer = setInterval(() => {
+      if (this.exited) {
+        clearInterval(this.foregroundPollTimer!);
+        this.foregroundPollTimer = null;
+        return;
+      }
+      const next = this.inferForegroundProcess();
+      this.emitForegroundIfChanged(next);
+    }, FOREGROUP_POLL_INTERVAL_MS);
+    this.foregroundPollTimer.unref?.();
+  }
+
+  private emitForegroundIfChanged(next: string | null): void {
+    if (next !== this.lastEmittedForeground) {
+      this.lastEmittedForeground = next;
+      this.emit("foreground", next);
+    }
   }
 
   private inferForegroundProcess(): string | null {

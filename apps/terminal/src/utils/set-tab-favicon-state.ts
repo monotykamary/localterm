@@ -1,11 +1,11 @@
 import { buildFaviconSvg } from "./build-favicon-svg";
 import { type FaviconState, markFaviconPainted, shouldRepaintFavicon } from "./favicon-state-store";
 
-export const setTabFaviconState = (state: FaviconState): void => {
+export const setTabFaviconState = (state: FaviconState, hasBadge = false): void => {
   if (typeof document === "undefined") return;
-  if (!shouldRepaintFavicon(state)) return;
-  markFaviconPainted(state);
-  const href = `data:image/svg+xml,${encodeURIComponent(buildFaviconSvg(state))}`;
+  if (!shouldRepaintFavicon(state, hasBadge)) return;
+  markFaviconPainted(state, hasBadge);
+  const href = `data:image/svg+xml,${encodeURIComponent(buildFaviconSvg(state, hasBadge))}`;
 
   let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
   if (!link) {

@@ -91,6 +91,7 @@ export const WS_HEARTBEAT_TIMEOUT_MS = 60_000;
 // server is given this long to actually close before we resolve anyway. Keeps
 // the daemon's SIGTERM path bounded so the CLI's force-exit fallback never
 // fires for normal shutdowns.
+export const FOREGROUP_POLL_INTERVAL_MS = 250;
 export const SERVER_STOP_GRACE_MS = 1_500;
 
 export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "[0:0:0:0:0:0:0:1]"]);
