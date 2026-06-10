@@ -33,8 +33,19 @@ const scoreQueryMatch = (query: string, label: string): number => {
   if (lower.startsWith(q)) return 2;
   if (lower.includes(q)) return 3;
   const fzy = fuzzyScore(query, label);
-  if (fzy > 0) return 4 + (1 - fzy);
+  if (fzy > 0) {
+    const maxFzy = fuzzyMaxScore(query.length);
+    const normalized = fzy / maxFzy;
+    return 4 + (1 - normalized);
+  }
   return 0;
+};
+
+const fuzzyMaxScore = (queryLength: number): number => {
+  let score = queryLength;
+  score += (queryLength - 1) * 0.5;
+  score += queryLength * 0.5;
+  return score;
 };
 
 const fuzzyScore = (query: string, text: string): number => {
