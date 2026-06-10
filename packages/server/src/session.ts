@@ -9,6 +9,7 @@ import {
   DEFAULT_ROWS,
   LOCALTERM_VALUE,
   MAX_NOTIFICATION_LENGTH,
+  MAX_PENDING_PARSE_BYTES,
   PTY_ENV_DENYLIST,
   TERM_TYPE,
 } from "./constants.js";
@@ -51,6 +52,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private lastEmittedCwd = "";
   private lastEmittedForeground: string | null | undefined = undefined;
   private hookCleanupPaths: string[] = [];
+  private pendingParse = "";
 
   constructor(input: SpawnPtyInput) {
     super();
@@ -202,7 +204,10 @@ export class Session extends EventEmitter<SessionEvents> {
   }
 
   private onPtyOutput(data: string): void {
-    const osc7Path = parseOsc7FromChunk(data);
+    const combined = this.pendingParse + data;
+    this.pendingParse = "";
+
+    const osc7Path = parseOsc7FromChunk(combined);
     let cwdChanged = false;
     if (osc7Path && osc7Path !== this.lastEmittedCwd) {
       this.lastEmittedCwd = osc7Path;
@@ -210,7 +215,7 @@ export class Session extends EventEmitter<SessionEvents> {
       cwdChanged = true;
     }
 
-    const oscTitle = parseOscTitleFromChunk(data);
+    const oscTitle = parseOscTitleFromChunk(combined);
     if (oscTitle) {
       const trimmed = oscTitle.trim();
       if (trimmed && trimmed !== this.lastEmittedTitle) {
@@ -225,7 +230,7 @@ export class Session extends EventEmitter<SessionEvents> {
       }
     }
 
-    const altScreen = parseAltScreenFromChunk(data);
+    const altScreen = parseAltScreenFromChunk(combined);
     if (altScreen !== null) {
       const nextForeground = altScreen ? this.inferForegroundProcess() : null;
       if (nextForeground !== this.lastEmittedForeground) {
@@ -234,10 +239,24 @@ export class Session extends EventEmitter<SessionEvents> {
       }
     }
 
-    const notifications = parseOscNotificationsFromChunk(data);
+    const notifications = parseOscNotificationsFromChunk(combined);
     for (const body of notifications) {
       this.emit("notification", body.slice(0, MAX_NOTIFICATION_LENGTH));
     }
+
+    const lastEsc = combined.lastIndexOf("\x1b");
+    if (lastEsc !== -1 && combined.length - lastEsc <= MAX_PENDING_PARSE_BYTES) {
+      const tail = combined.slice(lastEsc);
+      if (this.hasIncompleteOsc(tail)) {
+        this.pendingParse = tail;
+      }
+    }
+  }
+
+  private hasIncompleteOsc(tail: string): boolean {
+    if (tail.length < 2) return true;
+    if (tail[1] !== "]") return false;
+    return tail.indexOf("\x07", 2) === -1 && tail.indexOf("\x1b\\", 2) === -1;
   }
 
   private prepareOsc7Hook(
