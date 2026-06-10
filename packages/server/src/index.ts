@@ -246,9 +246,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             }
           };
 
-          // Wire listeners BEFORE the first safeSend so any synchronous emit
-          // from Session (current or future) reaches the client. Today
-          // node-pty's data/exit are async, but this guards against drift.
+          // Wire listeners so any emit from Session (current or future)
+          // reaches the client. Today node-pty's data/exit are async, but
+          // this guards against drift.
           const onOutput = (data: string) => {
             outputBatch += data;
             if (outputBatchTimer === null) {

@@ -194,13 +194,9 @@ export class Session extends EventEmitter<SessionEvents> {
     if (initialTitle) {
       this.initialTitle = initialTitle;
       this.lastEmittedTitle = initialTitle;
-      this.emit("title", initialTitle);
     }
     this.lastEmittedCwd = this.cwd;
-    this.emit("cwd", this.cwd);
-
     this.lastEmittedForeground = null;
-    this.emit("foreground", null);
   }
 
   private onPtyOutput(data: string): void {
