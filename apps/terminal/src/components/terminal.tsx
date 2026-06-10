@@ -271,7 +271,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     let resizeTimer: number | null = null;
     let faviconRunningTimer: number | null = null;
     let faviconReadyTimer: number | null = null;
-    let faviconState: "ready" | "running" = "ready";
+    let faviconState: "ready" | "running" | "notified" = "ready";
     // Kitty keyboard protocol (https://sw.kovidgoyal.net/kitty/keyboard-protocol/)
     // tracks a stack of flags so a TUI can push/pop reporting modes. We only
     // care that *some* flags are active when intercepting modifier+Enter so
@@ -300,8 +300,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           faviconRunningTimer = null;
         }
         if (faviconState === "running") {
-          faviconState = "ready";
-          setTabFaviconState("ready");
+          const nextState = document.hidden ? "notified" : "ready";
+          faviconState = nextState;
+          setTabFaviconState(nextState);
         }
       }, FAVICON_READY_DEBOUNCE_MS);
     };
@@ -315,7 +316,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         window.clearTimeout(faviconReadyTimer);
         faviconReadyTimer = null;
       }
-      if (faviconState === "running") {
+      if (faviconState === "running" || faviconState === "notified") {
         faviconState = "ready";
         setTabFaviconState("ready");
       }
@@ -730,6 +731,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     terminal.onResize(({ cols, rows }) => sendResize(cols, rows));
 
     const observer = new ResizeObserver(scheduleFit);
+    const onVisibilityChange = () => {
+      if (!document.hidden && faviconState === "notified") {
+        faviconState = "ready";
+        setTabFaviconState("ready");
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     observer.observe(container);
     fitToContainer();
     requestAnimationFrame(() => terminal.focus());
@@ -917,6 +926,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       clearResizeScrollRestore();
       resetFavicon();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       observer.disconnect();
       try {
         socket?.close();

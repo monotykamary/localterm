@@ -1,4 +1,4 @@
-export type FaviconState = "ready" | "running" | "dead";
+export type FaviconState = "ready" | "running" | "notified" | "dead";
 
 let currentState: FaviconState = "ready";
 let lastPaintedState: FaviconState | null = null;
