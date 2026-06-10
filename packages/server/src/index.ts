@@ -376,6 +376,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   }
 
   let httpServer: ServerType | null = null;
+  let actualPort = port;
   await new Promise<void>((resolve, reject) => {
     const handleError = (error: Error) => {
       reject(new ServerErrorException(serverError.listenFailed(host, port, error)));
@@ -387,6 +388,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
         port,
       },
       () => {
+        const addr = node.address();
+        if (addr && typeof addr === "object") actualPort = addr.port;
         node.removeListener("error", handleError);
         resolve();
       },
@@ -445,7 +448,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     });
   };
 
-  return { port, host, registry, stop };
+  return { port: actualPort, host, registry, stop };
 };
 
 export type { Session } from "./session.js";

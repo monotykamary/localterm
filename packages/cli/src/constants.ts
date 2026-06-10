@@ -5,7 +5,7 @@ export const DAEMON_PROBE_INTERVAL_MS = 100;
 export const DAEMON_PROBE_MAX_WAIT_MS = 5000;
 export const VERIFY_PID_TIMEOUT_MS = 1000;
 
-export const MIN_TCP_PORT = 0;
+export const MIN_TCP_PORT = 1;
 export const MAX_TCP_PORT = 65535;
 
 export const FRIENDLY_HOSTNAME = "localterm.localhost";

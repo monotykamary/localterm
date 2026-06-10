@@ -7,9 +7,12 @@ describe("parsePortOption", () => {
     expect(parsePortOption("3417")).toBe(3417);
   });
 
-  it("accepts the boundary ports", () => {
-    expect(parsePortOption("0")).toBe(0);
+  it("accepts the upper boundary port", () => {
     expect(parsePortOption("65535")).toBe(65535);
+  });
+
+  it("rejects port 0 (ephemeral port not supported)", () => {
+    expect(() => parsePortOption("0")).toThrow(InvalidArgumentError);
   });
 
   it("rejects non-numeric input rather than silently coercing to NaN", () => {
