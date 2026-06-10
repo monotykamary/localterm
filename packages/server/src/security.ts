@@ -72,7 +72,8 @@ export const isPrivateHost = (host: string): boolean => {
   const normalized = normalizeBareIpv6(host);
   if (isLoopback(normalized)) return true;
   if (normalized.endsWith(".localhost")) return true;
-  const bare = normalized.startsWith("[") && normalized.endsWith("]") ? normalized.slice(1, -1) : normalized;
+  const bare =
+    normalized.startsWith("[") && normalized.endsWith("]") ? normalized.slice(1, -1) : normalized;
   if (bare.includes(":")) return isPrivateIpv6(bare);
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(bare)) return isPrivateIpv4(bare);
   return false;
