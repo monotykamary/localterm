@@ -8,9 +8,9 @@ const SRGB_LINEAR_TO_GAMMA_THRESHOLD = 0.0031308;
 const CIE_KAPPA = 24389 / 27;
 const CIE_EPSILON = 216 / 24389;
 
-const D65_X = 0.9642;
+const D65_X = 0.95047;
 const D65_Y = 1.0;
-const D65_Z = 0.8249;
+const D65_Z = 1.08883;
 
 const LAB_CUBE_ROOT_THRESHOLD = 0.008856;
 const LAB_CUBE_ROOT_COEFFICIENT = 7.787;
@@ -93,23 +93,21 @@ export const xyzToLab = (xyz: Xyz): Lab => {
   };
 };
 
+const labChannelToXyz = (fValue: number, whitePoint: number): number => {
+  const cubed = fValue * fValue * fValue;
+  if (cubed > CIE_EPSILON) return whitePoint * cubed;
+  return whitePoint * ((116 * fValue - 16) / CIE_KAPPA);
+};
+
 export const labToXyz = (lab: Lab): Xyz => {
   const fY = (lab.l + 16) / 116;
   const fX = lab.a / 500 + fY;
   const fZ = fY - lab.b / 200;
 
-  if (lab.l > CIE_KAPPA * CIE_EPSILON) {
-    return {
-      x: D65_X * fX * fX * fX,
-      y: D65_Y * fY * fY * fY,
-      z: D65_Z * fZ * fZ * fZ,
-    };
-  }
-
   return {
-    x: D65_X * ((116 * fX - 16) / CIE_KAPPA),
-    y: D65_Y * (lab.l / CIE_KAPPA),
-    z: D65_Z * ((116 * fZ - 16) / CIE_KAPPA),
+    x: labChannelToXyz(fX, D65_X),
+    y: labChannelToXyz(fY, D65_Y),
+    z: labChannelToXyz(fZ, D65_Z),
   };
 };
 
