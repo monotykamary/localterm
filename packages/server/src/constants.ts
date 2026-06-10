@@ -57,14 +57,15 @@ export const WS_OUTBOUND_RESUME_LOW_WATER_BYTES = 1 * 1024 * 1024;
 export const WS_OUTBOUND_DRAIN_POLL_MS = 50;
 export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 
-// DEC 2026 synchronized output: flush threshold. When an output batch exceeds
-// this many bytes, the server wraps it with BSU (`CSI ? 2026 h`) and ESU
-// (`CSI ? 2026 l`) so xterm.js defers rendering until the full batch is parsed,
-// preventing torn frames during heavy output (e.g. ASCII animations, cat of
-// large files). Under this threshold the overhead of the 12 extra bytes would
-// never pay off — the data is small enough that xterm renders it within one
-// animation frame.
-export const SYNC_OUTPUT_FLUSH_THRESHOLD_BYTES = 8 * 1024;
+// Output batch early-flush threshold. During continuous high-throughput output
+// (ASCII animations, cat of large files), waiting the full OUTPUT_BATCH_WINDOW_MS
+// can accumulate hundreds of KB in one WebSocket message. Flushing when the
+// batch passes this size keeps individual messages small, maintaining a steady
+// data flow to the client. The value is calibrated to be generous enough for
+// the largest single TUI frame (ink erase + repaint typically 3–6KB on a
+// 120×40 terminal) so that the 2ms window can still coalesce those frames into
+// one message before the size threshold is hit.
+export const OUTPUT_BATCH_FLUSH_BYTES = 8 * 1024;
 
 // Output batching window. The kernel PTY delivers child writes in 1024-byte
 // chunks on macOS, and node-pty emits each chunk as a separate data event in
@@ -75,6 +76,8 @@ export const SYNC_OUTPUT_FLUSH_THRESHOLD_BYTES = 8 * 1024;
 // half-erased frame (visible flicker in cmd/Claude Code on every keypress).
 // A small timer window lets all chunks of one frame (measured 0.02–0.8ms
 // apart) coalesce into one message, which xterm.js parses atomically.
+// For continuous high-throughput output, OUTPUT_BATCH_FLUSH_BYTES triggers an
+// immediate flush regardless of the timer, keeping the data flowing.
 export const OUTPUT_BATCH_WINDOW_MS = 2;
 
 // Heartbeat: send a WS ping every N ms; if no pong arrives within the timeout

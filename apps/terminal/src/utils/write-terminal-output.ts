@@ -1,8 +1,5 @@
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 
-const BSU_BEGIN = "\x1b[?2026h";
-const BSU_END = "\x1b[?2026l";
-
 class OutputBatcher {
   private terminal: XtermTerminal | null = null;
   private chunks: string[] = [];
@@ -35,7 +32,7 @@ class OutputBatcher {
       terminal.write(chunks[0]);
       return;
     }
-    terminal.write(BSU_BEGIN + chunks.join("") + BSU_END);
+    terminal.write(chunks.join(""));
   }
 }
 

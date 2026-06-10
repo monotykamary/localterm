@@ -8,9 +8,9 @@ import {
   DEFAULT_PORT,
   HTTP_STATUS_NOT_FOUND,
   MAX_CONCURRENT_SESSIONS,
+  OUTPUT_BATCH_FLUSH_BYTES,
   OUTPUT_BATCH_WINDOW_MS,
   SERVER_STOP_GRACE_MS,
-  SYNC_OUTPUT_FLUSH_THRESHOLD_BYTES,
   WS_BACKPRESSURE_THRESHOLD_BYTES,
   WS_CLOSE_BACKPRESSURE,
   WS_CLOSE_CAPACITY_REACHED,
@@ -232,10 +232,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           const flushOutputBatch = () => {
             outputBatchTimer = null;
             if (!outputBatch) return;
-            const payload =
-              outputBatch.length >= SYNC_OUTPUT_FLUSH_THRESHOLD_BYTES
-                ? `\x1b[?2026h${outputBatch}\x1b[?2026l`
-                : outputBatch;
+            const payload = outputBatch;
             outputBatch = "";
             safeSend(ws, { type: "output", data: payload });
             if (
@@ -252,7 +249,13 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           // this guards against drift.
           const onOutput = (data: string) => {
             outputBatch += data;
-            if (outputBatchTimer === null) {
+            if (outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
+              if (outputBatchTimer !== null) {
+                clearTimeout(outputBatchTimer);
+                outputBatchTimer = null;
+              }
+              flushOutputBatch();
+            } else if (outputBatchTimer === null) {
               outputBatchTimer = setTimeout(flushOutputBatch, OUTPUT_BATCH_WINDOW_MS);
             }
           };
