@@ -9,6 +9,7 @@ const STANDARD_OPTIONS = {
 };
 
 const noopSleep = (): Promise<void> => Promise.resolve();
+const neverHealthy = (): Promise<boolean> => Promise.resolve(false);
 
 describe("pollForDaemonReady", () => {
   it("resolves with the new port once a different value appears", async () => {
@@ -22,6 +23,7 @@ describe("pollForDaemonReady", () => {
         return tick < 3 ? null : 4242;
       },
       sleep: noopSleep,
+      probeHealth: neverHealthy,
     });
     expect(result).toEqual({ ok: true, port: 4242 });
   });
@@ -40,6 +42,7 @@ describe("pollForDaemonReady", () => {
         return newPort;
       },
       sleep: noopSleep,
+      probeHealth: neverHealthy,
     });
     expect(result).toEqual({ ok: true, port: newPort });
   });
@@ -55,6 +58,7 @@ describe("pollForDaemonReady", () => {
       },
       readPort: () => null,
       sleep: noopSleep,
+      probeHealth: neverHealthy,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -70,6 +74,7 @@ describe("pollForDaemonReady", () => {
       isAlive: () => true,
       readPort: () => null,
       sleep: noopSleep,
+      probeHealth: neverHealthy,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -87,6 +92,7 @@ describe("pollForDaemonReady", () => {
       isAlive,
       readPort,
       sleep: noopSleep,
+      probeHealth: neverHealthy,
     });
     expect(result).toEqual({ ok: true, port: 7777 });
     expect(isAlive).toHaveBeenCalledOnce();
@@ -104,7 +110,38 @@ describe("pollForDaemonReady", () => {
       isAlive: () => true,
       readPort: () => null,
       sleep: sleepSpy,
+      probeHealth: neverHealthy,
     });
     expect(sleepSpy).toHaveBeenCalledTimes(10);
+  });
+
+  it("resolves when port file matches initialPort but health probe succeeds", async () => {
+    const stalePort = 3417;
+    const result = await pollForDaemonReady({
+      ...STANDARD_OPTIONS,
+      initialPort: stalePort,
+      isAlive: () => true,
+      readPort: () => stalePort,
+      sleep: noopSleep,
+      probeHealth: () => Promise.resolve(true),
+    });
+    expect(result).toEqual({ ok: true, port: stalePort });
+  });
+
+  it("continues polling when port file matches and health probe fails", async () => {
+    const stalePort = 3417;
+    let tick = 0;
+    const result = await pollForDaemonReady({
+      ...STANDARD_OPTIONS,
+      initialPort: stalePort,
+      isAlive: () => true,
+      readPort: () => stalePort,
+      sleep: noopSleep,
+      probeHealth: () => {
+        tick += 1;
+        return Promise.resolve(tick >= 3);
+      },
+    });
+    expect(result).toEqual({ ok: true, port: stalePort });
   });
 });

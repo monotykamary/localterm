@@ -11,11 +11,24 @@ export interface DaemonProbeOptions {
   isAlive: (pid: number) => boolean;
   readPort: () => number | null;
   sleep: (durationMs: number) => Promise<void>;
+  probeHealth?: (port: number) => Promise<boolean>;
 }
+
+const defaultProbeHealth = async (port: number): Promise<boolean> => {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
 
 export const pollForDaemonReady = async (
   options: DaemonProbeOptions,
 ): Promise<DaemonReadyResult> => {
+  const probeHealth = options.probeHealth ?? defaultProbeHealth;
   let waited = 0;
   while (waited < options.maxWaitMs) {
     await options.sleep(options.intervalMs);
@@ -26,6 +39,10 @@ export const pollForDaemonReady = async (
     const observedPort = options.readPort();
     if (observedPort !== null && observedPort !== options.initialPort) {
       return { ok: true, port: observedPort };
+    }
+    if (observedPort !== null) {
+      const healthy = await probeHealth(observedPort);
+      if (healthy) return { ok: true, port: observedPort };
     }
   }
   return {
