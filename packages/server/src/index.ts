@@ -8,6 +8,7 @@ import {
   DEFAULT_PORT,
   HTTP_STATUS_NOT_FOUND,
   MAX_CONCURRENT_SESSIONS,
+  OUTPUT_BATCH_WINDOW_MS,
   SERVER_STOP_GRACE_MS,
   SYNC_OUTPUT_FLUSH_THRESHOLD_BYTES,
   WS_BACKPRESSURE_THRESHOLD_BYTES,
@@ -131,7 +132,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       let heartbeatTimer: NodeJS.Timeout | null = null;
       let stopHeartbeat: (() => void) | null = null;
       let outputBatch = "";
-      let outputBatchTimer: NodeJS.Immediate | null = null;
+      let outputBatchTimer: NodeJS.Timeout | null = null;
 
       const stopDrainPoll = () => {
         if (drainPollTimer === null) return;
@@ -252,7 +253,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           const onOutput = (data: string) => {
             outputBatch += data;
             if (outputBatchTimer === null) {
-              outputBatchTimer = setImmediate(flushOutputBatch);
+              outputBatchTimer = setTimeout(flushOutputBatch, OUTPUT_BATCH_WINDOW_MS);
             }
           };
           const onTitle = (title: string) => safeSend(ws, { type: "title", title });
@@ -262,7 +263,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           const onNotification = (body: string) => safeSend(ws, { type: "notification", body });
           const onExit = (code: number | null) => {
             if (outputBatchTimer !== null) {
-              clearImmediate(outputBatchTimer);
+              clearTimeout(outputBatchTimer);
               outputBatchTimer = null;
             }
             flushOutputBatch();
@@ -311,7 +312,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
         },
         onClose(event) {
           if (outputBatchTimer !== null) {
-            clearImmediate(outputBatchTimer);
+            clearTimeout(outputBatchTimer);
             outputBatchTimer = null;
           }
           if (outputBatch && activeWs) {
@@ -336,7 +337,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
         },
         onError(event) {
           if (outputBatchTimer !== null) {
-            clearImmediate(outputBatchTimer);
+            clearTimeout(outputBatchTimer);
             outputBatchTimer = null;
           }
           if (outputBatch && activeWs) {

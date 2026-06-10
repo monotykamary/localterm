@@ -66,6 +66,17 @@ export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 // animation frame.
 export const SYNC_OUTPUT_FLUSH_THRESHOLD_BYTES = 8 * 1024;
 
+// Output batching window. The kernel PTY delivers child writes in 1024-byte
+// chunks on macOS, and node-pty emits each chunk as a separate data event in
+// its own event loop iteration — a setImmediate scheduled on the first chunk
+// fires before the remaining chunks of the same child write are read. That
+// split a single ink/TUI redraw frame (erase + repaint, ~3KB) across multiple
+// WebSocket messages, and xterm.js rendering between them flashed the
+// half-erased frame (visible flicker in cmd/Claude Code on every keypress).
+// A small timer window lets all chunks of one frame (measured 0.02–0.8ms
+// apart) coalesce into one message, which xterm.js parses atomically.
+export const OUTPUT_BATCH_WINDOW_MS = 2;
+
 // Heartbeat: send a WS ping every N ms; if no pong arrives within the timeout
 // we tear down the socket. Without this, half-open connections (laptop sleep,
 // VPN dropout, kernel‑side TCP keepalives at 2h+) wedge the session — the
