@@ -617,14 +617,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.key === "Tab" && (event.metaKey || event.ctrlKey)) return false;
-      if (event.altKey && event.code === "KeyT") {
-        if (event.type === "keydown") {
-          event.preventDefault();
-          const newShellLink = document.getElementById("new-shell-link");
-          if (newShellLink instanceof HTMLAnchorElement) newShellLink.click();
-        }
-        return false;
-      }
       if (isNewTabShortcut(event, isMac)) {
         if (event.type === "keydown") {
           event.preventDefault();
