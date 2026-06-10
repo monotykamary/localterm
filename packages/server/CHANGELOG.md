@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.9.1
+
+### Patch Changes
+
+- Fix terminal not scrolling to bottom after split-tab resize
+
 ## 1.2.0
 
 ### Minor Changes
