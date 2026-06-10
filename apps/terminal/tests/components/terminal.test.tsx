@@ -1010,7 +1010,7 @@ describe("Terminal scroll preservation through hot-swaps", () => {
     expect(handle.scrollToBottom).toHaveBeenCalled();
   });
 
-  it("writes output directly without RAF batching", () => {
+  it("writes output directly without RAF batching", async () => {
     render(<Terminal />);
     const handle = fakeXterms[0];
     if (!handle) throw new Error("xterm not constructed");
@@ -1019,10 +1019,12 @@ describe("Terminal scroll preservation through hot-swaps", () => {
       fakeWebSockets[0]?.fireMessage({ type: "output", data: "replayed transcript" });
     });
 
-    expect(handle.write).toHaveBeenCalledWith("replayed transcript");
+    await vi.waitFor(() => {
+      expect(handle.write).toHaveBeenCalledWith("replayed transcript");
+    });
   });
 
-  it("writes output escape sequences directly", () => {
+  it("writes output escape sequences directly", async () => {
     render(<Terminal />);
     const handle = fakeXterms[0];
     if (!handle) throw new Error("xterm not constructed");
@@ -1031,8 +1033,10 @@ describe("Terminal scroll preservation through hot-swaps", () => {
       fakeWebSockets[0]?.fireMessage({ type: "output", data: "\x1b[2J\x1b[H\x1b[3Jredraw" });
     });
 
-    const writtenData = handle.write.mock.calls.at(-1)?.[0];
-    expect(writtenData).toBe("\x1b[2J\x1b[H\x1b[3Jredraw");
+    await vi.waitFor(() => {
+      const writtenData = handle.write.mock.calls.at(-1)?.[0];
+      expect(writtenData).toBe("\x1b[2J\x1b[H\x1b[3Jredraw");
+    });
   });
 
   it("blocks scrollback purge CSI handlers without blocking normal screen clears", () => {

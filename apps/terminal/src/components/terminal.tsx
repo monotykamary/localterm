@@ -78,7 +78,7 @@ import { formatReconnectedMarker } from "@/utils/format-reconnected-marker";
 import { formatShellExitMarker } from "@/utils/format-shell-exit-marker";
 import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anchor";
-import { flushOutput } from "@/utils/write-terminal-output";
+import { outputBatcher } from "@/utils/write-terminal-output";
 import { shouldBlockTerminalScrollbackPurge } from "@/utils/should-block-terminal-scrollback-purge";
 import { clampTerminalFontSize } from "@/utils/clamp-terminal-font-size";
 import { clampTerminalLineHeight } from "@/utils/clamp-terminal-line-height";
@@ -358,6 +358,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       scrollbar: { showScrollbar: false },
     });
     terminalRef.current = terminal;
+    outputBatcher.attach(terminal);
     const fitAddon = new FitAddon();
     fitAddonRef.current = fitAddon;
     terminal.loadAddon(fitAddon);
@@ -805,7 +806,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           typeof (raw as Record<string, unknown>).data === "string"
         ) {
           const outputData = (raw as { type: "output"; data: string }).data;
-          flushOutput(terminal, outputData);
+          outputBatcher.push(outputData);
           noteOutputActivity();
           return;
         }
@@ -934,6 +935,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         /* socket already closed */
       }
       socket = null;
+      outputBatcher.detach();
       terminal.dispose();
       document.title = DEFAULT_DOCUMENT_TITLE;
     };
