@@ -9,16 +9,16 @@ const RUNNING_GLYPH = [
 ].join("");
 
 const FILL_FOR_STATE: Record<FaviconState, string> = {
-  ready: "hsl(142 72% 45%)",
+  ready: "hsl(220 8% 46%)",
   running: "hsl(45 93% 47%)",
-  notified: "hsl(142 72% 45%)",
+  notified: "hsl(220 8% 46%)",
   dead: "hsl(0 72% 50%)",
 };
 
 const INK_FOR_STATE: Record<FaviconState, string> = {
-  ready: "hsl(142 85% 12%)",
+  ready: "hsl(220 10% 16%)",
   running: "hsl(45 90% 12%)",
-  notified: "hsl(142 85% 12%)",
+  notified: "hsl(220 10% 16%)",
   dead: "hsl(0 80% 12%)",
 };
 
