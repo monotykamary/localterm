@@ -1,5 +1,13 @@
 # localterm
 
+## 1.13.1
+
+### Patch Changes
+
+- fix(terminal): remove settings tooltip from overlay bar
+- Updated dependencies
+  - @monotykamary/localterm-server@1.13.1
+
 ## 1.13.0
 
 ### Minor Changes

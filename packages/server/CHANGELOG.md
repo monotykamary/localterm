@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.13.1
+
+### Patch Changes
+
+- fix(terminal): remove settings tooltip from overlay bar
+
 ## 1.13.0
 
 ## 1.12.0
