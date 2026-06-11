@@ -113,7 +113,7 @@ vi.mock("@xterm/xterm", () => {
   class FakeXtermTerminal {
     cols = 80;
     rows = 24;
-    unicode = { activeVersion: "11" };
+    unicode = { activeVersion: "11", register: () => {} };
     options: Record<string, unknown> = {};
     buffer = { active: { baseY: 0, viewportY: 0 } };
     scrollLines = vi.fn();
@@ -169,7 +169,16 @@ vi.mock("@xterm/xterm", () => {
       fakeXterms.push(this.handle);
     }
 
-    _core = { _charSizeService: { measure: () => {} } };
+    _core = {
+      _charSizeService: { measure: () => {} },
+      unicodeService: {
+        _activeProvider: {
+          version: "15-graphemes",
+          wcwidth: (_codepoint: number): 0 | 1 | 2 => 1,
+          charProperties: (_codepoint: number, _preceding: number) => 0,
+        },
+      },
+    };
 
     loadAddon = () => {};
     open = () => {};

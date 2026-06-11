@@ -7,6 +7,7 @@ import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XtermTerminal } from "@xterm/xterm";
+import type { IUnicodeVersionProvider } from "@xterm/xterm";
 import {
   Binary,
   Check,
@@ -86,6 +87,7 @@ import {
   captureTerminalScrollAnchor,
   type TerminalScrollAnchor,
 } from "@/utils/capture-terminal-scroll-anchor";
+import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider";
 import { extractKeyboardModifiers } from "@/utils/extract-keyboard-modifiers";
 import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
 import { formatConnectionLostMarker } from "@/utils/format-connection-lost-marker";
@@ -420,6 +422,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     terminal.loadAddon(new ImageAddon());
     terminal.loadAddon(new ProgressAddon());
     terminal.loadAddon(new UnicodeGraphemesAddon());
+    const graphemesProvider = (
+      terminal as unknown as {
+        _core: { unicodeService: { _activeProvider: IUnicodeVersionProvider } };
+      }
+    )._core.unicodeService._activeProvider;
+    terminal.unicode.register(new EmojiWidthUnicodeProvider(graphemesProvider));
+    terminal.unicode.activeVersion = "15-graphemes-emoji";
     const searchAddon = new SearchAddon();
     terminal.loadAddon(searchAddon);
     searchAddonRef.current = searchAddon;
