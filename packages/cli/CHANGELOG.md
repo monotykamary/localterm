@@ -1,10 +1,22 @@
 # localterm
 
+## 1.11.3
+
+### Patch Changes
+
+- bf8c1e9: fix: correct emoji variation selector width during TUI streaming
+
+  Remove `terminal.unicode.activeVersion = "15"` override that was downgrading xterm.js from the grapheme-aware `"15-graphemes"` provider to the naive `"15"` provider. The non-grapheme provider fails to join U+FE0F (variation selector-16) with the preceding emoji, treating it as a phantom width-1 cell. This shifts cursor positions by +1 per emoji, causing TUI redraws to leave ghost-line artifacts.
+
+- Updated dependencies [bf8c1e9]
+  - @monotykamary/localterm-server@1.11.3
+
 ## 1.11.2
 
 ### Patch Changes
 
 - Fix security, CLI lifecycle, and frontend bugs from full codebase review
+
   - security: stripPort now treats `localhost:3417` correctly (was rejected with 403)
   - security: maxPayload capped at 256KB on WebSocket server
   - security: shell hook temp dirs use mode 0o700, rc files use mode 0o600
