@@ -91,7 +91,7 @@ Packaging:
       `fitAddonRef`, `scrollbarTrackRef`, `scrollbarThumbRef` null assignments from the
       mount-effect cleanup. These refs are never read after unmount. `terminalInitializedRef`
       is still reset to `false` (it gates re-initialization on re-mount).
-- [ ] **3.8** (perf, optional) `noteOutputActivity` timer churn — deferred.
+- [x] **3.8** `noteOutputActivity` timer churn — if `faviconReadyTimer` is already pending, skip re-arming instead of clear+setTimeout on every output frame.
 
 ---
 
