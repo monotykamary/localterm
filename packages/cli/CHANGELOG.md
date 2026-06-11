@@ -1,5 +1,15 @@
 # localterm
 
+## 1.14.0
+
+### Minor Changes
+
+- 323f25a: Add line annotations to the diff viewer with send-to-terminal review prompts: hover a diff line to leave a comment, then send all pending comments to the terminal as a formatted code-review prompt (pasted via bracketed paste, ready to submit to a CLI agent)
+
+### Patch Changes
+
+- @monotykamary/localterm-server@1.14.0
+
 ## 1.13.1
 
 ### Patch Changes
