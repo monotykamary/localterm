@@ -299,7 +299,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     const checkReadyAfterOutput = () => {
       const silence = performance.now() - lastOutputTimestamp;
       if (silence < FAVICON_READY_DEBOUNCE_MS) {
-        faviconReadyTimer = window.setTimeout(checkReadyAfterOutput, FAVICON_READY_DEBOUNCE_MS - silence);
+        faviconReadyTimer = window.setTimeout(
+          checkReadyAfterOutput,
+          FAVICON_READY_DEBOUNCE_MS - silence,
+        );
         return;
       }
       faviconReadyTimer = null;
@@ -396,9 +399,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     terminal.loadAddon(new ClipboardAddon());
     terminal.loadAddon(new ImageAddon());
     terminal.loadAddon(new ProgressAddon());
-    const unicodeGraphemesAddon = new UnicodeGraphemesAddon();
-    terminal.loadAddon(unicodeGraphemesAddon);
-    terminal.unicode.activeVersion = "15";
+    terminal.loadAddon(new UnicodeGraphemesAddon());
     const searchAddon = new SearchAddon();
     terminal.loadAddon(searchAddon);
     searchAddonRef.current = searchAddon;
