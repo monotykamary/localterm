@@ -103,6 +103,7 @@ import { clampTerminalPaddingX, clampTerminalPaddingY } from "@/utils/clamp-term
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { formatDiffCount } from "@/utils/format-diff-count";
 import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
+import { isDiffViewerShortcut } from "@/utils/is-diff-viewer-shortcut";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
 import {
@@ -226,6 +227,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const initialNerdFontEnabledRef = useRef<boolean>(loadStoredNerdFontEnabled());
   const fitAddonRef = useRef<FitAddon | null>(null);
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
+  const openDiffViewerRef = useRef<(() => void) | null>(null);
   const scrollbarTrackRef = useRef<HTMLDivElement | null>(null);
   const scrollbarThumbRef = useRef<HTMLDivElement | null>(null);
   const [exitInfo, setExitInfo] = useState<ExitInfo | null>(null);
@@ -681,6 +683,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         if (event.type === "keydown") {
           event.preventDefault();
           toggleCommandPaletteRef.current?.();
+        }
+        return false;
+      }
+      if (isDiffViewerShortcut(event, isMac)) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          openDiffViewerRef.current?.();
         }
         return false;
       }
@@ -1226,6 +1235,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     setIsDiffViewerOpen(true);
     setIsCommandPaletteOpen(false);
   }, []);
+  openDiffViewerRef.current = openDiffViewer;
 
   const closeDiffViewer = useCallback(() => {
     setIsDiffViewerOpen(false);
@@ -1400,6 +1410,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         id: "git-diff",
         label: "View git diff",
         category: "Actions",
+        shortcut: `${togglePrefix}G`,
         icon: <FileDiff className="size-3.5" />,
         action: openDiffViewer,
       },
@@ -1642,6 +1653,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                   type="button"
                   onClick={openDiffViewer}
                   aria-label={`view git diff: ${diffSummary.additions} additions, ${diffSummary.deletions} deletions${diffSummary.binaries > 0 ? `, ${diffSummary.binaries} binary files changed` : ""}`}
+                  title={`${isMac ? "⌘" : "Ctrl+"}G`}
                   className="flex h-8 items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 font-mono text-xs tabular-nums outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                 >
                   <span className="text-emerald-400">
