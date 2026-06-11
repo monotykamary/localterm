@@ -6,6 +6,7 @@ import {
   DEFAULT_HOST,
   DEFAULT_PORT,
   isLoopbackHost,
+  isServerErrorException,
 } from "@monotykamary/localterm-server";
 import kleur from "kleur";
 import open from "open";
@@ -20,7 +21,7 @@ import {
   getFriendlyUrl,
   STOP_COMMAND,
 } from "../constants.js";
-import { cliError, exitCodeForCliError } from "../errors.js";
+import { cliError, exitCodeForCliError, type CliError } from "../errors.js";
 import { clearPid, ensureLogFile, isAlive, readHost, readPort, writePid } from "../state.js";
 import { buildDaemonStartArgs } from "../utils/build-daemon-args.js";
 import { pollForDaemonReady } from "../utils/poll-for-daemon-ready.js";
@@ -28,6 +29,7 @@ import { reportCliError } from "../utils/report-cli-error.js";
 import { runStartPreflight } from "../utils/run-start-preflight.js";
 import { sleep } from "../utils/sleep.js";
 import { spawnDaemon } from "../utils/spawn-daemon.js";
+import { runStop } from "./stop.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,11 +62,19 @@ export const runStart = async (options: StartOptions): Promise<void> => {
   await runStartAsDaemon(options);
 };
 
+const stopExistingInstance = async (preflightError: CliError): Promise<void> => {
+  if (preflightError.kind === "already-running" || preflightError.kind === "stale-port-file") {
+    await runStop();
+    return;
+  }
+  reportCliError(preflightError);
+  process.exit(exitCodeForCliError(preflightError));
+};
+
 const runStartAsDaemon = async (options: StartOptions): Promise<void> => {
   const preflightError = await runStartPreflight();
   if (preflightError !== null) {
-    reportCliError(preflightError);
-    process.exit(exitCodeForCliError(preflightError));
+    await stopExistingInstance(preflightError);
   }
 
   const portBeforeSpawn = readPort();
@@ -128,8 +138,7 @@ const openInBrowser = async (url: string): Promise<void> => {
 const runStartInForeground = async (options: StartOptions): Promise<void> => {
   const preflightError = await runStartPreflight();
   if (preflightError !== null) {
-    reportCliError(preflightError);
-    process.exit(exitCodeForCliError(preflightError));
+    await stopExistingInstance(preflightError);
   }
 
   process.title = DAEMON_PROCESS_TITLE;
@@ -151,11 +160,33 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
       staticRoot,
     });
   } catch (caughtError) {
-    const startError = cliError.serverStartFailed(
-      caughtError instanceof Error ? caughtError : new Error(String(caughtError)),
-    );
-    reportCliError(startError);
-    process.exit(exitCodeForCliError(startError));
+    const isEaddrInuse =
+      isServerErrorException(caughtError) &&
+      caughtError.error.kind === "listen-failed" &&
+      caughtError.error.cause instanceof Error &&
+      (caughtError.error.cause as NodeJS.ErrnoException).code === "EADDRINUSE";
+    if (isEaddrInuse) {
+      await runStop();
+      try {
+        server = await createServer({
+          port: options.port,
+          host: options.host,
+          staticRoot,
+        });
+      } catch (retryError) {
+        const startError = cliError.serverStartFailed(
+          retryError instanceof Error ? retryError : new Error(String(retryError)),
+        );
+        reportCliError(startError);
+        process.exit(exitCodeForCliError(startError));
+      }
+    } else {
+      const startError = cliError.serverStartFailed(
+        caughtError instanceof Error ? caughtError : new Error(String(caughtError)),
+      );
+      reportCliError(startError);
+      process.exit(exitCodeForCliError(startError));
+    }
   }
 
   if (!isLoopbackHost(options.host)) {
