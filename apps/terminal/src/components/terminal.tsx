@@ -284,6 +284,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     let resizeTimer: number | null = null;
     let faviconRunningTimer: number | null = null;
     let faviconReadyTimer: number | null = null;
+    let lastOutputTimestamp = 0;
     let faviconState: "ready" | "running" | "alive-quiet" = "ready";
     let faviconBadge = false;
     let hasForegroundProcess = false;
@@ -295,6 +296,31 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     const kittyFlagStack: number[] = [0];
     const getKittyFlags = (): number => kittyFlagStack[kittyFlagStack.length - 1] ?? 0;
 
+    const checkReadyAfterOutput = () => {
+      const silence = performance.now() - lastOutputTimestamp;
+      if (silence < FAVICON_READY_DEBOUNCE_MS) {
+        faviconReadyTimer = window.setTimeout(checkReadyAfterOutput, FAVICON_READY_DEBOUNCE_MS - silence);
+        return;
+      }
+      faviconReadyTimer = null;
+      if (faviconRunningTimer !== null) {
+        window.clearTimeout(faviconRunningTimer);
+        faviconRunningTimer = null;
+      }
+      if (faviconState === "running") {
+        if (document.hidden) {
+          faviconBadge = true;
+        }
+        if (hasForegroundProcess) {
+          faviconState = "alive-quiet";
+          setTabFaviconState("alive-quiet", faviconBadge);
+        } else {
+          faviconState = "ready";
+          setTabFaviconState("ready", faviconBadge);
+        }
+      }
+    };
+
     const noteOutputActivity = () => {
       if (faviconState !== "running" && faviconRunningTimer === null) {
         faviconRunningTimer = window.setTimeout(() => {
@@ -305,26 +331,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           setTabFaviconState("running");
         }, FAVICON_RUNNING_DEBOUNCE_MS);
       }
+      lastOutputTimestamp = performance.now();
       if (faviconReadyTimer !== null) return;
-      faviconReadyTimer = window.setTimeout(() => {
-        faviconReadyTimer = null;
-        if (faviconRunningTimer !== null) {
-          window.clearTimeout(faviconRunningTimer);
-          faviconRunningTimer = null;
-        }
-        if (faviconState === "running") {
-          if (document.hidden) {
-            faviconBadge = true;
-          }
-          if (hasForegroundProcess) {
-            faviconState = "alive-quiet";
-            setTabFaviconState("alive-quiet", faviconBadge);
-          } else {
-            faviconState = "ready";
-            setTabFaviconState("ready", faviconBadge);
-          }
-        }
-      }, FAVICON_READY_DEBOUNCE_MS);
+      faviconReadyTimer = window.setTimeout(checkReadyAfterOutput, FAVICON_READY_DEBOUNCE_MS);
     };
 
     const resetFavicon = () => {
