@@ -1,5 +1,15 @@
 # localterm
 
+## 1.13.0
+
+### Minor Changes
+
+- Add ⌘G/Ctrl+G keyboard shortcut to open the git diff viewer
+
+### Patch Changes
+
+- @monotykamary/localterm-server@1.13.0
+
 ## 1.12.0
 
 ### Minor Changes
