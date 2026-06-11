@@ -210,6 +210,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const manualReconnectRef = useRef<(() => void) | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const refocusTerminalRef = useRef<(() => void) | null>(null);
+  const pasteToTerminalRef = useRef<((text: string) => void) | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const retryFeedbackTimerRef = useRef<number | null>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
@@ -740,6 +741,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     };
 
     refocusTerminalRef.current = () => terminal.focus();
+    // Routes through the normal paste pipeline (bracketed paste when the
+    // foreground app enables it), so multi-line text lands in the prompt
+    // without executing.
+    pasteToTerminalRef.current = (text) => terminal.paste(text);
 
     const sendResize = (cols: number, rows: number) => {
       const terminalInternals = terminal as unknown as {
@@ -1242,6 +1247,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     refocusTerminalRef.current?.();
   }, []);
 
+  const sendDiffReviewToTerminal = useCallback((text: string) => {
+    pasteToTerminalRef.current?.(text);
+  }, []);
+
   const handleSearchInputChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const next = event.target.value;
@@ -1723,7 +1732,12 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         onActiveItemChange={handleCommandPaletteHighlight}
       />
 
-      <DiffViewer open={isDiffViewerOpen} cwd={liveCwd} onClose={closeDiffViewer} />
+      <DiffViewer
+        open={isDiffViewerOpen}
+        cwd={liveCwd}
+        onClose={closeDiffViewer}
+        onSendToTerminal={sendDiffReviewToTerminal}
+      />
 
       <AlertDialog open={isModalOpen}>
         <AlertDialogContent>

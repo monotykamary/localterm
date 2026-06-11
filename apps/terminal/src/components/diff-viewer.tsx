@@ -1,8 +1,18 @@
 import type { GitDiffFile, GitDiffResponse } from "@monotykamary/localterm-server/protocol";
-import { FileWarning, RefreshCw, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FileWarning,
+  MessageSquare,
+  MessageSquarePlus,
+  Pencil,
+  RefreshCw,
+  Send,
+  Trash2,
+  X,
+} from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 import {
   COMMAND_PALETTE_BACKDROP_CLASSES,
   COMMAND_PALETTE_PANEL_CLASSES,
@@ -12,6 +22,11 @@ import { DIFF_VIEWER_CLOSE_TRANSITION_MS, DIFF_VIEWER_INITIAL_LINE_LIMIT } from 
 import { cn } from "@/lib/utils";
 import { buildSplitDiffRows } from "@/utils/build-split-diff-rows";
 import { fetchGitDiff } from "@/utils/fetch-git-diff";
+import {
+  diffAnnotationKey,
+  formatReviewPrompt,
+  type DiffAnnotation,
+} from "@/utils/format-review-prompt";
 import {
   countHunkLines,
   parseUnifiedDiff,
@@ -28,7 +43,18 @@ interface DiffViewerProps {
   open: boolean;
   cwd: string | null;
   onClose: () => void;
+  onSendToTerminal?: (text: string) => void;
 }
+
+type AnnotationTarget = Pick<DiffAnnotation, "side" | "lineNumber">;
+
+// Deleted lines are addressed on the old side, everything else on the new side.
+const annotationTargetFor = (line: DiffLine): AnnotationTarget | null => {
+  if (line.type === "del") {
+    return line.oldLine === null ? null : { side: "old", lineNumber: line.oldLine };
+  }
+  return line.newLine === null ? null : { side: "new", lineNumber: line.newLine };
+};
 
 const STATUS_LABELS: Record<GitDiffFile["status"], { letter: string; className: string }> = {
   modified: { letter: "M", className: "text-amber-400" },
@@ -59,8 +85,127 @@ const lineBackgroundClasses = (type: DiffLine["type"]): string => {
 const lineTextClasses = (type: DiffLine["type"]): string =>
   type === "context" ? "text-muted-foreground" : "text-foreground/90";
 
-const UnifiedDiffLine = ({ line }: { line: DiffLine }) => (
-  <div className={cn("flex", lineBackgroundClasses(line.type))}>
+const AnnotateLineButton = ({ onClick }: { onClick: () => void }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-label="comment on line"
+    className="absolute top-1/2 left-1 z-10 hidden size-4 -translate-y-1/2 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-transform group-hover/line:flex hover:scale-110"
+  >
+    <MessageSquarePlus className="size-3" aria-hidden="true" />
+  </button>
+);
+
+interface AnnotationEditorProps {
+  initialComment: string;
+  onSave: (comment: string) => void;
+  onCancel: () => void;
+}
+
+const AnnotationEditor = ({ initialComment, onSave, onCancel }: AnnotationEditorProps) => {
+  const [comment, setComment] = useState(initialComment);
+  const trimmed = comment.trim();
+  const save = () => {
+    if (trimmed) onSave(trimmed);
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <Textarea
+        autoFocus
+        value={comment}
+        onChange={(event) => setComment(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            onCancel();
+          } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            save();
+          }
+        }}
+        placeholder="Leave a comment on this line…"
+        aria-label="line comment"
+        className="min-h-12 text-xs"
+      />
+      <div className="flex items-center gap-1.5">
+        <Button size="xs" onClick={save} disabled={!trimmed}>
+          Save comment
+        </Button>
+        <Button size="xs" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+interface AnnotationBlockProps {
+  annotation: DiffAnnotation | undefined;
+  isEditing: boolean;
+  onEdit: () => void;
+  onSave: (comment: string) => void;
+  onCancel: () => void;
+  onDelete: () => void;
+}
+
+// Rendered as a full-width row right below the annotated diff line. The inner
+// wrapper sticks to the left edge so it stays visible while the unified view
+// scrolls horizontally.
+const AnnotationBlock = ({
+  annotation,
+  isEditing,
+  onEdit,
+  onSave,
+  onCancel,
+  onDelete,
+}: AnnotationBlockProps) => (
+  <div className="border-y border-border/40 bg-muted/20 py-2 pr-4 pl-3 font-sans">
+    <div className="sticky left-3 max-w-xl">
+      {isEditing ? (
+        <AnnotationEditor
+          initialComment={annotation?.comment ?? ""}
+          onSave={onSave}
+          onCancel={onCancel}
+        />
+      ) : annotation ? (
+        <div className="group/comment flex items-start gap-2">
+          <MessageSquare
+            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <p className="min-w-0 flex-1 whitespace-pre-wrap text-foreground/90">
+            {annotation.comment}
+          </p>
+          <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/comment:opacity-100">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={onEdit}
+              aria-label="edit comment"
+              className="hover:text-foreground"
+            >
+              <Pencil />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={onDelete}
+              aria-label="delete comment"
+              className="hover:text-destructive"
+            >
+              <Trash2 />
+            </Button>
+          </span>
+        </div>
+      ) : null}
+    </div>
+  </div>
+);
+
+const UnifiedDiffLine = ({ line, onAnnotate }: { line: DiffLine; onAnnotate?: () => void }) => (
+  <div className={cn("group/line relative flex", lineBackgroundClasses(line.type))}>
+    {onAnnotate ? <AnnotateLineButton onClick={onAnnotate} /> : null}
     <span className={LINE_NUMBER_CELL_CLASSES}>{line.oldLine ?? ""}</span>
     <span className={LINE_NUMBER_CELL_CLASSES}>{line.newLine ?? ""}</span>
     <span
@@ -83,7 +228,15 @@ const UnifiedDiffLine = ({ line }: { line: DiffLine }) => (
   </div>
 );
 
-const SplitDiffCell = ({ line, side }: { line: DiffLine | null; side: "left" | "right" }) => {
+const SplitDiffCell = ({
+  line,
+  side,
+  onAnnotate,
+}: {
+  line: DiffLine | null;
+  side: "left" | "right";
+  onAnnotate?: () => void;
+}) => {
   if (!line) {
     return (
       <>
@@ -97,6 +250,7 @@ const SplitDiffCell = ({ line, side }: { line: DiffLine | null; side: "left" | "
     line.type === "context" ? "context" : side === "left" ? "del" : ("add" as const);
   return (
     <>
+      {onAnnotate ? <AnnotateLineButton onClick={onAnnotate} /> : null}
       <span className={cn(LINE_NUMBER_CELL_CLASSES, lineBackgroundClasses(effectiveType))}>
         {side === "left" ? (line.oldLine ?? "") : (line.newLine ?? "")}
       </span>
@@ -120,9 +274,31 @@ const HunkHeader = ({ hunk }: { hunk: DiffHunk }) => (
 interface FileDiffPaneProps {
   file: GitDiffFile;
   viewMode: DiffViewMode;
+  annotations: Record<string, DiffAnnotation>;
+  editingKey: string | null;
+  onOpenEditor: (key: string) => void;
+  onSaveAnnotation: (annotation: DiffAnnotation) => void;
+  onCancelEditor: () => void;
+  onDeleteAnnotation: (key: string) => void;
 }
 
-const FileDiffPane = ({ file, viewMode }: FileDiffPaneProps) => {
+interface LineAnnotationState {
+  key: string;
+  saved: DiffAnnotation | undefined;
+  isEditing: boolean;
+  save: (comment: string) => void;
+}
+
+const FileDiffPane = ({
+  file,
+  viewMode,
+  annotations,
+  editingKey,
+  onOpenEditor,
+  onSaveAnnotation,
+  onCancelEditor,
+  onDeleteAnnotation,
+}: FileDiffPaneProps) => {
   const [showAllLines, setShowAllLines] = useState(false);
   const hunks = useMemo(() => (file.patch ? parseUnifiedDiff(file.patch) : []), [file.patch]);
   const totalLines = useMemo(() => countHunkLines(hunks), [hunks]);
@@ -161,6 +337,30 @@ const FileDiffPane = ({ file, viewMode }: FileDiffPaneProps) => {
   }
   const hiddenLineCount = totalLines - renderedLines;
 
+  const annotationStateFor = (line: DiffLine): LineAnnotationState | null => {
+    const target = annotationTargetFor(line);
+    if (!target) return null;
+    const key = diffAnnotationKey({ filePath: file.path, ...target });
+    return {
+      key,
+      saved: annotations[key],
+      isEditing: editingKey === key,
+      save: (comment: string) => onSaveAnnotation({ filePath: file.path, ...target, comment }),
+    };
+  };
+
+  const renderAnnotation = (state: LineAnnotationState | null) =>
+    state && (state.saved || state.isEditing) ? (
+      <AnnotationBlock
+        annotation={state.saved}
+        isEditing={state.isEditing}
+        onEdit={() => onOpenEditor(state.key)}
+        onSave={state.save}
+        onCancel={onCancelEditor}
+        onDelete={() => onDeleteAnnotation(state.key)}
+      />
+    ) : null;
+
   return (
     <div
       className={cn(
@@ -174,17 +374,47 @@ const FileDiffPane = ({ file, viewMode }: FileDiffPaneProps) => {
         <div key={hunk.header + String(hunk.lines[0]?.newLine ?? hunk.lines[0]?.oldLine ?? "")}>
           <HunkHeader hunk={hunk} />
           {viewMode === "unified"
-            ? hunk.lines.map((line, lineIndex) => <UnifiedDiffLine key={lineIndex} line={line} />)
-            : buildSplitDiffRows(hunk).map((row, rowIndex) => (
-                <div key={rowIndex} className="flex">
-                  <div className="flex w-1/2 min-w-0 border-r border-border/40">
-                    <SplitDiffCell line={row.left} side="left" />
-                  </div>
-                  <div className="flex w-1/2 min-w-0">
-                    <SplitDiffCell line={row.right} side="right" />
-                  </div>
-                </div>
-              ))}
+            ? hunk.lines.map((line, lineIndex) => {
+                const state = annotationStateFor(line);
+                return (
+                  <Fragment key={lineIndex}>
+                    <UnifiedDiffLine
+                      line={line}
+                      onAnnotate={state ? () => onOpenEditor(state.key) : undefined}
+                    />
+                    {renderAnnotation(state)}
+                  </Fragment>
+                );
+              })
+            : buildSplitDiffRows(hunk).map((row, rowIndex) => {
+                const leftState = row.left ? annotationStateFor(row.left) : null;
+                const rightState = row.right ? annotationStateFor(row.right) : null;
+                // A context line is the same object on both sides — render its
+                // annotation once.
+                const isSharedAnnotation = leftState !== null && leftState.key === rightState?.key;
+                return (
+                  <Fragment key={rowIndex}>
+                    <div className="flex">
+                      <div className="group/line relative flex w-1/2 min-w-0 border-r border-border/40">
+                        <SplitDiffCell
+                          line={row.left}
+                          side="left"
+                          onAnnotate={leftState ? () => onOpenEditor(leftState.key) : undefined}
+                        />
+                      </div>
+                      <div className="group/line relative flex w-1/2 min-w-0">
+                        <SplitDiffCell
+                          line={row.right}
+                          side="right"
+                          onAnnotate={rightState ? () => onOpenEditor(rightState.key) : undefined}
+                        />
+                      </div>
+                    </div>
+                    {renderAnnotation(leftState)}
+                    {isSharedAnnotation ? null : renderAnnotation(rightState)}
+                  </Fragment>
+                );
+              })}
         </div>
       ))}
       {hiddenLineCount > 0 ? (
@@ -205,7 +435,7 @@ const DiffPaneNotice = ({ children, icon }: { children: React.ReactNode; icon?: 
   </div>
 );
 
-export const DiffViewer = ({ open, cwd, onClose }: DiffViewerProps) => {
+export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerProps) => {
   const [mounted, setMounted] = useState(false);
   const [settled, setSettled] = useState(false);
   const [diff, setDiff] = useState<GitDiffResponse | null>(null);
@@ -214,6 +444,9 @@ export const DiffViewer = ({ open, cwd, onClose }: DiffViewerProps) => {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<DiffViewMode>(() => loadStoredDiffViewMode());
   const [refreshCount, setRefreshCount] = useState(0);
+  // Pending review annotations survive close/reopen until they are sent.
+  const [annotations, setAnnotations] = useState<Record<string, DiffAnnotation>>({});
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const fileListRef = useRef<HTMLDivElement | null>(null);
 
@@ -289,13 +522,18 @@ export const DiffViewer = ({ open, cwd, onClose }: DiffViewerProps) => {
   useEffect(() => {
     if (!open || !mounted) return;
     const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      // The annotation editor's textarea handles Escape itself (closes just
+      // the editor) and owns all typing.
+      const isTextArea = target instanceof HTMLElement && target.tagName === "TEXTAREA";
       if (event.key === "Escape") {
+        if (isTextArea) return;
         event.preventDefault();
         event.stopPropagation();
         onClose();
         return;
       }
-      const target = event.target;
+      if (isTextArea) return;
       if (target instanceof HTMLElement && target.tagName === "INPUT") return;
       if (event.key === "ArrowDown" || event.key === "j") {
         event.preventDefault();
@@ -317,6 +555,50 @@ export const DiffViewer = ({ open, cwd, onClose }: DiffViewerProps) => {
     setViewMode(nextMode);
     storeDiffViewMode(nextMode);
   }, []);
+
+  const openAnnotationEditor = useCallback((key: string) => {
+    setEditingKey(key);
+  }, []);
+
+  const cancelAnnotationEditor = useCallback(() => {
+    setEditingKey(null);
+  }, []);
+
+  const saveAnnotation = useCallback((annotation: DiffAnnotation) => {
+    setAnnotations((previous) => ({ ...previous, [diffAnnotationKey(annotation)]: annotation }));
+    setEditingKey(null);
+  }, []);
+
+  const deleteAnnotation = useCallback((key: string) => {
+    setAnnotations((previous) => {
+      const { [key]: _removed, ...rest } = previous;
+      return rest;
+    });
+    setEditingKey((previous) => (previous === key ? null : previous));
+  }, []);
+
+  const annotationList = useMemo(() => Object.values(annotations), [annotations]);
+
+  const annotationCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const annotation of annotationList) {
+      counts.set(annotation.filePath, (counts.get(annotation.filePath) ?? 0) + 1);
+    }
+    return counts;
+  }, [annotationList]);
+
+  const clearAnnotations = useCallback(() => {
+    setAnnotations({});
+    setEditingKey(null);
+  }, []);
+
+  const handleSendToTerminal = useCallback(() => {
+    if (!onSendToTerminal || annotationList.length === 0) return;
+    onSendToTerminal(formatReviewPrompt(annotationList));
+    setAnnotations({});
+    setEditingKey(null);
+    onClose();
+  }, [onSendToTerminal, annotationList, onClose]);
 
   if (!mounted) return null;
 
@@ -436,6 +718,7 @@ export const DiffViewer = ({ open, cwd, onClose }: DiffViewerProps) => {
                 const status = STATUS_LABELS[file.status];
                 const { directory, basename } = splitFilePath(file.path);
                 const isSelected = file.path === selectedPath;
+                const commentCount = annotationCounts.get(file.path) ?? 0;
                 return (
                   <button
                     key={file.path}
@@ -462,6 +745,15 @@ export const DiffViewer = ({ open, cwd, onClose }: DiffViewerProps) => {
                         <span className={isSelected ? "text-foreground" : ""}>{basename}</span>
                       </bdi>
                     </span>
+                    {commentCount > 0 ? (
+                      <span
+                        className="flex shrink-0 items-center gap-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
+                        title={`${commentCount} pending comment${commentCount === 1 ? "" : "s"}`}
+                      >
+                        <MessageSquare className="size-2.5" aria-hidden="true" />
+                        {commentCount}
+                      </span>
+                    ) : null}
                     {file.binary ? (
                       <span className="shrink-0 rounded border border-border/40 px-1 font-mono text-[10px] text-muted-foreground/70">
                         BIN
@@ -497,7 +789,16 @@ export const DiffViewer = ({ open, cwd, onClose }: DiffViewerProps) => {
                     ) : null}
                   </div>
                   <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
-                    <FileDiffPane file={selectedFile} viewMode={viewMode} />
+                    <FileDiffPane
+                      file={selectedFile}
+                      viewMode={viewMode}
+                      annotations={annotations}
+                      editingKey={editingKey}
+                      onOpenEditor={openAnnotationEditor}
+                      onSaveAnnotation={saveAnnotation}
+                      onCancelEditor={cancelAnnotationEditor}
+                      onDeleteAnnotation={deleteAnnotation}
+                    />
                   </div>
                 </>
               ) : (
@@ -508,6 +809,25 @@ export const DiffViewer = ({ open, cwd, onClose }: DiffViewerProps) => {
             </div>
           </div>
         )}
+
+        {annotationList.length > 0 ? (
+          <footer className="flex shrink-0 items-center gap-2 border-t border-border/40 px-4 py-2">
+            <span className="text-xs text-muted-foreground">
+              {annotationList.length} pending comment{annotationList.length === 1 ? "" : "s"}
+            </span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <Button variant="ghost" size="xs" onClick={clearAnnotations}>
+                Clear all
+              </Button>
+              {onSendToTerminal ? (
+                <Button size="xs" onClick={handleSendToTerminal}>
+                  <Send aria-hidden="true" />
+                  Send to terminal
+                </Button>
+              ) : null}
+            </div>
+          </footer>
+        ) : null}
       </div>
     </div>
   );
