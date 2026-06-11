@@ -1,5 +1,32 @@
 # localterm-server
 
+## 1.11.2
+
+### Patch Changes
+
+- Fix security, CLI lifecycle, and frontend bugs from full codebase review
+
+  - security: stripPort now treats `localhost:3417` correctly (was rejected with 403)
+  - security: maxPayload capped at 256KB on WebSocket server
+  - security: shell hook temp dirs use mode 0o700, rc files use mode 0o600
+  - security: non-loopback bind warns about unauthenticated access
+  - cli: PID verification is now tri-state (ours/not-ours/unknown) — unknown PIDs are no longer silently treated as "not ours"
+  - cli: `start` no longer auto-stops an already-running instance on `already-running`
+  - cli: `process.title` set before preflight to eliminate race in PID verification
+  - cli: `stop` polls after SIGKILL; refuses to signal on unknown verification
+  - cli: `PORT` env var no longer crashes on invalid values
+  - cli: `stop`/`status` set `process.exitCode` on error; `isAlive` treats EPERM as alive
+  - cli: PID/port/host writes are atomic (temp-file-then-rename); host persisted and used for health probes
+  - frontend: Nerd Font toggle now actually changes the font family
+  - frontend: reconnect probe no longer kills a fresh session when already connected
+  - frontend: scroll-restore falls back to bottom when anchor exceeds buffer
+  - frontend: custom scrollbar geometry updated on resize and after batcher flush
+  - frontend: history.replaceState skips unchanged + try/catch for Safari rate limit
+  - frontend: whitespace-only stored settings guarded; ref nulling in cleanup removed
+  - frontend: favicon debounce uses timestamp-based self-adjusting timer (no flash, no churn)
+  - refactor: createStoredSetting factory merged 22 load/store files into 11
+  - refactor: deleted dead code (errors.ts, schemas.ts shim, merged shortcut factories)
+
 ## 1.9.1
 
 ### Patch Changes
