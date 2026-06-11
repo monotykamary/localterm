@@ -11,6 +11,13 @@ import type { Terminal as XtermTerminal } from "@xterm/xterm";
  * report `DOM_DELTA_LINE` (one event per click) and pass through unchanged, so
  * clicky-mouse users still get the wheel→arrow behavior.
  *
+ * When the application has enabled mouse reporting (e.g. `?1000h` + `?1006h`
+ * for SGR mouse mode), pixel-delta wheel events must NOT be suppressed.
+ * xterm.js's `coreMouseService.consumeWheelEvent` already normalizes
+ * high-frequency pixel deltas into discrete scroll events by accumulating
+ * sub-cell-height deltas and only firing when the threshold is crossed, so
+ * the pathological arrow-key spam cannot occur.
+ *
  * Normal buffer is untouched — there the wheel scrolls scrollback, which is
  * the whole point and not pathological.
  */
@@ -19,5 +26,6 @@ export const shouldSuppressAltBufferWheel = (
   terminal: XtermTerminal,
 ): boolean => {
   if (terminal.buffer.active.type !== "alternate") return false;
+  if (terminal.modes.mouseTrackingMode !== "none") return false;
   return event.deltaMode === WheelEvent.DOM_DELTA_PIXEL;
 };
