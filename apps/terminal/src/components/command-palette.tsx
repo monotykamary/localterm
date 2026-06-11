@@ -1,5 +1,5 @@
-import { Search } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Check, Search } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   COMMAND_PALETTE_BACKDROP_CLASSES,
   COMMAND_PALETTE_PANEL_CLASSES,
@@ -14,6 +14,8 @@ export interface CommandItem {
   category: string;
   shortcut?: string;
   icon?: React.ReactNode;
+  /** Marks the currently active option (theme, font, …) or an enabled toggle. */
+  checked?: boolean;
   action: () => void;
 }
 
@@ -21,24 +23,40 @@ interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   commands: readonly CommandItem[];
+  /**
+   * Fires when the highlighted command changes, and with null when the
+   * palette closes or nothing is highlighted. Lets the host live-preview
+   * settings (theme, font) while the user navigates.
+   */
+  onActiveItemChange?: (item: CommandItem | null) => void;
 }
 
 const COMMAND_ITEM_CLASSES =
-  "flex w-full items-center gap-2.5 rounded-sm px-2.5 py-2 text-sm outline-none transition-colors";
+  "flex w-full items-center gap-2.5 rounded-sm px-2.5 py-2 text-sm text-muted-foreground outline-none transition-colors";
 
-const scoreQueryMatch = (query: string, label: string): number => {
-  const lower = label.toLowerCase();
+interface QueryMatch {
+  score: number;
+  indices: readonly number[];
+}
+
+// Matches that hit the label directly always rank above matches that only
+// succeed against "category label", whatever their individual scores.
+const CATEGORY_MATCH_PENALTY = 10;
+
+const matchQuery = (query: string, text: string): QueryMatch | null => {
   const q = query.toLowerCase();
-  if (lower === q) return 1;
-  if (lower.startsWith(q)) return 2;
-  if (lower.includes(q)) return 3;
-  const fzy = fuzzyScore(query, label);
-  if (fzy > 0) {
-    const maxFzy = fuzzyMaxScore(query.length);
-    const normalized = fzy / maxFzy;
-    return 4 + (1 - normalized);
+  const t = text.toLowerCase();
+  const direct = t.indexOf(q);
+  if (direct !== -1) {
+    const indices = Array.from({ length: q.length }, (_, i) => direct + i);
+    if (t === q) return { score: 1, indices };
+    if (direct === 0) return { score: 2, indices };
+    return { score: 3, indices };
   }
-  return 0;
+  const fuzzy = fuzzyMatch(q, t);
+  if (!fuzzy) return null;
+  const normalized = fuzzy.score / fuzzyMaxScore(q.length);
+  return { score: 4 + (1 - normalized), indices: fuzzy.indices };
 };
 
 const fuzzyMaxScore = (queryLength: number): number => {
@@ -48,47 +66,120 @@ const fuzzyMaxScore = (queryLength: number): number => {
   return score;
 };
 
-const fuzzyScore = (query: string, text: string): number => {
-  const q = query.toLowerCase();
-  const t = text.toLowerCase();
+const fuzzyMatch = (q: string, t: string): QueryMatch | null => {
   let qi = 0;
   let score = 0;
   let lastMatchIndex = -1;
+  const indices: number[] = [];
   for (let ti = 0; ti < t.length && qi < q.length; ti++) {
     if (t[ti] === q[qi]) {
       score += 1;
       if (lastMatchIndex === ti - 1) score += 0.5;
       if (ti === 0 || t[ti - 1] === " " || t[ti - 1] === "-") score += 0.5;
       lastMatchIndex = ti;
+      indices.push(ti);
       qi++;
     }
   }
-  return qi === q.length ? score : 0;
+  return qi === q.length ? { score, indices } : null;
 };
 
-export const CommandPalette = ({ open, onClose, commands }: CommandPaletteProps) => {
+interface FilteredEntry {
+  cmd: CommandItem;
+  indices: readonly number[] | null;
+}
+
+const filterCommands = (commands: readonly CommandItem[], query: string): FilteredEntry[] => {
+  if (!query) return commands.map((cmd) => ({ cmd, indices: null }));
+  return commands
+    .flatMap((cmd): (FilteredEntry & { score: number })[] => {
+      const labelMatch = matchQuery(query, cmd.label);
+      if (labelMatch) return [{ cmd, score: labelMatch.score, indices: labelMatch.indices }];
+      const categoryMatch = matchQuery(query, `${cmd.category} ${cmd.label}`);
+      if (categoryMatch) {
+        return [{ cmd, score: CATEGORY_MATCH_PENALTY + categoryMatch.score, indices: null }];
+      }
+      return [];
+    })
+    .sort((a, b) => a.score - b.score)
+    .map(({ cmd, indices }) => ({ cmd, indices }));
+};
+
+const HighlightedLabel = ({
+  label,
+  indices,
+}: {
+  label: string;
+  indices: readonly number[] | null;
+}) => {
+  if (!indices || indices.length === 0) return <>{label}</>;
+  const hits = new Set(indices);
+  const segments: { text: string; hit: boolean }[] = [];
+  for (let i = 0; i < label.length; i++) {
+    const hit = hits.has(i);
+    const last = segments[segments.length - 1];
+    if (last && last.hit === hit) last.text += label[i];
+    else segments.push({ text: label[i], hit });
+  }
+  return (
+    <>
+      {segments.map((segment, segmentIndex) => (
+        <span
+          key={segmentIndex}
+          className={segment.hit ? "font-semibold text-foreground" : undefined}
+        >
+          {segment.text}
+        </span>
+      ))}
+    </>
+  );
+};
+
+const KeyHint = ({ keys, label }: { keys: string; label: string }) => (
+  <span className="flex items-center gap-1">
+    <kbd className="rounded border border-border/40 bg-muted/30 px-1 font-mono text-[10px]">
+      {keys}
+    </kbd>
+    {label}
+  </span>
+);
+
+export const CommandPalette = ({
+  open,
+  onClose,
+  commands,
+  onActiveItemChange,
+}: CommandPaletteProps) => {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [mounted, setMounted] = useState(false);
   const [settled, setSettled] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
   const listId = useId();
 
-  const filtered = query
-    ? commands
-        .map((cmd) => ({ cmd, score: scoreQueryMatch(query, cmd.label) }))
-        .filter((entry) => entry.score > 0)
-        .sort((a, b) => a.score - b.score)
-        .map((entry) => entry.cmd)
-    : commands;
+  const filtered = useMemo(() => filterCommands(commands, query), [commands, query]);
+
+  const groups = useMemo(() => {
+    const result: { category: string; entries: { entry: FilteredEntry; index: number }[] }[] = [];
+    filtered.forEach((entry, index) => {
+      const last = result[result.length - 1];
+      if (last && last.category === entry.cmd.category) last.entries.push({ entry, index });
+      else result.push({ category: entry.cmd.category, entries: [{ entry, index }] });
+    });
+    return result;
+  }, [filtered]);
 
   useEffect(() => {
     if (open) {
       setMounted(true);
       setQuery("");
       setActiveIndex(0);
-      const frame = requestAnimationFrame(() => setSettled(true));
+      const frame = requestAnimationFrame(() => {
+        setSettled(true);
+        // autoFocus only fires on first mount; refocus explicitly when the
+        // palette reopens while the close animation is still unmounting.
+        inputRef.current?.focus();
+      });
       return () => cancelAnimationFrame(frame);
     }
     setSettled(false);
@@ -103,10 +194,15 @@ export const CommandPalette = ({ open, onClose, commands }: CommandPaletteProps)
   }, [query]);
 
   useEffect(() => {
-    if (!open || filtered.length === 0) return;
-    const item = listRef.current?.children[activeIndex] as HTMLElement | undefined;
-    item?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex, filtered.length, open]);
+    if (!onActiveItemChange) return;
+    onActiveItemChange(open ? (filtered[activeIndex]?.cmd ?? null) : null);
+  }, [open, filtered, activeIndex, onActiveItemChange]);
+
+  useEffect(() => {
+    const cmd = filtered[activeIndex]?.cmd;
+    if (!open || !cmd) return;
+    document.getElementById(`${listId}-${cmd.id}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeIndex, filtered, open, listId]);
 
   useEffect(() => {
     if (!open || !mounted) return;
@@ -122,7 +218,7 @@ export const CommandPalette = ({ open, onClose, commands }: CommandPaletteProps)
   }, [open, mounted, onClose]);
 
   const executeActive = useCallback(() => {
-    const cmd = filtered[activeIndex];
+    const cmd = filtered[activeIndex]?.cmd;
     if (!cmd) return;
     onClose();
     cmd.action();
@@ -130,16 +226,13 @@ export const CommandPalette = ({ open, onClose, commands }: CommandPaletteProps)
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key === "ArrowDown") {
+      const count = filtered.length;
+      const isNext = event.key === "ArrowDown" || (event.ctrlKey && event.key === "n");
+      const isPrev = event.key === "ArrowUp" || (event.ctrlKey && event.key === "p");
+      if (isNext || isPrev) {
         event.preventDefault();
-        setActiveIndex((prev) => (prev + 1) % Math.max(1, filtered.length));
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveIndex(
-          (prev) => (prev - 1 + Math.max(1, filtered.length)) % Math.max(1, filtered.length),
-        );
+        if (count === 0) return;
+        setActiveIndex((prev) => (prev + (isNext ? 1 : -1) + count) % count);
         return;
       }
       if (event.key === "Enter") {
@@ -154,6 +247,50 @@ export const CommandPalette = ({ open, onClose, commands }: CommandPaletteProps)
   if (!mounted) return null;
 
   const isVisible = open && settled;
+
+  const renderOption = (entry: FilteredEntry, index: number, showCategory: boolean) => {
+    const { cmd, indices } = entry;
+    return (
+      <button
+        key={cmd.id}
+        id={`${listId}-${cmd.id}`}
+        type="button"
+        role="option"
+        aria-selected={index === activeIndex}
+        className={cn(
+          COMMAND_ITEM_CLASSES,
+          index === activeIndex && "bg-foreground/10 text-foreground",
+        )}
+        onMouseMove={() => {
+          if (index !== activeIndex) setActiveIndex(index);
+        }}
+        onClick={() => {
+          onClose();
+          cmd.action();
+        }}
+      >
+        {cmd.icon ? (
+          <span className="shrink-0 text-muted-foreground/70">{cmd.icon}</span>
+        ) : (
+          <span className="w-4 shrink-0" />
+        )}
+        <span className="flex-1 truncate text-left">
+          <HighlightedLabel label={cmd.label} indices={indices} />
+        </span>
+        {showCategory ? (
+          <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground/50">
+            {cmd.category}
+          </span>
+        ) : null}
+        {cmd.checked ? <Check aria-label="active" className="size-3.5 shrink-0" /> : null}
+        {cmd.shortcut ? (
+          <kbd className="shrink-0 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70">
+            {cmd.shortcut}
+          </kbd>
+        ) : null}
+      </button>
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]">
@@ -170,7 +307,7 @@ export const CommandPalette = ({ open, onClose, commands }: CommandPaletteProps)
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
         className={cn(
-          "relative z-10 w-[460px] max-h-[360px] flex flex-col overflow-hidden rounded-xl",
+          "relative z-10 flex max-h-[400px] w-[520px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl",
           MODAL_PANEL_CLASSES,
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
@@ -187,7 +324,7 @@ export const CommandPalette = ({ open, onClose, commands }: CommandPaletteProps)
             placeholder="Type a command…"
             aria-label="search commands"
             aria-activedescendant={
-              filtered[activeIndex] ? `${listId}-${filtered[activeIndex].id}` : undefined
+              filtered[activeIndex] ? `${listId}-${filtered[activeIndex].cmd.id}` : undefined
             }
             aria-controls={listId}
             aria-expanded
@@ -197,47 +334,34 @@ export const CommandPalette = ({ open, onClose, commands }: CommandPaletteProps)
           />
         </div>
         <div
-          ref={listRef}
           id={listId}
           role="listbox"
           className="flex-1 overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {filtered.length === 0 ? (
             <div className="px-2.5 py-6 text-center text-sm text-muted-foreground/70">
-              No matching commands
+              No commands match “{query}”
             </div>
+          ) : query ? (
+            filtered.map((entry, index) => renderOption(entry, index, true))
           ) : (
-            filtered.map((cmd, index) => (
-              <button
-                key={cmd.id}
-                id={`${listId}-${cmd.id}`}
-                type="button"
-                role="option"
-                aria-selected={index === activeIndex}
-                className={cn(
-                  COMMAND_ITEM_CLASSES,
-                  index === activeIndex && "bg-foreground/10 text-foreground",
-                )}
-                onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => {
-                  onClose();
-                  cmd.action();
-                }}
-              >
-                {cmd.icon ? (
-                  <span className="shrink-0 text-muted-foreground/70">{cmd.icon}</span>
-                ) : (
-                  <span className="w-4 shrink-0" />
-                )}
-                <span className="flex-1 text-left">{cmd.label}</span>
-                {cmd.shortcut ? (
-                  <kbd className="shrink-0 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70">
-                    {cmd.shortcut}
-                  </kbd>
-                ) : null}
-              </button>
+            groups.map((group) => (
+              <div key={group.category} role="group" aria-label={group.category}>
+                <div className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50">
+                  {group.category}
+                </div>
+                {group.entries.map(({ entry, index }) => renderOption(entry, index, false))}
+              </div>
             ))
           )}
+        </div>
+        <div className="flex items-center gap-3 border-t border-border/40 px-3 py-1.5 text-[10px] text-muted-foreground/60">
+          <KeyHint keys="↑↓" label="navigate" />
+          <KeyHint keys="↵" label="run" />
+          <KeyHint keys="esc" label="close" />
+          <span className="ml-auto">
+            {filtered.length} {filtered.length === 1 ? "command" : "commands"}
+          </span>
         </div>
       </div>
     </div>

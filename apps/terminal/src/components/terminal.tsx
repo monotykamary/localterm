@@ -71,7 +71,11 @@ import {
   TOOLBAR_HIDE_DELAY_MS,
 } from "@/lib/constants";
 import { serverToClientMessageSchema } from "@monotykamary/localterm-server/protocol";
-import { TERMINAL_CURSOR_STYLES, type TerminalCursorStyle } from "@/lib/terminal-cursor";
+import {
+  TERMINAL_CURSOR_STYLES,
+  type TerminalCursorStyle,
+  isTerminalCursorStyle,
+} from "@/lib/terminal-cursor";
 import { TERMINAL_FONTS, familyForFont, findTerminalFontById } from "@/lib/terminal-fonts";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
 import { TERMINAL_THEMES, findTerminalThemeById } from "@/lib/terminal-themes";
@@ -1374,25 +1378,11 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
   const commandPaletteCommands = useMemo<CommandItem[]>(() => {
     const togglePrefix = isMac ? "⌘" : "Ctrl+";
-    const themeCommands: CommandItem[] = TERMINAL_THEMES.map((theme) => ({
-      id: `theme:${theme.id}`,
-      label: `Theme: ${theme.name}`,
-      category: "Theme",
-      action: () => handleThemeChange(theme.id),
-    }));
-    const fontCommands: CommandItem[] = TERMINAL_FONTS.map((font) => ({
-      id: `font:${font.id}`,
-      label: `Font: ${font.name}`,
-      category: "Font",
-      action: () => handleFontChange(font.id),
-    }));
     return [
-      ...themeCommands,
-      ...fontCommands,
       {
         id: "find",
         label: "Find in terminal",
-        category: "Search",
+        category: "Actions",
         shortcut: `${togglePrefix}F`,
         icon: <Search className="size-3.5" />,
         action: openSearchOverlay,
@@ -1400,14 +1390,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       {
         id: "git-diff",
         label: "View git diff",
-        category: "Git",
+        category: "Actions",
         icon: <FileDiff className="size-3.5" />,
         action: openDiffViewer,
       },
       {
         id: "new-shell",
         label: "Open new shell",
-        category: "Tab",
+        category: "Actions",
         shortcut: "Alt+T",
         icon: <Plus className="size-3.5" />,
         action: () => {
@@ -1415,22 +1405,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           if (link instanceof HTMLAnchorElement) link.click();
         },
       },
-      ...TERMINAL_CURSOR_STYLES.map((option) => ({
-        id: `cursor:${option.id}`,
-        label: `Cursor: ${option.name}`,
-        category: "Cursor",
-        action: () => handleCursorStyleChange(option.id),
-      })),
-      {
-        id: "cursor-blink",
-        label: `Cursor blink: ${activeCursorBlink ? "On" : "Off"}`,
-        category: "Cursor",
-        action: () => handleCursorBlinkChange(!activeCursorBlink),
-      },
       {
         id: "font-size-up",
         label: "Increase font size",
-        category: "Font",
+        category: "Settings",
         shortcut: `${togglePrefix}+`,
         icon: <MonitorCog className="size-3.5" />,
         action: () => handleFontSizeChange(activeFontSize + TERMINAL_FONT_SIZE_STEP_PX),
@@ -1438,17 +1416,46 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       {
         id: "font-size-down",
         label: "Decrease font size",
-        category: "Font",
+        category: "Settings",
         shortcut: `${togglePrefix}-`,
         icon: <MonitorCog className="size-3.5" />,
         action: () => handleFontSizeChange(activeFontSize - TERMINAL_FONT_SIZE_STEP_PX),
       },
       {
+        id: "cursor-blink",
+        label: "Cursor blink",
+        category: "Settings",
+        checked: activeCursorBlink,
+        action: () => handleCursorBlinkChange(!activeCursorBlink),
+      },
+      {
         id: "scroll-on-input",
-        label: `Pin to bottom on input: ${activeScrollOnUserInput ? "On" : "Off"}`,
-        category: "Scrollback",
+        label: "Pin to bottom on input",
+        category: "Settings",
+        checked: activeScrollOnUserInput,
         action: () => handleScrollOnUserInputChange(!activeScrollOnUserInput),
       },
+      ...TERMINAL_CURSOR_STYLES.map((option) => ({
+        id: `cursor:${option.id}`,
+        label: option.name,
+        category: "Cursor",
+        checked: option.id === activeCursorStyle,
+        action: () => handleCursorStyleChange(option.id),
+      })),
+      ...TERMINAL_FONTS.map((font) => ({
+        id: `font:${font.id}`,
+        label: font.name,
+        category: "Font",
+        checked: font.id === activeFontId,
+        action: () => handleFontChange(font.id),
+      })),
+      ...TERMINAL_THEMES.map((theme) => ({
+        id: `theme:${theme.id}`,
+        label: theme.name,
+        category: "Theme",
+        checked: theme.id === activeThemeId,
+        action: () => handleThemeChange(theme.id),
+      })),
     ];
   }, [
     isMac,
@@ -1463,7 +1470,18 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     handleFontSizeChange,
     activeScrollOnUserInput,
     handleScrollOnUserInputChange,
+    activeThemeId,
+    activeFontId,
+    activeCursorStyle,
   ]);
+
+  const handleCommandPaletteHighlight = useCallback((item: CommandItem | null) => {
+    const itemId = item?.id ?? "";
+    setPreviewThemeId(itemId.startsWith("theme:") ? itemId.slice("theme:".length) : null);
+    setPreviewFontId(itemId.startsWith("font:") ? itemId.slice("font:".length) : null);
+    const cursorStyleId = itemId.startsWith("cursor:") ? itemId.slice("cursor:".length) : null;
+    setPreviewCursorStyle(isTerminalCursorStyle(cursorStyleId) ? cursorStyleId : null);
+  }, []);
 
   return (
     <div className="h-dvh w-dvw" style={{ background: pageBackground }}>
@@ -1681,6 +1699,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         open={isCommandPaletteOpen}
         onClose={closeCommandPalette}
         commands={commandPaletteCommands}
+        onActiveItemChange={handleCommandPaletteHighlight}
       />
 
       <DiffViewer open={isDiffViewerOpen} cwd={liveCwd} onClose={closeDiffViewer} />
