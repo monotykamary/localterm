@@ -14,8 +14,19 @@ export {
 } from "./constants.js";
 export {
   clientToServerMessageSchema,
+  gitDiffFileSchema,
+  gitDiffFileStatusSchema,
+  gitDiffResponseSchema,
+  gitDiffSummarySchema,
   healthSchema,
   serverToClientMessageSchema,
 } from "./schemas.js";
-export type { ClientToServerMessage, ServerToClientMessage } from "./types.js";
+export type {
+  ClientToServerMessage,
+  GitDiffFile,
+  GitDiffFileStatus,
+  GitDiffResponse,
+  GitDiffSummary,
+  ServerToClientMessage,
+} from "./types.js";
 export type { ServerError, ServerErrorCode, ServerErrorKind } from "./errors.js";

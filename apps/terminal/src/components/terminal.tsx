@@ -7,7 +7,17 @@ import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XtermTerminal } from "@xterm/xterm";
-import { Check, ChevronDown, ChevronUp, Copy, MonitorCog, Plus, Search } from "lucide-react";
+import {
+  Binary,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  FileDiff,
+  MonitorCog,
+  Plus,
+  Search,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
@@ -30,7 +40,9 @@ import {
 } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
 import { CommandPalette, type CommandItem } from "@/components/command-palette";
+import { DiffViewer } from "@/components/diff-viewer";
 import { SettingsMenu } from "@/components/settings-menu";
+import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
 import {
   COPY_FEEDBACK_MS,
   DEAD_SESSION_TITLE_PREFIX,
@@ -83,6 +95,7 @@ import { clampTerminalFontSize } from "@/utils/clamp-terminal-font-size";
 import { clampTerminalLineHeight } from "@/utils/clamp-terminal-line-height";
 import { clampTerminalPaddingX, clampTerminalPaddingY } from "@/utils/clamp-terminal-padding";
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
+import { formatDiffCount } from "@/utils/format-diff-count";
 import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
@@ -270,6 +283,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const liveCwdRef = useRef<string | null>(null);
   const wsConnectedRef = useRef(false);
   const isMac = useMemo(detectIsMacPlatform, []);
+  const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
+  const diffSummary = useGitDiffSummary(liveCwd);
+  const hasDiff = diffSummary !== null && diffSummary.isRepo && diffSummary.files > 0;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1193,6 +1209,16 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   }, []);
   openSearchOverlayRef.current = openSearchOverlay;
 
+  const openDiffViewer = useCallback(() => {
+    setIsDiffViewerOpen(true);
+    setIsCommandPaletteOpen(false);
+  }, []);
+
+  const closeDiffViewer = useCallback(() => {
+    setIsDiffViewerOpen(false);
+    refocusTerminalRef.current?.();
+  }, []);
+
   const handleSearchInputChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const next = event.target.value;
@@ -1334,7 +1360,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
   useEffect(() => {
     onModalOpenChange?.(isModalOpen);
-    if (isModalOpen) setIsCommandPaletteOpen(false);
+    if (isModalOpen) {
+      setIsCommandPaletteOpen(false);
+      setIsDiffViewerOpen(false);
+    }
   }, [isModalOpen, onModalOpenChange]);
   const matchLabel =
     searchResults.resultCount === 0
@@ -1367,6 +1396,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         shortcut: `${togglePrefix}F`,
         icon: <Search className="size-3.5" />,
         action: openSearchOverlay,
+      },
+      {
+        id: "git-diff",
+        label: "View git diff",
+        category: "Git",
+        icon: <FileDiff className="size-3.5" />,
+        action: openDiffViewer,
       },
       {
         id: "new-shell",
@@ -1419,6 +1455,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     handleThemeChange,
     handleFontChange,
     openSearchOverlay,
+    openDiffViewer,
     handleCursorStyleChange,
     activeCursorBlink,
     handleCursorBlinkChange,
@@ -1470,7 +1507,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         <div
           className={cn(
             "absolute right-0 top-0 z-10 flex flex-col items-end pr-3 pt-1",
-            isToolbarVisible ? "pointer-events-auto" : "pointer-events-none",
+            isToolbarVisible || hasDiff ? "pointer-events-auto" : "pointer-events-none",
           )}
           onMouseEnter={handleToolbarAreaEnter}
           onMouseLeave={handleToolbarAreaLeave}
@@ -1479,7 +1516,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
             aria-hidden="true"
             className={cn(
               "pointer-events-auto mr-0.5 h-[2px] w-5 rounded-full bg-muted-foreground/25 transition-opacity duration-150",
-              isToolbarVisible || isSearchOpen ? "opacity-0" : "opacity-100",
+              isToolbarVisible || isSearchOpen || hasDiff ? "opacity-0" : "opacity-100",
             )}
           />
           {!isSearchOpen && (
@@ -1489,71 +1526,109 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
               className={cn(
                 "mt-1 flex items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md",
                 "transition-[opacity,transform] duration-200 ease-snappy",
-                isToolbarVisible
+                isToolbarVisible || hasDiff
                   ? "translate-y-0 opacity-100"
                   : "pointer-events-none -translate-y-1 opacity-0",
               )}
               onMouseDown={(event) => event.preventDefault()}
               onKeyDown={() => refocusTerminalRef.current?.()}
             >
-              <SettingsMenu
-                themeId={activeThemeId}
-                onThemeChange={handleThemeChange}
-                onThemePreview={setPreviewThemeId}
-                fontId={activeFontId}
-                onFontChange={handleFontChange}
-                onFontPreview={setPreviewFontId}
-                nerdFontEnabled={activeNerdFontEnabled}
-                onNerdFontEnabledChange={handleNerdFontEnabledChange}
-                fontSize={activeFontSize}
-                onFontSizeChange={handleFontSizeChange}
-                lineHeight={activeLineHeight}
-                onLineHeightChange={handleLineHeightChange}
-                cursorStyle={activeCursorStyle}
-                onCursorStyleChange={handleCursorStyleChange}
-                onCursorStylePreview={setPreviewCursorStyle}
-                cursorBlink={activeCursorBlink}
-                onCursorBlinkChange={handleCursorBlinkChange}
-                scrollback={activeScrollback}
-                onScrollbackChange={handleScrollbackChange}
-                scrollOnUserInput={activeScrollOnUserInput}
-                onScrollOnUserInputChange={handleScrollOnUserInputChange}
-                paddingX={activePaddingX}
-                onPaddingXChange={handlePaddingXChange}
-                paddingY={activePaddingY}
-                onPaddingYChange={handlePaddingYChange}
-                notificationsPermission={notificationsPermission}
-                onNotificationsPermissionRequest={handleNotificationsPermissionRequest}
-                sessionInfo={sessionInfo}
-                onPopoverOpenChange={handleSettingsPopoverOpenChange}
-                onClose={refocusTerminalRef.current ?? undefined}
-              />
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={openSearchOverlay}
-                aria-label="find in terminal"
-                className="hover:text-foreground"
+              {/* With a diff showing, the action buttons collapse behind the
+                  always-visible indicator and expand on hover via the
+                  0fr -> 1fr grid-column transition. */}
+              <div
+                className={cn(
+                  "grid",
+                  hasDiff && "transition-[grid-template-columns] duration-200 ease-snappy",
+                  hasDiff && !isToolbarVisible ? "grid-cols-[0fr]" : "grid-cols-[1fr]",
+                )}
               >
-                <Search />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                nativeButton={false}
-                aria-label="open a new shell in a new browser tab"
-                render={
-                  <a
-                    id="new-shell-link"
-                    href={newTabUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                <div
+                  className={cn(
+                    "flex min-w-0 items-center gap-0.5 overflow-hidden",
+                    hasDiff && "transition-opacity duration-200 ease-snappy",
+                    hasDiff && !isToolbarVisible ? "pointer-events-none opacity-0" : "opacity-100",
+                  )}
+                >
+                  <SettingsMenu
+                    themeId={activeThemeId}
+                    onThemeChange={handleThemeChange}
+                    onThemePreview={setPreviewThemeId}
+                    fontId={activeFontId}
+                    onFontChange={handleFontChange}
+                    onFontPreview={setPreviewFontId}
+                    nerdFontEnabled={activeNerdFontEnabled}
+                    onNerdFontEnabledChange={handleNerdFontEnabledChange}
+                    fontSize={activeFontSize}
+                    onFontSizeChange={handleFontSizeChange}
+                    lineHeight={activeLineHeight}
+                    onLineHeightChange={handleLineHeightChange}
+                    cursorStyle={activeCursorStyle}
+                    onCursorStyleChange={handleCursorStyleChange}
+                    onCursorStylePreview={setPreviewCursorStyle}
+                    cursorBlink={activeCursorBlink}
+                    onCursorBlinkChange={handleCursorBlinkChange}
+                    scrollback={activeScrollback}
+                    onScrollbackChange={handleScrollbackChange}
+                    scrollOnUserInput={activeScrollOnUserInput}
+                    onScrollOnUserInputChange={handleScrollOnUserInputChange}
+                    paddingX={activePaddingX}
+                    onPaddingXChange={handlePaddingXChange}
+                    paddingY={activePaddingY}
+                    onPaddingYChange={handlePaddingYChange}
+                    notificationsPermission={notificationsPermission}
+                    onNotificationsPermissionRequest={handleNotificationsPermissionRequest}
+                    sessionInfo={sessionInfo}
+                    onPopoverOpenChange={handleSettingsPopoverOpenChange}
+                    onClose={refocusTerminalRef.current ?? undefined}
                   />
-                }
-                className="hover:text-foreground"
-              >
-                <Plus />
-              </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={openSearchOverlay}
+                    aria-label="find in terminal"
+                    className="hover:text-foreground"
+                  >
+                    <Search />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    nativeButton={false}
+                    aria-label="open a new shell in a new browser tab"
+                    render={
+                      <a
+                        id="new-shell-link"
+                        href={newTabUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      />
+                    }
+                    className="hover:text-foreground"
+                  >
+                    <Plus />
+                  </Button>
+                </div>
+              </div>
+              {hasDiff && diffSummary !== null ? (
+                <button
+                  type="button"
+                  onClick={openDiffViewer}
+                  aria-label={`view git diff: ${diffSummary.additions} additions, ${diffSummary.deletions} deletions${diffSummary.binaries > 0 ? `, ${diffSummary.binaries} binary files changed` : ""}`}
+                  className="flex h-8 items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 font-mono text-xs tabular-nums outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                >
+                  <span className="text-emerald-400">
+                    +{formatDiffCount(diffSummary.additions)}
+                  </span>
+                  <span className="text-red-400">−{formatDiffCount(diffSummary.deletions)}</span>
+                  {diffSummary.binaries > 0 ? (
+                    <span className="flex items-center gap-0.5 text-muted-foreground">
+                      <Binary className="size-3" aria-hidden="true" />
+                      {diffSummary.binaries}
+                    </span>
+                  ) : null}
+                </button>
+              ) : null}
             </div>
           )}
           {isSearchOpen && (
@@ -1607,6 +1682,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         onClose={closeCommandPalette}
         commands={commandPaletteCommands}
       />
+
+      <DiffViewer open={isDiffViewerOpen} cwd={liveCwd} onClose={closeDiffViewer} />
 
       <AlertDialog open={isModalOpen}>
         <AlertDialogContent>

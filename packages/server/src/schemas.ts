@@ -100,3 +100,44 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   foregroundMessageSchema,
   notificationMessageSchema,
 ]);
+
+export const gitDiffFileStatusSchema = z.enum([
+  "modified",
+  "added",
+  "deleted",
+  "renamed",
+  "untracked",
+]);
+
+// Lightweight working-tree stats polled by the browser for the diff indicator.
+export const gitDiffSummarySchema = z
+  .object({
+    isRepo: z.boolean(),
+    files: z.number().int().nonnegative(),
+    additions: z.number().int().nonnegative(),
+    deletions: z.number().int().nonnegative(),
+    binaries: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const gitDiffFileSchema = z
+  .object({
+    path: z.string().min(1),
+    oldPath: z.string().min(1).nullable(),
+    status: gitDiffFileStatusSchema,
+    additions: z.number().int().nonnegative(),
+    deletions: z.number().int().nonnegative(),
+    binary: z.boolean(),
+    // Unified diff text for this file. Null when the file is binary or the
+    // patch was dropped for size (patchOmitted distinguishes the two).
+    patch: z.string().nullable(),
+    patchOmitted: z.boolean(),
+  })
+  .strict();
+
+export const gitDiffResponseSchema = z
+  .object({
+    isRepo: z.boolean(),
+    files: z.array(gitDiffFileSchema),
+  })
+  .strict();

@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import {
   DEFAULT_HOST,
   DEFAULT_PORT,
+  HTTP_STATUS_BAD_REQUEST,
   HTTP_STATUS_NOT_FOUND,
   MAX_CONCURRENT_SESSIONS,
   OUTPUT_BATCH_FLUSH_BYTES,
@@ -23,6 +24,7 @@ import {
   WS_READY_STATE_OPEN,
 } from "./constants.js";
 import { ServerErrorException, serverError } from "./errors.js";
+import { getGitDiff, getGitDiffSummary } from "./git-diff.js";
 import { clientToServerMessageSchema } from "./schemas.js";
 import { Session } from "./session.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
@@ -126,6 +128,31 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   const api = new Hono();
   api.get("/health", (context) => context.json({ ok: true, sessions: registry.size() }));
+
+  // Same validation as the WS `?cwd=` param: must exist and be a directory.
+  // No path containment check — this daemon already hands out unrestricted
+  // shells, so reading a diff is not an escalation.
+  const resolveCwdQuery = (rawCwd: string | undefined): string | null => {
+    if (!rawCwd) return null;
+    try {
+      return fs.statSync(rawCwd).isDirectory() ? rawCwd : null;
+    } catch {
+      return null;
+    }
+  };
+
+  api.get("/git/diff-summary", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json(await getGitDiffSummary(cwd));
+  });
+
+  api.get("/git/diff", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json(await getGitDiff(cwd));
+  });
+
   api.notFound((context) => context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND));
   app.route("/api", api);
 

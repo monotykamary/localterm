@@ -97,6 +97,34 @@ export const SERVER_STOP_GRACE_MS = 1_500;
 export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "[0:0:0:0:0:0:0:1]"]);
 
 export const HTTP_STATUS_NOT_FOUND = 404;
+export const HTTP_STATUS_BAD_REQUEST = 400;
+
+// Git diff endpoints. The summary endpoint is polled by the browser every few
+// seconds, so every limit here exists to keep one poll cheap and to keep a
+// pathological working tree (huge generated file, thousands of untracked
+// files) from wedging the daemon or ballooning a single HTTP response.
+export const GIT_COMMAND_TIMEOUT_MS = 10_000;
+// `git diff` of a large working tree can legitimately produce tens of MB;
+// execFile kills the child past maxBuffer, which we degrade into a
+// "patches omitted" response rather than an error.
+export const GIT_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
+// SHA of git's well-known empty tree object — the diff base for a repository
+// that has no commits yet, so a brand-new repo still reports its staged files.
+export const GIT_EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+// Untracked files aren't covered by `git diff`, so we stat/read them
+// ourselves (size+mtime cached between polls). Caps bound the per-poll
+// filesystem work; files past the byte cap keep an approximate line count
+// from the read prefix and drop their patch.
+export const GIT_MAX_UNTRACKED_FILES = 200;
+export const GIT_MAX_UNTRACKED_FILE_BYTES = 1 * 1024 * 1024;
+// Binary sniff window: a NUL byte in the first 8KB marks a file as binary,
+// matching git's own heuristic (buffer_is_binary checks the first 8000 bytes).
+export const GIT_BINARY_SNIFF_BYTES = 8000;
+// Per-file and whole-response patch caps for /api/git/diff. Files past the
+// per-file cap keep their stats but drop the patch text (the viewer shows a
+// "too large" notice); past the total cap all remaining patches are dropped.
+export const GIT_MAX_PATCH_BYTES_PER_FILE = 1 * 1024 * 1024;
+export const GIT_MAX_TOTAL_PATCH_BYTES = 10 * 1024 * 1024;
 
 export const WS_READY_STATE_OPEN = 1;
 export const WS_CLOSE_POLICY_VIOLATION = 1008;

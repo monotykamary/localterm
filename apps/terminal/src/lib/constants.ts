@@ -33,6 +33,14 @@ export const FAVICON_DEAD_OPACITY = 0.35;
 
 export const COMMAND_PALETTE_CLOSE_TRANSITION_MS = 150;
 
+export const GIT_DIFF_SUMMARY_POLL_INTERVAL_MS = 3000;
+export const DIFF_VIEWER_CLOSE_TRANSITION_MS = 150;
+// Render cap per file in the diff viewer. Beyond this the remaining hunks are
+// hidden behind a "show all" button so a generated-file diff can't lock up
+// the main thread on first paint.
+export const DIFF_VIEWER_INITIAL_LINE_LIMIT = 2000;
+export const DIFF_VIEW_MODE_STORAGE_KEY = "localterm:diff-view-mode";
+
 export const TOOLBAR_HIDE_DELAY_MS = 200;
 export const TOOLTIP_DELAY_MS = 300;
 export const TOOLTIP_SIDE_OFFSET_PX = 8;
