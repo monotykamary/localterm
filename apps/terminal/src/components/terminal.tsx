@@ -296,10 +296,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     const getKittyFlags = (): number => kittyFlagStack[kittyFlagStack.length - 1] ?? 0;
 
     const noteOutputActivity = () => {
-      if (faviconReadyTimer !== null) {
-        window.clearTimeout(faviconReadyTimer);
-        faviconReadyTimer = null;
-      }
       if (faviconState !== "running" && faviconRunningTimer === null) {
         faviconRunningTimer = window.setTimeout(() => {
           faviconRunningTimer = null;
@@ -309,6 +305,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           setTabFaviconState("running");
         }, FAVICON_RUNNING_DEBOUNCE_MS);
       }
+      if (faviconReadyTimer !== null) return;
       faviconReadyTimer = window.setTimeout(() => {
         faviconReadyTimer = null;
         if (faviconRunningTimer !== null) {
