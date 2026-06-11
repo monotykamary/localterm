@@ -63,8 +63,8 @@ describe("DiffViewer", () => {
     fetchGitDiffMock.mockResolvedValue(DIFF_RESPONSE);
     renderDiffViewer();
 
-    const fileOption = await screen.findByRole("option", { name: /app\.ts/ });
-    expect(fileOption.getAttribute("aria-selected")).toBe("true");
+    const fileOption = await screen.findByRole("option", { name: /app\.ts/, selected: true });
+    expect(fileOption).toBeTruthy();
     expect(fetchGitDiffMock).toHaveBeenCalledWith("/repo", expect.any(AbortSignal));
 
     expect(await screen.findByText("beta")).toBeTruthy();
