@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.12.0
+
+### Minor Changes
+
+- Add git diff viewer with server-side diff endpoints
+
 ## 1.11.3
 
 ### Patch Changes

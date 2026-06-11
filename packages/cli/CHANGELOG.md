@@ -1,5 +1,16 @@
 # localterm
 
+## 1.12.0
+
+### Minor Changes
+
+- Add git diff viewer with server-side diff endpoints
+
+### Patch Changes
+
+- Updated dependencies
+  - @monotykamary/localterm-server@1.12.0
+
 ## 1.11.3
 
 ### Patch Changes
@@ -16,6 +27,7 @@
 ### Patch Changes
 
 - Fix security, CLI lifecycle, and frontend bugs from full codebase review
+
   - security: stripPort now treats `localhost:3417` correctly (was rejected with 403)
   - security: maxPayload capped at 256KB on WebSocket server
   - security: shell hook temp dirs use mode 0o700, rc files use mode 0o600
