@@ -3,7 +3,7 @@ import {
   DEFAULT_TERMINAL_SCROLL_ON_USER_INPUT,
   TERMINAL_SCROLL_ON_USER_INPUT_STORAGE_KEY,
 } from "../../src/lib/constants";
-import { loadStoredTerminalScrollOnUserInput } from "../../src/utils/load-stored-terminal-scroll-on-user-input";
+import { loadStoredTerminalScrollOnUserInput } from "../../src/utils/stored-terminal-scroll-on-user-input";
 
 const installFakeLocalStorage = (initial: Record<string, string> = {}) => {
   const store = new Map<string, string>(Object.entries(initial));

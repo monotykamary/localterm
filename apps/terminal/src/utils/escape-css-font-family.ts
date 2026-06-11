@@ -4,9 +4,8 @@
  * quote (`"`) as `\"`. The order matters: escape backslashes first so we don't
  * double-escape the backslash we add for the quote.
  *
- * Most installed fonts have plain names, but Local Font Access can surface
- * user-installed fonts with unusual characters, and the manual-input fallback
- * accepts arbitrary strings — we can't trust either source.
+ * Most installed fonts have plain names, but user-configured font names from
+ * settings can contain unusual characters — we can't trust the input.
  */
 export const escapeCssFontFamily = (family: string): string =>
   family.replace(/\\/g, "\\\\").replace(/"/g, '\\"');

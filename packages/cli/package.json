@@ -13,19 +13,19 @@
     "xterm",
     "xterm.js"
   ],
-  "homepage": "https://github.com/aidenybai/localterm#readme",
+  "homepage": "https://github.com/monotykamary/localterm#readme",
   "bugs": {
-    "url": "https://github.com/aidenybai/localterm/issues"
+    "url": "https://github.com/monotykamary/localterm/issues"
   },
   "license": "MIT",
   "author": "Aiden Bai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aidenybai/localterm.git",
+    "url": "git+https://github.com/monotykamary/localterm.git",
     "directory": "packages/cli"
   },
   "bin": {
-    "@monotykamary/localterm": "./bin/localterm.mjs"
+    "localterm": "./bin/localterm.mjs"
   },
   "files": [
     "bin",

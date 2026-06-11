@@ -87,11 +87,11 @@ export const OUTPUT_BATCH_WINDOW_MS = 2;
 // trips its own write error and shows "Shell ended" with no idea why.
 export const WS_HEARTBEAT_INTERVAL_MS = 20_000;
 export const WS_HEARTBEAT_TIMEOUT_MS = 60_000;
+export const FOREGROUND_POLL_INTERVAL_MS = 250;
 // Hard ceiling for server.stop() — clients get terminated, then the http
 // server is given this long to actually close before we resolve anyway. Keeps
 // the daemon's SIGTERM path bounded so the CLI's force-exit fallback never
 // fires for normal shutdowns.
-export const FOREGROUP_POLL_INTERVAL_MS = 250;
 export const SERVER_STOP_GRACE_MS = 1_500;
 
 export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "[0:0:0:0:0:0:0:1]"]);

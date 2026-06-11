@@ -7,7 +7,16 @@ import { runStop } from "./commands/stop.js";
 import { parsePortOption } from "./utils/parse-port-option.js";
 import { readPackageVersion } from "./utils/read-package-version.js";
 
-const initialPort = parsePortOption(process.env.PORT ?? String(DEFAULT_PORT));
+const resolveInitialPort = (): number => {
+  const raw = process.env.PORT;
+  if (raw === undefined || raw === "") return DEFAULT_PORT;
+  try {
+    return parsePortOption(raw);
+  } catch {
+    console.warn(`ignoring invalid PORT environment variable: ${raw}`);
+    return DEFAULT_PORT;
+  }
+};
 
 const program = new Command();
 program
@@ -18,7 +27,7 @@ program
 program
   .command("start")
   .description("start the localterm server (daemonizes by default)")
-  .option("-p, --port <port>", "port to bind", parsePortOption, initialPort)
+  .option("-p, --port <port>", "port to bind", parsePortOption, resolveInitialPort())
   .option("-H, --host <host>", "host to bind", DEFAULT_HOST)
   .option("--open", "open browser on start")
   .option("-F, --foreground", "stay attached to this terminal (do not daemonize)", false)
@@ -48,7 +57,7 @@ program
 program
   .command("restart")
   .description("restart the localterm server")
-  .option("-p, --port <port>", "port to bind", parsePortOption, initialPort)
+  .option("-p, --port <port>", "port to bind", parsePortOption, resolveInitialPort())
   .option("-H, --host <host>", "host to bind", DEFAULT_HOST)
   .option("--open", "open browser on restart")
   .action(async (options: { port: number; host: string; open: boolean }) => {

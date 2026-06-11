@@ -18,7 +18,12 @@ export const restoreTerminalScrollAnchor = (
   }
 
   const buffer = terminal.buffer.active;
-  const targetViewportY = Math.max(0, buffer.baseY - anchor.distanceFromBottom);
+  if (anchor.distanceFromBottom > buffer.baseY) {
+    terminal.scrollToBottom();
+    return;
+  }
+
+  const targetViewportY = buffer.baseY - anchor.distanceFromBottom;
   const lineDelta = targetViewportY - buffer.viewportY;
   if (lineDelta !== 0) terminal.scrollLines(lineDelta);
 };

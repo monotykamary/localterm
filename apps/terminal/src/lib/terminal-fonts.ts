@@ -13,13 +13,13 @@ const MONO_FALLBACK = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
 const NERD_FONT_FAMILY = '"Symbols Nerd Font"';
 
-const buildFamily = (primary: string): string =>
-  `"${escapeCssFontFamily(primary)}", ${NERD_FONT_FAMILY}, ${MONO_FALLBACK}`;
+const buildFamily = (primary: string, nerdEnabled: boolean): string =>
+  `"${escapeCssFontFamily(primary)}"${nerdEnabled ? `, ${NERD_FONT_FAMILY}` : ""}, ${MONO_FALLBACK}`;
 
 const buildStaticFont = (id: string, name: string, source: TerminalFontSource): TerminalFont => ({
   id,
   name,
-  family: buildFamily(name),
+  family: buildFamily(name, true),
   source,
 });
 
@@ -59,6 +59,9 @@ export const findTerminalFontById = (id: string | null | undefined): TerminalFon
   if (!id) return GEIST_MONO;
   return TERMINAL_FONTS.find((font) => font.id === id) ?? GEIST_MONO;
 };
+
+export const familyForFont = (font: TerminalFont, nerdEnabled: boolean): string =>
+  buildFamily(font.name, nerdEnabled);
 
 export const buildGoogleFontsStylesheetHref = (): string => {
   const googleFonts = TERMINAL_FONTS.filter((font) => font.source === "google");

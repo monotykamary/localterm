@@ -5,11 +5,11 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  vite: npm:@voidzero-dev/vite-plus-core
+  vite: npm:@voidzero-dev/vite-plus-core@^0.1.12
 
 patchedDependencies:
   node-pty@1.1.0:
-    hash: dec0f8a94c03167ebf452f4fea5938b51a991e0463c91af0883da869114dc8d1
+    hash: 055369749ed898a53d1d3c2b69c380d70a244e8d869a1df14bf514e4ae000556
     path: patches/node-pty@1.1.0.patch
 
 importers:
@@ -132,7 +132,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       vite:
-        specifier: npm:@voidzero-dev/vite-plus-core
+        specifier: npm:@voidzero-dev/vite-plus-core@^0.1.12
         version: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@25.6.0)(jiti@2.6.1)(typescript@5.9.3)'
       vite-plus:
         specifier: ^0.1.12
@@ -181,7 +181,7 @@ importers:
         version: 4.12.15
       node-pty:
         specifier: 1.1.0
-        version: 1.1.0(patch_hash=dec0f8a94c03167ebf452f4fea5938b51a991e0463c91af0883da869114dc8d1)
+        version: 1.1.0(patch_hash=055369749ed898a53d1d3c2b69c380d70a244e8d869a1df14bf514e4ae000556)
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -189,12 +189,18 @@ importers:
       '@types/node':
         specifier: ^25.5.0
         version: 25.6.0
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
       vite-plus:
         specifier: ^0.1.12
         version: 0.1.19(@types/node@25.6.0)(jiti@2.6.1)(jsdom@29.0.2(@noble/hashes@1.8.0))(typescript@5.9.3)(vite@8.0.10(@types/node@25.6.0)(jiti@2.6.1))
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
 
 packages:
 
@@ -1244,6 +1250,9 @@ packages:
 
   '@types/validate-npm-package-name@4.0.2':
     resolution: {integrity: sha512-lrpDziQipxCEeK5kWxvljWYhUvOiB2A9izZd9B2AFarYAkqZshb4lPbRs7zKEic6eGtH8V/2qJW+dPp9OtF6bw==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@vitejs/plugin-react@5.2.0':
     resolution: {integrity: sha512-YmKkfhOAi3wsB1PhJq5Scj3GXMn3WvtQ/JC0xoopuHoXSdmtdStOpFrYaT1kie2YgFBcIe64ROzMYRjCrYOdYw==}
@@ -3137,8 +3146,8 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
-  ws@8.20.0:
-    resolution: {integrity: sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA==}
+  ws@8.21.0:
+    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -3680,7 +3689,7 @@ snapshots:
     dependencies:
       '@hono/node-server': 1.19.14(hono@4.12.15)
       hono: 4.12.15
-      ws: 8.20.0
+      ws: 8.21.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -4207,6 +4216,10 @@ snapshots:
 
   '@types/validate-npm-package-name@4.0.2': {}
 
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 25.6.0
+
   '@vitejs/plugin-react@5.2.0(@voidzero-dev/vite-plus-core@0.1.24(@types/node@25.6.0)(jiti@2.6.1)(typescript@5.9.3))':
     dependencies:
       '@babel/core': 7.29.0
@@ -4276,7 +4289,7 @@ snapshots:
       tinyexec: 1.1.1
       tinyglobby: 0.2.16
       vite: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@25.6.0)(jiti@2.6.1)(typescript@5.9.3)'
-      ws: 8.20.0
+      ws: 8.21.0
     optionalDependencies:
       '@types/node': 25.6.0
       jsdom: 29.0.2(@noble/hashes@1.8.0)
@@ -4316,7 +4329,7 @@ snapshots:
       tinyexec: 1.1.1
       tinyglobby: 0.2.16
       vite: 8.0.10(@types/node@25.6.0)(jiti@2.6.1)
-      ws: 8.20.0
+      ws: 8.21.0
     optionalDependencies:
       '@types/node': 25.6.0
       jsdom: 29.0.2(@noble/hashes@1.8.0)
@@ -5236,7 +5249,7 @@ snapshots:
       fetch-blob: 3.2.0
       formdata-polyfill: 4.0.10
 
-  node-pty@1.1.0(patch_hash=dec0f8a94c03167ebf452f4fea5938b51a991e0463c91af0883da869114dc8d1):
+  node-pty@1.1.0(patch_hash=055369749ed898a53d1d3c2b69c380d70a244e8d869a1df14bf514e4ae000556):
     dependencies:
       node-addon-api: 7.1.1
 
@@ -6013,7 +6026,7 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  ws@8.20.0: {}
+  ws@8.21.0: {}
 
   wsl-utils@0.1.0:
     dependencies:

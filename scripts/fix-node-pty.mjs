@@ -7,9 +7,11 @@ const requireCjs = createRequire(import.meta.url);
 
 let nodePtyDir;
 try {
-  const ptyEntry = requireCjs.resolve("node-pty");
+  const serverPackageJson = requireCjs.resolve("@monotykamary/localterm-server/package.json");
+  const ptyEntry = requireCjs.resolve("node-pty", { paths: [path.dirname(serverPackageJson)] });
   nodePtyDir = path.dirname(path.dirname(ptyEntry));
 } catch {
+  console.log("[fix-node-pty] node-pty not found, skipping");
   process.exit(0);
 }
 

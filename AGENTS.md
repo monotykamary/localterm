@@ -41,7 +41,7 @@ This is a pnpm monorepo with `apps/` (playgrounds, sites, extensions) and `packa
 
 ### Approved build scripts
 
-The root `package.json` has `pnpm.onlyBuiltDependencies` configured for `@parcel/watcher`, `esbuild`, `sharp`, `spawn-sync`, and `unrs-resolver`. Without this, `pnpm install` silently skips their native builds and downstream packages may fail.
+`pnpm-workspace.yaml` has `onlyBuiltDependencies` configured for `@parcel/watcher`, `esbuild`, `node-pty`, `sharp`, `spawn-sync`, and `unrs-resolver`. Without this, `pnpm install` silently skips their native builds and downstream packages may fail.
 
 ### Key commands reference
 

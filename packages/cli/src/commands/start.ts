@@ -1,7 +1,12 @@
 import { existsSync, openSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer, DEFAULT_HOST, DEFAULT_PORT } from "@monotykamary/localterm-server";
+import {
+  createServer,
+  DEFAULT_HOST,
+  DEFAULT_PORT,
+  isLoopbackHost,
+} from "@monotykamary/localterm-server";
 import kleur from "kleur";
 import open from "open";
 import {
@@ -16,7 +21,7 @@ import {
   STOP_COMMAND,
 } from "../constants.js";
 import { cliError, exitCodeForCliError } from "../errors.js";
-import { clearPid, ensureLogFile, isAlive, readPort, writePid } from "../state.js";
+import { clearPid, ensureLogFile, isAlive, readHost, readPort, writePid } from "../state.js";
 import { buildDaemonStartArgs } from "../utils/build-daemon-args.js";
 import { pollForDaemonReady } from "../utils/poll-for-daemon-ready.js";
 import { reportCliError } from "../utils/report-cli-error.js";
@@ -56,7 +61,7 @@ export const runStart = async (options: StartOptions): Promise<void> => {
 };
 
 const runStartAsDaemon = async (options: StartOptions): Promise<void> => {
-  const preflightError = runStartPreflight();
+  const preflightError = await runStartPreflight();
   if (preflightError !== null) {
     reportCliError(preflightError);
     process.exit(exitCodeForCliError(preflightError));
@@ -84,6 +89,7 @@ const runStartAsDaemon = async (options: StartOptions): Promise<void> => {
     logPath,
     isAlive,
     readPort,
+    readHost,
     sleep,
   });
 
@@ -120,7 +126,7 @@ const openInBrowser = async (url: string): Promise<void> => {
 };
 
 const runStartInForeground = async (options: StartOptions): Promise<void> => {
-  const preflightError = runStartPreflight();
+  const preflightError = await runStartPreflight();
   if (preflightError !== null) {
     reportCliError(preflightError);
     process.exit(exitCodeForCliError(preflightError));
@@ -152,7 +158,15 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
     process.exit(exitCodeForCliError(startError));
   }
 
-  writePid(process.pid, server.port);
+  if (!isLoopbackHost(options.host)) {
+    console.warn(
+      kleur.yellow(
+        `⚠ binding to ${options.host} — anyone on this network can open a shell. an authentication mechanism is not yet available; see https://github.com/monotykamary/localterm/issues`,
+      ),
+    );
+  }
+
+  writePid(process.pid, server.port, options.host);
 
   const namedUrl = getFriendlyUrl(server.port);
   if (isRunningAsDaemonChild()) {

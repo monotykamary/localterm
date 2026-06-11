@@ -36,21 +36,5 @@
     "node": ">=22",
     "pnpm": ">=8"
   },
-  "packageManager": "pnpm@10.24.0",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@parcel/watcher",
-      "esbuild",
-      "node-pty",
-      "sharp",
-      "spawn-sync",
-      "unrs-resolver"
-    ],
-    "overrides": {
-      "vite": "npm:@voidzero-dev/vite-plus-core"
-    },
-    "patchedDependencies": {
-      "node-pty@1.1.0": "patches/node-pty@1.1.0.patch"
-    }
-  }
+  "packageManager": "pnpm@10.24.0"
 }

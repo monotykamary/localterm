@@ -112,11 +112,17 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     typeof options.staticRoot === "string" ? path.resolve(options.staticRoot) : null;
 
   const isLoopbackBind = isLoopbackHost(host);
+  if (!isLoopbackBind) {
+    console.warn(
+      `⚠ non-loopback bind (${host}): any client on the private network can open an unauthenticated shell`,
+    );
+  }
 
   const registry = new SessionRegistry();
   const app = new Hono();
   app.use("*", createNetworkPolicyMiddleware(host));
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
+  wss.options.maxPayload = 256 * 1024;
 
   const api = new Hono();
   api.get("/health", (context) => context.json({ ok: true, sessions: registry.size() }));
@@ -395,6 +401,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
         const addr = node.address();
         if (addr && typeof addr === "object") actualPort = addr.port;
         node.removeListener("error", handleError);
+        node.on("error", (error: Error) => {
+          console.error(`http server error: ${error.message}`);
+        });
         resolve();
       },
     );

@@ -24,6 +24,8 @@ cd localterm
 ni
 ```
 
+The `node-pty` native addon requires a C++ toolchain (Xcode Command Line Tools on macOS, `build-essential` on Linux) because a source-build patch is applied via `pnpm-workspace.yaml` → `patchedDependencies`. Prebuilds are not used.
+
 3. Build all packages:
 
 ```bash

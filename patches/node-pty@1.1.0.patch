@@ -165,8 +165,8 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..58cdd45fcd38b86edba119516bccf6ff
    winp.ws_row = info[2].As<Napi::Number>().Int32Value();
 -  winp.ws_xpixel = 0;
 -  winp.ws_ypixel = 0;
-+  winp.ws_xpixel = info.Length() >= 5 ? info[3].As<Napi::Number>().Int32Value() : 0;
-+  winp.ws_ypixel = info.Length() >= 5 ? info[4].As<Napi::Number>().Int32Value() : 0;
++  winp.ws_xpixel = info.Length() >= 4 && info[3].IsNumber() ? info[3].As<Napi::Number>().Int32Value() : 0;
++  winp.ws_ypixel = info.Length() >= 5 && info[4].IsNumber() ? info[4].As<Napi::Number>().Int32Value() : 0;
  
    if (ioctl(fd, TIOCSWINSZ, &winp) == -1) {
      switch (errno) {

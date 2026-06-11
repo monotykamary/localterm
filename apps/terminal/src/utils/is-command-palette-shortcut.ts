@@ -1,6 +1,4 @@
-export const isCommandPaletteShortcut = (event: KeyboardEvent, isMac: boolean): boolean => {
-  if (event.key !== "k" && event.key !== "K") return false;
-  return isMac
-    ? event.metaKey && !event.ctrlKey && !event.altKey
-    : event.ctrlKey && !event.metaKey && !event.altKey;
-};
+import { isKeyboardShortcutWithKey } from "./is-keyboard-shortcut-with-key.js";
+
+export const isCommandPaletteShortcut = (event: KeyboardEvent, isMac: boolean): boolean =>
+  isKeyboardShortcutWithKey(event, "k", isMac);

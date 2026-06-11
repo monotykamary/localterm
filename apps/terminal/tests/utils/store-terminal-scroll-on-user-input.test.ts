@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { TERMINAL_SCROLL_ON_USER_INPUT_STORAGE_KEY } from "../../src/lib/constants";
-import { storeTerminalScrollOnUserInput } from "../../src/utils/store-terminal-scroll-on-user-input";
+import { storeTerminalScrollOnUserInput } from "../../src/utils/stored-terminal-scroll-on-user-input";
 
 const installFakeLocalStorage = (): { setItemMock: ReturnType<typeof vi.fn> } => {
   const store = new Map<string, string>();

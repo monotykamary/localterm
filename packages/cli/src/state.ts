@@ -1,5 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { getLogFile, getPidFile, getPortFile, getStateDirectory } from "./paths.js";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { getHostFile, getLogFile, getPidFile, getPortFile, getStateDirectory } from "./paths.js";
 
 export const ensureStateDirectory = (): void => {
   const stateDirectory = getStateDirectory();
@@ -17,14 +24,24 @@ export const ensureLogFile = (): string => {
   return logFile;
 };
 
-export const writePid = (pid: number, port: number): void => {
+export const writePid = (pid: number, port: number, host: string): void => {
   ensureStateDirectory();
-  writeFileSync(getPidFile(), String(pid), "utf8");
-  writeFileSync(getPortFile(), String(port), "utf8");
+  const pidFile = getPidFile();
+  const portFile = getPortFile();
+  const hostFile = getHostFile();
+  const pidTmp = `${pidFile}.tmp`;
+  const portTmp = `${portFile}.tmp`;
+  const hostTmp = `${hostFile}.tmp`;
+  writeFileSync(pidTmp, String(pid), "utf8");
+  writeFileSync(portTmp, String(port), "utf8");
+  writeFileSync(hostTmp, host, "utf8");
+  renameSync(pidTmp, pidFile);
+  renameSync(portTmp, portFile);
+  renameSync(hostTmp, hostFile);
 };
 
 export const clearPid = (): void => {
-  for (const file of [getPidFile(), getPortFile()]) {
+  for (const file of [getPidFile(), getPortFile(), getHostFile()]) {
     try {
       if (existsSync(file)) unlinkSync(file);
     } catch {
@@ -49,11 +66,21 @@ export const readPort = (): number | null => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
+export const readHost = (): string | null => {
+  const hostFile = getHostFile();
+  if (!existsSync(hostFile)) return null;
+  const raw = readFileSync(hostFile, "utf8").trim();
+  return raw || null;
+};
+
 export const isAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error: unknown) {
+    if (error && typeof error === "object" && "code" in error && error.code === "EPERM") {
+      return true;
+    }
     return false;
   }
 };

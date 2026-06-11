@@ -3,7 +3,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**"]
+      "outputs": ["dist/**"]
     },
     "@monotykamary/localterm#build": {
       "dependsOn": [
@@ -12,6 +12,7 @@
       ]
     },
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     },
@@ -20,9 +21,6 @@
     },
     "typecheck": {
       "dependsOn": ["^build"]
-    },
-    "lint": {},
-    "format": {},
-    "check": {}
+    }
   }
 }

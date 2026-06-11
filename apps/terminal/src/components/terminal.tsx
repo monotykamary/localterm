@@ -58,9 +58,9 @@ import {
   SEARCH_MATCH_BACKGROUND_HEX,
   TOOLBAR_HIDE_DELAY_MS,
 } from "@/lib/constants";
-import { serverToClientMessageSchema } from "@/lib/schemas";
+import { serverToClientMessageSchema } from "@monotykamary/localterm-server/protocol";
 import { TERMINAL_CURSOR_STYLES, type TerminalCursorStyle } from "@/lib/terminal-cursor";
-import { TERMINAL_FONTS, findTerminalFontById } from "@/lib/terminal-fonts";
+import { TERMINAL_FONTS, familyForFont, findTerminalFontById } from "@/lib/terminal-fonts";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
 import { TERMINAL_THEMES, findTerminalThemeById } from "@/lib/terminal-themes";
 import { generateExtendedPalette } from "@/utils/generate-extended-palette";
@@ -86,31 +86,45 @@ import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
-import { loadStoredTerminalCursorBlink } from "@/utils/load-stored-terminal-cursor-blink";
-import { loadStoredTerminalCursorStyle } from "@/utils/load-stored-terminal-cursor-style";
-import { loadStoredTerminalFontId } from "@/utils/load-stored-terminal-font-id";
-import { loadStoredTerminalFontSize } from "@/utils/load-stored-terminal-font-size";
-import { loadStoredTerminalLineHeight } from "@/utils/load-stored-terminal-line-height";
-import { loadStoredTerminalScrollback } from "@/utils/load-stored-terminal-scrollback";
-import { loadStoredTerminalScrollOnUserInput } from "@/utils/load-stored-terminal-scroll-on-user-input";
-import { loadStoredTerminalThemeId } from "@/utils/load-stored-terminal-theme-id";
-import { loadStoredTerminalPaddingX } from "@/utils/load-stored-terminal-padding-x";
-import { loadStoredTerminalPaddingY } from "@/utils/load-stored-terminal-padding-y";
-import { loadStoredNerdFontEnabled } from "@/utils/load-stored-nerd-font-enabled";
+import {
+  loadStoredTerminalCursorBlink,
+  storeTerminalCursorBlink,
+} from "@/utils/stored-terminal-cursor-blink";
+import {
+  loadStoredTerminalCursorStyle,
+  storeTerminalCursorStyle,
+} from "@/utils/stored-terminal-cursor-style";
+import { loadStoredTerminalFontId, storeTerminalFontId } from "@/utils/stored-terminal-font-id";
+import {
+  loadStoredTerminalFontSize,
+  storeTerminalFontSize,
+} from "@/utils/stored-terminal-font-size";
+import {
+  loadStoredTerminalLineHeight,
+  storeTerminalLineHeight,
+} from "@/utils/stored-terminal-line-height";
+import {
+  loadStoredTerminalScrollback,
+  storeTerminalScrollback,
+} from "@/utils/stored-terminal-scrollback";
+import {
+  loadStoredTerminalScrollOnUserInput,
+  storeTerminalScrollOnUserInput,
+} from "@/utils/stored-terminal-scroll-on-user-input";
+import { loadStoredTerminalThemeId, storeTerminalThemeId } from "@/utils/stored-terminal-theme-id";
+import {
+  loadStoredTerminalPaddingX,
+  storeTerminalPaddingX,
+} from "@/utils/stored-terminal-padding-x";
+import {
+  loadStoredTerminalPaddingY,
+  storeTerminalPaddingY,
+} from "@/utils/stored-terminal-padding-y";
+import { loadStoredNerdFontEnabled, storeNerdFontEnabled } from "@/utils/stored-nerd-font-enabled";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
-import { storeTerminalCursorBlink } from "@/utils/store-terminal-cursor-blink";
-import { storeTerminalCursorStyle } from "@/utils/store-terminal-cursor-style";
-import { storeTerminalFontId } from "@/utils/store-terminal-font-id";
-import { storeTerminalFontSize } from "@/utils/store-terminal-font-size";
-import { storeTerminalLineHeight } from "@/utils/store-terminal-line-height";
-import { storeTerminalScrollback } from "@/utils/store-terminal-scrollback";
-import { storeTerminalScrollOnUserInput } from "@/utils/store-terminal-scroll-on-user-input";
-import { storeTerminalThemeId } from "@/utils/store-terminal-theme-id";
-import { storeTerminalPaddingX } from "@/utils/store-terminal-padding-x";
-import { storeTerminalPaddingY } from "@/utils/store-terminal-padding-y";
-import { storeNerdFontEnabled } from "@/utils/store-nerd-font-enabled";
+
 import {
   MAX_INPUT_BYTES,
   type ClientToServerMessage,
@@ -254,6 +268,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   >("Notification" in window ? Notification.permission : "unsupported");
   const [liveCwd, setLiveCwd] = useState<string | null>(null);
   const liveCwdRef = useRef<string | null>(null);
+  const wsConnectedRef = useRef(false);
   const isMac = useMemo(detectIsMacPlatform, []);
 
   useEffect(() => {
@@ -347,7 +362,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       allowProposedApi: true,
       cursorBlink: initialCursorBlinkRef.current,
       cursorStyle: initialCursorStyleRef.current,
-      fontFamily: initialFont.family,
+      fontFamily: familyForFont(initialFont, initialNerdFontEnabledRef.current),
       fontSize: initialFontSizeRef.current,
       lineHeight: initialLineHeightRef.current,
       scrollback: initialScrollbackRef.current,
@@ -439,6 +454,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     };
     updateScrollbar();
     const scrollDisposable = terminal.onScroll(updateScrollbar);
+    outputBatcher.setAfterFlush(updateScrollbar);
 
     let isDragging = false;
     let dragStartY = 0;
@@ -722,7 +738,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         send({ type: "input", data: chunk });
       }
     });
-    terminal.onResize(({ cols, rows }) => sendResize(cols, rows));
+    terminal.onResize(({ cols, rows }) => {
+      sendResize(cols, rows);
+      updateScrollbar();
+    });
 
     const observer = new ResizeObserver(scheduleFit);
     const onVisibilityChange = () => {
@@ -780,6 +799,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       nextSocket.addEventListener("open", () => {
         if (disposed || socket !== nextSocket) return;
         wasEverConnected = true;
+        wsConnectedRef.current = true;
         setConsecutiveFailures(0);
         sendResize(terminal.cols, terminal.rows);
       });
@@ -792,6 +812,11 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         } catch {
           return;
         }
+        // Output frames dominate traffic (~100× all other message types combined).
+        // Parsing every frame through zod adds measurable latency on fast scrollback, so
+        // we fast-path the known shape — `{ type: "output", data: string }` — and fall
+        // through to the full schema for everything else. The server only emits this frame
+        // from a single code path (the output batch flush), so the shape is stable.
         if (
           typeof raw === "object" &&
           raw !== null &&
@@ -841,6 +866,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       nextSocket.addEventListener("close", (event) => {
         if (socket !== nextSocket) return;
         socket = null;
+        wsConnectedRef.current = false;
         if (disposed) return;
         if (exited) return;
         if (wasEverConnected) {
@@ -875,6 +901,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       // open a new tab") loses the user's tab state for a recoverable failure.
       exited = false;
       wasEverConnected = false;
+      wsConnectedRef.current = false;
       setExitInfo(null);
       setSessionInfo(null);
       setConsecutiveFailures(0);
@@ -898,14 +925,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
     return () => {
       disposed = true;
-      manualReconnectRef.current = null;
-      refocusTerminalRef.current = null;
-      searchAddonRef.current = null;
-      terminalRef.current = null;
       terminalInitializedRef.current = false;
-      fitAddonRef.current = null;
-      scrollbarTrackRef.current = null;
-      scrollbarThumbRef.current = null;
       if (thumbEl) {
         thumbEl.removeEventListener("pointerdown", handleThumbPointerDown);
         thumbEl.removeEventListener("pointermove", handleThumbPointerMove);
@@ -956,7 +976,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       if (cancelled) return;
       const liveTerminal = terminalRef.current;
       if (!liveTerminal) return;
-      liveTerminal.options.fontFamily = effectiveFont.family;
+      liveTerminal.options.fontFamily = familyForFont(effectiveFont, activeNerdFontEnabled);
       liveTerminal.clearTextureAtlas();
       const liveFitAddon = fitAddonRef.current;
       if (liveFitAddon) fitTerminalPreservingScroll(liveTerminal, liveFitAddon);
@@ -1250,8 +1270,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     liveCwdRef.current = liveCwd;
     if (!liveCwd) return;
     const url = new URL(window.location.href);
+    const currentCwd = url.searchParams.get(CWD_QUERY_PARAM);
+    if (currentCwd === liveCwd) return;
     url.searchParams.set(CWD_QUERY_PARAM, liveCwd);
-    window.history.replaceState(null, "", url);
+    try {
+      window.history.replaceState(null, "", url);
+    } catch {
+      /* Safari rate-limits replaceState; not fatal */
+    }
   }, [liveCwd]);
 
   const newTabUrl = buildNewTabUrl(liveCwd);
@@ -1271,6 +1297,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     let timeoutId: number | null = null;
     const reconnectOrScheduleNext = (healthy: boolean) => {
       if (cancelled) return;
+      if (wsConnectedRef.current) return;
       if (healthy) {
         const terminal = terminalRef.current;
         if (terminal) {
@@ -1296,7 +1323,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       cancelled = true;
       if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
-  }, [shouldAutoReconnect]);
+  }, [shouldAutoReconnect, effectiveCursorStyle, activeCursorBlink]);
 
   useEffect(() => {
     onModalOpenChange?.(isModalOpen);

@@ -54,7 +54,7 @@ describe("restoreTerminalScrollAnchor", () => {
 
     restoreTerminalScrollAnchor(terminal, anchor);
 
-    expect(scrollToBottom).not.toHaveBeenCalled();
-    expect(scrollLines).toHaveBeenCalledWith(-5);
+    expect(scrollToBottom).toHaveBeenCalledTimes(1);
+    expect(scrollLines).not.toHaveBeenCalled();
   });
 });

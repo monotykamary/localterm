@@ -10,6 +10,9 @@ const STANDARD_OPTIONS = {
 
 const noopSleep = (): Promise<void> => Promise.resolve();
 const neverHealthy = (): Promise<boolean> => Promise.resolve(false);
+const noopReadHost = (): string | null => "127.0.0.1";
+
+const noopProbeHealth = (): Promise<boolean> => neverHealthy();
 
 describe("pollForDaemonReady", () => {
   it("resolves with the new port once a different value appears", async () => {
@@ -22,8 +25,9 @@ describe("pollForDaemonReady", () => {
         tick += 1;
         return tick < 3 ? null : 4242;
       },
+      readHost: noopReadHost,
       sleep: noopSleep,
-      probeHealth: neverHealthy,
+      probeHealth: noopProbeHealth,
     });
     expect(result).toEqual({ ok: true, port: 4242 });
   });
@@ -41,8 +45,9 @@ describe("pollForDaemonReady", () => {
         if (tick < 4) return stalePort;
         return newPort;
       },
+      readHost: noopReadHost,
       sleep: noopSleep,
-      probeHealth: neverHealthy,
+      probeHealth: noopProbeHealth,
     });
     expect(result).toEqual({ ok: true, port: newPort });
   });
@@ -57,8 +62,9 @@ describe("pollForDaemonReady", () => {
         return tick < 3;
       },
       readPort: () => null,
+      readHost: noopReadHost,
       sleep: noopSleep,
-      probeHealth: neverHealthy,
+      probeHealth: noopProbeHealth,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -73,8 +79,9 @@ describe("pollForDaemonReady", () => {
       initialPort: null,
       isAlive: () => true,
       readPort: () => null,
+      readHost: noopReadHost,
       sleep: noopSleep,
-      probeHealth: neverHealthy,
+      probeHealth: noopProbeHealth,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -91,8 +98,9 @@ describe("pollForDaemonReady", () => {
       initialPort: null,
       isAlive,
       readPort,
+      readHost: noopReadHost,
       sleep: noopSleep,
-      probeHealth: neverHealthy,
+      probeHealth: noopProbeHealth,
     });
     expect(result).toEqual({ ok: true, port: 7777 });
     expect(isAlive).toHaveBeenCalledOnce();
@@ -109,8 +117,9 @@ describe("pollForDaemonReady", () => {
       logPath: "/tmp/localterm.log",
       isAlive: () => true,
       readPort: () => null,
+      readHost: noopReadHost,
       sleep: sleepSpy,
-      probeHealth: neverHealthy,
+      probeHealth: noopProbeHealth,
     });
     expect(sleepSpy).toHaveBeenCalledTimes(10);
   });
@@ -122,6 +131,7 @@ describe("pollForDaemonReady", () => {
       initialPort: stalePort,
       isAlive: () => true,
       readPort: () => stalePort,
+      readHost: noopReadHost,
       sleep: noopSleep,
       probeHealth: () => Promise.resolve(true),
     });
@@ -136,6 +146,7 @@ describe("pollForDaemonReady", () => {
       initialPort: stalePort,
       isAlive: () => true,
       readPort: () => stalePort,
+      readHost: noopReadHost,
       sleep: noopSleep,
       probeHealth: () => {
         tick += 1;

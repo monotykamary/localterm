@@ -10,7 +10,8 @@ const stripPort = (hostHeader: string | undefined): string | null => {
     return end === -1 ? trimmed : trimmed.slice(0, end + 1);
   }
   if (trimmed.includes(":") && !trimmed.includes(".")) {
-    return `[${trimmed}]`;
+    const colonCount = trimmed.split(":").length - 1;
+    if (colonCount >= 2) return `[${trimmed}]`;
   }
   const colon = trimmed.lastIndexOf(":");
   if (colon === -1) return trimmed;

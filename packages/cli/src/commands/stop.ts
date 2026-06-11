@@ -1,6 +1,6 @@
 import kleur from "kleur";
 import { STOP_MAX_WAIT_MS, STOP_POLL_INTERVAL_MS } from "../constants.js";
-import { cliError } from "../errors.js";
+import { cliError, exitCodeForCliError } from "../errors.js";
 import { clearPid, isAlive, readPid } from "../state.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 import { sleep } from "../utils/sleep.js";
@@ -19,7 +19,9 @@ export const runStop = async (): Promise<void> => {
   }
   const isOurDaemon = await verifyPidIsLocalterm(pid);
   if (!isOurDaemon) {
-    reportCliError(cliError.pidNotOurs(pid));
+    const notOursError = cliError.pidNotOurs(pid);
+    reportCliError(notOursError);
+    process.exitCode = exitCodeForCliError(notOursError);
     clearPid();
     return;
   }
@@ -27,9 +29,12 @@ export const runStop = async (): Promise<void> => {
   try {
     process.kill(pid, "SIGTERM");
   } catch (error) {
-    reportCliError(
-      cliError.signalFailed(pid, error instanceof Error ? error : new Error(String(error))),
+    const signalError = cliError.signalFailed(
+      pid,
+      error instanceof Error ? error : new Error(String(error)),
     );
+    reportCliError(signalError);
+    process.exitCode = exitCodeForCliError(signalError);
     return;
   }
 
@@ -45,6 +50,14 @@ export const runStop = async (): Promise<void> => {
     } catch {
       /* process exited between SIGTERM and SIGKILL */
     }
+    let killWaited = 0;
+    while (isAlive(pid) && killWaited < STOP_MAX_WAIT_MS) {
+      await sleep(STOP_POLL_INTERVAL_MS);
+      killWaited += STOP_POLL_INTERVAL_MS;
+    }
+  }
+  if (isAlive(pid)) {
+    console.warn(kleur.yellow(`pid ${pid} did not exit after SIGKILL`));
   }
   clearPid();
   console.log(kleur.green(`✔ stopped pid ${pid}`));

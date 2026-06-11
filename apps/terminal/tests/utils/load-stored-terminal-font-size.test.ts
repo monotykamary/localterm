@@ -5,7 +5,7 @@ import {
   TERMINAL_FONT_SIZE_MIN_PX,
   TERMINAL_FONT_SIZE_STORAGE_KEY,
 } from "../../src/lib/constants";
-import { loadStoredTerminalFontSize } from "../../src/utils/load-stored-terminal-font-size";
+import { loadStoredTerminalFontSize } from "../../src/utils/stored-terminal-font-size";
 
 const installFakeLocalStorage = (initial: Record<string, string> = {}) => {
   const store = new Map<string, string>(Object.entries(initial));

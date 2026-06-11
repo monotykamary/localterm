@@ -10,15 +10,15 @@
     "terminal",
     "websocket"
   ],
-  "homepage": "https://github.com/aidenybai/localterm#readme",
+  "homepage": "https://github.com/monotykamary/localterm#readme",
   "bugs": {
-    "url": "https://github.com/aidenybai/localterm/issues"
+    "url": "https://github.com/monotykamary/localterm/issues"
   },
   "license": "MIT",
   "author": "Aiden Bai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aidenybai/localterm.git",
+    "url": "git+https://github.com/monotykamary/localterm.git",
     "directory": "packages/server"
   },
   "files": [
@@ -60,8 +60,10 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
+    "@types/ws": "^8.18.1",
     "typescript": "^5.9.3",
-    "vite-plus": "^0.1.12"
+    "vite-plus": "^0.1.12",
+    "ws": "^8.21.0"
   },
   "engines": {
     "node": ">=22"

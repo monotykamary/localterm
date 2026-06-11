@@ -52,6 +52,21 @@ describe("loopbackMiddleware", () => {
     expect(response.status).toBe(200);
   });
 
+  it("allows localhost with port", async () => {
+    const response = await probe({ host: "localhost:3417" });
+    expect(response.status).toBe(200);
+  });
+
+  it("allows *.localhost with port", async () => {
+    const response = await probe({ host: "localterm.localhost:3417" });
+    expect(response.status).toBe(200);
+  });
+
+  it("allows [::1] with port", async () => {
+    const response = await probe({ host: "[::1]:3417" });
+    expect(response.status).toBe(200);
+  });
+
   it("rejects forged Host header (DNS rebind)", async () => {
     const response = await probe({ host: "evil.example.com" });
     expect(response.status).toBe(403);

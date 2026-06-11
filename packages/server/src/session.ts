@@ -7,7 +7,7 @@ import {
   COLORTERM_VALUE,
   DEFAULT_COLS,
   DEFAULT_ROWS,
-  FOREGROUP_POLL_INTERVAL_MS,
+  FOREGROUND_POLL_INTERVAL_MS,
   LOCALTERM_VALUE,
   MAX_NOTIFICATION_LENGTH,
   MAX_PENDING_PARSE_BYTES,
@@ -52,6 +52,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private lastEmittedTitle = "";
   private lastEmittedCwd = "";
   private lastEmittedForeground: string | null | undefined = undefined;
+  private pixelResizeSupported: boolean | null = null;
   private hookCleanupPaths: string[] = [];
   private pendingParse = "";
   private foregroundPollTimer: NodeJS.Timeout | null = null;
@@ -170,7 +171,22 @@ export class Session extends EventEmitter<SessionEvents> {
     this.currentCols = cols;
     this.currentRows = rows;
     try {
-      this.pty.resize(cols, rows, pixelWidth, pixelHeight);
+      if (pixelWidth !== undefined && pixelHeight !== undefined) {
+        if (this.pixelResizeSupported === null) {
+          try {
+            this.pty.resize(cols, rows, pixelWidth, pixelHeight);
+            this.pixelResizeSupported = true;
+            return;
+          } catch {
+            this.pixelResizeSupported = false;
+          }
+        }
+        if (this.pixelResizeSupported) {
+          this.pty.resize(cols, rows, pixelWidth, pixelHeight);
+          return;
+        }
+      }
+      this.pty.resize(cols, rows);
     } catch {
       /* PTY may have died between checks */
     }
@@ -266,7 +282,7 @@ export class Session extends EventEmitter<SessionEvents> {
     switch (shellName) {
       case "zsh": {
         const hookDir = path.join(os.tmpdir(), `localterm-zdot-${hookId}`);
-        mkdirSync(hookDir, { recursive: true });
+        mkdirSync(hookDir, { recursive: true, mode: 0o700 });
         this.hookCleanupPaths.push(hookDir);
         const hookScript = this.zshOsc7ChpwdFunction();
         const userZdotdir = env.ZDOTDIR || os.homedir();
@@ -279,13 +295,15 @@ export class Session extends EventEmitter<SessionEvents> {
           "__localterm_osc7_chpwd",
         ];
         writeFileSync(path.join(hookDir, ".zshrc"), lines.join("\n") + "\n", {
-          mode: 0o644,
+          mode: 0o600,
         });
         return [[], { ZDOTDIR: hookDir, __LOCALTERM_ORIG_ZDOTDIR: userZdotdir }];
       }
       case "bash": {
-        const hookPath = path.join(os.tmpdir(), `localterm-bashrc-${hookId}`);
-        this.hookCleanupPaths.push(hookPath);
+        const hookDir = path.join(os.tmpdir(), `localterm-bash-${hookId}`);
+        mkdirSync(hookDir, { recursive: true, mode: 0o700 });
+        const hookPath = path.join(hookDir, "bashrc");
+        this.hookCleanupPaths.push(hookDir);
         const hookScript = this.bashOsc7Function();
         const lines = [
           "source /etc/bashrc 2>/dev/null",
@@ -295,7 +313,7 @@ export class Session extends EventEmitter<SessionEvents> {
           'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt"',
           "__localterm_osc7_prompt",
         ];
-        writeFileSync(hookPath, lines.join("\n") + "\n", { mode: 0o644 });
+        writeFileSync(hookPath, lines.join("\n") + "\n", { mode: 0o600 });
         return [["--rcfile", hookPath], null];
       }
       default:
@@ -328,7 +346,7 @@ export class Session extends EventEmitter<SessionEvents> {
       }
       const next = this.inferForegroundProcess();
       this.emitForegroundIfChanged(next);
-    }, FOREGROUP_POLL_INTERVAL_MS);
+    }, FOREGROUND_POLL_INTERVAL_MS);
     this.foregroundPollTimer.unref?.();
   }
 

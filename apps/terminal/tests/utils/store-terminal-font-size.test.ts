@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { TERMINAL_FONT_SIZE_STORAGE_KEY } from "../../src/lib/constants";
-import { storeTerminalFontSize } from "../../src/utils/store-terminal-font-size";
+import { storeTerminalFontSize } from "../../src/utils/stored-terminal-font-size";
 
 const installFakeLocalStorage = (): { setItemMock: ReturnType<typeof vi.fn> } => {
   const store = new Map<string, string>();

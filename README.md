@@ -34,7 +34,7 @@ The mental model is **shell = browser tab**:
 - **Close tab** → shell dies immediately
 - **Reload tab** → fresh shell (the prior one is gone)
 
-No session ids, no URL slugs, no reconnects. If you want a long-lived shell that survives reloads, run `tmux` _inside_ localterm.
+Reloads and connection drops spawn a fresh shell (auto-reconnect is built in for transport failures). If you want a long-lived shell that survives reloads, run `tmux` _inside_ localterm.
 
 ## CLI
 
@@ -55,11 +55,11 @@ State lives in `~/.localterm/` (PID, port, server log at `~/.localterm/server.lo
 
 ## Resources & Contributing Back
 
-Looking to contribute back? Check out the [Contributing Guide](https://github.com/millionco/localterm/blob/main/CONTRIBUTING.md) and [`AGENTS.md`](https://github.com/millionco/localterm/blob/main/AGENTS.md) for code style.
+Looking to contribute back? Check out the [Contributing Guide](https://github.com/monotykamary/localterm/blob/main/CONTRIBUTING.md) and [`AGENTS.md`](https://github.com/monotykamary/localterm/blob/main/AGENTS.md) for code style.
 
-Find a bug? Head over to our [issue tracker](https://github.com/millionco/localterm/issues) and we'll do our best to help. We love pull requests, too!
+Find a bug? Head over to our [issue tracker](https://github.com/monotykamary/localterm/issues) and we'll do our best to help. We love pull requests, too!
 
-[**→ Start contributing on GitHub**](https://github.com/millionco/localterm/blob/main/CONTRIBUTING.md)
+[**→ Start contributing on GitHub**](https://github.com/monotykamary/localterm/blob/main/CONTRIBUTING.md)
 
 ### License
 
