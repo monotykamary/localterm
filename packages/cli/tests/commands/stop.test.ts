@@ -34,20 +34,30 @@ describe("runStop", () => {
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("stale"));
   });
 
-  it("refuses to signal a pid that is not localterm", async () => {
+  it("refuses to signal a pid that is confirmed not ours", async () => {
     vi.spyOn(state, "readPid").mockReturnValue(12345);
     vi.spyOn(state, "isAlive").mockReturnValue(true);
-    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue(false);
+    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue("not-ours");
     const clearSpy = vi.spyOn(state, "clearPid").mockReturnValue(undefined);
     await runStop();
     expect(process.exitCode).toBe(0);
     expect(clearSpy).toHaveBeenCalledOnce();
   });
 
+  it("warns but does not clear pid when verification is unknown", async () => {
+    vi.spyOn(state, "readPid").mockReturnValue(12345);
+    vi.spyOn(state, "isAlive").mockReturnValue(true);
+    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue("unknown");
+    const clearSpy = vi.spyOn(state, "clearPid").mockReturnValue(undefined);
+    await runStop();
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("could not verify"));
+    expect(clearSpy).not.toHaveBeenCalled();
+  });
+
   it("sends SIGTERM and reports stopped pid", async () => {
     vi.spyOn(state, "readPid").mockReturnValue(12345);
     vi.spyOn(state, "isAlive").mockReturnValueOnce(true).mockReturnValue(false);
-    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue(true);
+    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue("ours");
     const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
     const clearSpy = vi.spyOn(state, "clearPid").mockReturnValue(undefined);
     await runStop();
@@ -59,11 +69,9 @@ describe("runStop", () => {
   it("escalates to SIGKILL when SIGTERM does not kill the process", async () => {
     vi.spyOn(state, "readPid").mockReturnValue(12345);
     let postKillIsAlive = false;
-    // isAlive returns true through all polling iterations
     vi.spyOn(state, "isAlive").mockImplementation(() => !postKillIsAlive);
-    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue(true);
+    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue("ours");
     const killSpy = vi.spyOn(process, "kill").mockImplementation((_pid, signal) => {
-      // After SIGKILL, simulate the process being dead
       if (signal === "SIGKILL") postKillIsAlive = true;
       return true;
     });
@@ -77,7 +85,7 @@ describe("runStop", () => {
   it("warns when pid does not exit after SIGKILL", async () => {
     vi.spyOn(state, "readPid").mockReturnValue(12345);
     vi.spyOn(state, "isAlive").mockReturnValue(true);
-    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue(true);
+    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue("ours");
     vi.spyOn(process, "kill")
       .mockImplementationOnce(() => true)
       .mockImplementation(() => {
@@ -91,7 +99,7 @@ describe("runStop", () => {
   it("sets exitCode on signal failure", async () => {
     vi.spyOn(state, "readPid").mockReturnValue(12345);
     vi.spyOn(state, "isAlive").mockReturnValue(true);
-    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue(true);
+    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue("ours");
     vi.spyOn(process, "kill").mockImplementation(() => {
       throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
     });

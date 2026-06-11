@@ -27,9 +27,11 @@ const readProcessComm = async (pid: number): Promise<string | null> => {
   return null;
 };
 
-export const verifyPidIsLocalterm = async (pid: number): Promise<boolean> => {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
+export type PidVerification = "ours" | "not-ours" | "unknown";
+
+export const verifyPidIsLocalterm = async (pid: number): Promise<PidVerification> => {
+  if (!Number.isInteger(pid) || pid <= 0) return "not-ours";
   const comm = await readProcessComm(pid);
-  if (comm === null) return false;
-  return comm === DAEMON_PROCESS_TITLE;
+  if (comm === null) return "unknown";
+  return comm === DAEMON_PROCESS_TITLE ? "ours" : "not-ours";
 };

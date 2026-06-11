@@ -9,23 +9,23 @@ afterEach(() => {
 });
 
 describe("verifyPidIsLocalterm", () => {
-  it("rejects non-positive or non-integer pids without spawning a probe", async () => {
-    expect(await verifyPidIsLocalterm(0)).toBe(false);
-    expect(await verifyPidIsLocalterm(-1)).toBe(false);
-    expect(await verifyPidIsLocalterm(Number.NaN)).toBe(false);
-    expect(await verifyPidIsLocalterm(1.5)).toBe(false);
+  it("returns 'not-ours' for non-positive or non-integer pids", async () => {
+    expect(await verifyPidIsLocalterm(0)).toBe("not-ours");
+    expect(await verifyPidIsLocalterm(-1)).toBe("not-ours");
+    expect(await verifyPidIsLocalterm(Number.NaN)).toBe("not-ours");
+    expect(await verifyPidIsLocalterm(1.5)).toBe("not-ours");
   });
 
-  it("returns false for a pid that does not exist", async () => {
-    expect(await verifyPidIsLocalterm(2_147_483_640)).toBe(false);
+  it("returns 'unknown' for a pid that cannot be probed", async () => {
+    expect(await verifyPidIsLocalterm(2_147_483_640)).toBe("unknown");
   });
 
-  it("returns false for a live process whose comm is not the daemon title", async () => {
-    expect(await verifyPidIsLocalterm(process.pid)).toBe(false);
+  it("returns 'not-ours' for a live process whose comm is not the daemon title", async () => {
+    expect(await verifyPidIsLocalterm(process.pid)).toBe("not-ours");
   });
 
-  it("returns true for a live process whose comm matches the daemon title", async () => {
+  it("returns 'ours' for a live process whose comm matches the daemon title", async () => {
     process.title = DAEMON_PROCESS_TITLE;
-    expect(await verifyPidIsLocalterm(process.pid)).toBe(true);
+    expect(await verifyPidIsLocalterm(process.pid)).toBe("ours");
   });
 });

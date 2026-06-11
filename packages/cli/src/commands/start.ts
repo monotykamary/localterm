@@ -62,11 +62,7 @@ export const runStart = async (options: StartOptions): Promise<void> => {
   await runStartAsDaemon(options);
 };
 
-const stopExistingInstance = async (preflightError: CliError): Promise<void> => {
-  if (preflightError.kind === "already-running" || preflightError.kind === "stale-port-file") {
-    await runStop();
-    return;
-  }
+const handlePreflightError = (preflightError: CliError): void => {
   reportCliError(preflightError);
   process.exit(exitCodeForCliError(preflightError));
 };
@@ -74,7 +70,11 @@ const stopExistingInstance = async (preflightError: CliError): Promise<void> => 
 const runStartAsDaemon = async (options: StartOptions): Promise<void> => {
   const preflightError = await runStartPreflight();
   if (preflightError !== null) {
-    await stopExistingInstance(preflightError);
+    if (preflightError.kind === "stale-port-file") await runStop();
+    else {
+      handlePreflightError(preflightError);
+      return;
+    }
   }
 
   const portBeforeSpawn = readPort();
@@ -136,12 +136,16 @@ const openInBrowser = async (url: string): Promise<void> => {
 };
 
 const runStartInForeground = async (options: StartOptions): Promise<void> => {
+  process.title = DAEMON_PROCESS_TITLE;
+
   const preflightError = await runStartPreflight();
   if (preflightError !== null) {
-    await stopExistingInstance(preflightError);
+    if (preflightError.kind === "stale-port-file") await runStop();
+    else {
+      handlePreflightError(preflightError);
+      return;
+    }
   }
-
-  process.title = DAEMON_PROCESS_TITLE;
 
   const staticRoot = resolveStaticRoot();
   if (!staticRoot) {
@@ -174,6 +178,13 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
           staticRoot,
         });
       } catch (retryError) {
+        console.error(
+          kleur.red(
+            `port ${options.port} is still in use after stop. ` +
+              `find the process with: lsof -i :${options.port} ` +
+              `or: fuser ${options.port}/tcp`,
+          ),
+        );
         const startError = cliError.serverStartFailed(
           retryError instanceof Error ? retryError : new Error(String(retryError)),
         );

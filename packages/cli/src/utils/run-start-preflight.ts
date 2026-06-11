@@ -5,8 +5,8 @@ import { verifyPidIsLocalterm } from "./verify-pid-is-localterm.js";
 export const runStartPreflight = async (): Promise<CliError | null> => {
   const existingPid = readPid();
   if (existingPid && isAlive(existingPid)) {
-    const isOurs = await verifyPidIsLocalterm(existingPid);
-    if (!isOurs) {
+    const verification = await verifyPidIsLocalterm(existingPid);
+    if (verification === "not-ours") {
       clearPid();
       return null;
     }

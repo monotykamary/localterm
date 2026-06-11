@@ -8,7 +8,7 @@ beforeEach(() => {
   vi.spyOn(state, "readPort").mockReturnValue(null);
   vi.spyOn(state, "isAlive").mockReturnValue(false);
   vi.spyOn(state, "clearPid").mockReturnValue(undefined);
-  vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue(true);
+  vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue("ours");
 });
 
 afterEach(() => {
@@ -57,12 +57,26 @@ describe("runStartPreflight", () => {
     expect(clearSpy).toHaveBeenCalledOnce();
   });
 
-  it("clears pid and returns null when pid is alive but not localterm", async () => {
+  it("clears pid and returns null when pid is confirmed not ours", async () => {
     const clearSpy = vi.spyOn(state, "clearPid");
     vi.spyOn(state, "readPid").mockReturnValue(12345);
     vi.spyOn(state, "isAlive").mockReturnValue(true);
-    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue(false);
+    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue("not-ours");
     expect(await runStartPreflight()).toBeNull();
     expect(clearSpy).toHaveBeenCalledOnce();
+  });
+
+  it("treats unknown verification as ours and reports already-running", async () => {
+    vi.spyOn(state, "readPid").mockReturnValue(12345);
+    vi.spyOn(state, "isAlive").mockReturnValue(true);
+    vi.spyOn(verify, "verifyPidIsLocalterm").mockResolvedValue("unknown");
+    vi.spyOn(state, "readPort").mockReturnValue(3417);
+    expect(await runStartPreflight()).toEqual(
+      expect.objectContaining({
+        kind: "already-running",
+        pid: 12345,
+        port: 3417,
+      }),
+    );
   });
 });
