@@ -1,5 +1,22 @@
 # localterm
 
+## 1.16.0
+
+### Minor Changes
+
+- Replace git diff summary polling with event-driven push model
+
+  The browser no longer polls `/api/git/diff-summary` every 3 seconds.
+  Instead, the server pushes the summary over the WebSocket when it
+  detects changes via shell prompt hooks (OSC 7777) and `fs.watch` on
+  `.git/index`, `.git/HEAD`, and `.git/refs/`. This eliminates the
+  constant `git` subprocess spawns that kept `syspolicyd` at high CPU.
+
+### Patch Changes
+
+- Updated dependencies
+  - @monotykamary/localterm-server@1.16.0
+
 ## 1.15.1
 
 ### Patch Changes
@@ -79,6 +96,7 @@
 ### Patch Changes
 
 - Fix security, CLI lifecycle, and frontend bugs from full codebase review
+
   - security: stripPort now treats `localhost:3417` correctly (was rejected with 403)
   - security: maxPayload capped at 256KB on WebSocket server
   - security: shell hook temp dirs use mode 0o700, rc files use mode 0o600
