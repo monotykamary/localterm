@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
-import { GIT_DIRTY_DEBOUNCE_MS } from "./constants.js";
+import { GIT_DIRTY_DEBOUNCE_MS, WORKTREE_DIRTY_DEBOUNCE_MS } from "./constants.js";
 
 const resolveGitDir = (cwd: string): string | null => {
   const indicator = path.join(cwd, ".git");
@@ -41,26 +41,38 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
     const gitDir = resolveGitDir(cwd);
     if (!gitDir) return;
 
-    const watchTargets = [gitDir];
+    const gitWatchTargets = [gitDir];
     const refsDir = path.join(gitDir, "refs");
     try {
-      if (fs.statSync(refsDir).isDirectory()) watchTargets.push(refsDir);
+      if (fs.statSync(refsDir).isDirectory()) gitWatchTargets.push(refsDir);
     } catch {
       /* refs dir may not exist in a bare or unusual repo */
     }
 
-    for (const target of watchTargets) {
+    for (const target of gitWatchTargets) {
       try {
         const watcher = fs.watch(target, (event) => {
           if (this.disposed) return;
           if (event === "change" || event === "rename") {
-            this.scheduleEmit();
+            this.scheduleEmit(GIT_DIRTY_DEBOUNCE_MS);
           }
         });
         this.watchers.push(watcher);
       } catch {
         /* target doesn't exist or isn't watchable */
       }
+    }
+
+    try {
+      const watcher = fs.watch(cwd, (event) => {
+        if (this.disposed) return;
+        if (event === "change" || event === "rename") {
+          this.scheduleEmit(WORKTREE_DIRTY_DEBOUNCE_MS);
+        }
+      });
+      this.watchers.push(watcher);
+    } catch {
+      /* cwd doesn't exist or isn't watchable */
     }
   }
 
@@ -85,12 +97,14 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
     this.removeAllListeners();
   }
 
-  private scheduleEmit(): void {
-    if (this.debounceTimer !== null) return;
+  private scheduleEmit(delayMs: number): void {
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer);
+    }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
       if (!this.disposed) this.emit("git-dirty");
-    }, GIT_DIRTY_DEBOUNCE_MS);
+    }, delayMs);
     this.debounceTimer.unref?.();
   }
 }
