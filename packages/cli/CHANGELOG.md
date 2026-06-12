@@ -1,5 +1,15 @@
 # localterm
 
+## 1.15.0
+
+### Minor Changes
+
+- c19be91: Add GitHub-style multiline comments to the diff viewer: press and hold a line's comment button and drag across lines (in either direction, in unified or split view) to select a range, then release to comment on it. The range highlights while dragging and on saved comments, Escape cancels an in-progress drag, and review prompts sent to the terminal reference the full line span (e.g. `src/main.ts L10-L14`)
+
+### Patch Changes
+
+- @monotykamary/localterm-server@1.15.0
+
 ## 1.14.1
 
 ### Patch Changes
@@ -62,7 +72,6 @@
 ### Patch Changes
 
 - Fix security, CLI lifecycle, and frontend bugs from full codebase review
-
   - security: stripPort now treats `localhost:3417` correctly (was rejected with 403)
   - security: maxPayload capped at 256KB on WebSocket server
   - security: shell hook temp dirs use mode 0o700, rc files use mode 0o600
