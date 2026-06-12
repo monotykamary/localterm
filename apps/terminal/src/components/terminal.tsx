@@ -10,6 +10,7 @@ import { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { IUnicodeVersionProvider } from "@xterm/xterm";
 import {
   Binary,
+  CalendarClock,
   Check,
   ChevronDown,
   ChevronUp,
@@ -40,6 +41,7 @@ import {
   InputGroupText,
 } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
+import { AutomationsMenu } from "@/components/automations-menu";
 import { CommandPalette, type CommandItem } from "@/components/command-palette";
 import { DiffViewer } from "@/components/diff-viewer";
 import { SettingsMenu } from "@/components/settings-menu";
@@ -72,7 +74,10 @@ import {
   TOOLBAR_HIDE_DELAY_MS,
   TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS,
 } from "@/lib/constants";
-import { serverToClientMessageSchema } from "@monotykamary/localterm-server/protocol";
+import {
+  serverToClientMessageSchema,
+  type AutomationWithNextRun,
+} from "@monotykamary/localterm-server/protocol";
 import {
   TERMINAL_CURSOR_STYLES,
   type TerminalCursorStyle,
@@ -103,10 +108,12 @@ import { clampTerminalLineHeight } from "@/utils/clamp-terminal-line-height";
 import { clampTerminalPaddingX, clampTerminalPaddingY } from "@/utils/clamp-terminal-padding";
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { formatDiffCount } from "@/utils/format-diff-count";
+import { isAutomationsShortcut } from "@/utils/is-automations-shortcut";
 import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
 import { isDiffViewerShortcut } from "@/utils/is-diff-viewer-shortcut";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
+import { removeRunQueryParam, RUN_QUERY_PARAM } from "@/utils/remove-run-query-param";
 import {
   loadStoredTerminalCursorBlink,
   storeTerminalCursorBlink,
@@ -171,6 +178,8 @@ const buildWebSocketUrl = (cwdOverride?: string | null): string => {
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   const cwd = cwdOverride ?? new URLSearchParams(window.location.search).get(CWD_QUERY_PARAM);
   if (cwd) url.searchParams.set(CWD_QUERY_PARAM, cwd);
+  const runId = new URLSearchParams(window.location.search).get(RUN_QUERY_PARAM);
+  if (runId) url.searchParams.set(RUN_QUERY_PARAM, runId);
   return url.toString();
 };
 
@@ -242,10 +251,15 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [searchOpenAttempt, setSearchOpenAttempt] = useState(0);
   const [isToolbarHovered, setIsToolbarHovered] = useState(false);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
+  const [isAutomationsOpen, setIsAutomationsOpen] = useState(false);
+  const [automations, setAutomations] = useState<AutomationWithNextRun[] | null>(null);
+  const toggleAutomationsRef = useRef<(() => void) | null>(null);
   const toolbarHoverTimeoutRef = useRef<number | null>(null);
   const isSettingsPopoverOpenRef = useRef(false);
-  const isToolbarVisible = isToolbarHovered || isSettingsPopoverOpen;
+  const isAutomationsOpenRef = useRef(false);
+  const isToolbarVisible = isToolbarHovered || isSettingsPopoverOpen || isAutomationsOpen;
   isSettingsPopoverOpenRef.current = isSettingsPopoverOpen;
+  isAutomationsOpenRef.current = isAutomationsOpen;
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultState>({
     resultIndex: -1,
@@ -688,6 +702,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         }
         return false;
       }
+      if (isAutomationsShortcut(event, isMac)) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          toggleAutomationsRef.current?.();
+        }
+        return false;
+      }
       if (isDiffViewerShortcut(event, isMac)) {
         if (event.type === "keydown") {
           event.preventDefault();
@@ -894,6 +915,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           });
           setLiveCwd(message.cwd);
           applyIncomingTitle(message.title);
+          removeRunQueryParam();
+        } else if (message.type === "automations") {
+          setAutomations(message.automations);
         } else if (message.type === "cwd") {
           setLiveCwd(message.cwd);
           setGitDiffSummary(null);
@@ -1208,7 +1232,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       : TOOLBAR_HIDE_DELAY_MS;
     toolbarHoverTimeoutRef.current = window.setTimeout(() => {
       toolbarHoverTimeoutRef.current = null;
-      if (!isSettingsPopoverOpenRef.current) {
+      if (!isSettingsPopoverOpenRef.current && !isAutomationsOpenRef.current) {
         setIsToolbarHovered(false);
       }
     }, delay);
@@ -1226,6 +1250,27 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       }, TOOLBAR_HIDE_DELAY_MS);
     }
   }, []);
+
+  const handleAutomationsOpenChange = useCallback((open: boolean) => {
+    setIsAutomationsOpen(open);
+    if (open) {
+      setIsCommandPaletteOpen(false);
+      return;
+    }
+    if (toolbarHoverTimeoutRef.current !== null) {
+      window.clearTimeout(toolbarHoverTimeoutRef.current);
+    }
+    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
+      toolbarHoverTimeoutRef.current = null;
+      setIsToolbarHovered(false);
+    }, TOOLBAR_HIDE_DELAY_MS);
+    refocusTerminalRef.current?.();
+  }, []);
+
+  const toggleAutomations = useCallback(() => {
+    handleAutomationsOpenChange(!isAutomationsOpenRef.current);
+  }, [handleAutomationsOpenChange]);
+  toggleAutomationsRef.current = toggleAutomations;
 
   const toggleCommandPalette = useCallback(() => {
     setIsCommandPaletteOpen((previous) => !previous);
@@ -1403,6 +1448,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     if (isModalOpen) {
       setIsCommandPaletteOpen(false);
       setIsDiffViewerOpen(false);
+      setIsAutomationsOpen(false);
     }
   }, [isModalOpen, onModalOpenChange]);
   const matchLabel =
@@ -1430,6 +1476,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         shortcut: `${togglePrefix}G`,
         icon: <FileDiff className="size-3.5" />,
         action: openDiffViewer,
+      },
+      {
+        id: "automations",
+        label: "Automations",
+        category: "Actions",
+        shortcut: `${togglePrefix}J`,
+        icon: <CalendarClock className="size-3.5" />,
+        action: () => handleAutomationsOpenChange(true),
       },
       {
         id: "new-shell",
@@ -1500,6 +1554,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     handleFontChange,
     openSearchOverlay,
     openDiffViewer,
+    handleAutomationsOpenChange,
     handleCursorStyleChange,
     activeCursorBlink,
     handleCursorBlinkChange,
@@ -1646,6 +1701,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                   >
                     <Search />
                   </Button>
+                  <AutomationsMenu
+                    open={isAutomationsOpen}
+                    onOpenChange={handleAutomationsOpenChange}
+                    automations={automations}
+                    onAutomationsLoaded={setAutomations}
+                    defaultCwd={liveCwd}
+                    isMac={isMac}
+                  />
                   <Button
                     variant="ghost"
                     size="icon-sm"

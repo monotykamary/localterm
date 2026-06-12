@@ -47,6 +47,21 @@ localterm restart
 
 State lives in `~/.localterm/` (PID, port, server log at `~/.localterm/server.log`).
 
+## Automations
+
+Schedule commands as server-managed cron jobs. When one is due, localterm opens a new browser tab in the automation's directory and runs the command in a fresh shell — the tab stays open afterwards so you can see that it ran and whether it succeeded.
+
+- Open the panel from the top-right toolbar (calendar icon) or with <kbd>⌘J</kbd> / <kbd>Ctrl+J</kbd>.
+- Schedules use standard 5-field cron (plus `@hourly`, `@daily`, `@weekly`, …), evaluated in local time.
+- Definitions persist in `~/.localterm/automations.json`; the daemon must be running for jobs to fire.
+- Everything is also available over HTTP at `/api/automations` (list/create/update/delete/run-now).
+
+Agents can manage automations too — install the API playbook as a skill with [`skills`](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add monotykamary/localterm
+```
+
 ## Security
 
 - By default, binds loopback (`127.0.0.1`) and enforces loopback `Host`/`Origin` headers to defeat DNS-rebinding and cross-origin attacks.

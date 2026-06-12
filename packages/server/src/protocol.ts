@@ -1,6 +1,10 @@
 export {
+  MAX_AUTOMATION_COMMAND_LENGTH,
+  MAX_AUTOMATION_NAME_LENGTH,
+  MAX_AUTOMATIONS,
   MAX_COLS,
   MAX_CONCURRENT_SESSIONS,
+  MAX_CRON_EXPRESSION_LENGTH,
   MAX_INPUT_BYTES,
   MAX_NOTIFICATION_LENGTH,
   MAX_OUTPUT_BYTES,
@@ -12,21 +16,36 @@ export {
   WS_CLOSE_POLICY_VIOLATION,
   WS_READY_STATE_OPEN,
 } from "./constants.js";
+export { cronMatchesDate, nextCronOccurrence, parseCronExpression } from "./cron-expression.js";
+export type { ParsedCronExpression } from "./cron-expression.js";
 export {
+  automationLastRunSchema,
+  automationLastRunStatusSchema,
+  automationSchema,
+  automationsListResponseSchema,
+  automationWithNextRunSchema,
   clientToServerMessageSchema,
+  createAutomationInputSchema,
   gitDiffFileSchema,
   gitDiffFileStatusSchema,
   gitDiffResponseSchema,
   gitDiffSummarySchema,
   healthSchema,
   serverToClientMessageSchema,
+  updateAutomationInputSchema,
 } from "./schemas.js";
 export type {
+  Automation,
+  AutomationLastRun,
+  AutomationLastRunStatus,
+  AutomationWithNextRun,
   ClientToServerMessage,
+  CreateAutomationInput,
   GitDiffFile,
   GitDiffFileStatus,
   GitDiffResponse,
   GitDiffSummary,
   ServerToClientMessage,
+  UpdateAutomationInput,
 } from "./types.js";
 export type { ServerError, ServerErrorCode, ServerErrorKind } from "./errors.js";

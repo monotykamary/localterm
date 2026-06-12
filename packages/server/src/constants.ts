@@ -1,5 +1,6 @@
 export const DEFAULT_PORT = 3417;
 export const DEFAULT_HOST = "127.0.0.1";
+export const FRIENDLY_HOSTNAME = "localterm.localhost";
 export const DEFAULT_COLS = 120;
 export const DEFAULT_ROWS = 32;
 export const DEFAULT_SHELL_FALLBACK = "/bin/sh";
@@ -126,6 +127,25 @@ export const GIT_BINARY_SNIFF_BYTES = 8000;
 export const GIT_MAX_PATCH_BYTES_PER_FILE = 1 * 1024 * 1024;
 export const GIT_MAX_TOTAL_PATCH_BYTES = 10 * 1024 * 1024;
 export const GIT_DIRTY_THROTTLE_MS = 100;
+
+export const HTTP_STATUS_CREATED = 201;
+
+export const MS_PER_MINUTE = 60_000;
+
+export const MAX_AUTOMATIONS = 100;
+export const MAX_AUTOMATION_NAME_LENGTH = 120;
+export const MAX_AUTOMATION_COMMAND_LENGTH = 4096;
+export const MAX_CRON_EXPRESSION_LENGTH = 256;
+export const AUTOMATIONS_FILE_VERSION = 1;
+// Ticks land just past the minute boundary so a timer that fires marginally
+// early can never evaluate the previous minute twice.
+export const AUTOMATION_TICK_ALIGNMENT_DELAY_MS = 50;
+// A launched run that no browser tab claims within this window is marked
+// "missed" (browser closed, headless host, open() failed silently).
+export const AUTOMATION_PENDING_RUN_EXPIRY_MS = 5 * 60 * 1000;
+// Covers schedules that only fire on Feb 29 (the rarest valid cron target).
+export const CRON_NEXT_OCCURRENCE_SCAN_LIMIT_DAYS = 1466;
+export const MAX_AUTOMATION_EXIT_CODE_DIGITS = 4;
 
 export const WS_READY_STATE_OPEN = 1;
 export const WS_CLOSE_POLICY_VIOLATION = 1008;

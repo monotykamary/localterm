@@ -1,13 +1,21 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { serve, type ServerType } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { Hono } from "hono";
+import open from "open";
+import { AutomationRunTracker } from "./automation-run-tracker.js";
+import { AutomationScheduler } from "./automation-scheduler.js";
+import { AutomationStore } from "./automation-store.js";
 import {
   DEFAULT_HOST,
   DEFAULT_PORT,
+  FRIENDLY_HOSTNAME,
   HTTP_STATUS_BAD_REQUEST,
+  HTTP_STATUS_CREATED,
   HTTP_STATUS_NOT_FOUND,
+  MAX_AUTOMATIONS,
   MAX_CONCURRENT_SESSIONS,
   OUTPUT_BATCH_FLUSH_BYTES,
   OUTPUT_BATCH_WINDOW_MS,
@@ -26,17 +34,25 @@ import {
 import { ServerErrorException, serverError } from "./errors.js";
 import { getGitDiff, getGitDiffSummary } from "./git-diff.js";
 import { GitDiffWatcher } from "./git-diff-watcher.js";
-import { clientToServerMessageSchema } from "./schemas.js";
+import { parseCronExpression } from "./cron-expression.js";
+import {
+  clientToServerMessageSchema,
+  createAutomationInputSchema,
+  updateAutomationInputSchema,
+} from "./schemas.js";
 import { Session } from "./session.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
 import { SessionRegistry } from "./session-registry.js";
 import { resolveStaticAsset } from "./static-resolver.js";
-import type { ServerToClientMessage } from "./types.js";
+import { computeNextAutomationRunAt } from "./utils/compute-next-automation-run-at.js";
+import type { Automation, AutomationWithNextRun, ServerToClientMessage } from "./types.js";
 
 export interface ServerOptions {
   port?: number;
   host?: string;
   staticRoot?: string | null;
+  stateDirectory?: string;
+  openUrl?: (url: string) => Promise<void>;
 }
 
 export interface RunningServer {
@@ -127,6 +143,54 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
   wss.options.maxPayload = 256 * 1024;
 
+  const stateDirectory = options.stateDirectory ?? path.join(os.homedir(), ".localterm");
+  const automationStore = new AutomationStore(path.join(stateDirectory, "automations.json"));
+  const automationRunTracker = new AutomationRunTracker();
+  const automationScheduler = new AutomationScheduler(automationStore);
+  const clientSockets = new Set<BroadcastSocket>();
+  const openUrl =
+    options.openUrl ??
+    (async (url: string) => {
+      await open(url);
+    });
+
+  const toAutomationWithNextRun = (automation: Automation, from: Date): AutomationWithNextRun => ({
+    ...automation,
+    nextRunAt: computeNextAutomationRunAt(automation, from),
+  });
+
+  const listAutomationsWithNextRun = (): AutomationWithNextRun[] => {
+    const from = new Date();
+    return automationStore.list().map((automation) => toAutomationWithNextRun(automation, from));
+  };
+
+  const broadcastAutomations = () => {
+    const payload: ServerToClientMessage = {
+      type: "automations",
+      automations: listAutomationsWithNextRun(),
+    };
+    for (const clientSocket of clientSockets) {
+      safeSend(clientSocket, payload);
+    }
+  };
+
+  const launchAutomationRun = (automation: Automation) => {
+    const run = automationRunTracker.create(automation);
+    automationStore.recordLastRun(automation.id, {
+      runId: run.runId,
+      at: run.createdAt,
+      status: "launched",
+      exitCode: null,
+    });
+    broadcastAutomations();
+    const runUrl = `http://${FRIENDLY_HOSTNAME}:${actualPort}/?run=${run.runId}`;
+    void openUrl(runUrl).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`failed to open a browser tab for automation "${automation.name}": ${message}`);
+    });
+    return run;
+  };
+
   const api = new Hono();
   api.get("/health", (context) => context.json({ ok: true, sessions: registry.size() }));
 
@@ -152,6 +216,66 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const cwd = resolveCwdQuery(context.req.query("cwd"));
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
     return context.json(await getGitDiff(cwd));
+  });
+
+  const readJsonBody = async (context: { req: { json: () => Promise<unknown> } }) => {
+    try {
+      return await context.req.json();
+    } catch {
+      return undefined;
+    }
+  };
+
+  api.get("/automations", (context) => context.json({ automations: listAutomationsWithNextRun() }));
+
+  api.post("/automations", async (context) => {
+    const parsed = createAutomationInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    if (automationStore.size() >= MAX_AUTOMATIONS) {
+      return context.json({ error: "too_many_automations" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    if (!parseCronExpression(parsed.data.schedule)) {
+      return context.json({ error: "invalid_schedule" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    if (!resolveCwdQuery(parsed.data.cwd)) {
+      return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const automation = automationStore.create(parsed.data);
+    broadcastAutomations();
+    return context.json(
+      { automation: toAutomationWithNextRun(automation, new Date()) },
+      HTTP_STATUS_CREATED,
+    );
+  });
+
+  api.patch("/automations/:id", async (context) => {
+    const parsed = updateAutomationInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    if (parsed.data.schedule !== undefined && !parseCronExpression(parsed.data.schedule)) {
+      return context.json({ error: "invalid_schedule" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    if (parsed.data.cwd !== undefined && !resolveCwdQuery(parsed.data.cwd)) {
+      return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const automation = automationStore.update(context.req.param("id"), parsed.data);
+    if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    broadcastAutomations();
+    return context.json({ automation: toAutomationWithNextRun(automation, new Date()) });
+  });
+
+  api.delete("/automations/:id", (context) => {
+    if (!automationStore.remove(context.req.param("id"))) {
+      return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    }
+    broadcastAutomations();
+    return context.json({ ok: true });
+  });
+
+  api.post("/automations/:id/run", (context) => {
+    const automation = automationStore.get(context.req.param("id"));
+    if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    const run = launchAutomationRun(automation);
+    return context.json({ runId: run.runId });
   });
 
   api.notFound((context) => context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND));
@@ -195,6 +319,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           /* invalid or inaccessible path; fall back to default cwd */
         }
       }
+      const requestedRunId = context.req.query("run");
 
       return {
         onOpen(_event, ws) {
@@ -210,9 +335,43 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             ws.close(WS_CLOSE_CAPACITY_REACHED, "session capacity reached");
             return;
           }
-          const newSession = new Session({ cwd: requestedCwd });
+          clientSockets.add(ws);
+          // Claims are single-use: a reload of a ?run= tab gets a plain shell
+          // in the same cwd instead of re-running the scheduled command.
+          const claimedRun = requestedRunId ? automationRunTracker.claim(requestedRunId) : null;
+          let sessionCwd = requestedCwd;
+          if (claimedRun) {
+            try {
+              if (fs.statSync(claimedRun.cwd).isDirectory()) sessionCwd = claimedRun.cwd;
+            } catch {
+              /* automation cwd vanished since creation; fall back to default */
+            }
+          }
+          const newSession = new Session({
+            cwd: sessionCwd,
+            initialCommand: claimedRun?.command,
+          });
           session = newSession;
           registry.register(newSession);
+
+          if (claimedRun) {
+            automationStore.recordLastRun(claimedRun.automationId, {
+              runId: claimedRun.runId,
+              at: Date.now(),
+              status: "running",
+              exitCode: null,
+            });
+            broadcastAutomations();
+            newSession.on("automation-exit", (exitCode: number) => {
+              automationStore.recordLastRun(claimedRun.automationId, {
+                runId: claimedRun.runId,
+                at: Date.now(),
+                status: exitCode === 0 ? "completed" : "failed",
+                exitCode,
+              });
+              broadcastAutomations();
+            });
+          }
 
           // Heartbeat. Without this, half-open sockets (laptop sleep, network
           // dropout) never surface as a `close` event and the daemon keeps
@@ -323,10 +482,14 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             }
           };
 
-          gitDiffWatcher.on("git-dirty", () => { void handleGitDirty(); });
+          gitDiffWatcher.on("git-dirty", () => {
+            void handleGitDirty();
+          });
           gitDiffWatcher.start(newSession.cwd);
 
-          newSession.on("git-dirty", () => { void handleGitDirty(); });
+          newSession.on("git-dirty", () => {
+            void handleGitDirty();
+          });
           newSession.on("cwd", (changedCwd: string) => {
             gitDiffWatcher.stop();
             gitDiffWatcher.start(changedCwd);
@@ -389,6 +552,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           console.info(
             `ws closed${pidLabel}: code=${event.code} reason=${JSON.stringify(event.reason)} wasClean=${event.wasClean}`,
           );
+          if (activeWs) clientSockets.delete(activeWs);
           if (!session) return;
           registry.unregister(session);
           session.dispose();
@@ -411,6 +575,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           const message = errorValue instanceof Error ? errorValue.message : String(errorValue);
           const pidLabel = session ? ` pid ${session.pid}` : "";
           console.error(`ws error${pidLabel}: ${message}`);
+          if (activeWs) clientSockets.delete(activeWs);
           if (!session) return;
           registry.unregister(session);
           session.dispose();
@@ -472,7 +637,24 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   }
   injectWebSocket(httpServer);
 
+  automationScheduler.on("due", (automation) => {
+    launchAutomationRun(automation);
+  });
+  automationScheduler.on("tick", (now) => {
+    let didExpireAny = false;
+    for (const expiredRun of automationRunTracker.sweepExpired(now.getTime())) {
+      const automation = automationStore.get(expiredRun.automationId);
+      if (automation?.lastRun?.runId !== expiredRun.runId) continue;
+      if (automation.lastRun.status !== "launched") continue;
+      automationStore.recordLastRun(automation.id, { ...automation.lastRun, status: "missed" });
+      didExpireAny = true;
+    }
+    if (didExpireAny) broadcastAutomations();
+  });
+  automationScheduler.start();
+
   const stop = async () => {
+    automationScheduler.dispose();
     registry.disposeAll();
     // Forcibly tear down every WS first. node-pty + ws upgraded sockets
     // aren't tracked in http.Server's keep-alive set, so target.close() would

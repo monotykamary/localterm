@@ -25,6 +25,7 @@ import type { SpawnPtyInput } from "./types.js";
 import { formatWorkingDirectoryTitle } from "./utils/format-working-directory-title.js";
 import { parseAltScreenFromChunk } from "./utils/parse-alt-screen.js";
 import { parseOsc7FromChunk } from "./utils/parse-osc7.js";
+import { parseOscAutomationExitFromChunk } from "./utils/parse-osc-automation-exit.js";
 import { parseOscDirtyFromChunk } from "./utils/parse-osc-dirty.js";
 import { parseOscNotificationsFromChunk } from "./utils/parse-osc-notification.js";
 import { parseOscTitleFromChunk } from "./utils/parse-osc-title.js";
@@ -37,6 +38,7 @@ interface SessionEvents {
   foreground: [process: string | null];
   notification: [body: string];
   "git-dirty": [];
+  "automation-exit": [code: number];
 }
 
 export class Session extends EventEmitter<SessionEvents> {
@@ -58,6 +60,8 @@ export class Session extends EventEmitter<SessionEvents> {
   private hookCleanupPaths: string[] = [];
   private pendingParse = "";
   private foregroundPollTimer: NodeJS.Timeout | null = null;
+  private readonly reportInitialCommandExit: boolean;
+  private hasEmittedAutomationExit = false;
 
   constructor(input: SpawnPtyInput) {
     super();
@@ -68,6 +72,7 @@ export class Session extends EventEmitter<SessionEvents> {
     this.currentCols = input.cols ?? DEFAULT_COLS;
     this.currentRows = input.rows ?? DEFAULT_ROWS;
     this.createdAt = Date.now();
+    this.reportInitialCommandExit = Boolean(input.initialCommand);
 
     const env: Record<string, string> = {};
     const denied = new Set(PTY_ENV_DENYLIST);
@@ -108,6 +113,11 @@ export class Session extends EventEmitter<SessionEvents> {
       this.exited = true;
       this.emit("exit", exitCode);
     });
+
+    // The PTY line discipline buffers the bytes until the shell reads stdin,
+    // so writing before the first prompt is safe — the command echoes at the
+    // prompt and runs exactly as if the user had typed it.
+    if (input.initialCommand) this.pty.write(`${input.initialCommand}\r`);
 
     this.emitInitialMetadata();
     this.startForegroundPoll();
@@ -269,6 +279,14 @@ export class Session extends EventEmitter<SessionEvents> {
       this.emit("git-dirty");
     }
 
+    if (this.reportInitialCommandExit && !this.hasEmittedAutomationExit) {
+      const automationExitCode = parseOscAutomationExitFromChunk(combined);
+      if (automationExitCode !== null) {
+        this.hasEmittedAutomationExit = true;
+        this.emit("automation-exit", automationExitCode);
+      }
+    }
+
     const lastEsc = combined.lastIndexOf("\x1b");
     if (lastEsc !== -1 && combined.length - lastEsc <= MAX_PENDING_PARSE_BYTES) {
       const tail = combined.slice(lastEsc);
@@ -305,6 +323,12 @@ export class Session extends EventEmitter<SessionEvents> {
           "__localterm_osc7_chpwd",
           "__localterm_git_dirty() { printf '\\e]7777;git-dirty\\a'; }",
           "precmd_functions=(${precmd_functions[@]} __localterm_git_dirty)",
+          ...(this.reportInitialCommandExit
+            ? [
+                ...this.automationExitHookFunctionLines("__localterm_automation_exit_precmd"),
+                "precmd_functions=(__localterm_automation_exit_precmd ${precmd_functions[@]})",
+              ]
+            : []),
         ];
         writeFileSync(path.join(hookDir, ".zshrc"), lines.join("\n") + "\n", {
           mode: 0o600,
@@ -325,6 +349,12 @@ export class Session extends EventEmitter<SessionEvents> {
           'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt;__localterm_git_dirty"',
           "__localterm_osc7_prompt",
           "__localterm_git_dirty() { printf '\\e]7777;git-dirty\\a'; }",
+          ...(this.reportInitialCommandExit
+            ? [
+                ...this.automationExitHookFunctionLines("__localterm_automation_exit_prompt"),
+                'PROMPT_COMMAND="__localterm_automation_exit_prompt${PROMPT_COMMAND:+;${PROMPT_COMMAND}}"',
+              ]
+            : []),
         ];
         writeFileSync(hookPath, lines.join("\n") + "\n", { mode: 0o600 });
         return [["--rcfile", hookPath], null];
@@ -332,6 +362,24 @@ export class Session extends EventEmitter<SessionEvents> {
       default:
         return [[], null];
     }
+  }
+
+  // The initial command is buffered into the PTY at spawn, so prompt #1 is
+  // the one the command echoes at and prompt #2 is the first one after it
+  // finishes — that's the only cycle where $? is the command's exit status.
+  // The hook must run FIRST in the prompt chain (prepended), otherwise the
+  // osc7/git-dirty hooks' printf would have already reset $? to 0.
+  private automationExitHookFunctionLines(functionName: string): string[] {
+    return [
+      "__localterm_automation_prompt_count=0",
+      `${functionName}() {`,
+      "  local __localterm_command_exit=$?",
+      "  __localterm_automation_prompt_count=$((__localterm_automation_prompt_count + 1))",
+      '  if [ "$__localterm_automation_prompt_count" -eq 2 ]; then',
+      "    printf '\\e]7777;automation-exit;%d\\a' \"$__localterm_command_exit\"",
+      "  fi",
+      "}",
+    ];
   }
 
   private zshOsc7ChpwdFunction(): string {

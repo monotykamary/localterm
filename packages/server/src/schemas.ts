@@ -1,6 +1,10 @@
 import { z } from "zod";
 import {
+  AUTOMATIONS_FILE_VERSION,
+  MAX_AUTOMATION_COMMAND_LENGTH,
+  MAX_AUTOMATION_NAME_LENGTH,
   MAX_COLS,
+  MAX_CRON_EXPRESSION_LENGTH,
   MAX_FOREGROUND_LENGTH,
   MAX_INPUT_BYTES,
   MAX_NOTIFICATION_LENGTH,
@@ -117,6 +121,79 @@ const gitDiffSummaryMessageSchema = z
   })
   .strict();
 
+export const automationLastRunStatusSchema = z.enum([
+  "launched",
+  "running",
+  "completed",
+  "failed",
+  "missed",
+]);
+
+export const automationLastRunSchema = z
+  .object({
+    runId: z.string().min(1),
+    at: z.number().int().nonnegative(),
+    status: automationLastRunStatusSchema,
+    exitCode: z.number().int().nullable(),
+  })
+  .strict();
+
+const automationShape = {
+  id: z.string().min(1),
+  name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
+  schedule: z.string().min(1).max(MAX_CRON_EXPRESSION_LENGTH),
+  cwd: z.string().min(1),
+  command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
+  enabled: z.boolean(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+  lastRun: automationLastRunSchema.nullable(),
+};
+
+export const automationSchema = z.object(automationShape).strict();
+
+export const automationWithNextRunSchema = z
+  .object({ ...automationShape, nextRunAt: z.number().int().nullable() })
+  .strict();
+
+export const automationsFileSchema = z
+  .object({
+    version: z.literal(AUTOMATIONS_FILE_VERSION),
+    automations: z.array(automationSchema),
+  })
+  .strict();
+
+export const createAutomationInputSchema = z
+  .object({
+    name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
+    schedule: z.string().min(1).max(MAX_CRON_EXPRESSION_LENGTH),
+    cwd: z.string().min(1),
+    command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+
+export const updateAutomationInputSchema = z
+  .object({
+    name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH).optional(),
+    schedule: z.string().min(1).max(MAX_CRON_EXPRESSION_LENGTH).optional(),
+    cwd: z.string().min(1).optional(),
+    command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH).optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+
+export const automationsListResponseSchema = z
+  .object({ automations: z.array(automationWithNextRunSchema) })
+  .strict();
+
+const automationsMessageSchema = z
+  .object({
+    type: z.literal("automations"),
+    automations: z.array(automationWithNextRunSchema),
+  })
+  .strict();
+
 export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   outputMessageSchema,
   exitMessageSchema,
@@ -126,6 +203,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   foregroundMessageSchema,
   notificationMessageSchema,
   gitDiffSummaryMessageSchema,
+  automationsMessageSchema,
 ]);
 
 export const gitDiffFileSchema = z

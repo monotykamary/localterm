@@ -40,6 +40,8 @@ export const DIFF_VIEWER_CLOSE_TRANSITION_MS = 150;
 export const DIFF_VIEWER_INITIAL_LINE_LIMIT = 2000;
 export const DIFF_VIEW_MODE_STORAGE_KEY = "localterm:diff-view-mode";
 
+export const AUTOMATIONS_RELATIVE_TIME_REFRESH_MS = 30_000;
+
 export const TOOLBAR_HIDE_DELAY_MS = 200;
 export const TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS = 1500;
 export const TOOLTIP_DELAY_MS = 300;
