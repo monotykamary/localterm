@@ -1,5 +1,13 @@
 # localterm
 
+## 1.16.2
+
+### Patch Changes
+
+- Replace debounce with leading-edge throttle for faster git-dirty signals, widen flaky test timeouts
+- Updated dependencies
+  - @monotykamary/localterm-server@1.16.2
+
 ## 1.16.1
 
 ### Patch Changes
