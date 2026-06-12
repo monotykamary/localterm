@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
-import { GIT_DIRTY_DEBOUNCE_MS, WORKTREE_DIRTY_DEBOUNCE_MS } from "./constants.js";
+import { GIT_DIRTY_THROTTLE_MS } from "./constants.js";
 
 const resolveGitDir = (cwd: string): string | null => {
   const indicator = path.join(cwd, ".git");
@@ -32,7 +32,7 @@ interface GitDiffWatcherEvents {
 
 export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
   private watchers: fs.FSWatcher[] = [];
-  private debounceTimer: NodeJS.Timeout | null = null;
+  private throttleTimer: NodeJS.Timeout | null = null;
   private disposed = false;
 
   start(cwd: string): void {
@@ -41,20 +41,20 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
     const gitDir = resolveGitDir(cwd);
     if (!gitDir) return;
 
-    const gitWatchTargets = [gitDir];
+    const watchTargets = [gitDir, cwd];
     const refsDir = path.join(gitDir, "refs");
     try {
-      if (fs.statSync(refsDir).isDirectory()) gitWatchTargets.push(refsDir);
+      if (fs.statSync(refsDir).isDirectory()) watchTargets.push(refsDir);
     } catch {
       /* refs dir may not exist in a bare or unusual repo */
     }
 
-    for (const target of gitWatchTargets) {
+    for (const target of watchTargets) {
       try {
         const watcher = fs.watch(target, (event) => {
           if (this.disposed) return;
           if (event === "change" || event === "rename") {
-            this.scheduleEmit(GIT_DIRTY_DEBOUNCE_MS);
+            this.throttledEmit();
           }
         });
         this.watchers.push(watcher);
@@ -62,24 +62,12 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
         /* target doesn't exist or isn't watchable */
       }
     }
-
-    try {
-      const watcher = fs.watch(cwd, (event) => {
-        if (this.disposed) return;
-        if (event === "change" || event === "rename") {
-          this.scheduleEmit(WORKTREE_DIRTY_DEBOUNCE_MS);
-        }
-      });
-      this.watchers.push(watcher);
-    } catch {
-      /* cwd doesn't exist or isn't watchable */
-    }
   }
 
   stop(): void {
-    if (this.debounceTimer !== null) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
+    if (this.throttleTimer !== null) {
+      clearTimeout(this.throttleTimer);
+      this.throttleTimer = null;
     }
     for (const watcher of this.watchers) {
       try {
@@ -97,14 +85,12 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
     this.removeAllListeners();
   }
 
-  private scheduleEmit(delayMs: number): void {
-    if (this.debounceTimer !== null) {
-      clearTimeout(this.debounceTimer);
-    }
-    this.debounceTimer = setTimeout(() => {
-      this.debounceTimer = null;
-      if (!this.disposed) this.emit("git-dirty");
-    }, delayMs);
-    this.debounceTimer.unref?.();
+  private throttledEmit(): void {
+    if (this.throttleTimer !== null) return;
+    if (!this.disposed) this.emit("git-dirty");
+    this.throttleTimer = setTimeout(() => {
+      this.throttleTimer = null;
+    }, GIT_DIRTY_THROTTLE_MS);
+    this.throttleTimer.unref?.();
   }
 }

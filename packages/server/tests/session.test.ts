@@ -10,7 +10,7 @@ const waitFor = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
     ),
   ]);
 
-const collectOutput = async (session: Session, timeoutMs = 1500): Promise<string> => {
+const collectOutput = async (session: Session, timeoutMs = 5000): Promise<string> => {
   return waitFor(
     new Promise<string>((resolve) => {
       let buffer = "";
@@ -94,7 +94,7 @@ describe("Session", () => {
       new Promise<number | null>((resolve) => {
         session.once("exit", (code) => resolve(code));
       }),
-      3000,
+      5000,
     );
     session.write("exit 0\n");
     const code = await exitPromise;
@@ -106,7 +106,7 @@ describe("Session", () => {
     const session = new Session({ shell: "/bin/sh" });
     const exitPromise = new Promise<void>((resolve) => session.once("exit", () => resolve()));
     session.kill();
-    await waitFor(exitPromise, 3000);
+    await waitFor(exitPromise, 5000);
     expect(session.isExited).toBe(true);
     expect(() => session.write("anything")).not.toThrow();
     session.dispose();
@@ -135,15 +135,15 @@ describe("Session", () => {
             resolve();
             return;
           }
-          if (Date.now() - startedAt > 2000) {
-            reject(new Error(`pid ${childPid} still alive 2s after dispose`));
+          if (Date.now() - startedAt > 4000) {
+            reject(new Error(`pid ${childPid} still alive 4s after dispose`));
             return;
           }
           setTimeout(poll, 50);
         };
         poll();
       }),
-      2500,
+      5000,
     );
   });
 

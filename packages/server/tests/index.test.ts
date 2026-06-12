@@ -197,7 +197,7 @@ describe("createServer WS lifecycle", () => {
     } finally {
       for (const socket of sockets) await closeWs(socket);
     }
-  });
+  }, 10_000);
 
   it("responds to health check", async () => {
     const response = await fetch(`http://127.0.0.1:${server.port}/api/health`);

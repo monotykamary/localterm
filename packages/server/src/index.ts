@@ -6,7 +6,6 @@ import { Hono } from "hono";
 import {
   DEFAULT_HOST,
   DEFAULT_PORT,
-  GIT_DIRTY_DEBOUNCE_MS,
   HTTP_STATUS_BAD_REQUEST,
   HTTP_STATUS_NOT_FOUND,
   MAX_CONCURRENT_SESSIONS,
@@ -313,13 +312,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           };
 
           const gitDiffWatcher = new GitDiffWatcher();
-          let gitDirtyDebounceTimer: NodeJS.Timeout | null = null;
-
           const handleGitDirty = async () => {
-            if (gitDirtyDebounceTimer !== null) {
-              clearTimeout(gitDirtyDebounceTimer);
-              gitDirtyDebounceTimer = null;
-            }
             const cwd = newSession.lastEmittedCwd;
             if (!cwd) return;
             try {
@@ -330,19 +323,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             }
           };
 
-          const scheduleGitDirty = () => {
-            if (gitDirtyDebounceTimer !== null) return;
-            gitDirtyDebounceTimer = setTimeout(() => {
-              gitDirtyDebounceTimer = null;
-              void handleGitDirty();
-            }, GIT_DIRTY_DEBOUNCE_MS);
-            gitDirtyDebounceTimer.unref?.();
-          };
-
-          gitDiffWatcher.on("git-dirty", scheduleGitDirty);
+          gitDiffWatcher.on("git-dirty", () => { void handleGitDirty(); });
           gitDiffWatcher.start(newSession.cwd);
 
-          newSession.on("git-dirty", scheduleGitDirty);
+          newSession.on("git-dirty", () => { void handleGitDirty(); });
           newSession.on("cwd", (changedCwd: string) => {
             gitDiffWatcher.stop();
             gitDiffWatcher.start(changedCwd);
