@@ -3,25 +3,36 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import { GIT_DIRTY_THROTTLE_MS } from "./constants.js";
 
-const resolveGitDir = (cwd: string): string | null => {
-  const indicator = path.join(cwd, ".git");
-  try {
-    const stat = fs.statSync(indicator);
-    if (stat.isDirectory()) return indicator;
-    if (stat.isFile()) {
-      const content = fs.readFileSync(indicator, "utf8").trim();
-      const match = /^gitdir:\s*(.+)$/m.exec(content);
-      if (match) {
-        const resolved = path.resolve(cwd, match[1]);
-        try {
-          if (fs.statSync(resolved).isDirectory()) return resolved;
-        } catch {
-          /* gitdir path is stale or inaccessible */
+interface GitDirResult {
+  gitDir: string;
+  repoRoot: string;
+}
+
+const resolveGitDir = (cwd: string): GitDirResult | null => {
+  let current = path.resolve(cwd);
+  while (true) {
+    const indicator = path.join(current, ".git");
+    try {
+      const stat = fs.statSync(indicator);
+      if (stat.isDirectory()) return { gitDir: indicator, repoRoot: current };
+      if (stat.isFile()) {
+        const content = fs.readFileSync(indicator, "utf8").trim();
+        const match = /^gitdir:\s*(.+)$/m.exec(content);
+        if (match) {
+          const resolved = path.resolve(current, match[1]);
+          try {
+            if (fs.statSync(resolved).isDirectory()) return { gitDir: resolved, repoRoot: current };
+          } catch {
+            /* gitdir path is stale or inaccessible */
+          }
         }
       }
+    } catch {
+      /* .git doesn't exist here — walk up */
     }
-  } catch {
-    /* not a git repo or .git is missing */
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
   }
   return null;
 };
@@ -38,8 +49,9 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
   start(cwd: string): void {
     this.stop();
 
-    const gitDir = resolveGitDir(cwd);
-    if (!gitDir) return;
+    const result = resolveGitDir(cwd);
+    if (!result) return;
+    const { gitDir, repoRoot } = result;
 
     const watch = (target: string, options?: fs.WatchOptions | BufferEncoding | null) => {
       try {
@@ -56,7 +68,7 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
     };
 
     watch(gitDir);
-    watch(cwd, { recursive: true });
+    watch(repoRoot, { recursive: true });
 
     const refsDir = path.join(gitDir, "refs");
     try {
