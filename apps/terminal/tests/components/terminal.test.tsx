@@ -41,6 +41,7 @@ interface FakeXtermHandle {
   scrollLines: ReturnType<typeof vi.fn>;
   scrollToBottom: ReturnType<typeof vi.fn>;
   write: ReturnType<typeof vi.fn>;
+  focus: ReturnType<typeof vi.fn>;
   invokeCsiHandler: (prefix: string | undefined, final: string, params: number[]) => boolean;
 }
 
@@ -119,6 +120,7 @@ vi.mock("@xterm/xterm", () => {
     scrollLines = vi.fn();
     scrollToBottom = vi.fn();
     write = vi.fn((_data: string, callback?: () => void) => callback?.());
+    focus = vi.fn();
     private titleListeners = new Set<(title: string) => void>();
     private csiHandlers: FakeCsiHandlerEntry[] = [];
     private handle: FakeXtermHandle;
@@ -154,6 +156,7 @@ vi.mock("@xterm/xterm", () => {
         scrollLines: this.scrollLines,
         scrollToBottom: this.scrollToBottom,
         write: this.write,
+        focus: this.focus,
         invokeCsiHandler: (prefix, final, params) => {
           for (let entryIndex = this.csiHandlers.length - 1; entryIndex >= 0; entryIndex -= 1) {
             const entry = this.csiHandlers[entryIndex];
@@ -199,7 +202,6 @@ vi.mock("@xterm/xterm", () => {
     };
     reset = () => {};
     clearTextureAtlas = () => {};
-    focus = () => {};
     dispose = () => {};
   }
   return { Terminal: FakeXtermTerminal };
@@ -619,6 +621,55 @@ describe("Terminal Cmd+F search", () => {
     expect(selectSpy).toHaveBeenCalled();
     expect(wasNotPrevented).toBe(false);
     expect(input.value).toBe("needle");
+  });
+});
+
+describe("Terminal overlay input routing", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps the search overlay clickable while open even when the toolbar is not hovered", () => {
+    // Regression: the overlay wrapper went pointer-events-none once the hover
+    // hide-timer fired, so the still-visible find input could not be clicked
+    // back into — clicks fell through to the terminal.
+    render(<Terminal />);
+    act(() => {
+      dispatchFindShortcut(fakeXterms[0]);
+    });
+    const wrapper = screen.getByRole("search").parentElement;
+    expect(wrapper?.className).toContain("pointer-events-auto");
+  });
+
+  it("does not swallow mousedown inside the portaled automations popover", async () => {
+    // Regression: the toolbar's focus-preserving onMouseDown preventDefault
+    // also fired for the portaled popover (React events bubble through the
+    // React tree), so popover inputs could never be focused by click.
+    render(<Terminal />);
+    fireEvent.click(screen.getByLabelText("automations"));
+    fireEvent.click(await screen.findByLabelText("new automation"));
+    const nameInput = await screen.findByLabelText("automation name");
+    const wasNotPrevented = fireEvent.mouseDown(nameInput);
+    expect(wasNotPrevented).toBe(true);
+  });
+
+  it("does not refocus the terminal on keydown inside the automations popover", async () => {
+    // Regression: the toolbar's onKeyDown refocused xterm for keystrokes
+    // bubbling out of the portaled popover, sending typed text to the shell.
+    render(<Terminal />);
+    fireEvent.click(screen.getByLabelText("automations"));
+    fireEvent.click(await screen.findByLabelText("new automation"));
+    const nameInput = await screen.findByLabelText("automation name");
+    fakeXterms[0]?.focus.mockClear();
+    fireEvent.keyDown(nameInput, { key: "a" });
+    expect(fakeXterms[0]?.focus).not.toHaveBeenCalled();
+  });
+
+  it("still refocuses the terminal on keydown over the toolbar's own buttons", () => {
+    render(<Terminal />);
+    fakeXterms[0]?.focus.mockClear();
+    fireEvent.keyDown(screen.getByLabelText("find in terminal"), { key: "a" });
+    expect(fakeXterms[0]?.focus).toHaveBeenCalled();
   });
 });
 

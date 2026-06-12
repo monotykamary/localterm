@@ -1617,7 +1617,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         <div
           className={cn(
             "absolute right-0 top-0 z-10 flex flex-col items-end pr-3 pt-1",
-            isToolbarVisible || hasDiff ? "pointer-events-auto" : "pointer-events-none",
+            isToolbarVisible || isSearchOpen || hasDiff
+              ? "pointer-events-auto"
+              : "pointer-events-none",
           )}
           onMouseEnter={handleToolbarAreaEnter}
           onMouseLeave={handleToolbarAreaLeave}
@@ -1640,8 +1642,18 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                   ? "translate-y-0 opacity-100"
                   : "pointer-events-none -translate-y-1 opacity-0",
               )}
-              onMouseDown={(event) => event.preventDefault()}
-              onKeyDown={() => refocusTerminalRef.current?.()}
+              // The settings/automations popovers portal their DOM to <body> but
+              // their React events still bubble here; only swallow focus for
+              // events originating in the toolbar's own DOM subtree, or popover
+              // inputs become unfocusable and typing gets yanked to the terminal.
+              onMouseDown={(event) => {
+                if (event.currentTarget.contains(event.target as Node)) event.preventDefault();
+              }}
+              onKeyDown={(event) => {
+                if (event.currentTarget.contains(event.target as Node)) {
+                  refocusTerminalRef.current?.();
+                }
+              }}
             >
               {/* With a diff showing, the action buttons collapse behind the
                   always-visible indicator and expand on hover via the
