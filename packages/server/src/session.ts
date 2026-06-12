@@ -352,8 +352,16 @@ export class Session extends EventEmitter<SessionEvents> {
 
   private emitForegroundIfChanged(next: string | null): void {
     if (next !== this.lastEmittedForeground) {
+      const hadForeground = this.lastEmittedForeground != null;
       this.lastEmittedForeground = next;
       this.emit("foreground", next);
+      if (hadForeground && next === null) {
+        const cwdTitle = formatWorkingDirectoryTitle(this.lastEmittedCwd);
+        if (cwdTitle && cwdTitle !== this.lastEmittedTitle) {
+          this.lastEmittedTitle = cwdTitle;
+          this.emit("title", cwdTitle);
+        }
+      }
     }
   }
 
