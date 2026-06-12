@@ -1199,8 +1199,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   }, []);
 
   const handleToolbarAreaLeave = useCallback((event: React.MouseEvent) => {
-    const leftThroughViewportEdge =
-      event.clientY <= 0 || event.clientX >= window.innerWidth - 1;
+    const leftThroughViewportEdge = event.clientY <= 0 || event.clientX >= window.innerWidth - 1;
     const delay = leftThroughViewportEdge
       ? TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS
       : TOOLBAR_HIDE_DELAY_MS;

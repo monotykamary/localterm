@@ -100,10 +100,7 @@ export const resolveDragRange = (
 };
 
 /** Keys (diffLineTargetKey) of every line the range covers, inclusive. */
-export const coveredTargetKeys = (
-  index: DiffLineRangeIndex,
-  range: DiffLineRange,
-): Set<string> => {
+export const coveredTargetKeys = (index: DiffLineRangeIndex, range: DiffLineRange): Set<string> => {
   const keys = new Set<string>();
   const startEntry = index.byKey.get(diffLineTargetKey(range.start));
   const endEntry = index.byKey.get(diffLineTargetKey(range.end));

@@ -9,15 +9,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type RefObject,
-} from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
@@ -547,9 +539,7 @@ const FileDiffPane = ({
                       }
                       onAnnotate={state ? () => onOpenEditor(state.key) : undefined}
                       onDragStart={state ? () => startDrag(state.target) : undefined}
-                      onDragEnter={
-                        isDragging && state ? () => dragOver(state.target) : undefined
-                      }
+                      onDragEnter={isDragging && state ? () => dragOver(state.target) : undefined}
                     />
                     {renderAnnotation(state)}
                   </Fragment>

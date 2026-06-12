@@ -54,9 +54,7 @@ describe("formatReviewPrompt", () => {
         comment: "Keep these.",
       }),
     ]);
-    expect(prompt).toContain(
-      "\n- src/main.ts (deleted, was L3-L5 — see `git diff`): Keep these.",
-    );
+    expect(prompt).toContain("\n- src/main.ts (deleted, was L3-L5 — see `git diff`): Keep these.");
   });
 
   it("spells out both sides for a range that crosses removed lines", () => {
@@ -108,17 +106,13 @@ describe("annotationRangeStart", () => {
   it("returns null for single-line annotations and degenerate ranges", () => {
     expect(annotationRangeStart(annotation({ lineNumber: 5 }))).toBeNull();
     expect(
-      annotationRangeStart(
-        annotation({ startSide: "new", startLineNumber: 5, lineNumber: 5 }),
-      ),
+      annotationRangeStart(annotation({ startSide: "new", startLineNumber: 5, lineNumber: 5 })),
     ).toBeNull();
   });
 
   it("returns the start of a real range", () => {
     expect(
-      annotationRangeStart(
-        annotation({ startSide: "old", startLineNumber: 2, lineNumber: 5 }),
-      ),
+      annotationRangeStart(annotation({ startSide: "old", startLineNumber: 2, lineNumber: 5 })),
     ).toEqual({ side: "old", lineNumber: 2 });
   });
 });
