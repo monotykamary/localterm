@@ -41,17 +41,9 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
     const gitDir = resolveGitDir(cwd);
     if (!gitDir) return;
 
-    const watchTargets = [gitDir, cwd];
-    const refsDir = path.join(gitDir, "refs");
-    try {
-      if (fs.statSync(refsDir).isDirectory()) watchTargets.push(refsDir);
-    } catch {
-      /* refs dir may not exist in a bare or unusual repo */
-    }
-
-    for (const target of watchTargets) {
+    const watch = (target: string, options?: fs.WatchOptions | BufferEncoding | null) => {
       try {
-        const watcher = fs.watch(target, (event) => {
+        const watcher = fs.watch(target, options ?? {}, (event: string) => {
           if (this.disposed) return;
           if (event === "change" || event === "rename") {
             this.throttledEmit();
@@ -61,6 +53,16 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
       } catch {
         /* target doesn't exist or isn't watchable */
       }
+    };
+
+    watch(gitDir);
+    watch(cwd, { recursive: true });
+
+    const refsDir = path.join(gitDir, "refs");
+    try {
+      if (fs.statSync(refsDir).isDirectory()) watch(refsDir);
+    } catch {
+      /* refs dir may not exist in a bare or unusual repo */
     }
   }
 
