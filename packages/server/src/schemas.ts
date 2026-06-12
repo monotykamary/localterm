@@ -91,16 +91,6 @@ const notificationMessageSchema = z
   })
   .strict();
 
-export const serverToClientMessageSchema = z.discriminatedUnion("type", [
-  outputMessageSchema,
-  exitMessageSchema,
-  titleMessageSchema,
-  sessionMessageSchema,
-  cwdMessageSchema,
-  foregroundMessageSchema,
-  notificationMessageSchema,
-]);
-
 export const gitDiffFileStatusSchema = z.enum([
   "modified",
   "added",
@@ -119,6 +109,24 @@ export const gitDiffSummarySchema = z
     binaries: z.number().int().nonnegative(),
   })
   .strict();
+
+const gitDiffSummaryMessageSchema = z
+  .object({
+    type: z.literal("git-diff-summary"),
+    summary: gitDiffSummarySchema,
+  })
+  .strict();
+
+export const serverToClientMessageSchema = z.discriminatedUnion("type", [
+  outputMessageSchema,
+  exitMessageSchema,
+  titleMessageSchema,
+  sessionMessageSchema,
+  cwdMessageSchema,
+  foregroundMessageSchema,
+  notificationMessageSchema,
+  gitDiffSummaryMessageSchema,
+]);
 
 export const gitDiffFileSchema = z
   .object({

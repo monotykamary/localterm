@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import {
   DEFAULT_HOST,
   DEFAULT_PORT,
+  GIT_DIRTY_DEBOUNCE_MS,
   HTTP_STATUS_BAD_REQUEST,
   HTTP_STATUS_NOT_FOUND,
   MAX_CONCURRENT_SESSIONS,
@@ -25,6 +26,7 @@ import {
 } from "./constants.js";
 import { ServerErrorException, serverError } from "./errors.js";
 import { getGitDiff, getGitDiffSummary } from "./git-diff.js";
+import { GitDiffWatcher } from "./git-diff-watcher.js";
 import { clientToServerMessageSchema } from "./schemas.js";
 import { Session } from "./session.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
@@ -305,9 +307,47 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             flushOutputBatch();
             stopDrainPoll();
             stopHeartbeatChecks();
+            gitDiffWatcher.dispose();
             safeSend(ws, { type: "exit", code });
             ws.close();
           };
+
+          const gitDiffWatcher = new GitDiffWatcher();
+          let gitDirtyDebounceTimer: NodeJS.Timeout | null = null;
+
+          const handleGitDirty = async () => {
+            if (gitDirtyDebounceTimer !== null) {
+              clearTimeout(gitDirtyDebounceTimer);
+              gitDirtyDebounceTimer = null;
+            }
+            const cwd = newSession.lastEmittedCwd;
+            if (!cwd) return;
+            try {
+              const summary = await getGitDiffSummary(cwd);
+              safeSend(ws, { type: "git-diff-summary", summary });
+            } catch {
+              /* transient git failure; next dirty signal will retry */
+            }
+          };
+
+          const scheduleGitDirty = () => {
+            if (gitDirtyDebounceTimer !== null) return;
+            gitDirtyDebounceTimer = setTimeout(() => {
+              gitDirtyDebounceTimer = null;
+              void handleGitDirty();
+            }, GIT_DIRTY_DEBOUNCE_MS);
+            gitDirtyDebounceTimer.unref?.();
+          };
+
+          gitDiffWatcher.on("git-dirty", scheduleGitDirty);
+          gitDiffWatcher.start(newSession.cwd);
+
+          newSession.on("git-dirty", scheduleGitDirty);
+          newSession.on("cwd", (changedCwd: string) => {
+            gitDiffWatcher.stop();
+            gitDiffWatcher.start(changedCwd);
+          });
+
           newSession.on("output", onOutput);
           newSession.on("title", onTitle);
           newSession.on("cwd", onCwd);

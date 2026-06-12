@@ -5,7 +5,6 @@ import { DiffViewer } from "../../src/components/diff-viewer";
 
 vi.mock("../../src/utils/fetch-git-diff", () => ({
   fetchGitDiff: vi.fn(),
-  fetchGitDiffSummary: vi.fn(),
 }));
 
 import { fetchGitDiff } from "../../src/utils/fetch-git-diff";

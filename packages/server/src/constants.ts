@@ -125,6 +125,7 @@ export const GIT_BINARY_SNIFF_BYTES = 8000;
 // "too large" notice); past the total cap all remaining patches are dropped.
 export const GIT_MAX_PATCH_BYTES_PER_FILE = 1 * 1024 * 1024;
 export const GIT_MAX_TOTAL_PATCH_BYTES = 10 * 1024 * 1024;
+export const GIT_DIRTY_DEBOUNCE_MS = 100;
 
 export const WS_READY_STATE_OPEN = 1;
 export const WS_CLOSE_POLICY_VIOLATION = 1008;

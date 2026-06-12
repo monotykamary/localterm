@@ -25,6 +25,7 @@ import type { SpawnPtyInput } from "./types.js";
 import { formatWorkingDirectoryTitle } from "./utils/format-working-directory-title.js";
 import { parseAltScreenFromChunk } from "./utils/parse-alt-screen.js";
 import { parseOsc7FromChunk } from "./utils/parse-osc7.js";
+import { parseOscDirtyFromChunk } from "./utils/parse-osc-dirty.js";
 import { parseOscNotificationsFromChunk } from "./utils/parse-osc-notification.js";
 import { parseOscTitleFromChunk } from "./utils/parse-osc-title.js";
 
@@ -35,6 +36,7 @@ interface SessionEvents {
   cwd: [cwd: string];
   foreground: [process: string | null];
   notification: [body: string];
+  "git-dirty": [];
 }
 
 export class Session extends EventEmitter<SessionEvents> {
@@ -50,7 +52,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private paused = false;
   private initialTitle = "";
   private lastEmittedTitle = "";
-  private lastEmittedCwd = "";
+  private lastEmittedCwdValue = "";
   private lastEmittedForeground: string | null | undefined = undefined;
   private pixelResizeSupported: boolean | null = null;
   private hookCleanupPaths: string[] = [];
@@ -139,6 +141,10 @@ export class Session extends EventEmitter<SessionEvents> {
     return this.paused;
   }
 
+  get lastEmittedCwd(): string {
+    return this.lastEmittedCwdValue;
+  }
+
   write(data: string): void {
     if (this.exited) return;
     this.pty.write(data);
@@ -218,7 +224,7 @@ export class Session extends EventEmitter<SessionEvents> {
       this.initialTitle = initialTitle;
       this.lastEmittedTitle = initialTitle;
     }
-    this.lastEmittedCwd = this.cwd;
+    this.lastEmittedCwdValue = this.cwd;
     this.lastEmittedForeground = null;
   }
 
@@ -228,8 +234,8 @@ export class Session extends EventEmitter<SessionEvents> {
 
     const osc7Path = parseOsc7FromChunk(combined);
     let cwdChanged = false;
-    if (osc7Path && osc7Path !== this.lastEmittedCwd) {
-      this.lastEmittedCwd = osc7Path;
+    if (osc7Path && osc7Path !== this.lastEmittedCwdValue) {
+      this.lastEmittedCwdValue = osc7Path;
       this.emit("cwd", osc7Path);
       cwdChanged = true;
     }
@@ -242,7 +248,7 @@ export class Session extends EventEmitter<SessionEvents> {
         this.emit("title", trimmed);
       }
     } else if (cwdChanged) {
-      const cwdTitle = formatWorkingDirectoryTitle(this.lastEmittedCwd);
+      const cwdTitle = formatWorkingDirectoryTitle(this.lastEmittedCwdValue);
       if (cwdTitle && cwdTitle !== this.lastEmittedTitle) {
         this.lastEmittedTitle = cwdTitle;
         this.emit("title", cwdTitle);
@@ -257,6 +263,10 @@ export class Session extends EventEmitter<SessionEvents> {
     const notifications = parseOscNotificationsFromChunk(combined);
     for (const body of notifications) {
       this.emit("notification", body.slice(0, MAX_NOTIFICATION_LENGTH));
+    }
+
+    if (parseOscDirtyFromChunk(combined)) {
+      this.emit("git-dirty");
     }
 
     const lastEsc = combined.lastIndexOf("\x1b");
@@ -293,6 +303,8 @@ export class Session extends EventEmitter<SessionEvents> {
           hookScript,
           "chpwd_functions=(${chpwd_functions[@]} __localterm_osc7_chpwd)",
           "__localterm_osc7_chpwd",
+          "__localterm_git_dirty() { printf '\\e]7777;git-dirty\\a'; }",
+          "precmd_functions=(${precmd_functions[@]} __localterm_git_dirty)",
         ];
         writeFileSync(path.join(hookDir, ".zshrc"), lines.join("\n") + "\n", {
           mode: 0o600,
@@ -310,8 +322,9 @@ export class Session extends EventEmitter<SessionEvents> {
           "source /etc/bash.bashrc 2>/dev/null",
           "source ~/.bashrc 2>/dev/null",
           hookScript,
-          'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt"',
+          'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt;__localterm_git_dirty"',
           "__localterm_osc7_prompt",
+          "__localterm_git_dirty() { printf '\\e]7777;git-dirty\\a'; }",
         ];
         writeFileSync(hookPath, lines.join("\n") + "\n", { mode: 0o600 });
         return [["--rcfile", hookPath], null];
@@ -356,7 +369,7 @@ export class Session extends EventEmitter<SessionEvents> {
       this.lastEmittedForeground = next;
       this.emit("foreground", next);
       if (hadForeground && next === null) {
-        const cwdTitle = formatWorkingDirectoryTitle(this.lastEmittedCwd);
+        const cwdTitle = formatWorkingDirectoryTitle(this.lastEmittedCwdValue);
         if (cwdTitle && cwdTitle !== this.lastEmittedTitle) {
           this.lastEmittedTitle = cwdTitle;
           this.emit("title", cwdTitle);

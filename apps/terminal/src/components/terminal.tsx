@@ -294,7 +294,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const wsConnectedRef = useRef(false);
   const isMac = useMemo(detectIsMacPlatform, []);
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
-  const diffSummary = useGitDiffSummary(liveCwd);
+  const { summary: diffSummary, setGitDiffSummary } = useGitDiffSummary();
   const hasDiff = diffSummary !== null && diffSummary.isRepo && diffSummary.files > 0;
 
   useEffect(() => {
@@ -896,6 +896,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           applyIncomingTitle(message.title);
         } else if (message.type === "cwd") {
           setLiveCwd(message.cwd);
+          setGitDiffSummary(null);
+        } else if (message.type === "git-diff-summary") {
+          setGitDiffSummary(message.summary);
         } else if (message.type === "foreground") {
           const nowHasProcess = message.process !== null;
           onForegroundProcessChange?.(nowHasProcess);
