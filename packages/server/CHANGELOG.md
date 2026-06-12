@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.15.1
+
+### Patch Changes
+
+- 0c68b11: Revert terminal title to cwd-derived value when a foreground process exits
+
 ## 1.15.0
 
 ## 1.14.1

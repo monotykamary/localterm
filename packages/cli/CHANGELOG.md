@@ -1,5 +1,12 @@
 # localterm
 
+## 1.15.1
+
+### Patch Changes
+
+- 0c68b11: Revert terminal title to cwd-derived value when a foreground process (e.g. Claude Code) exits, instead of leaving the stale program name in the titlebar.
+- @monotykamary/localterm-server@1.15.1
+
 ## 1.15.0
 
 ### Minor Changes
