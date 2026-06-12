@@ -70,6 +70,7 @@ import {
   SEARCH_ACTIVE_MATCH_BORDER_HEX,
   SEARCH_MATCH_BACKGROUND_HEX,
   TOOLBAR_HIDE_DELAY_MS,
+  TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS,
 } from "@/lib/constants";
 import { serverToClientMessageSchema } from "@monotykamary/localterm-server/protocol";
 import {
@@ -1197,13 +1198,18 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     setIsToolbarHovered(true);
   }, []);
 
-  const handleToolbarAreaLeave = useCallback(() => {
+  const handleToolbarAreaLeave = useCallback((event: React.MouseEvent) => {
+    const leftThroughViewportEdge =
+      event.clientY <= 0 || event.clientX >= window.innerWidth - 1;
+    const delay = leftThroughViewportEdge
+      ? TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS
+      : TOOLBAR_HIDE_DELAY_MS;
     toolbarHoverTimeoutRef.current = window.setTimeout(() => {
       toolbarHoverTimeoutRef.current = null;
       if (!isSettingsPopoverOpenRef.current) {
         setIsToolbarHovered(false);
       }
-    }, TOOLBAR_HIDE_DELAY_MS);
+    }, delay);
   }, []);
 
   const handleSettingsPopoverOpenChange = useCallback((open: boolean) => {

@@ -42,6 +42,7 @@ export const DIFF_VIEWER_INITIAL_LINE_LIMIT = 2000;
 export const DIFF_VIEW_MODE_STORAGE_KEY = "localterm:diff-view-mode";
 
 export const TOOLBAR_HIDE_DELAY_MS = 200;
+export const TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS = 1500;
 export const TOOLTIP_DELAY_MS = 300;
 export const TOOLTIP_SIDE_OFFSET_PX = 8;
 
