@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.16.1
+
+### Patch Changes
+
+- Watch the cwd directory for out-of-band working-tree changes
+
 ## 1.16.0
 
 ### Minor Changes
