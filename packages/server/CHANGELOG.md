@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.16.3
+
+### Patch Changes
+
+- Fix cwd watcher to use recursive fs.watch so subdirectory file changes are detected
+
 ## 1.16.2
 
 ### Patch Changes
