@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.16.4
+
+### Patch Changes
+
+- Fix git-dirty watcher to resolve .git by walking up the directory tree so it works from subdirectories
+
 ## 1.16.3
 
 ### Patch Changes
