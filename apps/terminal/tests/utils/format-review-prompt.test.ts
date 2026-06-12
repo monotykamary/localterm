@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  annotationRangeStart,
   diffAnnotationKey,
   formatReviewPrompt,
   type DiffAnnotation,
@@ -31,6 +32,55 @@ describe("formatReviewPrompt", () => {
     );
   });
 
+  it("formats a new-side range as a line span", () => {
+    const prompt = formatReviewPrompt([
+      annotation({
+        startSide: "new",
+        startLineNumber: 10,
+        lineNumber: 14,
+        comment: "Extract this block.",
+      }),
+    ]);
+    expect(prompt).toContain("\n- src/main.ts L10-L14: Extract this block.");
+  });
+
+  it("formats an old-side range as a deleted span", () => {
+    const prompt = formatReviewPrompt([
+      annotation({
+        side: "old",
+        startSide: "old",
+        startLineNumber: 3,
+        lineNumber: 5,
+        comment: "Keep these.",
+      }),
+    ]);
+    expect(prompt).toContain(
+      "\n- src/main.ts (deleted, was L3-L5 — see `git diff`): Keep these.",
+    );
+  });
+
+  it("spells out both sides for a range that crosses removed lines", () => {
+    const prompt = formatReviewPrompt([
+      annotation({
+        startSide: "old",
+        startLineNumber: 7,
+        lineNumber: 9,
+        comment: "This replacement loses the null check.",
+      }),
+    ]);
+    expect(prompt).toContain(
+      "\n- src/main.ts old L7 through L9 (range spans removed lines — see `git diff`): " +
+        "This replacement loses the null check.",
+    );
+  });
+
+  it("treats a degenerate range as a single line", () => {
+    const prompt = formatReviewPrompt([
+      annotation({ startSide: "new", startLineNumber: 4, lineNumber: 4, comment: "One line." }),
+    ]);
+    expect(prompt).toContain("\n- src/main.ts L4: One line.");
+  });
+
   it("sorts comments by file path, then line number", () => {
     const prompt = formatReviewPrompt([
       annotation({ filePath: "src/b.ts", lineNumber: 9, comment: "third" }),
@@ -51,5 +101,24 @@ describe("diffAnnotationKey", () => {
     expect(diffAnnotationKey(annotation({ side: "old", lineNumber: 3 }))).not.toBe(
       diffAnnotationKey(annotation({ side: "new", lineNumber: 3 })),
     );
+  });
+});
+
+describe("annotationRangeStart", () => {
+  it("returns null for single-line annotations and degenerate ranges", () => {
+    expect(annotationRangeStart(annotation({ lineNumber: 5 }))).toBeNull();
+    expect(
+      annotationRangeStart(
+        annotation({ startSide: "new", startLineNumber: 5, lineNumber: 5 }),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns the start of a real range", () => {
+    expect(
+      annotationRangeStart(
+        annotation({ startSide: "old", startLineNumber: 2, lineNumber: 5 }),
+      ),
+    ).toEqual({ side: "old", lineNumber: 2 });
   });
 });

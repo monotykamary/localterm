@@ -9,7 +9,15 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,8 +29,18 @@ import {
 import { DIFF_VIEWER_CLOSE_TRANSITION_MS, DIFF_VIEWER_INITIAL_LINE_LIMIT } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { buildSplitDiffRows } from "@/utils/build-split-diff-rows";
+import {
+  buildDiffLineRangeIndex,
+  coveredTargetKeys,
+  diffLineTargetFor,
+  diffLineTargetKey,
+  resolveDragRange,
+  type DiffLineRange,
+  type DiffLineTarget,
+} from "@/utils/diff-line-ranges";
 import { fetchGitDiff } from "@/utils/fetch-git-diff";
 import {
+  annotationRangeStart,
   diffAnnotationKey,
   formatReviewPrompt,
   type DiffAnnotation,
@@ -46,15 +64,28 @@ interface DiffViewerProps {
   onSendToTerminal?: (text: string) => void;
 }
 
-type AnnotationTarget = Pick<DiffAnnotation, "side" | "lineNumber">;
+// A multiline drag that just ended: the range the open annotation editor will
+// attach to its annotation on save. `end` is the line the editor anchors to.
+interface PendingAnnotationRange extends DiffLineRange {
+  filePath: string;
+}
 
-// Deleted lines are addressed on the old side, everything else on the new side.
-const annotationTargetFor = (line: DiffLine): AnnotationTarget | null => {
-  if (line.type === "del") {
-    return line.oldLine === null ? null : { side: "old", lineNumber: line.oldLine };
-  }
-  return line.newLine === null ? null : { side: "new", lineNumber: line.newLine };
+const formatRangeLabel = (start: DiffLineTarget, end: DiffLineTarget): string => {
+  const sideRef = (target: DiffLineTarget) =>
+    `${target.side === "old" ? "old " : ""}L${target.lineNumber}`;
+  return start.side === end.side
+    ? `${start.side === "old" ? "old " : ""}L${start.lineNumber}–L${end.lineNumber}`
+    : `${sideRef(start)} – ${sideRef(end)}`;
 };
+
+// Overlays a line covered by a multiline annotation or an in-progress drag
+// selection. pointer-events-none keeps the line interactive beneath it.
+const RangeHighlight = () => (
+  <span
+    aria-hidden="true"
+    className="pointer-events-none absolute inset-0 border-l-2 border-primary/60 bg-primary/10"
+  />
+);
 
 const STATUS_LABELS: Record<GitDiffFile["status"], { letter: string; className: string }> = {
   modified: { letter: "M", className: "text-amber-400" },
@@ -85,11 +116,23 @@ const lineBackgroundClasses = (type: DiffLine["type"]): string => {
 const lineTextClasses = (type: DiffLine["type"]): string =>
   type === "context" ? "text-muted-foreground" : "text-foreground/90";
 
-const AnnotateLineButton = ({ onClick }: { onClick: () => void }) => (
+const AnnotateLineButton = ({
+  onClick,
+  onDragStart,
+}: {
+  onClick: () => void;
+  onDragStart: () => void;
+}) => (
   <button
     type="button"
     onClick={onClick}
-    aria-label="comment on line"
+    onPointerDown={(event) => {
+      if (event.button !== 0) return;
+      // Keep the browser from starting a text selection under the drag.
+      event.preventDefault();
+      onDragStart();
+    }}
+    aria-label="comment on line — drag to select multiple lines"
     className="absolute top-1/2 left-1 z-10 hidden size-4 -translate-y-1/2 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-transform group-hover/line:flex hover:scale-110"
   >
     <MessageSquarePlus className="size-3" aria-hidden="true" />
@@ -143,6 +186,7 @@ const AnnotationEditor = ({ initialComment, onSave, onCancel }: AnnotationEditor
 interface AnnotationBlockProps {
   annotation: DiffAnnotation | undefined;
   isEditing: boolean;
+  rangeLabel: string | null;
   onEdit: () => void;
   onSave: (comment: string) => void;
   onCancel: () => void;
@@ -155,6 +199,7 @@ interface AnnotationBlockProps {
 const AnnotationBlock = ({
   annotation,
   isEditing,
+  rangeLabel,
   onEdit,
   onSave,
   onCancel,
@@ -162,6 +207,11 @@ const AnnotationBlock = ({
 }: AnnotationBlockProps) => (
   <div className="border-y border-border/40 bg-muted/20 py-2 pr-4 pl-3 font-sans">
     <div className="sticky left-3 max-w-xl">
+      {rangeLabel ? (
+        <div className="mb-1 font-mono text-[10px] tracking-wide text-muted-foreground/80">
+          {rangeLabel}
+        </div>
+      ) : null}
       {isEditing ? (
         <AnnotationEditor
           initialComment={annotation?.comment ?? ""}
@@ -203,9 +253,26 @@ const AnnotationBlock = ({
   </div>
 );
 
-const UnifiedDiffLine = ({ line, onAnnotate }: { line: DiffLine; onAnnotate?: () => void }) => (
-  <div className={cn("group/line relative flex", lineBackgroundClasses(line.type))}>
-    {onAnnotate ? <AnnotateLineButton onClick={onAnnotate} /> : null}
+const UnifiedDiffLine = ({
+  line,
+  highlighted,
+  onAnnotate,
+  onDragStart,
+  onDragEnter,
+}: {
+  line: DiffLine;
+  highlighted: boolean;
+  onAnnotate?: () => void;
+  onDragStart?: () => void;
+  onDragEnter?: () => void;
+}) => (
+  <div
+    className={cn("group/line relative flex", lineBackgroundClasses(line.type))}
+    onPointerEnter={onDragEnter}
+  >
+    {onAnnotate && onDragStart ? (
+      <AnnotateLineButton onClick={onAnnotate} onDragStart={onDragStart} />
+    ) : null}
     <span className={LINE_NUMBER_CELL_CLASSES}>{line.oldLine ?? ""}</span>
     <span className={LINE_NUMBER_CELL_CLASSES}>{line.newLine ?? ""}</span>
     <span
@@ -225,6 +292,7 @@ const UnifiedDiffLine = ({ line, onAnnotate }: { line: DiffLine; onAnnotate?: ()
         </span>
       ) : null}
     </span>
+    {highlighted ? <RangeHighlight /> : null}
   </div>
 );
 
@@ -232,10 +300,12 @@ const SplitDiffCell = ({
   line,
   side,
   onAnnotate,
+  onDragStart,
 }: {
   line: DiffLine | null;
   side: "left" | "right";
   onAnnotate?: () => void;
+  onDragStart?: () => void;
 }) => {
   if (!line) {
     return (
@@ -250,7 +320,9 @@ const SplitDiffCell = ({
     line.type === "context" ? "context" : side === "left" ? "del" : ("add" as const);
   return (
     <>
-      {onAnnotate ? <AnnotateLineButton onClick={onAnnotate} /> : null}
+      {onAnnotate && onDragStart ? (
+        <AnnotateLineButton onClick={onAnnotate} onDragStart={onDragStart} />
+      ) : null}
       <span className={cn(LINE_NUMBER_CELL_CLASSES, lineBackgroundClasses(effectiveType))}>
         {side === "left" ? (line.oldLine ?? "") : (line.newLine ?? "")}
       </span>
@@ -276,7 +348,11 @@ interface FileDiffPaneProps {
   viewMode: DiffViewMode;
   annotations: Record<string, DiffAnnotation>;
   editingKey: string | null;
-  onOpenEditor: (key: string) => void;
+  pendingRange: PendingAnnotationRange | null;
+  // Set while a drag selection is active so the viewer's Escape handler can
+  // cancel the drag instead of closing the dialog.
+  dragCancelRef: RefObject<(() => void) | null>;
+  onOpenEditor: (key: string, range?: PendingAnnotationRange) => void;
   onSaveAnnotation: (annotation: DiffAnnotation) => void;
   onCancelEditor: () => void;
   onDeleteAnnotation: (key: string) => void;
@@ -284,9 +360,16 @@ interface FileDiffPaneProps {
 
 interface LineAnnotationState {
   key: string;
+  target: DiffLineTarget;
   saved: DiffAnnotation | undefined;
   isEditing: boolean;
+  rangeStart: DiffLineTarget | null;
   save: (comment: string) => void;
+}
+
+interface DragSelection {
+  anchor: DiffLineTarget;
+  focus: DiffLineTarget;
 }
 
 const FileDiffPane = ({
@@ -294,18 +377,75 @@ const FileDiffPane = ({
   viewMode,
   annotations,
   editingKey,
+  pendingRange,
+  dragCancelRef,
   onOpenEditor,
   onSaveAnnotation,
   onCancelEditor,
   onDeleteAnnotation,
 }: FileDiffPaneProps) => {
   const [showAllLines, setShowAllLines] = useState(false);
+  const [drag, setDrag] = useState<DragSelection | null>(null);
   const hunks = useMemo(() => (file.patch ? parseUnifiedDiff(file.patch) : []), [file.patch]);
   const totalLines = useMemo(() => countHunkLines(hunks), [hunks]);
+  const rangeIndex = useMemo(() => buildDiffLineRangeIndex(hunks), [hunks]);
+
+  const isDragging = drag !== null;
+  const dragRange = drag ? resolveDragRange(rangeIndex, drag.anchor, drag.focus) : null;
+  const dragRangeRef = useRef(dragRange);
+  dragRangeRef.current = dragRange;
+
+  const startDrag = (target: DiffLineTarget) => setDrag({ anchor: target, focus: target });
+  const dragOver = (target: DiffLineTarget) =>
+    setDrag((previous) => (previous ? { ...previous, focus: target } : previous));
 
   useEffect(() => {
     setShowAllLines(false);
+    setDrag(null);
   }, [file.path]);
+
+  // Releasing the pointer anywhere commits the drag and opens the editor on
+  // the last line of the range; a plain click is just a single-line range.
+  useEffect(() => {
+    if (!isDragging) return;
+    const cancelDrag = () => setDrag(null);
+    dragCancelRef.current = cancelDrag;
+    const commitDrag = () => {
+      setDrag(null);
+      const range = dragRangeRef.current;
+      if (!range) return;
+      const key = diffAnnotationKey({ filePath: file.path, ...range.end });
+      const isMultiline = diffLineTargetKey(range.start) !== diffLineTargetKey(range.end);
+      onOpenEditor(key, isMultiline ? { filePath: file.path, ...range } : undefined);
+    };
+    window.addEventListener("pointerup", commitDrag);
+    window.addEventListener("pointercancel", cancelDrag);
+    return () => {
+      dragCancelRef.current = null;
+      window.removeEventListener("pointerup", commitDrag);
+      window.removeEventListener("pointercancel", cancelDrag);
+    };
+  }, [isDragging, file.path, onOpenEditor, dragCancelRef]);
+
+  // Lines covered by the live drag, the just-committed editor range, or any
+  // saved multiline annotation in this file.
+  const highlightedKeys = useMemo(() => {
+    const keys = new Set<string>();
+    const addRange = (range: DiffLineRange | null) => {
+      if (!range) return;
+      for (const key of coveredTargetKeys(rangeIndex, range)) keys.add(key);
+    };
+    addRange(dragRange);
+    if (pendingRange && pendingRange.filePath === file.path) addRange(pendingRange);
+    for (const annotation of Object.values(annotations)) {
+      if (annotation.filePath !== file.path) continue;
+      const start = annotationRangeStart(annotation);
+      if (start) {
+        addRange({ start, end: { side: annotation.side, lineNumber: annotation.lineNumber } });
+      }
+    }
+    return keys;
+  }, [rangeIndex, dragRange, pendingRange, annotations, file.path]);
 
   if (file.binary) {
     return <DiffPaneNotice icon>Binary file — no text diff to show.</DiffPaneNotice>;
@@ -338,14 +478,34 @@ const FileDiffPane = ({
   const hiddenLineCount = totalLines - renderedLines;
 
   const annotationStateFor = (line: DiffLine): LineAnnotationState | null => {
-    const target = annotationTargetFor(line);
+    const target = diffLineTargetFor(line);
     if (!target) return null;
     const key = diffAnnotationKey({ filePath: file.path, ...target });
+    const saved = annotations[key];
+    const isEditing = editingKey === key;
+    // A drag that just ended supplies the editor's range; re-editing an
+    // existing multiline annotation keeps its saved range.
+    const rangeStart =
+      isEditing && pendingRange && pendingRange.filePath === file.path
+        ? pendingRange.start
+        : saved
+          ? annotationRangeStart(saved)
+          : null;
     return {
       key,
-      saved: annotations[key],
-      isEditing: editingKey === key,
-      save: (comment: string) => onSaveAnnotation({ filePath: file.path, ...target, comment }),
+      target,
+      saved,
+      isEditing,
+      rangeStart,
+      save: (comment: string) =>
+        onSaveAnnotation({
+          filePath: file.path,
+          ...target,
+          ...(rangeStart
+            ? { startSide: rangeStart.side, startLineNumber: rangeStart.lineNumber }
+            : {}),
+          comment,
+        }),
     };
   };
 
@@ -354,6 +514,7 @@ const FileDiffPane = ({
       <AnnotationBlock
         annotation={state.saved}
         isEditing={state.isEditing}
+        rangeLabel={state.rangeStart ? formatRangeLabel(state.rangeStart, state.target) : null}
         onEdit={() => onOpenEditor(state.key)}
         onSave={state.save}
         onCancel={onCancelEditor}
@@ -368,6 +529,7 @@ const FileDiffPane = ({
         // Unified lines scroll horizontally; split columns clip instead so the
         // two panes keep a stable 50/50 width.
         viewMode === "unified" && "min-w-max",
+        isDragging && "select-none",
       )}
     >
       {visibleHunks.map((hunk) => (
@@ -380,7 +542,14 @@ const FileDiffPane = ({
                   <Fragment key={lineIndex}>
                     <UnifiedDiffLine
                       line={line}
+                      highlighted={
+                        state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
+                      }
                       onAnnotate={state ? () => onOpenEditor(state.key) : undefined}
+                      onDragStart={state ? () => startDrag(state.target) : undefined}
+                      onDragEnter={
+                        isDragging && state ? () => dragOver(state.target) : undefined
+                      }
                     />
                     {renderAnnotation(state)}
                   </Fragment>
@@ -395,19 +564,37 @@ const FileDiffPane = ({
                 return (
                   <Fragment key={rowIndex}>
                     <div className="flex">
-                      <div className="group/line relative flex w-1/2 min-w-0 border-r border-border/40">
+                      <div
+                        className="group/line relative flex w-1/2 min-w-0 border-r border-border/40"
+                        onPointerEnter={
+                          isDragging && leftState ? () => dragOver(leftState.target) : undefined
+                        }
+                      >
                         <SplitDiffCell
                           line={row.left}
                           side="left"
                           onAnnotate={leftState ? () => onOpenEditor(leftState.key) : undefined}
+                          onDragStart={leftState ? () => startDrag(leftState.target) : undefined}
                         />
+                        {leftState && highlightedKeys.has(diffLineTargetKey(leftState.target)) ? (
+                          <RangeHighlight />
+                        ) : null}
                       </div>
-                      <div className="group/line relative flex w-1/2 min-w-0">
+                      <div
+                        className="group/line relative flex w-1/2 min-w-0"
+                        onPointerEnter={
+                          isDragging && rightState ? () => dragOver(rightState.target) : undefined
+                        }
+                      >
                         <SplitDiffCell
                           line={row.right}
                           side="right"
                           onAnnotate={rightState ? () => onOpenEditor(rightState.key) : undefined}
+                          onDragStart={rightState ? () => startDrag(rightState.target) : undefined}
                         />
+                        {rightState && highlightedKeys.has(diffLineTargetKey(rightState.target)) ? (
+                          <RangeHighlight />
+                        ) : null}
                       </div>
                     </div>
                     {renderAnnotation(leftState)}
@@ -447,6 +634,10 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
   // Pending review annotations survive close/reopen until they are sent.
   const [annotations, setAnnotations] = useState<Record<string, DiffAnnotation>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  // Range selected by the drag that opened the current editor, applied to the
+  // annotation on save.
+  const [pendingRange, setPendingRange] = useState<PendingAnnotationRange | null>(null);
+  const dragCancelRef = useRef<(() => void) | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const fileListRef = useRef<HTMLDivElement | null>(null);
 
@@ -530,6 +721,11 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
         if (isTextArea) return;
         event.preventDefault();
         event.stopPropagation();
+        // Mid-drag Escape abandons the range selection, not the viewer.
+        if (dragCancelRef.current) {
+          dragCancelRef.current();
+          return;
+        }
         onClose();
         return;
       }
@@ -556,17 +752,20 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
     storeDiffViewMode(nextMode);
   }, []);
 
-  const openAnnotationEditor = useCallback((key: string) => {
+  const openAnnotationEditor = useCallback((key: string, range?: PendingAnnotationRange) => {
     setEditingKey(key);
+    setPendingRange(range ?? null);
   }, []);
 
   const cancelAnnotationEditor = useCallback(() => {
     setEditingKey(null);
+    setPendingRange(null);
   }, []);
 
   const saveAnnotation = useCallback((annotation: DiffAnnotation) => {
     setAnnotations((previous) => ({ ...previous, [diffAnnotationKey(annotation)]: annotation }));
     setEditingKey(null);
+    setPendingRange(null);
   }, []);
 
   const deleteAnnotation = useCallback((key: string) => {
@@ -575,6 +774,11 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
       return rest;
     });
     setEditingKey((previous) => (previous === key ? null : previous));
+    setPendingRange((previous) =>
+      previous && diffAnnotationKey({ filePath: previous.filePath, ...previous.end }) === key
+        ? null
+        : previous,
+    );
   }, []);
 
   const annotationList = useMemo(() => Object.values(annotations), [annotations]);
@@ -590,6 +794,7 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
   const clearAnnotations = useCallback(() => {
     setAnnotations({});
     setEditingKey(null);
+    setPendingRange(null);
   }, []);
 
   const handleSendToTerminal = useCallback(() => {
@@ -597,6 +802,7 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
     onSendToTerminal(formatReviewPrompt(annotationList));
     setAnnotations({});
     setEditingKey(null);
+    setPendingRange(null);
     onClose();
   }, [onSendToTerminal, annotationList, onClose]);
 
@@ -794,6 +1000,8 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
                       viewMode={viewMode}
                       annotations={annotations}
                       editingKey={editingKey}
+                      pendingRange={pendingRange}
+                      dragCancelRef={dragCancelRef}
                       onOpenEditor={openAnnotationEditor}
                       onSaveAnnotation={saveAnnotation}
                       onCancelEditor={cancelAnnotationEditor}

@@ -1,0 +1,4 @@
+# Always diff source files as text, even when a stray control byte (e.g. a
+# NUL used as a string separator) trips git's binary-file heuristic.
+*.ts diff
+*.tsx diff
