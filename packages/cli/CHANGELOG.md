@@ -1,5 +1,12 @@
 # localterm
 
+## 1.19.0
+
+### Patch Changes
+
+- Updated dependencies [cfe35c2]
+  - @monotykamary/localterm-server@1.19.0
+
 ## 1.18.0
 
 ### Patch Changes
