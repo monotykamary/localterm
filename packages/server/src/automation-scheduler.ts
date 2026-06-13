@@ -3,6 +3,7 @@ import type { AutomationStore } from "./automation-store.js";
 import { AUTOMATION_TICK_ALIGNMENT_DELAY_MS, MS_PER_MINUTE } from "./constants.js";
 import { cronMatchesDate, parseCronExpression } from "./cron-expression.js";
 import type { Automation } from "./types.js";
+import { compileScheduleAll } from "./utils/compile-schedule.js";
 
 interface AutomationSchedulerEvents {
   due: [automation: Automation];
@@ -38,8 +39,12 @@ export class AutomationScheduler extends EventEmitter<AutomationSchedulerEvents>
     const automations = this.store.list();
     for (const automation of automations) {
       if (!automation.enabled) continue;
-      const parsed = parseCronExpression(automation.schedule);
-      if (!parsed || !cronMatchesDate(parsed, now)) continue;
+      if (automation.lifecycle === "finished") continue;
+      const matched = compileScheduleAll(automation.schedule).some((expression) => {
+        const parsed = parseCronExpression(expression);
+        return parsed !== null && cronMatchesDate(parsed, now);
+      });
+      if (!matched) continue;
       if (this.lastFiredMinuteByAutomationId.get(automation.id) === minuteKey) continue;
       this.lastFiredMinuteByAutomationId.set(automation.id, minuteKey);
       this.emit("due", automation);

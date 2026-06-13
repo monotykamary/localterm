@@ -6,13 +6,16 @@ import type { Automation } from "../src/types.js";
 const automation: Automation = {
   id: "automation-1",
   name: "nightly build",
-  schedule: "0 2 * * *",
+  schedule: { kind: "daily", hour: 2, minute: 0 },
   cwd: "/tmp",
   command: "pnpm build",
   enabled: true,
+  limit: { kind: "forever" },
+  runCount: 0,
+  lifecycle: "active",
+  runs: [],
   createdAt: 0,
   updatedAt: 0,
-  lastRun: null,
 };
 
 describe("AutomationRunTracker", () => {

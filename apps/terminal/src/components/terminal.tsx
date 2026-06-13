@@ -41,7 +41,8 @@ import {
   InputGroupText,
 } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
-import { AutomationsMenu } from "@/components/automations-menu";
+import { AutomationsButton } from "@/components/automations-menu";
+import { AutomationsModal } from "@/components/automations-modal";
 import { CommandPalette, type CommandItem } from "@/components/command-palette";
 import { DiffViewer } from "@/components/diff-viewer";
 import { SettingsMenu } from "@/components/settings-menu";
@@ -1713,12 +1714,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                   >
                     <Search />
                   </Button>
-                  <AutomationsMenu
-                    open={isAutomationsOpen}
-                    onOpenChange={handleAutomationsOpenChange}
-                    automations={automations}
-                    onAutomationsLoaded={setAutomations}
-                    defaultCwd={liveCwd}
+                  <AutomationsButton
+                    onOpen={() => handleAutomationsOpenChange(true)}
                     isMac={isMac}
                   />
                   <Button
@@ -1820,6 +1817,15 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         cwd={liveCwd}
         onClose={closeDiffViewer}
         onSendToTerminal={sendDiffReviewToTerminal}
+      />
+
+      <AutomationsModal
+        open={isAutomationsOpen}
+        onClose={() => handleAutomationsOpenChange(false)}
+        automations={automations}
+        onAutomationsLoaded={setAutomations}
+        defaultCwd={liveCwd}
+        isMac={isMac}
       />
 
       <AlertDialog open={isModalOpen}>

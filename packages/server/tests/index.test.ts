@@ -103,7 +103,8 @@ describe("createServer WS lifecycle", () => {
   let server: RunningServer;
 
   beforeEach(async () => {
-    server = await createServer({ port: 0, host: "127.0.0.1" });
+    // Inject a no-op opener so the server doesn't reach for a real CDP browser.
+    server = await createServer({ port: 0, host: "127.0.0.1", openUrl: async () => {} });
   });
 
   afterEach(async () => {

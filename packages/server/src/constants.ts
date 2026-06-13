@@ -136,7 +136,32 @@ export const MAX_AUTOMATIONS = 100;
 export const MAX_AUTOMATION_NAME_LENGTH = 120;
 export const MAX_AUTOMATION_COMMAND_LENGTH = 4096;
 export const MAX_CRON_EXPRESSION_LENGTH = 256;
-export const AUTOMATIONS_FILE_VERSION = 1;
+// v1 stored a raw cron string + a single lastRun. v2 stores a structured
+// schedule (with a derived cron computed on the fly), a run-count limit, a
+// lifecycle, and a capped run-history array. AutomationStore.load() migrates
+// v1 -> v2 in place on first boot so existing automations are never lost.
+export const AUTOMATIONS_FILE_VERSION = 2;
+// Largest "stop after N runs" budget. Generous — a limit is opt-in; the common
+// case is "forever".
+export const AUTOMATION_RUN_LIMIT_MAX = 100_000;
+// Per-automation run-history ring. Newest-first; appendRun trims to this. At
+// MAX_AUTOMATIONS the whole history file stays around 1 MB in the worst case.
+export const AUTOMATION_RUN_HISTORY_CAP = 50;
+// Most-recent "skipped" entries reconstructed per automation per outage. A
+// frequent schedule (every minute) over a multi-day sleep would otherwise
+// record thousands of skips and evict every real run from the ring.
+export const AUTOMATION_DOWNTIME_RECONCILE_CAP = 10;
+// A "multiple times a day" schedule compiles to one cron per distinct time.
+export const MAX_AUTOMATION_TIMES_PER_DAY = 12;
+// Downtime shorter than this is treated as a clean restart (no reconciliation):
+// the daemon writes its heartbeat ~once a minute, so a same-minute bounce must
+// not manufacture "skipped" entries.
+export const AUTOMATION_RECONCILE_MIN_DOWNTIME_MS = 90_000;
+// Cap how far back startup reconciliation enumerates missed occurrences. Bounds
+// the work for a frequent (every-minute) schedule after a long outage; we keep
+// only the most-recent AUTOMATION_DOWNTIME_RECONCILE_CAP per automation anyway.
+export const AUTOMATION_RECONCILE_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
+export const DAEMON_HEARTBEAT_FILE_VERSION = 1;
 // Ticks land just past the minute boundary so a timer that fires marginally
 // early can never evaluate the previous minute twice.
 export const AUTOMATION_TICK_ALIGNMENT_DELAY_MS = 50;

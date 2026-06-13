@@ -49,12 +49,14 @@ State lives in `~/.localterm/` (PID, port, server log at `~/.localterm/server.lo
 
 ## Automations
 
-Schedule commands as server-managed cron jobs. When one is due, localterm opens a new browser tab in the automation's directory and runs the command in a fresh shell — the tab stays open afterwards so you can see that it ran and whether it succeeded.
+Schedule commands as server-managed jobs. When one is due, localterm opens a new browser tab in the automation's directory and runs the command in a fresh shell — the tab stays open afterwards so you can see that it ran and whether it succeeded. The tab opens in the **background** so a scheduled run never steals your focus (via the DevTools Protocol over a connection opened once at start when a Chromium browser has remote debugging on, otherwise the OS opener / macOS `open -g`; set `LOCALTERM_DISABLE_CDP_TABS=1` to force the fallback).
 
-- Open the panel from the top-right toolbar (calendar icon) or with <kbd>⌘J</kbd> / <kbd>Ctrl+J</kbd>.
-- Schedules use standard 5-field cron (plus `@hourly`, `@daily`, `@weekly`, …), evaluated in local time.
-- Definitions persist in `~/.localterm/automations.json`; the daemon must be running for jobs to fire.
-- Everything is also available over HTTP at `/api/automations` (list/create/update/delete/run-now).
+- Open the full-screen panel from the top-right toolbar (calendar icon) or with <kbd>⌘J</kbd> / <kbd>Ctrl+J</kbd>.
+- Build schedules from friendly presets — daily, weekdays/weekends, specific days, multiple times a day, every N minutes/hours — with raw 5-field cron available as an advanced escape hatch. Evaluated in local time.
+- Cap a job with a run limit ("stop after N runs"); when reached it's marked **finished** and stays listed until you reset it. Or let it run forever.
+- A **recent runs** view and a per-automation history show which runs succeeded, failed, were missed, or were **skipped** because the machine was asleep at that scheduled time (reconstructed when the daemon next starts).
+- Definitions persist in `~/.localterm/automations.json` (auto-migrated from older versions; a sibling `~/.localterm/daemon-heartbeat.json` records liveness for downtime detection); the daemon must be running for jobs to fire.
+- Everything is also available over HTTP at `/api/automations` (list/create/update/delete/run-now/reset).
 
 Agents can manage automations too — install the API playbook as a skill with [`skills`](https://github.com/vercel-labs/skills):
 

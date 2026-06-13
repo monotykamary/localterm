@@ -1,8 +1,11 @@
 import { z } from "zod";
 import {
+  AUTOMATION_RUN_HISTORY_CAP,
+  AUTOMATION_RUN_LIMIT_MAX,
   AUTOMATIONS_FILE_VERSION,
   MAX_AUTOMATION_COMMAND_LENGTH,
   MAX_AUTOMATION_NAME_LENGTH,
+  MAX_AUTOMATION_TIMES_PER_DAY,
   MAX_COLS,
   MAX_CRON_EXPRESSION_LENGTH,
   MAX_FOREGROUND_LENGTH,
@@ -121,13 +124,141 @@ const gitDiffSummaryMessageSchema = z
   })
   .strict();
 
-export const automationLastRunStatusSchema = z.enum([
-  "launched",
-  "running",
-  "completed",
-  "failed",
-  "missed",
+// ----------------------------------------------------------------------------
+// Automations (file format v2).
+//
+// A v2 automation stores a STRUCTURED schedule (friendly presets + a raw-cron
+// escape hatch) instead of a bare cron string, a run-count limit + lifecycle,
+// and a capped run-history array. The cron engine stays the single timing
+// authority: every schedule kind compiles to one (or, for "timesOfDay",
+// several) 5-field cron strings via utils/compile-schedule.ts, computed on the
+// fly — no derived cron is persisted. The wire shape re-derives `cron` and the
+// legacy `lastRun` for back-compat.
+// ----------------------------------------------------------------------------
+
+// Bounds mirror cron-expression.ts exactly (minute 0-59, hour 0-23, Vixie
+// day-of-week 0=Sun..6=Sat, day-of-month 1-31).
+const scheduleMinuteSchema = z.number().int().min(0).max(59);
+const scheduleHourSchema = z.number().int().min(0).max(23);
+const scheduleDayOfWeekSchema = z.number().int().min(0).max(6);
+const scheduleDayOfMonthSchema = z.number().int().min(1).max(31);
+const scheduleStepMinutesSchema = z.number().int().min(1).max(59);
+const scheduleStepHoursSchema = z.number().int().min(1).max(23);
+const scheduleTimeOfDaySchema = z
+  .object({ hour: scheduleHourSchema, minute: scheduleMinuteSchema })
+  .strict();
+
+export const automationScheduleSchema = z.discriminatedUnion("kind", [
+  // "<minute> * * * *"
+  z.object({ kind: z.literal("hourly"), minute: scheduleMinuteSchema }).strict(),
+  // "<minute> <hour> * * *"
+  z
+    .object({ kind: z.literal("daily"), hour: scheduleHourSchema, minute: scheduleMinuteSchema })
+    .strict(),
+  // Multiple times a day -> one cron per distinct time.
+  z
+    .object({
+      kind: z.literal("timesOfDay"),
+      times: z.array(scheduleTimeOfDaySchema).min(1).max(MAX_AUTOMATION_TIMES_PER_DAY),
+    })
+    .strict(),
+  // Weekdays/weekends -> "<minute> <hour> * * 1-5" / "<minute> <hour> * * 0,6"
+  z
+    .object({
+      kind: z.literal("weekdaysPreset"),
+      preset: z.enum(["weekdays", "weekends"]),
+      hour: scheduleHourSchema,
+      minute: scheduleMinuteSchema,
+    })
+    .strict(),
+  // Specific weekdays -> "<minute> <hour> * * <sorted dow list>"
+  z
+    .object({
+      kind: z.literal("weekly"),
+      daysOfWeek: z.array(scheduleDayOfWeekSchema).min(1).max(7),
+      hour: scheduleHourSchema,
+      minute: scheduleMinuteSchema,
+    })
+    .strict(),
+  // Specific days of month -> "<minute> <hour> <sorted dom list> * *"
+  z
+    .object({
+      kind: z.literal("monthly"),
+      daysOfMonth: z.array(scheduleDayOfMonthSchema).min(1).max(31),
+      hour: scheduleHourSchema,
+      minute: scheduleMinuteSchema,
+    })
+    .strict(),
+  // "*/<step> * * * *"
+  z.object({ kind: z.literal("everyNMinutes"), step: scheduleStepMinutesSchema }).strict(),
+  // "<minute> */<step> * * *"
+  z
+    .object({
+      kind: z.literal("everyNHours"),
+      step: scheduleStepHoursSchema,
+      minute: scheduleMinuteSchema,
+    })
+    .strict(),
+  // Advanced escape hatch — raw 5-field cron, validated at the route layer.
+  z
+    .object({
+      kind: z.literal("cron"),
+      expression: z.string().min(1).max(MAX_CRON_EXPRESSION_LENGTH),
+    })
+    .strict(),
 ]);
+
+// Create/update accept either the structured schedule or a legacy bare cron
+// string (coerced to {kind:"cron"} at the store) so existing curl/skill
+// consumers keep working.
+export const scheduleInputSchema = z.union([
+  automationScheduleSchema,
+  z.string().min(1).max(MAX_CRON_EXPRESSION_LENGTH),
+]);
+
+export const automationRunLimitSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("forever") }).strict(),
+  z
+    .object({
+      kind: z.literal("count"),
+      max: z.number().int().min(1).max(AUTOMATION_RUN_LIMIT_MAX),
+    })
+    .strict(),
+]);
+
+// "finished" = a count limit has been reached. Terminal and orthogonal to
+// `enabled`; cleared only by POST /:id/reset.
+export const automationLifecycleSchema = z.enum(["active", "finished"]);
+
+export const automationRunStatusSchema = z.enum([
+  "launched", // tab open requested, awaiting a WS claim
+  "running", // a tab claimed the run and the command is executing
+  "completed", // command finished with exit code 0
+  "failed", // command finished with a non-zero exit code
+  "missed", // launched but no tab claimed it before it expired (daemon WAS alive)
+  "skipped", // scheduled occurrence inside a daemon-downtime window; never launched
+]);
+
+// Retained for the derived wire `lastRun`; status widened to include "skipped".
+export const automationLastRunStatusSchema = automationRunStatusSchema;
+
+export const automationRunRecordSchema = z
+  .object({
+    runId: z.string().min(1),
+    // The intended minute boundary (ms). Equals startedAt for manual runs;
+    // stable identity/sort key.
+    scheduledFor: z.number().int().nonnegative(),
+    // Launch-attempt time; null for a "skipped" (never-launched) run.
+    startedAt: z.number().int().nonnegative().nullable(),
+    // Terminal time; null while launched/running.
+    finishedAt: z.number().int().nonnegative().nullable(),
+    status: automationRunStatusSchema,
+    exitCode: z.number().int().nullable(),
+    trigger: z.enum(["schedule", "manual"]),
+    // false for manual + skipped; true for scheduled launches.
+    countsTowardLimit: z.boolean(),
+  })
+  .strict();
 
 export const automationLastRunSchema = z
   .object({
@@ -138,22 +269,34 @@ export const automationLastRunSchema = z
   })
   .strict();
 
-const automationShape = {
+// Stored shape (automations.json v2). No derived fields (cron/lastRun/nextRunAt
+// live only on the wire).
+const automationStoredShape = {
   id: z.string().min(1),
   name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
-  schedule: z.string().min(1).max(MAX_CRON_EXPRESSION_LENGTH),
+  schedule: automationScheduleSchema,
   cwd: z.string().min(1),
   command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
   enabled: z.boolean(),
+  limit: automationRunLimitSchema,
+  runCount: z.number().int().nonnegative(),
+  lifecycle: automationLifecycleSchema,
+  runs: z.array(automationRunRecordSchema).max(AUTOMATION_RUN_HISTORY_CAP),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
-  lastRun: automationLastRunSchema.nullable(),
 };
 
-export const automationSchema = z.object(automationShape).strict();
+export const automationSchema = z.object(automationStoredShape).strict();
 
+// Wire shape: stored fields + derived nextRunAt, cron (first compiled cron,
+// for display/back-compat), and lastRun (projection of runs[0]).
 export const automationWithNextRunSchema = z
-  .object({ ...automationShape, nextRunAt: z.number().int().nullable() })
+  .object({
+    ...automationStoredShape,
+    nextRunAt: z.number().int().nullable(),
+    cron: z.string().min(1),
+    lastRun: automationLastRunSchema.nullable(),
+  })
   .strict();
 
 export const automationsFileSchema = z
@@ -163,24 +306,61 @@ export const automationsFileSchema = z
   })
   .strict();
 
-export const createAutomationInputSchema = z
+// Frozen v1 file shape — read only by the v1->v2 migrator in automation-store.
+const automationV1LastRunSchema = z
   .object({
+    runId: z.string().min(1),
+    at: z.number().int().nonnegative(),
+    status: z.enum(["launched", "running", "completed", "failed", "missed"]),
+    exitCode: z.number().int().nullable(),
+  })
+  .strict();
+
+export const automationV1Schema = z
+  .object({
+    id: z.string().min(1),
     name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
     schedule: z.string().min(1).max(MAX_CRON_EXPRESSION_LENGTH),
     cwd: z.string().min(1),
     command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
+    enabled: z.boolean(),
+    createdAt: z.number().int().nonnegative(),
+    updatedAt: z.number().int().nonnegative(),
+    lastRun: automationV1LastRunSchema.nullable(),
+  })
+  .strict();
+
+export const automationsFileV1Schema = z
+  .object({
+    version: z.literal(1),
+    automations: z.array(automationV1Schema),
+  })
+  .strict();
+
+export const createAutomationInputSchema = z
+  .object({
+    name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
+    schedule: scheduleInputSchema,
+    cwd: z.string().min(1),
+    command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
     enabled: z.boolean().optional(),
+    limit: automationRunLimitSchema.optional(),
   })
   .strict();
 
 export const updateAutomationInputSchema = z
   .object({
     name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH).optional(),
-    schedule: z.string().min(1).max(MAX_CRON_EXPRESSION_LENGTH).optional(),
+    schedule: scheduleInputSchema.optional(),
     cwd: z.string().min(1).optional(),
     command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH).optional(),
     enabled: z.boolean().optional(),
+    limit: automationRunLimitSchema.optional(),
   })
+  .strict();
+
+export const resetAutomationInputSchema = z
+  .object({ clearHistory: z.boolean().optional() })
   .strict();
 
 export const automationsListResponseSchema = z

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +9,9 @@ import open from "open";
 import { AutomationRunTracker } from "./automation-run-tracker.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
+import { CdpClient } from "./cdp/cdp-client.js";
 import {
+  AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
   DEFAULT_HOST,
   DEFAULT_PORT,
   FRIENDLY_HOSTNAME,
@@ -17,6 +20,7 @@ import {
   HTTP_STATUS_NOT_FOUND,
   MAX_AUTOMATIONS,
   MAX_CONCURRENT_SESSIONS,
+  MS_PER_MINUTE,
   OUTPUT_BATCH_FLUSH_BYTES,
   OUTPUT_BATCH_WINDOW_MS,
   SERVER_STOP_GRACE_MS,
@@ -34,24 +38,45 @@ import {
 import { ServerErrorException, serverError } from "./errors.js";
 import { getGitDiff, getGitDiffSummary } from "./git-diff.js";
 import { GitDiffWatcher } from "./git-diff-watcher.js";
+import { HeartbeatStore } from "./heartbeat-store.js";
 import { parseCronExpression } from "./cron-expression.js";
 import {
   clientToServerMessageSchema,
   createAutomationInputSchema,
+  resetAutomationInputSchema,
   updateAutomationInputSchema,
 } from "./schemas.js";
 import { Session } from "./session.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
 import { SessionRegistry } from "./session-registry.js";
 import { resolveStaticAsset } from "./static-resolver.js";
+import {
+  compileSchedule,
+  compileScheduleAll,
+  normalizeScheduleInput,
+} from "./utils/compile-schedule.js";
 import { computeNextAutomationRunAt } from "./utils/compute-next-automation-run-at.js";
-import type { Automation, AutomationWithNextRun, ServerToClientMessage } from "./types.js";
+import { enumerateMissedOccurrences } from "./utils/reconcile-downtime.js";
+import type {
+  Automation,
+  AutomationLastRun,
+  AutomationSchedule,
+  AutomationWithNextRun,
+  PendingAutomationRun,
+  ServerToClientMessage,
+} from "./types.js";
 
 export interface ServerOptions {
   port?: number;
   host?: string;
   staticRoot?: string | null;
   stateDirectory?: string;
+  /**
+   * Override how automation run URLs are opened. When provided, the caller owns
+   * tab-opening and the built-in CDP background-tab path is disabled. Defaults
+   * to: CDP background tab when a debug-enabled Chromium browser is reachable,
+   * else the OS opener (`open -g`).
+   */
   openUrl?: (url: string) => Promise<void>;
 }
 
@@ -147,16 +172,46 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const automationStore = new AutomationStore(path.join(stateDirectory, "automations.json"));
   const automationRunTracker = new AutomationRunTracker();
   const automationScheduler = new AutomationScheduler(automationStore);
+  const heartbeatStore = new HeartbeatStore(path.join(stateDirectory, "daemon-heartbeat.json"));
   const clientSockets = new Set<BroadcastSocket>();
+  const cdpBackgroundTabsDisabled = process.env.LOCALTERM_DISABLE_CDP_TABS === "1";
+  // One persistent CDP socket for the daemon's lifetime — opened once at start
+  // (below), so the user clears the browser's remote-debugging prompt a single
+  // time rather than on every run. Skipped when a caller injects its own
+  // `openUrl` (it owns tab-opening) or when disabled via env.
+  const cdpClient = options.openUrl || cdpBackgroundTabsDisabled ? null : new CdpClient();
   const openUrl =
     options.openUrl ??
     (async (url: string) => {
-      await open(url);
+      // Best case: if a debug-enabled Chromium browser is running, open the run
+      // tab via CDP with `background: true` so it lands *behind* the active tab
+      // (a true background tab, no focus steal). This is how browser-harness-js
+      // does it, over a connection we keep alive across runs.
+      if (cdpClient && (await cdpClient.openBackgroundTab(url))) return;
+      // Fallback: the OS opener. `background: true` is macOS `open -g`, which at
+      // least keeps the browser app from coming to the foreground; ignored
+      // elsewhere. Used whenever CDP isn't available (non-Chromium default
+      // browser, remote debugging off, or LOCALTERM_DISABLE_CDP_TABS=1).
+      await open(url, { background: true });
     });
+
+  // Project the newest run as the legacy `lastRun` for back-compat clients.
+  const deriveLastRun = (automation: Automation): AutomationLastRun | null => {
+    const latest = automation.runs[0];
+    if (!latest) return null;
+    return {
+      runId: latest.runId,
+      at: latest.finishedAt ?? latest.startedAt ?? latest.scheduledFor,
+      status: latest.status,
+      exitCode: latest.exitCode,
+    };
+  };
 
   const toAutomationWithNextRun = (automation: Automation, from: Date): AutomationWithNextRun => ({
     ...automation,
     nextRunAt: computeNextAutomationRunAt(automation, from),
+    cron: compileSchedule(automation.schedule),
+    lastRun: deriveLastRun(automation),
   });
 
   const listAutomationsWithNextRun = (): AutomationWithNextRun[] => {
@@ -174,14 +229,33 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
   };
 
-  const launchAutomationRun = (automation: Automation) => {
+  // Open a browser tab for a run and record it in history. Scheduled launches
+  // count toward the limit (and can finish the automation); manual launches
+  // never count and are allowed even on a finished/disabled automation.
+  const tryLaunch = (
+    automation: Automation,
+    trigger: "schedule" | "manual",
+  ): PendingAutomationRun | null => {
+    if (trigger === "schedule") {
+      const current = automationStore.get(automation.id);
+      if (!current || !current.enabled || current.lifecycle === "finished") return null;
+    }
     const run = automationRunTracker.create(automation);
-    automationStore.recordLastRun(automation.id, {
+    const counts = trigger === "schedule";
+    automationStore.appendRun(automation.id, {
       runId: run.runId,
-      at: run.createdAt,
+      scheduledFor:
+        trigger === "schedule"
+          ? Math.floor(run.createdAt / MS_PER_MINUTE) * MS_PER_MINUTE
+          : run.createdAt,
+      startedAt: run.createdAt,
+      finishedAt: null,
       status: "launched",
       exitCode: null,
+      trigger,
+      countsTowardLimit: counts,
     });
+    if (counts) automationStore.incrementRunCount(automation.id);
     broadcastAutomations();
     const runUrl = `http://${FRIENDLY_HOSTNAME}:${actualPort}/?run=${run.runId}`;
     void openUrl(runUrl).catch((error: unknown) => {
@@ -189,6 +263,41 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       console.warn(`failed to open a browser tab for automation "${automation.name}": ${message}`);
     });
     return run;
+  };
+
+  // On boot, settle the state the dead process left behind: any run still
+  // "launched"/"running" can never resume (the run tracker is in-memory), so it
+  // becomes "missed"; and if the daemon was down across scheduled times, record
+  // those as "skipped" so the user can see what didn't run while the machine was
+  // off. Skipped runs never launch and never count toward a limit. No clients
+  // exist yet, so nothing is broadcast.
+  const reconcileOnStartup = (now: number): void => {
+    const lastAliveAt = heartbeatStore.read();
+    const hadOutage =
+      lastAliveAt !== null && now - lastAliveAt >= AUTOMATION_RECONCILE_MIN_DOWNTIME_MS;
+    for (const automation of automationStore.list()) {
+      for (const run of automation.runs) {
+        if (run.status === "launched" || run.status === "running") {
+          automationStore.updateRun(automation.id, run.runId, {
+            status: "missed",
+            finishedAt: now,
+          });
+        }
+      }
+      if (!hadOutage || !automation.enabled || automation.lifecycle === "finished") continue;
+      for (const occurrence of enumerateMissedOccurrences(automation, lastAliveAt as number, now)) {
+        automationStore.appendRun(automation.id, {
+          runId: randomUUID(),
+          scheduledFor: occurrence,
+          startedAt: null,
+          finishedAt: occurrence,
+          status: "skipped",
+          exitCode: null,
+          trigger: "schedule",
+          countsTowardLimit: false,
+        });
+      }
+    }
   };
 
   const api = new Hono();
@@ -226,6 +335,13 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
   };
 
+  // A structured schedule (or legacy bare cron string) is valid iff every cron
+  // it compiles to parses.
+  const isValidScheduleInput = (input: AutomationSchedule | string): boolean => {
+    const crons = compileScheduleAll(normalizeScheduleInput(input));
+    return crons.length > 0 && crons.every((cron) => parseCronExpression(cron) !== null);
+  };
+
   api.get("/automations", (context) => context.json({ automations: listAutomationsWithNextRun() }));
 
   api.post("/automations", async (context) => {
@@ -234,7 +350,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     if (automationStore.size() >= MAX_AUTOMATIONS) {
       return context.json({ error: "too_many_automations" }, HTTP_STATUS_BAD_REQUEST);
     }
-    if (!parseCronExpression(parsed.data.schedule)) {
+    if (!isValidScheduleInput(parsed.data.schedule)) {
       return context.json({ error: "invalid_schedule" }, HTTP_STATUS_BAD_REQUEST);
     }
     if (!resolveCwdQuery(parsed.data.cwd)) {
@@ -251,11 +367,18 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   api.patch("/automations/:id", async (context) => {
     const parsed = updateAutomationInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
-    if (parsed.data.schedule !== undefined && !parseCronExpression(parsed.data.schedule)) {
+    if (parsed.data.schedule !== undefined && !isValidScheduleInput(parsed.data.schedule)) {
       return context.json({ error: "invalid_schedule" }, HTTP_STATUS_BAD_REQUEST);
     }
     if (parsed.data.cwd !== undefined && !resolveCwdQuery(parsed.data.cwd)) {
       return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const existing = automationStore.get(context.req.param("id"));
+    if (!existing) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    // A PATCH never un-finishes — re-enabling a finished automation must go
+    // through reset so it can't accidentally fire past its limit.
+    if (existing.lifecycle === "finished" && parsed.data.enabled === true) {
+      return context.json({ error: "automation_finished" }, HTTP_STATUS_BAD_REQUEST);
     }
     const automation = automationStore.update(context.req.param("id"), parsed.data);
     if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
@@ -274,8 +397,21 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   api.post("/automations/:id/run", (context) => {
     const automation = automationStore.get(context.req.param("id"));
     if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
-    const run = launchAutomationRun(automation);
+    // tryLaunch only returns null for the "schedule" trigger (finished/disabled
+    // guard); a manual launch always succeeds. The guard satisfies the shared
+    // nullable return type before reading run.runId.
+    const run = tryLaunch(automation, "manual");
+    if (!run) return context.json({ error: "launch_failed" }, HTTP_STATUS_BAD_REQUEST);
     return context.json({ runId: run.runId });
+  });
+
+  api.post("/automations/:id/reset", async (context) => {
+    const parsed = resetAutomationInputSchema.safeParse((await readJsonBody(context)) ?? {});
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const automation = automationStore.reset(context.req.param("id"), parsed.data.clearHistory);
+    if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    broadcastAutomations();
+    return context.json({ automation: toAutomationWithNextRun(automation, new Date()) });
   });
 
   api.notFound((context) => context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND));
@@ -355,19 +491,16 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           registry.register(newSession);
 
           if (claimedRun) {
-            automationStore.recordLastRun(claimedRun.automationId, {
-              runId: claimedRun.runId,
-              at: Date.now(),
+            automationStore.updateRun(claimedRun.automationId, claimedRun.runId, {
               status: "running",
-              exitCode: null,
+              startedAt: Date.now(),
             });
             broadcastAutomations();
             newSession.on("automation-exit", (exitCode: number) => {
-              automationStore.recordLastRun(claimedRun.automationId, {
-                runId: claimedRun.runId,
-                at: Date.now(),
+              automationStore.updateRun(claimedRun.automationId, claimedRun.runId, {
                 status: exitCode === 0 ? "completed" : "failed",
                 exitCode,
+                finishedAt: Date.now(),
               });
               broadcastAutomations();
             });
@@ -638,23 +771,48 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   injectWebSocket(httpServer);
 
   automationScheduler.on("due", (automation) => {
-    launchAutomationRun(automation);
+    tryLaunch(automation, "schedule");
   });
   automationScheduler.on("tick", (now) => {
+    // Liveness heartbeat for downtime detection on the next boot.
+    heartbeatStore.write(now.getTime());
     let didExpireAny = false;
     for (const expiredRun of automationRunTracker.sweepExpired(now.getTime())) {
       const automation = automationStore.get(expiredRun.automationId);
-      if (automation?.lastRun?.runId !== expiredRun.runId) continue;
-      if (automation.lastRun.status !== "launched") continue;
-      automationStore.recordLastRun(automation.id, { ...automation.lastRun, status: "missed" });
+      const run = automation?.runs.find((entry) => entry.runId === expiredRun.runId);
+      if (!automation || !run || run.status !== "launched") continue;
+      automationStore.updateRun(automation.id, run.runId, {
+        status: "missed",
+        finishedAt: now.getTime(),
+      });
       didExpireAny = true;
     }
     if (didExpireAny) broadcastAutomations();
   });
+  reconcileOnStartup(Date.now());
   automationScheduler.start();
+
+  // Open the persistent CDP connection now, while the user is present at
+  // `start` to clear any one-time remote-debugging prompt. Fire-and-forget:
+  // failure just means runs fall back to the OS opener.
+  if (cdpClient) {
+    void cdpClient
+      .connect()
+      .then(() => {
+        if (cdpClient.connectedBrowser) {
+          console.log(
+            `automation run tabs will open in the background via ${cdpClient.connectedBrowser.name} (CDP)`,
+          );
+        }
+      })
+      .catch(() => {
+        // No debug-enabled Chromium browser reachable — runs use `open -g`.
+      });
+  }
 
   const stop = async () => {
     automationScheduler.dispose();
+    cdpClient?.close();
     registry.disposeAll();
     // Forcibly tear down every WS first. node-pty + ws upgraded sockets
     // aren't tracked in http.Server's keep-alive set, so target.close() would

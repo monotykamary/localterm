@@ -137,6 +137,137 @@ describe("automations REST API", () => {
     expect((await request("POST", "/missing/run")).status).toBe(404);
   });
 
+  it("creates with a structured schedule and exposes derived cron + empty history", async () => {
+    const { status, body } = await request("POST", "", {
+      name: "weekday standup",
+      schedule: { kind: "weekdaysPreset", preset: "weekdays", hour: 9, minute: 0 },
+      cwd: os.tmpdir(),
+      command: "echo standup",
+    });
+    expect(status).toBe(201);
+    const automation = automationWithNextRunSchema.parse(body.automation);
+    expect(automation.schedule).toEqual({
+      kind: "weekdaysPreset",
+      preset: "weekdays",
+      hour: 9,
+      minute: 0,
+    });
+    expect(automation.cron).toBe("0 9 * * 1-5");
+    expect(automation.runs).toEqual([]);
+    expect(automation.lastRun).toBeNull();
+    expect(automation.limit).toEqual({ kind: "forever" });
+    expect(automation.lifecycle).toBe("active");
+  });
+
+  it("accepts a legacy bare cron string and recognizes it as a preset", async () => {
+    const { body } = await request("POST", "", { ...createInput(), schedule: "0 9 * * 1-5" });
+    const automation = automationWithNextRunSchema.parse(body.automation);
+    expect(automation.schedule).toEqual({
+      kind: "weekdaysPreset",
+      preset: "weekdays",
+      hour: 9,
+      minute: 0,
+    });
+  });
+
+  it("rejects a structured schedule that cannot compile to valid cron", async () => {
+    const { body } = await request("POST", "", {
+      ...createInput(),
+      schedule: { kind: "cron", expression: "totally invalid" },
+    });
+    expect(body.error).toBe("invalid_schedule");
+  });
+
+  it("does not count manual runs toward the limit", async () => {
+    const created = await request("POST", "", {
+      ...createInput(),
+      limit: { kind: "count", max: 2 },
+    });
+    const automation = automationWithNextRunSchema.parse(created.body.automation);
+    await request("POST", `/${automation.id}/run`);
+    await request("POST", `/${automation.id}/run`);
+    await request("POST", `/${automation.id}/run`);
+    const [listed] = (await request("GET", "")).body.automations as Array<Record<string, unknown>>;
+    expect(listed.runCount).toBe(0);
+    expect(listed.lifecycle).toBe("active");
+    const runs = listed.runs as Array<Record<string, unknown>>;
+    expect(runs).toHaveLength(3);
+    expect(runs.every((run) => run.trigger === "manual" && run.countsTowardLimit === false)).toBe(
+      true,
+    );
+  });
+
+  it("reset reactivates and can clear history", async () => {
+    const created = await request("POST", "", createInput());
+    const automation = automationWithNextRunSchema.parse(created.body.automation);
+    await request("POST", `/${automation.id}/run`);
+    const reset = await request("POST", `/${automation.id}/reset`, { clearHistory: true });
+    expect(reset.status).toBe(200);
+    const afterReset = automationWithNextRunSchema.parse(reset.body.automation);
+    expect(afterReset.lifecycle).toBe("active");
+    expect(afterReset.runs).toEqual([]);
+    expect((await request("POST", "/missing/reset")).status).toBe(404);
+  });
+
+  it("blocks re-enabling a finished automation until it is reset", async () => {
+    // Pre-seed a finished automation, then boot a fresh server over it so the
+    // finished-state route logic can be exercised without waiting on a tick.
+    const seedDir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-finished-"));
+    fs.writeFileSync(
+      path.join(seedDir, "automations.json"),
+      JSON.stringify({
+        version: 2,
+        automations: [
+          {
+            id: "fin-1",
+            name: "done",
+            schedule: { kind: "daily", hour: 9, minute: 0 },
+            cwd: os.tmpdir(),
+            command: "true",
+            enabled: true,
+            limit: { kind: "count", max: 1 },
+            runCount: 1,
+            lifecycle: "finished",
+            runs: [],
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        ],
+      }),
+    );
+    const server = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      stateDirectory: seedDir,
+      openUrl: async () => {},
+    });
+    try {
+      const base = `http://127.0.0.1:${server.port}/api/automations`;
+      const reEnable = await (
+        await fetch(`${base}/fin-1`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ enabled: true }),
+        })
+      ).json();
+      expect((reEnable as Record<string, unknown>).error).toBe("automation_finished");
+      // A finished automation reports no next run.
+      const listed = (await (await fetch(base)).json()) as {
+        automations: Array<{ lifecycle: string; nextRunAt: number | null }>;
+      };
+      expect(listed.automations[0].lifecycle).toBe("finished");
+      expect(listed.automations[0].nextRunAt).toBeNull();
+      const reset = (await (await fetch(`${base}/fin-1/reset`, { method: "POST" })).json()) as {
+        automation: { lifecycle: string; runCount: number };
+      };
+      expect(reset.automation.lifecycle).toBe("active");
+      expect(reset.automation.runCount).toBe(0);
+    } finally {
+      await server.stop();
+      fs.rmSync(seedDir, { recursive: true, force: true });
+    }
+  });
+
   it("lets a tab claim a run exactly once and runs the command in the automation cwd", async () => {
     const automationCwd = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-run-cwd-"));
     try {

@@ -25,7 +25,7 @@ describe("AutomationScheduler", () => {
   const createAutomation = (overrides: Partial<Automation> = {}) =>
     store.create({
       name: "every minute",
-      schedule: "* * * * *",
+      schedule: { kind: "everyNMinutes", step: 1 },
       cwd: os.tmpdir(),
       command: "true",
       ...overrides,
@@ -48,12 +48,38 @@ describe("AutomationScheduler", () => {
     expect(due).toEqual([]);
   });
 
-  it("skips automations whose schedule does not match", () => {
-    createAutomation({ schedule: "30 2 * * *" });
+  it("skips finished automations", () => {
+    const automation = createAutomation({ limit: { kind: "count", max: 1 } });
+    store.incrementRunCount(automation.id);
+    expect(store.get(automation.id)?.lifecycle).toBe("finished");
     const due: Automation[] = [];
     scheduler.on("due", (dueAutomation) => due.push(dueAutomation));
     scheduler.runTick(new Date(2026, 5, 13, 10, 15, 0));
     expect(due).toEqual([]);
+  });
+
+  it("skips automations whose schedule does not match", () => {
+    createAutomation({ schedule: { kind: "daily", hour: 2, minute: 30 } });
+    const due: Automation[] = [];
+    scheduler.on("due", (dueAutomation) => due.push(dueAutomation));
+    scheduler.runTick(new Date(2026, 5, 13, 10, 15, 0));
+    expect(due).toEqual([]);
+  });
+
+  it("matches a multiple-times-a-day schedule on any of its times", () => {
+    const automation = createAutomation({
+      schedule: {
+        kind: "timesOfDay",
+        times: [
+          { hour: 9, minute: 0 },
+          { hour: 10, minute: 15 },
+        ],
+      },
+    });
+    const due: Automation[] = [];
+    scheduler.on("due", (dueAutomation) => due.push(dueAutomation));
+    scheduler.runTick(new Date(2026, 5, 13, 10, 15, 0));
+    expect(due.map((entry) => entry.id)).toEqual([automation.id]);
   });
 
   it("never fires twice for the same automation and minute", () => {
@@ -69,7 +95,7 @@ describe("AutomationScheduler", () => {
   it("tolerates invalid schedules without firing", () => {
     const valid = createAutomation();
     const invalid = createAutomation();
-    store.update(invalid.id, { schedule: "not a cron" });
+    store.update(invalid.id, { schedule: { kind: "cron", expression: "not a cron" } });
     const due: Automation[] = [];
     scheduler.on("due", (dueAutomation) => due.push(dueAutomation));
     scheduler.runTick(new Date(2026, 5, 13, 10, 15, 0));

@@ -1,6 +1,9 @@
 export {
+  AUTOMATION_RUN_HISTORY_CAP,
+  AUTOMATION_RUN_LIMIT_MAX,
   MAX_AUTOMATION_COMMAND_LENGTH,
   MAX_AUTOMATION_NAME_LENGTH,
+  MAX_AUTOMATION_TIMES_PER_DAY,
   MAX_AUTOMATIONS,
   MAX_COLS,
   MAX_CONCURRENT_SESSIONS,
@@ -21,6 +24,11 @@ export type { ParsedCronExpression } from "./cron-expression.js";
 export {
   automationLastRunSchema,
   automationLastRunStatusSchema,
+  automationLifecycleSchema,
+  automationRunLimitSchema,
+  automationRunRecordSchema,
+  automationRunStatusSchema,
+  automationScheduleSchema,
   automationSchema,
   automationsListResponseSchema,
   automationWithNextRunSchema,
@@ -31,6 +39,8 @@ export {
   gitDiffResponseSchema,
   gitDiffSummarySchema,
   healthSchema,
+  resetAutomationInputSchema,
+  scheduleInputSchema,
   serverToClientMessageSchema,
   updateAutomationInputSchema,
 } from "./schemas.js";
@@ -38,6 +48,11 @@ export type {
   Automation,
   AutomationLastRun,
   AutomationLastRunStatus,
+  AutomationLifecycle,
+  AutomationRunLimit,
+  AutomationRunRecord,
+  AutomationRunStatus,
+  AutomationSchedule,
   AutomationWithNextRun,
   ClientToServerMessage,
   CreateAutomationInput,
@@ -45,7 +60,9 @@ export type {
   GitDiffFileStatus,
   GitDiffResponse,
   GitDiffSummary,
+  ResetAutomationInput,
   ServerToClientMessage,
   UpdateAutomationInput,
 } from "./types.js";
+export { compileSchedule, compileScheduleAll } from "./utils/compile-schedule.js";
 export type { ServerError, ServerErrorCode, ServerErrorKind } from "./errors.js";
