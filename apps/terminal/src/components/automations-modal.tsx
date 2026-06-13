@@ -70,6 +70,7 @@ interface AutomationFormState {
   schedule: ScheduleFormState;
   limitMode: "forever" | "count";
   limitMax: number;
+  closeOnFinish: boolean;
 }
 
 const DEFAULT_LIMIT_MAX = 20;
@@ -89,6 +90,7 @@ const emptyForm = (defaultCwd: string | null): AutomationFormState => ({
   schedule: defaultScheduleForm(),
   limitMode: "forever",
   limitMax: DEFAULT_LIMIT_MAX,
+  closeOnFinish: false,
 });
 
 const formForAutomation = (automation: AutomationWithNextRun): AutomationFormState => ({
@@ -100,6 +102,7 @@ const formForAutomation = (automation: AutomationWithNextRun): AutomationFormSta
   schedule: recognizeScheduleForm(automation.schedule),
   limitMode: automation.limit.kind === "count" ? "count" : "forever",
   limitMax: automation.limit.kind === "count" ? automation.limit.max : DEFAULT_LIMIT_MAX,
+  closeOnFinish: automation.closeOnFinish,
 });
 
 const RunRow = ({ run, nowMs }: { run: AutomationRunRecord; nowMs: number }) => {
@@ -537,6 +540,7 @@ export const AutomationsModal = ({
         form.limitMode === "count"
           ? ({ kind: "count", max: form.limitMax } as const)
           : ({ kind: "forever" } as const),
+      closeOnFinish: form.closeOnFinish,
     };
     const saved = form.id ? await updateAutomation(form.id, input) : await createAutomation(input);
     setIsSaving(false);
@@ -848,6 +852,9 @@ const AutomationDetail = ({
           </Button>
           <Switch
             size="sm"
+            // The icon buttons carry their own padding; the switch doesn't, so
+            // a small left margin keeps its spacing even with the buttons.
+            className="ml-1.5"
             aria-label={`toggle ${automation.name}`}
             checked={automation.enabled}
             onCheckedChange={onToggleEnabled}
@@ -1049,6 +1056,21 @@ const AutomationForm = ({
         aria-label="automation enabled"
         checked={form.enabled}
         onCheckedChange={(enabled) => onChange({ ...form, enabled })}
+      />
+    </div>
+
+    <div className="flex items-center justify-between text-xs text-muted-foreground">
+      <span className="flex flex-col">
+        Close tab when finished
+        <span className="text-[10px] text-muted-foreground/60">
+          Closes the run's tab once the command exits (needs a Chromium browser with remote
+          debugging).
+        </span>
+      </span>
+      <Switch
+        aria-label="close tab when finished"
+        checked={form.closeOnFinish}
+        onCheckedChange={(closeOnFinish) => onChange({ ...form, closeOnFinish })}
       />
     </div>
 

@@ -103,8 +103,12 @@ describe("createServer WS lifecycle", () => {
   let server: RunningServer;
 
   beforeEach(async () => {
-    // Inject a no-op opener so the server doesn't reach for a real CDP browser.
-    server = await createServer({ port: 0, host: "127.0.0.1", openUrl: async () => {} });
+    // Inject a no-op tab controller so the server doesn't reach for a real CDP browser.
+    server = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      tabController: { open: async () => null, close: async () => {} },
+    });
   });
 
   afterEach(async () => {

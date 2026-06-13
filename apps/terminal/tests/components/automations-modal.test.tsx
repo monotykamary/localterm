@@ -21,6 +21,7 @@ const automation = (overrides: Partial<AutomationWithNextRun> = {}): AutomationW
   command: "pnpm build",
   enabled: true,
   limit: { kind: "forever" },
+  closeOnFinish: false,
   runCount: 0,
   lifecycle: "active",
   runs: [],
@@ -121,7 +122,26 @@ describe("AutomationsModal", () => {
         command: "echo hi",
         enabled: true,
         limit: { kind: "forever" },
+        closeOnFinish: false,
       });
+    });
+  });
+
+  it("submits closeOnFinish when the toggle is enabled", async () => {
+    const fetchMock = vi.mocked(fetch);
+    renderModal([]);
+    fireEvent.click(await screen.findByLabelText("new automation"));
+    fireEvent.change(screen.getByLabelText("automation name"), { target: { value: "demo" } });
+    fireEvent.change(screen.getByLabelText("automation command"), { target: { value: "echo hi" } });
+    fireEvent.click(screen.getByLabelText("close tab when finished"));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await vi.waitFor(() => {
+      const postCalls = fetchMock.mock.calls.filter(
+        (call) => call[1] && Reflect.get(call[1], "method") === "POST",
+      );
+      expect(postCalls).toHaveLength(1);
+      const body = JSON.parse(String(Reflect.get(postCalls[0][1] ?? {}, "body")));
+      expect(body.closeOnFinish).toBe(true);
     });
   });
 });

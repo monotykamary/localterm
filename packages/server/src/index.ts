@@ -72,12 +72,25 @@ export interface ServerOptions {
   staticRoot?: string | null;
   stateDirectory?: string;
   /**
-   * Override how automation run URLs are opened. When provided, the caller owns
-   * tab-opening and the built-in CDP background-tab path is disabled. Defaults
-   * to: CDP background tab when a debug-enabled Chromium browser is reachable,
-   * else the OS opener (`open -g`).
+   * Override how automation run tabs are opened and closed. When provided, the
+   * caller owns tab control and the built-in CDP background-tab path is
+   * disabled. Defaults to: CDP background tab (closeable) when a debug-enabled
+   * Chromium browser is reachable, else the OS opener (`open -g`, not
+   * closeable).
    */
-  openUrl?: (url: string) => Promise<void>;
+  tabController?: AutomationTabController;
+}
+
+/** Opens and (optionally) closes the browser tab for an automation run. */
+export interface AutomationTabController {
+  /**
+   * Open `url` in a background tab. Returns an opaque handle used to close the
+   * tab later (when the automation has `closeOnFinish`), or null when the tab
+   * can't be closed programmatically (e.g. the OS-opener fallback).
+   */
+  open: (url: string) => Promise<string | null>;
+  /** Close a tab previously opened by `open`. Best-effort; never throws. */
+  close: (handle: string) => Promise<void>;
 }
 
 export interface RunningServer {
@@ -178,22 +191,33 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // One persistent CDP socket for the daemon's lifetime — opened once at start
   // (below), so the user clears the browser's remote-debugging prompt a single
   // time rather than on every run. Skipped when a caller injects its own
-  // `openUrl` (it owns tab-opening) or when disabled via env.
-  const cdpClient = options.openUrl || cdpBackgroundTabsDisabled ? null : new CdpClient();
-  const openUrl =
-    options.openUrl ??
-    (async (url: string) => {
+  // `tabController` (it owns tab control) or when disabled via env.
+  const cdpClient = options.tabController || cdpBackgroundTabsDisabled ? null : new CdpClient();
+  const tabController: AutomationTabController = options.tabController ?? {
+    open: async (url: string) => {
       // Best case: if a debug-enabled Chromium browser is running, open the run
       // tab via CDP with `background: true` so it lands *behind* the active tab
-      // (a true background tab, no focus steal). This is how browser-harness-js
-      // does it, over a connection we keep alive across runs.
-      if (cdpClient && (await cdpClient.openBackgroundTab(url))) return;
+      // (a true background tab, no focus steal) and stays closeable. This is how
+      // browser-harness-js does it, over a connection we keep alive across runs.
+      if (cdpClient) {
+        const handle = await cdpClient.openBackgroundTab(url);
+        if (handle) return handle;
+      }
       // Fallback: the OS opener. `background: true` is macOS `open -g`, which at
       // least keeps the browser app from coming to the foreground; ignored
       // elsewhere. Used whenever CDP isn't available (non-Chromium default
-      // browser, remote debugging off, or LOCALTERM_DISABLE_CDP_TABS=1).
+      // browser, remote debugging off, or LOCALTERM_DISABLE_CDP_TABS=1). Not
+      // closeable, so `closeOnFinish` is silently a no-op on this path.
       await open(url, { background: true });
-    });
+      return null;
+    },
+    close: async (handle: string) => {
+      if (cdpClient) await cdpClient.closeTab(handle);
+    },
+  };
+  // Maps a run id -> the tab handle that ran it, so we can close the tab when
+  // the command finishes (only set when the opener returned a closeable handle).
+  const runTabHandles = new Map<string, string>();
 
   // Project the newest run as the legacy `lastRun` for back-compat clients.
   const deriveLastRun = (automation: Automation): AutomationLastRun | null => {
@@ -258,11 +282,32 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     if (counts) automationStore.incrementRunCount(automation.id);
     broadcastAutomations();
     const runUrl = `http://${FRIENDLY_HOSTNAME}:${actualPort}/?run=${run.runId}`;
-    void openUrl(runUrl).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`failed to open a browser tab for automation "${automation.name}": ${message}`);
-    });
+    void tabController
+      .open(runUrl)
+      .then((handle) => {
+        // Remember the tab so `automation-exit` can close it if closeOnFinish.
+        if (handle) runTabHandles.set(run.runId, handle);
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `failed to open a browser tab for automation "${automation.name}": ${message}`,
+        );
+      });
     return run;
+  };
+
+  // Close a finished run's tab when the automation opted into closeOnFinish.
+  const closeRunTabIfRequested = (automationId: string, runId: string): void => {
+    const handle = runTabHandles.get(runId);
+    runTabHandles.delete(runId);
+    if (!handle) return;
+    const automation = automationStore.get(automationId);
+    if (!automation?.closeOnFinish) return;
+    void tabController.close(handle).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`failed to close automation tab (run ${runId}): ${message}`);
+    });
   };
 
   // On boot, settle the state the dead process left behind: any run still
@@ -422,6 +467,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     upgradeWebSocket((context) => {
       let session: Session | null = null;
       let activeWs: BroadcastSocket | null = null;
+      let claimedRunId: string | null = null;
       let drainPollTimer: NodeJS.Timeout | null = null;
       let heartbeatTimer: NodeJS.Timeout | null = null;
       let stopHeartbeat: (() => void) | null = null;
@@ -442,6 +488,16 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
         if (stopHeartbeat) {
           stopHeartbeat();
           stopHeartbeat = null;
+        }
+      };
+
+      // Drop any unclosed tab handle for this connection's run so the map can't
+      // grow without bound when a tab closes before its command reports exit
+      // (non-bash shells, or the user closing the tab early).
+      const releaseRunTabHandle = () => {
+        if (claimedRunId) {
+          runTabHandles.delete(claimedRunId);
+          claimedRunId = null;
         }
       };
 
@@ -475,6 +531,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           // Claims are single-use: a reload of a ?run= tab gets a plain shell
           // in the same cwd instead of re-running the scheduled command.
           const claimedRun = requestedRunId ? automationRunTracker.claim(requestedRunId) : null;
+          if (claimedRun) claimedRunId = claimedRun.runId;
           let sessionCwd = requestedCwd;
           if (claimedRun) {
             try {
@@ -503,6 +560,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
                 finishedAt: Date.now(),
               });
               broadcastAutomations();
+              closeRunTabIfRequested(claimedRun.automationId, claimedRun.runId);
             });
           }
 
@@ -686,6 +744,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             `ws closed${pidLabel}: code=${event.code} reason=${JSON.stringify(event.reason)} wasClean=${event.wasClean}`,
           );
           if (activeWs) clientSockets.delete(activeWs);
+          releaseRunTabHandle();
           if (!session) return;
           registry.unregister(session);
           session.dispose();
@@ -709,6 +768,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           const pidLabel = session ? ` pid ${session.pid}` : "";
           console.error(`ws error${pidLabel}: ${message}`);
           if (activeWs) clientSockets.delete(activeWs);
+          releaseRunTabHandle();
           if (!session) return;
           registry.unregister(session);
           session.dispose();

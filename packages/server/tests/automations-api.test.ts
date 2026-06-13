@@ -42,8 +42,12 @@ describe("automations REST API", () => {
       port: 0,
       host: "127.0.0.1",
       stateDirectory,
-      openUrl: async (url) => {
-        openedUrls.push(url);
+      tabController: {
+        open: async (url) => {
+          openedUrls.push(url);
+          return null;
+        },
+        close: async () => {},
       },
     });
     testContext = { server, stateDirectory, openedUrls };
@@ -239,7 +243,7 @@ describe("automations REST API", () => {
       port: 0,
       host: "127.0.0.1",
       stateDirectory: seedDir,
-      openUrl: async () => {},
+      tabController: { open: async () => null, close: async () => {} },
     });
     try {
       const base = `http://127.0.0.1:${server.port}/api/automations`;
@@ -355,6 +359,122 @@ describe("automations REST API", () => {
       await new Promise<void>((resolve) => secondSocket.once("close", () => resolve()));
     } finally {
       fs.rmSync(automationCwd, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  it("closes the run tab when closeOnFinish is set and the command finishes", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-close-"));
+    const closedHandles: string[] = [];
+    // A tab controller that hands back a closeable handle and records closes.
+    const server = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      stateDirectory: dir,
+      tabController: {
+        open: async () => "tab-handle-1",
+        close: async (handle) => {
+          closedHandles.push(handle);
+        },
+      },
+    });
+    try {
+      const base = `http://127.0.0.1:${server.port}/api/automations`;
+      const post = async (suffix: string, body?: unknown) =>
+        (
+          await fetch(`${base}${suffix}`, {
+            method: "POST",
+            ...(body
+              ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+              : {}),
+          })
+        ).json();
+
+      const created = (await post("", {
+        name: "closer",
+        schedule: "0 2 * * *",
+        cwd: dir,
+        command: "echo automation-ran-marker",
+        closeOnFinish: true,
+      })) as { automation: { id: string } };
+      const run = (await post(`/${created.automation.id}/run`)) as { runId: string };
+
+      // Claim the run in a real session; the command runs and exits, which fires
+      // automation-exit and should close the tab via the controller.
+      const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws?run=${run.runId}`);
+      try {
+        await vi.waitFor(() => expect(closedHandles).toEqual(["tab-handle-1"]), {
+          timeout: 30_000,
+          interval: 100,
+        });
+      } finally {
+        socket.close();
+        await new Promise<void>((resolve) => socket.once("close", () => resolve()));
+      }
+    } finally {
+      await server.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  it("leaves the run tab open when closeOnFinish is not set", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-noclose-"));
+    const closedHandles: string[] = [];
+    const server = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      stateDirectory: dir,
+      tabController: {
+        open: async () => "tab-handle-1",
+        close: async (handle) => {
+          closedHandles.push(handle);
+        },
+      },
+    });
+    try {
+      const base = `http://127.0.0.1:${server.port}/api/automations`;
+      const created = (await (
+        await fetch(base, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: "no-closer",
+            schedule: "0 2 * * *",
+            cwd: dir,
+            command: "echo automation-ran-marker",
+          }),
+        })
+      ).json()) as { automation: { id: string } };
+      const run = (await (
+        await fetch(`${base}/${created.automation.id}/run`, { method: "POST" })
+      ).json()) as { runId: string };
+
+      const collected: string[] = [];
+      const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws?run=${run.runId}`);
+      socket.addEventListener("message", (event) => {
+        try {
+          const message = JSON.parse(String(event.data)) as Record<string, unknown>;
+          if (message.type === "output" && typeof message.data === "string") {
+            collected.push(message.data);
+          }
+        } catch {
+          /* ignore */
+        }
+      });
+      try {
+        // Wait until the command has clearly run, then confirm no close happened.
+        await vi.waitFor(() => expect(collected.join("")).toContain("automation-ran-marker"), {
+          timeout: 30_000,
+          interval: 100,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(closedHandles).toEqual([]);
+      } finally {
+        socket.close();
+        await new Promise<void>((resolve) => socket.once("close", () => resolve()));
+      }
+    } finally {
+      await server.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 90_000);
 });

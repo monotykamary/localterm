@@ -11,6 +11,7 @@ const automation: Automation = {
   command: "pnpm build",
   enabled: true,
   limit: { kind: "forever" },
+  closeOnFinish: false,
   runCount: 0,
   lifecycle: "active",
   runs: [],

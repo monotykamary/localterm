@@ -279,6 +279,10 @@ const automationStoredShape = {
   command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
   enabled: z.boolean(),
   limit: automationRunLimitSchema,
+  // When true, the run's browser tab is closed once the command finishes
+  // (only honored for tabs opened via CDP). Defaults false → tab stays open.
+  // Optional in the persisted shape so pre-existing v2 files load unchanged.
+  closeOnFinish: z.boolean().default(false),
   runCount: z.number().int().nonnegative(),
   lifecycle: automationLifecycleSchema,
   runs: z.array(automationRunRecordSchema).max(AUTOMATION_RUN_HISTORY_CAP),
@@ -345,6 +349,7 @@ export const createAutomationInputSchema = z
     command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
     enabled: z.boolean().optional(),
     limit: automationRunLimitSchema.optional(),
+    closeOnFinish: z.boolean().optional(),
   })
   .strict();
 
@@ -356,6 +361,7 @@ export const updateAutomationInputSchema = z
     command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH).optional(),
     enabled: z.boolean().optional(),
     limit: automationRunLimitSchema.optional(),
+    closeOnFinish: z.boolean().optional(),
   })
   .strict();
 

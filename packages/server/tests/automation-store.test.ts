@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { AutomationStore } from "../src/automation-store.js";
-import { AUTOMATION_RUN_HISTORY_CAP } from "../src/constants.js";
+import { AUTOMATION_RUN_HISTORY_CAP, AUTOMATIONS_FILE_VERSION } from "../src/constants.js";
 import type { AutomationRunRecord, CreateAutomationInput } from "../src/types.js";
 
 const createInput: CreateAutomationInput = {
@@ -53,11 +53,55 @@ describe("AutomationStore", () => {
     expect(automation.runCount).toBe(0);
     expect(automation.lifecycle).toBe("active");
     expect(automation.limit).toEqual({ kind: "forever" });
+    expect(automation.closeOnFinish).toBe(false);
     expect(automation.schedule).toEqual({ kind: "daily", hour: 2, minute: 0 });
     expect(automation.createdAt).toBe(automation.updatedAt);
 
     const reloaded = new AutomationStore(filePath);
     expect(reloaded.list()).toEqual([automation]);
+  });
+
+  it("honors closeOnFinish on create, toggles it on update, and persists it", () => {
+    const store = new AutomationStore(filePath);
+    const automation = store.create({ ...createInput, closeOnFinish: true });
+    expect(automation.closeOnFinish).toBe(true);
+
+    const updated = store.update(automation.id, { closeOnFinish: false });
+    expect(updated?.closeOnFinish).toBe(false);
+    // An update that omits closeOnFinish leaves it untouched.
+    const renamed = store.update(automation.id, { name: "renamed" });
+    expect(renamed?.closeOnFinish).toBe(false);
+
+    const reloaded = new AutomationStore(filePath);
+    expect(reloaded.get(automation.id)?.closeOnFinish).toBe(false);
+  });
+
+  it("defaults closeOnFinish to false when absent from a persisted v2 file", () => {
+    // A v2 file written before closeOnFinish existed has no such field.
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: AUTOMATIONS_FILE_VERSION,
+        automations: [
+          {
+            id: "legacy",
+            name: "legacy",
+            schedule: { kind: "daily", hour: 2, minute: 0 },
+            cwd: "/tmp",
+            command: "echo hi",
+            enabled: true,
+            limit: { kind: "forever" },
+            runCount: 0,
+            lifecycle: "active",
+            runs: [],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      }),
+    );
+    const store = new AutomationStore(filePath);
+    expect(store.get("legacy")?.closeOnFinish).toBe(false);
   });
 
   it("coerces a recognizable bare cron string into a friendly preset", () => {

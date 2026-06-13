@@ -34,7 +34,7 @@ Requests must come from the same machine; `Host` must be loopback (using
 
 ## Automations
 
-An automation is `{name, schedule, cwd, command, enabled, limit}`:
+An automation is `{name, schedule, cwd, command, enabled, limit, closeOnFinish}`:
 
 - `schedule` — a **structured schedule object** (preferred) or, for back-compat,
   a bare 5-field cron string. The object is a tagged union on `kind`:
@@ -68,6 +68,10 @@ An automation is `{name, schedule, cwd, command, enabled, limit}`:
   N runs". When the limit is reached the automation **finishes** (a terminal
   `lifecycle:"finished"` state) and stops firing but stays listed with its
   history. Only scheduled runs count toward the limit; manual `/run` never does.
+- `closeOnFinish` — defaults to `false` (the tab stays open). When `true`, the
+  run's browser tab is closed once the command finishes. Only honored for tabs
+  opened via CDP (the background-tab path); on the `open -g` fallback it's a
+  silent no-op since that tab has no closeable handle.
 
 When a job fires (or is run manually), the server opens
 `http://localterm.localhost:<port>/?run=<id>` in the user's browser; the new tab

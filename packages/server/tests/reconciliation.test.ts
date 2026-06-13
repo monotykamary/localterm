@@ -18,6 +18,7 @@ const automationWith = (schedule: AutomationSchedule): Automation => ({
   command: "x",
   enabled: true,
   limit: { kind: "forever" },
+  closeOnFinish: false,
   runCount: 0,
   lifecycle: "active",
   runs: [],
@@ -90,7 +91,7 @@ describe("startup downtime reconciliation (integration)", () => {
       port: 0,
       host: "127.0.0.1",
       stateDirectory,
-      openUrl: async () => {},
+      tabController: { open: async () => null, close: async () => {} },
     });
 
   const heartbeatPath = () => path.join(stateDirectory, "daemon-heartbeat.json");
