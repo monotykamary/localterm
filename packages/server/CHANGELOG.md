@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.19.1
+
+### Patch Changes
+
+- 0118ccf: Dev tooling: manage pnpm via mise (`npm:pnpm@11.6.0`) instead of Homebrew and bump the pinned pnpm to 11.6.0, declaring the pnpm 11 `allowBuilds` gate for node-pty. No runtime changes.
+
 ## 1.19.0
 
 ### Minor Changes

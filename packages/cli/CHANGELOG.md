@@ -1,5 +1,13 @@
 # localterm
 
+## 1.19.1
+
+### Patch Changes
+
+- 0118ccf: Dev tooling: manage pnpm via mise (`npm:pnpm@11.6.0`) instead of Homebrew and bump the pinned pnpm to 11.6.0, declaring the pnpm 11 `allowBuilds` gate for node-pty. No runtime changes.
+- Updated dependencies [0118ccf]
+  - @monotykamary/localterm-server@1.19.1
+
 ## 1.19.0
 
 ### Patch Changes
@@ -178,6 +186,7 @@
 ### Patch Changes
 
 - Fix security, CLI lifecycle, and frontend bugs from full codebase review
+
   - security: stripPort now treats `localhost:3417` correctly (was rejected with 403)
   - security: maxPayload capped at 256KB on WebSocket server
   - security: shell hook temp dirs use mode 0o700, rc files use mode 0o600
