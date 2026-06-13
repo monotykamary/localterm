@@ -12,6 +12,14 @@
  * the app and causes the exact artifacting it was meant to fix.
  */
 const EMOJI_WIDE_WIDTH_OVERRIDE_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x2ffc, 0x2fff], // ideographic description characters (Unicode 15.1 made these Wide)
+  [0x31ef, 0x31ef], // ideographic description character subtraction (Unicode 15.1 Wide)
+  [0x1aff0, 0x1aff3], // Katakana Minnan tone letters (Unicode 14, EAW=Wide)
+  [0x1aff5, 0x1affb],
+  [0x1affd, 0x1affe],
+  [0x1b11f, 0x1b122], // archaic Hiragana/Katakana letters (Unicode 14, EAW=Wide)
+  [0x1b132, 0x1b132], // Hiragana small ko (Unicode 15, EAW=Wide)
+  [0x1b155, 0x1b155], // Katakana small ko (Unicode 15, EAW=Wide)
   [0x1f3fb, 0x1f3ff], // emoji skin-tone modifiers
   [0x1f6dc, 0x1f6df], // wireless, playground slide, wheel, ring buoy
   [0x1f7f0, 0x1f7f0], // heavy equals sign
@@ -31,7 +39,7 @@ const EMOJI_WIDE_WIDTH_OVERRIDE_RANGES: ReadonlyArray<readonly [number, number]>
 ];
 
 export const isEmojiWideWidthOverride = (codepoint: number): boolean => {
-  if (codepoint < 0x1f3fb || codepoint > 0x1faf8) return false;
+  if (codepoint < 0x2ffc || codepoint > 0x1faf8) return false;
   for (const [start, end] of EMOJI_WIDE_WIDTH_OVERRIDE_RANGES) {
     if (codepoint >= start && codepoint <= end) return true;
   }
