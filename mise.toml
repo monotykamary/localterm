@@ -1,0 +1,10 @@
+# Provide pnpm at the exact version pinned in package.json's "packageManager"
+# field, installed as the node-based pnpm (npm: backend) rather than mise's
+# default `aqua` backend, which ships the ~200 MB standalone @pnpm/exe binary.
+#
+# Why pin it here: when the pnpm you invoke already matches "packageManager",
+# pnpm does NOT self-delegate to a second pnpm process, so each command is one
+# fewer node launch. On macOS that also avoids an extra Gatekeeper/syspolicyd
+# assessment of the large notarized node binary.
+[tools]
+"npm:pnpm" = "11.6.0"
