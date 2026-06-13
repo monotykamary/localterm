@@ -1,5 +1,12 @@
 # localterm
 
+## 1.18.0
+
+### Patch Changes
+
+- Updated dependencies [8297fef]
+  - @monotykamary/localterm-server@1.18.0
+
 ## 1.17.2
 
 ### Patch Changes
@@ -164,7 +171,6 @@
 ### Patch Changes
 
 - Fix security, CLI lifecycle, and frontend bugs from full codebase review
-
   - security: stripPort now treats `localhost:3417` correctly (was rejected with 403)
   - security: maxPayload capped at 256KB on WebSocket server
   - security: shell hook temp dirs use mode 0o700, rc files use mode 0o600
