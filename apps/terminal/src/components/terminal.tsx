@@ -446,7 +446,15 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         _core: { unicodeService: { _activeProvider: IUnicodeVersionProvider } };
       }
     )._core.unicodeService._activeProvider;
-    terminal.unicode.register(new EmojiWidthUnicodeProvider(graphemesProvider));
+    terminal.unicode.register(
+      new EmojiWidthUnicodeProvider(
+        graphemesProvider,
+        // The spacing-combining-mark override only matches Claude Code, which
+        // runs in the normal buffer. Full-screen TUIs (vim, less, tmux) run in
+        // the alternate buffer and use correct combining-mark widths.
+        () => terminal.buffer.active.type === "normal",
+      ),
+    );
     terminal.unicode.activeVersion = "15-graphemes-emoji";
     const searchAddon = new SearchAddon();
     terminal.loadAddon(searchAddon);
