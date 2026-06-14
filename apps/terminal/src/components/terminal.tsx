@@ -46,10 +46,10 @@ import { AutomationsButton } from "@/components/automations-menu";
 import { AutomationsModal } from "@/components/automations-modal";
 import { CommandPalette, type CommandItem } from "@/components/command-palette";
 import { DiffViewer } from "@/components/diff-viewer";
+import { KeepAwakeMenu, type CaffeinateMode } from "@/components/keep-awake-menu";
 import { SettingsMenu } from "@/components/settings-menu";
 import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
 import {
-  CAFFEINATE_ACCENT_COLOR,
   COPY_FEEDBACK_MS,
   DEAD_SESSION_TITLE_PREFIX,
   DEFAULT_DOCUMENT_TITLE,
@@ -275,13 +275,16 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [isToolbarHovered, setIsToolbarHovered] = useState(false);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isAutomationsOpen, setIsAutomationsOpen] = useState(false);
+  const [isKeepAwakePopoverOpen, setIsKeepAwakePopoverOpen] = useState(false);
   const [automations, setAutomations] = useState<AutomationWithNextRun[] | null>(null);
   const toggleAutomationsRef = useRef<(() => void) | null>(null);
-  const setCaffeinateRef = useRef<((enabled: boolean) => void) | null>(null);
+  const setCaffeinateModeRef = useRef<((mode: CaffeinateMode) => void) | null>(null);
+  const setCaffeinateCommandsRef = useRef<((commands: string[]) => void) | null>(null);
   const toolbarHoverTimeoutRef = useRef<number | null>(null);
   const isSettingsPopoverOpenRef = useRef(false);
   const isAutomationsOpenRef = useRef(false);
-  const isToolbarVisible = isToolbarHovered || isSettingsPopoverOpen || isAutomationsOpen;
+  const isToolbarVisible =
+    isToolbarHovered || isSettingsPopoverOpen || isAutomationsOpen || isKeepAwakePopoverOpen;
   isSettingsPopoverOpenRef.current = isSettingsPopoverOpen;
   isAutomationsOpenRef.current = isAutomationsOpen;
   const [searchQuery, setSearchQuery] = useState("");
@@ -332,10 +335,15 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const wsConnectedRef = useRef(false);
   const isMac = useMemo(detectIsMacPlatform, []);
   // Keep-awake (caffeinate) is daemon-owned global state: the server is the
-  // source of truth and broadcasts changes to every tab. Seed `supported` from
-  // the platform so the button doesn't flash in before the first WS frame.
-  const [isCaffeinated, setIsCaffeinated] = useState(false);
-  const [isCaffeinateSupported, setIsCaffeinateSupported] = useState(isMac);
+  // source of truth for the mode, the live process state, and the trigger
+  // commands, and broadcasts changes to every tab. Seed `supported` from the
+  // platform and `mode` from the server default ("automatic") so the control
+  // doesn't flash in before the first WS frame.
+  const [caffeinateSupported, setCaffeinateSupported] = useState(isMac);
+  const [caffeinateActive, setCaffeinateActive] = useState(false);
+  const [caffeinateMode, setCaffeinateMode] = useState<CaffeinateMode>("automatic");
+  const [caffeinateDefaultCommands, setCaffeinateDefaultCommands] = useState<string[]>([]);
+  const [caffeinateCommands, setCaffeinateCommands] = useState<string[]>([]);
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
   const { summary: diffSummary, setGitDiffSummary } = useGitDiffSummary();
   const hasDiff = diffSummary !== null && diffSummary.isRepo && diffSummary.files > 0;
@@ -693,7 +701,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
     };
 
-    setCaffeinateRef.current = (enabled: boolean) => send({ type: "caffeinate", enabled });
+    setCaffeinateModeRef.current = (mode: CaffeinateMode) =>
+      send({ type: "caffeinate-mode", mode });
+    setCaffeinateCommandsRef.current = (commands: string[]) =>
+      send({ type: "caffeinate-commands", commands });
 
     const clearResizeScrollRestore = () => {
       const state = resizeScrollRestoreRef.current;
@@ -958,8 +969,11 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         } else if (message.type === "automations") {
           setAutomations(message.automations);
         } else if (message.type === "caffeinate") {
-          setIsCaffeinated(message.active);
-          setIsCaffeinateSupported(message.supported);
+          setCaffeinateSupported(message.supported);
+          setCaffeinateActive(message.active);
+          setCaffeinateMode(message.mode);
+          setCaffeinateDefaultCommands(message.defaultCommands);
+          setCaffeinateCommands(message.commands);
         } else if (message.type === "cwd") {
           setLiveCwd(message.cwd);
           setGitDiffSummary(null);
@@ -1253,11 +1267,19 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     });
   }, []);
 
-  // Server-authoritative: we only request the flip and let the broadcast update
-  // every tab's button, so all open tabs stay in lockstep.
-  const handleCaffeinateToggle = useCallback(() => {
-    setCaffeinateRef.current?.(!isCaffeinated);
-  }, [isCaffeinated]);
+  // Server-authoritative: we only request the change and let the broadcast
+  // update every tab's control, so all open tabs stay in lockstep.
+  const handleCaffeinateModeChange = useCallback((mode: CaffeinateMode) => {
+    setCaffeinateModeRef.current?.(mode);
+  }, []);
+
+  const handleCaffeinateCommandsChange = useCallback((commands: string[]) => {
+    setCaffeinateCommandsRef.current?.(commands);
+  }, []);
+
+  const handleKeepAwakePopoverOpenChange = useCallback((open: boolean) => {
+    setIsKeepAwakePopoverOpen(open);
+  }, []);
 
   useEffect(() => {
     if (!isSearchOpen) return;
@@ -1598,6 +1620,25 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         checked: activeScrollOnUserInput,
         action: () => handleScrollOnUserInputChange(!activeScrollOnUserInput),
       },
+      // Keep-awake mode mirrors the coffee dropdown; only offered where
+      // caffeinate exists (macOS), matching the toolbar control's gating.
+      // Custom automatic commands stay in the popover — they need text input.
+      ...(caffeinateSupported
+        ? (
+            [
+              { mode: "off", label: "Keep awake: off" },
+              { mode: "on", label: "Keep awake: on" },
+              { mode: "automatic", label: "Keep awake: automatic" },
+            ] as const
+          ).map(({ mode, label }) => ({
+            id: `keep-awake:${mode}`,
+            label,
+            category: "Keep awake",
+            icon: <Coffee className="size-3.5" />,
+            checked: caffeinateMode === mode,
+            action: () => handleCaffeinateModeChange(mode),
+          }))
+        : []),
       ...TERMINAL_CURSOR_STYLES.map((option) => ({
         id: `cursor:${option.id}`,
         label: option.name,
@@ -1637,6 +1678,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     activeThemeId,
     activeFontId,
     activeCursorStyle,
+    caffeinateSupported,
+    caffeinateMode,
+    handleCaffeinateModeChange,
   ]);
 
   const handleCommandPaletteHighlight = useCallback((item: CommandItem | null) => {
@@ -1789,19 +1833,17 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                     onOpen={() => handleAutomationsOpenChange(true)}
                     isMac={isMac}
                   />
-                  {isCaffeinateSupported ? (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="keep system awake"
-                      aria-pressed={isCaffeinated}
-                      title={isCaffeinated ? "Keeping system awake" : "Keep system awake"}
-                      onClick={handleCaffeinateToggle}
-                      className="hover:text-foreground"
-                      style={isCaffeinated ? { color: CAFFEINATE_ACCENT_COLOR } : undefined}
-                    >
-                      <Coffee />
-                    </Button>
+                  {caffeinateSupported ? (
+                    <KeepAwakeMenu
+                      mode={caffeinateMode}
+                      active={caffeinateActive}
+                      defaultCommands={caffeinateDefaultCommands}
+                      commands={caffeinateCommands}
+                      onModeChange={handleCaffeinateModeChange}
+                      onCommandsChange={handleCaffeinateCommandsChange}
+                      onPopoverOpenChange={handleKeepAwakePopoverOpenChange}
+                      onClose={refocusTerminalRef.current ?? undefined}
+                    />
                   ) : null}
                   <Button
                     variant="ghost"

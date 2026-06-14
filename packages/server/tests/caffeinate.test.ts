@@ -1,12 +1,28 @@
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { WebSocket } from "ws";
 import {
   CaffeinateController,
   type CaffeinateProcessHandle,
 } from "../src/caffeinate-controller.js";
+import { CAFFEINATE_AUTO_DEFAULT_COMMANDS } from "../src/constants.js";
 import { createServer, type RunningServer } from "../src/index.js";
 
 type MessagePredicate = (message: unknown) => boolean;
+
+// The expected broadcast shape, with sensible defaults overridable per assertion.
+const caffeinateState = (overrides: Record<string, unknown> = {}) => ({
+  type: "caffeinate",
+  supported: true,
+  active: false,
+  mode: "automatic",
+  defaultCommands: [...CAFFEINATE_AUTO_DEFAULT_COMMANDS],
+  commands: [],
+  ...overrides,
+});
 
 const hasType = (message: unknown, type: string): message is Record<string, unknown> =>
   Boolean(
@@ -104,57 +120,67 @@ const createFakeSpawn = () => {
   return { spawned, spawnProcess };
 };
 
+const makeStateDir = (): string => path.join(os.tmpdir(), `localterm-caffeinate-${randomUUID()}`);
+
 describe("createServer caffeinate broadcast", () => {
   let server: RunningServer;
   let spawned: { killed: boolean }[];
+  let stateDirectory: string;
 
   beforeEach(async () => {
     const fakeSpawn = createFakeSpawn();
     spawned = fakeSpawn.spawned;
+    stateDirectory = makeStateDir();
     server = await createServer({
       port: 0,
       host: "127.0.0.1",
+      stateDirectory,
       tabController: { open: async () => null, close: async () => {} },
       caffeinateController: new CaffeinateController({
         supported: true,
         spawnProcess: fakeSpawn.spawnProcess,
       }),
+      // No matching processes, so automatic mode never activates and no real
+      // `ps` is ever run.
+      caffeinateSnapshotProcesses: async () => [],
     });
   });
 
   afterEach(async () => {
     await server.stop();
+    fs.rmSync(stateDirectory, { recursive: true, force: true });
   });
 
   it("sends the current keep-awake state on connect", async () => {
     const tab = await connect(server.port);
     try {
       const state = await tab.waitFor((message) => hasType(message, "caffeinate"));
-      expect(state).toEqual({ type: "caffeinate", active: false, supported: true });
+      // Fresh state dir → default automatic mode, no custom commands, idle.
+      expect(state).toEqual(caffeinateState());
       expect(spawned).toHaveLength(0);
     } finally {
       await closeWs(tab.socket);
     }
   });
 
-  it("broadcasts a toggle to every connected tab", async () => {
+  it("broadcasts a mode change to every connected tab", async () => {
     const tabA = await connect(server.port);
     const tabB = await connect(server.port);
     try {
       await tabA.waitFor((message) => hasType(message, "caffeinate"));
       await tabB.waitFor((message) => hasType(message, "caffeinate"));
 
-      tabA.socket.send(JSON.stringify({ type: "caffeinate", enabled: true }));
+      tabA.socket.send(JSON.stringify({ type: "caffeinate-mode", mode: "on" }));
 
       const [stateA, stateB] = await Promise.all([
         tabA.waitFor(isCaffeinateState(true)),
         tabB.waitFor(isCaffeinateState(true)),
       ]);
-      expect(stateA).toEqual({ type: "caffeinate", active: true, supported: true });
-      expect(stateB).toEqual({ type: "caffeinate", active: true, supported: true });
+      expect(stateA).toEqual(caffeinateState({ mode: "on", active: true }));
+      expect(stateB).toEqual(caffeinateState({ mode: "on", active: true }));
       expect(spawned).toHaveLength(1);
 
-      tabB.socket.send(JSON.stringify({ type: "caffeinate", enabled: false }));
+      tabB.socket.send(JSON.stringify({ type: "caffeinate-mode", mode: "off" }));
       await Promise.all([
         tabA.waitFor(isCaffeinateState(false)),
         tabB.waitFor(isCaffeinateState(false)),
@@ -165,31 +191,59 @@ describe("createServer caffeinate broadcast", () => {
       await closeWs(tabB.socket);
     }
   });
+
+  it("broadcasts and persists custom trigger commands", async () => {
+    const tab = await connect(server.port);
+    try {
+      await tab.waitFor((message) => hasType(message, "caffeinate"));
+      tab.socket.send(
+        JSON.stringify({ type: "caffeinate-commands", commands: ["  ollama  ", "ollama"] }),
+      );
+      const state = await tab.waitFor(
+        (message) =>
+          hasType(message, "caffeinate") &&
+          Array.isArray(message.commands) &&
+          message.commands.length === 1,
+      );
+      // Trimmed and de-duplicated by the store.
+      expect(state).toEqual(caffeinateState({ commands: ["ollama"] }));
+      const persisted = JSON.parse(
+        fs.readFileSync(path.join(stateDirectory, "caffeinate.json"), "utf8"),
+      );
+      expect(persisted.commands).toEqual(["ollama"]);
+    } finally {
+      await closeWs(tab.socket);
+    }
+  });
 });
 
 describe("createServer caffeinate when unsupported", () => {
   it("reports unsupported and never spawns", async () => {
     const fakeSpawn = createFakeSpawn();
+    const stateDirectory = makeStateDir();
     const server = await createServer({
       port: 0,
       host: "127.0.0.1",
+      stateDirectory,
       tabController: { open: async () => null, close: async () => {} },
       caffeinateController: new CaffeinateController({
         supported: false,
         spawnProcess: fakeSpawn.spawnProcess,
       }),
+      caffeinateSnapshotProcesses: async () => [],
     });
     const tab = await connect(server.port);
     try {
       const state = await tab.waitFor((message) => hasType(message, "caffeinate"));
-      expect(state).toEqual({ type: "caffeinate", active: false, supported: false });
+      expect(state).toEqual(caffeinateState({ supported: false }));
 
-      tab.socket.send(JSON.stringify({ type: "caffeinate", enabled: true }));
+      tab.socket.send(JSON.stringify({ type: "caffeinate-mode", mode: "on" }));
       await new Promise((resolve) => setTimeout(resolve, 150));
       expect(fakeSpawn.spawned).toHaveLength(0);
     } finally {
       await closeWs(tab.socket);
       await server.stop();
+      fs.rmSync(stateDirectory, { recursive: true, force: true });
     }
   });
 });

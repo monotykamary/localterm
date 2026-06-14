@@ -28,17 +28,37 @@ describe("clientToServerMessageSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("accepts a caffeinate toggle frame", () => {
-    expect(
-      clientToServerMessageSchema.safeParse({ type: "caffeinate", enabled: true }).success,
-    ).toBe(true);
-    expect(
-      clientToServerMessageSchema.safeParse({ type: "caffeinate", enabled: false }).success,
-    ).toBe(true);
+  it("accepts caffeinate-mode frames for every mode", () => {
+    for (const mode of ["off", "on", "automatic"]) {
+      expect(
+        clientToServerMessageSchema.safeParse({ type: "caffeinate-mode", mode }).success,
+      ).toBe(true);
+    }
   });
 
-  it("rejects a caffeinate frame missing enabled", () => {
-    expect(clientToServerMessageSchema.safeParse({ type: "caffeinate" }).success).toBe(false);
+  it("rejects a caffeinate-mode frame with an unknown mode", () => {
+    expect(
+      clientToServerMessageSchema.safeParse({ type: "caffeinate-mode", mode: "sometimes" }).success,
+    ).toBe(false);
+    expect(clientToServerMessageSchema.safeParse({ type: "caffeinate-mode" }).success).toBe(false);
+  });
+
+  it("accepts a caffeinate-commands frame and trims entries", () => {
+    const result = clientToServerMessageSchema.safeParse({
+      type: "caffeinate-commands",
+      commands: ["  ollama  ", "lazygit"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success && result.data.type === "caffeinate-commands") {
+      expect(result.data.commands).toEqual(["ollama", "lazygit"]);
+    }
+  });
+
+  it("rejects a caffeinate-commands frame with a blank command", () => {
+    expect(
+      clientToServerMessageSchema.safeParse({ type: "caffeinate-commands", commands: ["   "] })
+        .success,
+    ).toBe(false);
   });
 
   it("rejects negative dimensions", () => {
@@ -190,15 +210,19 @@ describe("serverToClientMessageSchema", () => {
   it("accepts a caffeinate state frame", () => {
     const result = serverToClientMessageSchema.safeParse({
       type: "caffeinate",
-      active: true,
       supported: true,
+      active: true,
+      mode: "automatic",
+      defaultCommands: ["claude", "codex"],
+      commands: ["ollama"],
     });
     expect(result.success).toBe(true);
   });
 
   it("rejects caffeinate state frames missing fields", () => {
     expect(
-      serverToClientMessageSchema.safeParse({ type: "caffeinate", active: true }).success,
+      serverToClientMessageSchema.safeParse({ type: "caffeinate", active: true, supported: true })
+        .success,
     ).toBe(false);
   });
 });

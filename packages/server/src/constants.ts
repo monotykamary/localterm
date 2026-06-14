@@ -14,6 +14,24 @@ export const LOCALTERM_VALUE = "1";
 export const CAFFEINATE_BINARY = "caffeinate";
 export const CAFFEINATE_ARGS: readonly string[] = ["-dims"];
 
+// Keep-awake "automatic" mode recognizes these commands out of the box and
+// caffeinates whenever one is running in any localterm session. Fixed — the
+// user can add their own on top but cannot remove these.
+export const CAFFEINATE_AUTO_DEFAULT_COMMANDS: readonly string[] = [
+  "claude",
+  "codex",
+  "opencode",
+  "pi",
+];
+export const CAFFEINATE_PREFERENCES_FILE_VERSION = 1;
+// Automatic detection is event-driven (no timer): a `ps` snapshot is taken only
+// in response to a foreground change or a session connect/disconnect. This
+// debounce window coalesces a burst of such events into a single snapshot; it
+// fires once and does not repeat.
+export const CAFFEINATE_AUTO_POKE_DEBOUNCE_MS = 150;
+export const MAX_CAFFEINATE_COMMANDS = 50;
+export const MAX_CAFFEINATE_COMMAND_LENGTH = 128;
+
 export const TITLE_MAX_PATH_SEGMENTS = 1;
 
 /**

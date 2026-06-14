@@ -10,6 +10,9 @@ import { AutomationRunTracker } from "./automation-run-tracker.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
 import { CaffeinateController } from "./caffeinate-controller.js";
+import { CaffeinateManager } from "./caffeinate-manager.js";
+import { CaffeinatePreferencesStore } from "./caffeinate-preferences-store.js";
+import type { SnapshotProcesses } from "./caffeinate-process-match.js";
 import { CdpClient } from "./cdp/cdp-client.js";
 import {
   AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
@@ -86,6 +89,12 @@ export interface ServerOptions {
    * power assertion.
    */
   caffeinateController?: CaffeinateController;
+  /**
+   * Override how automatic-mode keep-awake inspects running processes. Defaults
+   * to a real `ps` snapshot. Injectable so tests can drive automatic detection
+   * deterministically without spawning processes.
+   */
+  caffeinateSnapshotProcesses?: SnapshotProcesses;
 }
 
 /** Opens and (optionally) closes the browser tab for an automation run. */
@@ -194,6 +203,15 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const automationScheduler = new AutomationScheduler(automationStore);
   const heartbeatStore = new HeartbeatStore(path.join(stateDirectory, "daemon-heartbeat.json"));
   const caffeinateController = options.caffeinateController ?? new CaffeinateController();
+  const caffeinatePreferencesStore = new CaffeinatePreferencesStore(
+    path.join(stateDirectory, "caffeinate.json"),
+  );
+  const caffeinateManager = new CaffeinateManager({
+    controller: caffeinateController,
+    store: caffeinatePreferencesStore,
+    listSessionPids: () => registry.pids(),
+    snapshotProcesses: options.caffeinateSnapshotProcesses,
+  });
   const clientSockets = new Set<BroadcastSocket>();
   const cdpBackgroundTabsDisabled = process.env.LOCALTERM_DISABLE_CDP_TABS === "1";
   // One persistent CDP socket for the daemon's lifetime — opened once at start
@@ -263,12 +281,15 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   const caffeinateStatePayload = (): ServerToClientMessage => ({
     type: "caffeinate",
-    active: caffeinateController.active,
-    supported: caffeinateController.supported,
+    supported: caffeinateManager.supported,
+    active: caffeinateManager.active,
+    mode: caffeinateManager.mode,
+    defaultCommands: [...caffeinateManager.defaultCommands],
+    commands: caffeinateManager.commands,
   });
 
   // The daemon owns the single keep-awake process, so its state is broadcast to
-  // every tab — exactly like automations — and the coffee toggles stay in sync.
+  // every tab — exactly like automations — and the coffee controls stay in sync.
   const broadcastCaffeinate = () => {
     const payload = caffeinateStatePayload();
     for (const clientSocket of clientSockets) {
@@ -276,7 +297,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
   };
 
-  caffeinateController.on("change", broadcastCaffeinate);
+  caffeinateManager.on("change", broadcastCaffeinate);
 
   // Open a browser tab for a run and record it in history. Scheduled launches
   // count toward the limit (and can finish the automation); manual launches
@@ -696,8 +717,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           };
           const onTitle = (title: string) => safeSend(ws, { type: "title", title });
           const onCwd = (cwd: string) => safeSend(ws, { type: "cwd", cwd });
-          const onForeground = (process: string | null) =>
+          const onForeground = (process: string | null) => {
             safeSend(ws, { type: "foreground", process });
+            // A foreground transition is the cheap signal that a recognized
+            // program may have started or stopped — nudge automatic detection.
+            caffeinateManager.pokeAuto();
+          };
           const onNotification = (body: string) => safeSend(ws, { type: "notification", body });
           const onExit = (code: number | null) => {
             if (outputBatchTimer !== null) {
@@ -769,8 +794,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           if (!parsed.success) return;
           if (parsed.data.type === "input") {
             session.write(parsed.data.data);
-          } else if (parsed.data.type === "caffeinate") {
-            caffeinateController.setActive(parsed.data.enabled);
+          } else if (parsed.data.type === "caffeinate-mode") {
+            caffeinateManager.setMode(parsed.data.mode);
+          } else if (parsed.data.type === "caffeinate-commands") {
+            caffeinateManager.setCommands(parsed.data.commands);
           } else {
             session.resize(
               parsed.data.cols,
@@ -803,6 +830,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           releaseRunTabHandle();
           if (!session) return;
           registry.unregister(session);
+          // A closed session may have been the only one running a trigger;
+          // re-evaluate automatic keep-awake now that its pid is gone.
+          caffeinateManager.pokeAuto();
           session.dispose();
           session = null;
           activeWs = null;
@@ -827,6 +857,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           releaseRunTabHandle();
           if (!session) return;
           registry.unregister(session);
+          // A closed session may have been the only one running a trigger;
+          // re-evaluate automatic keep-awake now that its pid is gone.
+          caffeinateManager.pokeAuto();
           session.dispose();
           session = null;
           activeWs = null;
@@ -928,7 +961,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   const stop = async () => {
     automationScheduler.dispose();
-    caffeinateController.dispose();
+    caffeinateManager.dispose();
     cdpClient?.close();
     registry.disposeAll();
     // Forcibly tear down every WS first. node-pty + ws upgraded sockets

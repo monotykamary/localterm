@@ -3,9 +3,12 @@ import {
   AUTOMATION_RUN_HISTORY_CAP,
   AUTOMATION_RUN_LIMIT_MAX,
   AUTOMATIONS_FILE_VERSION,
+  CAFFEINATE_PREFERENCES_FILE_VERSION,
   MAX_AUTOMATION_COMMAND_LENGTH,
   MAX_AUTOMATION_NAME_LENGTH,
   MAX_AUTOMATION_TIMES_PER_DAY,
+  MAX_CAFFEINATE_COMMAND_LENGTH,
+  MAX_CAFFEINATE_COMMANDS,
   MAX_COLS,
   MAX_CRON_EXPRESSION_LENGTH,
   MAX_FOREGROUND_LENGTH,
@@ -40,19 +43,38 @@ const resizeMessageSchema = z
   })
   .strict();
 
-// Toggle the machine-wide keep-awake (`caffeinate -dims`). The daemon owns the
-// single process; this just expresses the desired on/off state.
-const caffeinateInputMessageSchema = z
+// Keep-awake (`caffeinate -dims`) has three modes. "off" never caffeinates,
+// "on" always does, and "automatic" caffeinates only while a recognized program
+// is running in some localterm session.
+export const caffeinateModeSchema = z.enum(["off", "on", "automatic"]);
+
+// One trigger command for automatic mode. Matched against the basename of each
+// token in a running process's command line (so `node …/claude` counts).
+const caffeinateCommandSchema = z.string().trim().min(1).max(MAX_CAFFEINATE_COMMAND_LENGTH);
+
+// Set the machine-wide keep-awake mode. The daemon owns the single process and
+// decides when it actually runs; this just expresses the desired mode.
+const caffeinateModeInputMessageSchema = z
   .object({
-    type: z.literal("caffeinate"),
-    enabled: z.boolean(),
+    type: z.literal("caffeinate-mode"),
+    mode: caffeinateModeSchema,
+  })
+  .strict();
+
+// Replace the user's custom automatic-mode trigger commands (on top of the
+// fixed defaults, which are never sent from the client).
+const caffeinateCommandsInputMessageSchema = z
+  .object({
+    type: z.literal("caffeinate-commands"),
+    commands: z.array(caffeinateCommandSchema).max(MAX_CAFFEINATE_COMMANDS),
   })
   .strict();
 
 export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   inputMessageSchema,
   resizeMessageSchema,
-  caffeinateInputMessageSchema,
+  caffeinateModeInputMessageSchema,
+  caffeinateCommandsInputMessageSchema,
 ]);
 
 const outputMessageSchema = z
@@ -421,13 +443,29 @@ const automationsMessageSchema = z
   })
   .strict();
 
-// Current keep-awake state, broadcast to every tab so the coffee toggle stays
-// in lockstep. `supported` is false off macOS, where `caffeinate` does not exist.
+// Current keep-awake state, broadcast to every tab so the coffee control stays
+// in lockstep. `supported` is false off macOS, where `caffeinate` does not
+// exist. `active` is whether the process is running right now (drives the icon
+// tint); `mode` is the selected off/on/automatic. `defaultCommands` are the
+// fixed automatic triggers (shown read-only); `commands` are the user's
+// additions.
 const caffeinateStateMessageSchema = z
   .object({
     type: z.literal("caffeinate"),
-    active: z.boolean(),
     supported: z.boolean(),
+    active: z.boolean(),
+    mode: caffeinateModeSchema,
+    defaultCommands: z.array(z.string()),
+    commands: z.array(z.string()),
+  })
+  .strict();
+
+// Persisted keep-awake preferences (~/.localterm/caffeinate.json).
+export const caffeinatePreferencesFileSchema = z
+  .object({
+    version: z.literal(CAFFEINATE_PREFERENCES_FILE_VERSION),
+    mode: caffeinateModeSchema,
+    commands: z.array(caffeinateCommandSchema).max(MAX_CAFFEINATE_COMMANDS),
   })
   .strict();
 
