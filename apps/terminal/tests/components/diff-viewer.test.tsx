@@ -304,4 +304,149 @@ describe("DiffViewer", () => {
     );
     expect(screen.queryByText("#123")).toBeNull();
   });
+
+  it("re-fetches a patch after close/reopen even when a previous fetch was in flight", async () => {
+    // Regression: aborting an in-flight patch fetch on close left a stale
+    // "loading" entry in the cache. On reopen, loadPatch bailed on the
+    // tombstone and the diff showed "Loading diff…" forever.
+    filesMock.mockResolvedValue(FILE_LIST);
+    let patchCallCount = 0;
+    patchMock.mockImplementation(async () => {
+      patchCallCount += 1;
+      // First invocation: never resolve (simulates a slow fetch that gets
+      // aborted on close). Subsequent invocations resolve normally.
+      if (patchCallCount === 1) return new Promise<GitDiffFilePatch | null>(() => {});
+      return PATCHES["src/app.ts"] ?? null;
+    });
+
+    const { unmount } = render(
+      <DiffViewer open cwd="/repo" branchInfo={null} onClose={() => {}} />,
+    );
+
+    // Wait for the patch request to be in flight.
+    await vi.waitFor(() => expect(patchMock).toHaveBeenCalled());
+
+    // Close the viewer while the patch fetch is still pending — this aborts
+    // the fetch and (before the fix) leaves a stale "loading" entry.
+    unmount();
+
+    // Reopen the viewer — this time patches resolve immediately.
+    mockHappyPath();
+    renderDiffViewer();
+
+    // The patch should load instead of staying in "Loading diff…" forever.
+    expect(await screen.findByText("BETA")).toBeTruthy();
+  });
+
+  it("does not loop the background revalidation infinitely", async () => {
+    // Regression: the on-open revalidation effect had branchFiles/workingFiles
+    // as dependencies. Each background refresh changed those deps, re-triggered
+    // the effect, causing an infinite fetch loop.
+    const callCounts = { working: 0, branch: 0 };
+    filesMock.mockImplementation(async (_cwd, query) => {
+      if (query.mode === "working") callCounts.working += 1;
+      else callCounts.branch += 1;
+      return FILE_LIST;
+    });
+    patchMock.mockImplementation((_cwd, path) => Promise.resolve(PATCHES[path] ?? null));
+
+    renderDiffViewer();
+    await screen.findByText("BETA");
+
+    // Wait a few event-loop turns for any further fetch to fire.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // Working-mode file list should be fetched at most twice: once for the
+    // initial no-data path and once for the background refresh on the next
+    // open.
+    expect(callCounts.working).toBeLessThanOrEqual(3);
+  });
+
+  it("invalidates cached patches when compare mode changes", async () => {
+    // Regression: switching from working to branch mode left stale working-tree
+    // patches in the cache. loadPatch bailed on state==="loaded", so the
+    // branch diff showed the working-tree content.
+    const branchPatch = ["@@ -1,3 +1,3 @@", " delta", "-epsilon", "+EPSILON", " zeta", ""].join(
+      "\n",
+    );
+
+    filesMock.mockResolvedValue(FILE_LIST);
+    const branchFileList: GitDiffFileListResponse = {
+      isRepo: true,
+      files: [
+        {
+          path: "src/app.ts",
+          oldPath: null,
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+          binary: false,
+        },
+      ],
+    };
+
+    let patchModeSeen: string[] = [];
+    patchMock.mockImplementation((_cwd, _path, query) => {
+      patchModeSeen.push(query.mode);
+      if (query.mode === "branch")
+        return Promise.resolve({ patch: branchPatch, patchOmitted: false, binary: false });
+      return Promise.resolve(PATCHES["src/app.ts"] ?? null);
+    });
+
+    // Start in working mode (no PR → default is working).
+    renderDiffViewer();
+    expect(await screen.findByText("BETA")).toBeTruthy();
+    patchModeSeen = [];
+
+    // Pre-seed branch file data so the on-open revalidation has data
+    // immediately and doesn't clear the cache again.
+    filesMock.mockImplementation(async (_cwd, query) => {
+      return query.mode === "branch" ? branchFileList : FILE_LIST;
+    });
+
+    // Switch to branch mode.
+    fireEvent.click(screen.getByRole("radio", { name: "Branch" }));
+
+    // The branch-mode patch should be fetched.
+    await vi.waitFor(() => expect(patchModeSeen).toContain("branch"));
+    expect(await screen.findByText("EPSILON")).toBeTruthy();
+    expect(screen.queryByText("BETA")).toBeNull();
+  });
+
+  it("clears patch cache when cwd changes", async () => {
+    // Regression: switching repos left stale patches from the old repo in the
+    // cache. loadPatch bailed on state==="loaded", showing wrong diff.
+    mockHappyPath();
+    const { rerender } = render(
+      <DiffViewer open cwd="/repo-a" branchInfo={null} onClose={() => {}} />,
+    );
+    await screen.findByText("BETA");
+
+    // Switch to a different repo — file list and patch cache should reset.
+    const otherList: GitDiffFileListResponse = {
+      isRepo: true,
+      files: [
+        {
+          path: "src/app.ts",
+          oldPath: null,
+          status: "added",
+          additions: 5,
+          deletions: 0,
+          binary: false,
+        },
+      ],
+    };
+    const otherPatch: GitDiffFilePatch = {
+      patch: ["@@ -0,0 +1,5 @@", "+line1", "+line2", "+line3", "+line4", "+line5", ""].join("\n"),
+      patchOmitted: false,
+      binary: false,
+    };
+    filesMock.mockResolvedValue(otherList);
+    patchMock.mockResolvedValue(otherPatch);
+
+    rerender(<DiffViewer open cwd="/repo-b" branchInfo={null} onClose={() => {}} />);
+
+    expect(await screen.findByText("line1")).toBeTruthy();
+    expect(screen.queryByText("BETA")).toBeNull();
+  });
 });

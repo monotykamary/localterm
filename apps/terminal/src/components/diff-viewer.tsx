@@ -882,9 +882,10 @@ export const DiffViewer = ({
   const fileListRef = useRef<HTMLDivElement | null>(null);
   // In-flight per-file patch fetches, so they can be aborted on close/refresh.
   const patchControllersRef = useRef<Map<string, AbortController>>(new Map());
-  // Tracks the last-seen file metadata per path so the patch-loading effect
-  // can detect real changes (additions/deletions/status) vs mere reference
-  // identity changes from re-fetches returning identical data.
+  // Tracks the last-seen file metadata per path+mode so the patch-loading
+  // effect can detect real changes (additions/deletions/status) vs mere
+  // reference identity changes from re-fetches returning identical data.
+  // Includes compareMode+base so switching modes invalidates stale patches.
   const lastFileMetaRef = useRef<Map<string, string>>(new Map());
   // Latest cache, read by loadPatch without making it depend on patchCache.
   const patchCacheRef = useRef(patchCache);
@@ -918,7 +919,10 @@ export const DiffViewer = ({
     setWorkingFiles(null);
     setBranchFiles(null);
     setHasError(false);
-  }, [cwd]);
+    setPatchCache({});
+    lastFileMetaRef.current.clear();
+    abortPatchFetches();
+  }, [cwd, abortPatchFetches]);
 
   // Pre-fetch both file lists on cwd change. Runs while the viewer is closed so
   // data is ready on open. Branch fetch is chained after working (sequential) to
@@ -937,6 +941,11 @@ export const DiffViewer = ({
     return () => controller.abort();
   }, [cwd]);
 
+  const workingFilesRef = useRef(workingFiles);
+  workingFilesRef.current = workingFiles;
+  const branchFilesRef = useRef(branchFiles);
+  branchFilesRef.current = branchFiles;
+
   // On-open revalidation: when the viewer opens with data already present, show
   // it immediately and silently refresh in the background. When data is missing
   // (first load on a fresh cwd, or explicit refresh), fetch with the center
@@ -944,9 +953,18 @@ export const DiffViewer = ({
   useEffect(() => {
     if (!open || !cwd) {
       abortPatchFetches();
+      setPatchCache((prev) => {
+        let changed = false;
+        const next: Record<string, PatchEntry> = {};
+        for (const [path, entry] of Object.entries(prev)) {
+          if (entry.state === "loading") changed = true;
+          else next[path] = entry;
+        }
+        return changed ? next : prev;
+      });
       return;
     }
-    const currentData = compareMode === "branch" ? branchFiles : workingFiles;
+    const currentData = compareMode === "branch" ? branchFilesRef.current : workingFilesRef.current;
     const setter = compareMode === "branch" ? setBranchFiles : setWorkingFiles;
     const query = { mode: compareMode, base: baseOverride };
 
@@ -974,16 +992,15 @@ export const DiffViewer = ({
       setter(response);
     })();
     return () => controller.abort();
-  }, [
-    open,
-    cwd,
-    refreshCount,
-    compareMode,
-    baseOverride,
-    branchFiles,
-    workingFiles,
-    abortPatchFetches,
-  ]);
+  }, [open, cwd, refreshCount, compareMode, baseOverride, abortPatchFetches]);
+
+  // Invalidate cached patches when the comparison mode or base changes —
+  // patches from one mode are wrong for another.
+  useEffect(() => {
+    abortPatchFetches();
+    setPatchCache({});
+    lastFileMetaRef.current.clear();
+  }, [compareMode, baseOverride, abortPatchFetches]);
 
   const displayFileList = compareMode === "branch" ? branchFiles : workingFiles;
   const files = useMemo(() => displayFileList?.files ?? [], [displayFileList]);
@@ -992,10 +1009,15 @@ export const DiffViewer = ({
     (path: string | null | undefined, force = false) => {
       if (!path || !cwd) return;
       const existing = patchCacheRef.current[path];
-      if (!force && existing && (existing.state === "loaded" || existing.state === "loading"))
+      const inFlight = patchControllersRef.current.has(path);
+      if (
+        !force &&
+        existing &&
+        (existing.state === "loaded" || (existing.state === "loading" && inFlight))
+      )
         return;
-      if (force && existing?.state === "loading") return;
-      const previousData = existing?.state === "loaded" ? existing.data : undefined;
+      if (force && existing?.state === "loading" && inFlight) return;
+      const previousData = existing?.data;
       setPatchCache((previous) => ({
         ...previous,
         [path]: { state: "loading", ...(previousData ? { data: previousData } : {}) },
@@ -1008,14 +1030,23 @@ export const DiffViewer = ({
         path,
         { mode: compareMode, base: baseOverride },
         controller.signal,
-      ).then((data) => {
-        if (controller.signal.aborted) return;
-        patchControllersRef.current.delete(path);
-        setPatchCache((previous) => ({
-          ...previous,
-          [path]: data ? { state: "loaded", data } : { state: "error" },
-        }));
-      });
+      )
+        .then((data) => {
+          if (controller.signal.aborted) return;
+          patchControllersRef.current.delete(path);
+          setPatchCache((previous) => ({
+            ...previous,
+            [path]: data ? { state: "loaded", data } : { state: "error" },
+          }));
+        })
+        .catch(() => {
+          if (controller.signal.aborted) return;
+          patchControllersRef.current.delete(path);
+          setPatchCache((previous) => ({
+            ...previous,
+            [path]: { state: "error" },
+          }));
+        });
     },
     [cwd, compareMode, baseOverride],
   );
@@ -1035,9 +1066,10 @@ export const DiffViewer = ({
   useEffect(() => {
     if (!selectedPath) return;
     const selectedMeta = files.find((file) => file.path === selectedPath);
+    const modeKey = `${compareMode}:${baseOverride ?? ""}`;
     const metaKey = selectedMeta
-      ? `${selectedMeta.additions}:${selectedMeta.deletions}:${selectedMeta.status}:${selectedMeta.binary}`
-      : "";
+      ? `${modeKey}:${selectedMeta.additions}:${selectedMeta.deletions}:${selectedMeta.status}:${selectedMeta.binary}`
+      : modeKey;
     const lastKey = lastFileMetaRef.current.get(selectedPath);
     const fileChanged = lastKey !== undefined && lastKey !== metaKey;
     lastFileMetaRef.current.set(selectedPath, metaKey);
