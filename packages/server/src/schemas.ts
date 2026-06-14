@@ -169,7 +169,10 @@ export const gitDiffFilePatchSchema = z
   })
   .strict();
 
-// Lightweight working-tree stats polled by the browser for the diff indicator.
+// Lightweight working-tree stats pushed to the browser for the diff indicator.
+// `branch` is the current branch (null when detached / not a repo); the client
+// watches it to refresh the ambient PR lease only when the branch actually
+// changes, not on every working-tree edit.
 export const gitDiffSummarySchema = z
   .object({
     isRepo: z.boolean(),
@@ -177,6 +180,7 @@ export const gitDiffSummarySchema = z
     additions: z.number().int().nonnegative(),
     deletions: z.number().int().nonnegative(),
     binaries: z.number().int().nonnegative(),
+    branch: z.string().nullable(),
   })
   .strict();
 

@@ -169,6 +169,7 @@ describe("getGitDiffSummary / getGitDiff", () => {
       additions: 0,
       deletions: 0,
       binaries: 0,
+      branch: null,
     });
     expect(await getGitDiff(plainDir)).toEqual({ isRepo: false, files: [] });
   });
@@ -185,6 +186,8 @@ describe("getGitDiffSummary / getGitDiff", () => {
     expect(summary.deletions).toBe(2);
     // binary.bin + untracked.bin
     expect(summary.binaries).toBe(2);
+    // current branch surfaced for the ambient PR-lease refresh
+    expect(summary.branch).toBe("main");
   });
 
   it("returns per-file entries with patches", async () => {
@@ -257,6 +260,7 @@ describe("getGitDiffSummary / getGitDiff", () => {
         additions: 0,
         deletions: 0,
         binaries: 0,
+        branch: "main",
       });
       expect((await getGitDiff(cleanDir)).files).toEqual([]);
     } finally {

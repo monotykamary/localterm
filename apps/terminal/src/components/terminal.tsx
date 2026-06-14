@@ -359,6 +359,15 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   // expand on hover.
   const hasToolbarIndicator = hasDiff || branchPr !== null;
 
+  // A `git checkout` keeps the same cwd, so the cwd-keyed lease wouldn't notice.
+  // The ambient summary carries the live branch; when it diverges from the branch
+  // the lease was fetched under, re-lease so the PR indicator tracks the branch.
+  const summaryBranch = diffSummary?.branch ?? null;
+  useEffect(() => {
+    if (!branchInfo || !summaryBranch) return;
+    if (summaryBranch !== branchInfo.currentBranch) refreshBranchInfo();
+  }, [summaryBranch, branchInfo, refreshBranchInfo]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;

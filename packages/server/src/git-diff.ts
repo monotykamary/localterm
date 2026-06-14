@@ -44,6 +44,7 @@ const EMPTY_SUMMARY: GitDiffSummary = {
   additions: 0,
   deletions: 0,
   binaries: 0,
+  branch: null,
 };
 
 const runGit = (cwd: string, args: string[]): Promise<string> =>
@@ -129,8 +130,12 @@ const firstExistingRef = async (cwd: string, candidates: string[]): Promise<stri
 const normalizePrState = (raw: unknown): GitBranchPrState =>
   raw === "MERGED" ? "merged" : raw === "CLOSED" ? "closed" : "open";
 
+// A parsed PR carries its head-repo owner so we can keep only the ones whose
+// head is OUR branch (our fork), not some stranger's same-named branch.
+type ParsedPr = GitBranchPr & { headOwner: string | null };
+
 // Parse `gh pr list --json …` output (an array) into our PR shape.
-const parsePrList = (stdout: string | null): GitBranchPr[] => {
+const parsePrList = (stdout: string | null): ParsedPr[] => {
   if (!stdout) return [];
   try {
     const parsed = JSON.parse(stdout) as Array<{
@@ -139,9 +144,10 @@ const parsePrList = (stdout: string | null): GitBranchPr[] => {
       baseRefName?: string;
       url?: string;
       state?: string;
+      headRepositoryOwner?: { login?: string } | null;
     }>;
     if (!Array.isArray(parsed)) return [];
-    const prs: GitBranchPr[] = [];
+    const prs: ParsedPr[] = [];
     for (const item of parsed) {
       if (typeof item?.number !== "number" || !item.baseRefName) continue;
       prs.push({
@@ -150,6 +156,10 @@ const parsePrList = (stdout: string | null): GitBranchPr[] => {
         baseRefName: item.baseRefName,
         url: typeof item.url === "string" && item.url.length > 0 ? item.url : null,
         state: normalizePrState(item.state),
+        headOwner:
+          typeof item.headRepositoryOwner?.login === "string"
+            ? item.headRepositoryOwner.login
+            : null,
       });
     }
     return prs;
@@ -158,51 +168,77 @@ const parsePrList = (stdout: string | null): GitBranchPr[] => {
   }
 };
 
-// GitHub "owner/repo" slugs parsed from the repo's remotes, so PR lookup can be
-// retried against each one. Order preserves `git remote -v` order (origin first).
-export const listGithubRemoteSlugs = async (cwd: string): Promise<string[]> => {
+interface GithubRemote {
+  name: string;
+  slug: string;
+  owner: string;
+}
+
+// Parse the repo's GitHub remotes from `git remote -v` — preserving order
+// (origin first) and de-duplicating the fetch/push pair per remote.
+const parseGithubRemotes = async (cwd: string): Promise<GithubRemote[]> => {
   try {
     const stdout = await runGit(cwd, ["remote", "-v"]);
-    const slugs: string[] = [];
+    const seen = new Set<string>();
+    const remotes: GithubRemote[] = [];
     for (const line of stdout.split("\n")) {
-      // Matches both SSH (git@github.com:owner/repo.git) and HTTPS
-      // (https://github.com/owner/repo) forms.
-      const match = /github\.com[/:]([^\s/]+\/[^\s]+?)(?:\.git)?(?:\s|$)/.exec(line);
-      if (match && !slugs.includes(match[1])) slugs.push(match[1]);
+      // <name>\t<url> (fetch|push); url is SSH (git@github.com:owner/repo.git)
+      // or HTTPS (https://github.com/owner/repo).
+      const match = /^(\S+)\s+\S*github\.com[/:]([^\s/]+)\/([^\s]+?)(?:\.git)?(?:\s|$)/.exec(line);
+      if (!match) continue;
+      const [, name, owner, repo] = match;
+      const slug = `${owner}/${repo}`;
+      const key = `${name} ${slug}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      remotes.push({ name, slug, owner });
     }
-    return slugs;
+    return remotes;
   } catch {
     return [];
   }
 };
 
-const PR_LIST_FIELDS = "number,title,baseRefName,url,state";
+// GitHub "owner/repo" slugs parsed from the repo's remotes (origin first).
+export const listGithubRemoteSlugs = async (cwd: string): Promise<string[]> => {
+  const slugs: string[] = [];
+  for (const remote of await parseGithubRemotes(cwd)) {
+    if (!slugs.includes(remote.slug)) slugs.push(remote.slug);
+  }
+  return slugs;
+};
+
+const PR_LIST_FIELDS = "number,title,baseRefName,url,state,headRepositoryOwner";
 
 // Discover the PR for the current branch via gh. Returns null whenever gh is
 // unavailable or there is no PR — never throws.
 //
-// Uses `gh pr list --head <branch> --state all` (not `gh pr view`) for two
-// reasons: it finds MERGED/CLOSED PRs, not just open ones; and `gh pr view`
-// can't be combined with `--repo` for the implicit current branch. We try the
-// default base repo first, then each GitHub remote explicitly — a fork's PR
-// usually targets the upstream remote, which gh won't pick as the default base
-// repo. An open PR wins; otherwise the most recent merged/closed one.
+// `gh pr list --head <branch>` matches by branch NAME across every fork, so on a
+// common name like "main" it returns strangers' PRs. We therefore keep only PRs
+// whose head repository is OUR repo (the `origin` remote's owner) — the branch
+// in our own fork. We query every GitHub remote (a fork's PR targets the
+// upstream) in parallel, using `--state all` so merged/closed PRs count too. An
+// open PR wins; otherwise the most recent merged/closed one.
 const detectPr = async (cwd: string): Promise<GitBranchPr | null> => {
   const currentBranch = await getCurrentBranch(cwd);
   if (!currentBranch) return null;
-  const slugs = await listGithubRemoteSlugs(cwd);
-  // Prefer explicit per-remote queries (a fork's PR lives on the upstream); only
-  // fall back to gh's default base repo when there are no GitHub remotes.
-  const repoArgsList: string[][] = slugs.length > 0 ? slugs.map((slug) => ["--repo", slug]) : [[]];
+  const remotes = await parseGithubRemotes(cwd);
+  if (remotes.length === 0) return null;
+  // The head repo of our PR is the fork we push to — `origin` (or, lacking one,
+  // the first remote). Only PRs whose head is owned by it are ours.
+  const ownRemote = remotes.find((remote) => remote.name === "origin") ?? remotes[0];
+  const ownOwner = ownRemote.owner.toLowerCase();
+  const slugs = [...new Set(remotes.map((remote) => remote.slug))];
 
   // gh process spawn + network dominate, so query every candidate repo in
   // parallel — collapses N sequential round-trips into one.
   const results = await Promise.all(
-    repoArgsList.map((repoArgs) =>
+    slugs.map((slug) =>
       runGh(cwd, [
         "pr",
         "list",
-        ...repoArgs,
+        "--repo",
+        slug,
         "--head",
         currentBranch,
         "--state",
@@ -210,24 +246,35 @@ const detectPr = async (cwd: string): Promise<GitBranchPr | null> => {
         "--json",
         PR_LIST_FIELDS,
         "--limit",
-        "10",
+        "30",
       ]).then(parsePrList),
     ),
   );
 
   const seen = new Set<string>();
-  let fallback: GitBranchPr | null = null;
+  let fallback: ParsedPr | null = null;
   for (const prs of results) {
     for (const pr of prs) {
+      // Only PRs whose head is our own fork's copy of this branch.
+      if (!pr.headOwner || pr.headOwner.toLowerCase() !== ownOwner) continue;
       const key = pr.url ?? `#${pr.number}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      if (pr.state === "open") return pr;
+      if (pr.state === "open") return toBranchPr(pr);
       fallback ??= pr;
     }
   }
-  return fallback;
+  return fallback ? toBranchPr(fallback) : null;
 };
+
+// Drop the internal headOwner before returning the public PR shape.
+const toBranchPr = ({ number, title, baseRefName, url, state }: ParsedPr): GitBranchPr => ({
+  number,
+  title,
+  baseRefName,
+  url,
+  state,
+});
 
 // Pick the base branch to compare against when the client hasn't chosen one,
 // using LOCAL git only (no gh) so the branch diff loads as fast as the working
@@ -459,9 +506,10 @@ export const getGitDiffSummary = async (
   try {
     const base = await resolveEffectiveBase(cwd, options);
     if (base === null) return { ...EMPTY_SUMMARY, isRepo: true };
-    const [numstatRaw, untrackedPaths] = await Promise.all([
+    const [numstatRaw, untrackedPaths, branch] = await Promise.all([
       runGit(cwd, ["diff", base, "-M", "--no-ext-diff", "--no-textconv", "--numstat", "-z"]),
       listUntrackedPaths(cwd),
+      getCurrentBranch(cwd),
     ]);
     const tracked = parseNumstatZ(numstatRaw);
     let additions = 0;
@@ -484,6 +532,7 @@ export const getGitDiffSummary = async (
       additions,
       deletions,
       binaries,
+      branch,
     };
   } catch {
     // Transient git failure (lock contention, timeout) — report a quiet repo
