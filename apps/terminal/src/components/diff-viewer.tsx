@@ -6,6 +6,7 @@ import type {
   GitDiffFilePatch,
   GitDiffMode,
 } from "@monotykamary/localterm-server/protocol";
+import type { SyntaxLine } from "@/utils/syntax-highlight";
 import {
   FileWarning,
   GitBranch,
@@ -44,6 +45,8 @@ import {
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { SplitDiffRow } from "@/utils/build-split-diff-rows";
+import { renderSyntaxTokens } from "@/utils/render-syntax-tokens";
+import { detectLangId, tokenizeDiffLines } from "@/utils/syntax-highlight";
 import {
   buildRenderChunks,
   renderChunkLength,
@@ -310,6 +313,7 @@ const UnifiedDiffLine = memo(
     line,
     annotateKey,
     highlighted,
+    syntaxTokens,
     onAnnotate,
     onStartDrag,
     onDragEnter,
@@ -317,6 +321,7 @@ const UnifiedDiffLine = memo(
     line: DiffLine;
     annotateKey: string | null;
     highlighted: boolean;
+    syntaxTokens: SyntaxLine | null;
   } & LineCallbacks) => (
     <div
       className={cn("group/line relative flex", lineBackgroundClasses(line.type))}
@@ -339,8 +344,8 @@ const UnifiedDiffLine = memo(
       >
         {line.type === "add" ? "+" : line.type === "del" ? "-" : ""}
       </span>
-      <span className={cn("whitespace-pre pr-4", lineTextClasses(line.type))}>
-        {line.text}
+      <span className={cn("whitespace-pre pr-4", !syntaxTokens && lineTextClasses(line.type))}>
+        {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
         {line.noNewline ? (
           <span className="select-none text-muted-foreground/50" title="No newline at end of file">
             {" ⊘"}
@@ -356,11 +361,13 @@ UnifiedDiffLine.displayName = "UnifiedDiffLine";
 const SplitDiffCell = ({
   line,
   side,
+  syntaxTokens,
   onAnnotate,
   onDragStart,
 }: {
   line: DiffLine | null;
   side: "left" | "right";
+  syntaxTokens: SyntaxLine | null;
   onAnnotate?: () => void;
   onDragStart?: () => void;
 }) => {
@@ -387,10 +394,10 @@ const SplitDiffCell = ({
         className={cn(
           "min-w-0 flex-1 overflow-x-clip whitespace-pre pr-2",
           lineBackgroundClasses(effectiveType),
-          lineTextClasses(line.type),
+          !syntaxTokens && lineTextClasses(line.type),
         )}
       >
-        {line.text}
+        {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
       </span>
     </>
   );
@@ -403,6 +410,7 @@ const SplitDiffRowView = memo(
     leftHighlighted,
     rightKey,
     rightHighlighted,
+    tokenMap,
     onAnnotate,
     onStartDrag,
     onDragEnter,
@@ -412,6 +420,7 @@ const SplitDiffRowView = memo(
     leftHighlighted: boolean;
     rightKey: string | null;
     rightHighlighted: boolean;
+    tokenMap: Map<DiffLine, SyntaxLine>;
   } & LineCallbacks) => {
     const left = row.left;
     const right = row.right;
@@ -424,6 +433,7 @@ const SplitDiffRowView = memo(
           <SplitDiffCell
             line={left}
             side="left"
+            syntaxTokens={left ? (tokenMap.get(left) ?? null) : null}
             onAnnotate={leftKey !== null && onAnnotate ? () => onAnnotate(leftKey) : undefined}
             onDragStart={left && onStartDrag ? () => onStartDrag(left) : undefined}
           />
@@ -436,6 +446,7 @@ const SplitDiffRowView = memo(
           <SplitDiffCell
             line={right}
             side="right"
+            syntaxTokens={right ? (tokenMap.get(right) ?? null) : null}
             onAnnotate={rightKey !== null && onAnnotate ? () => onAnnotate(rightKey) : undefined}
             onDragStart={right && onStartDrag ? () => onStartDrag(right) : undefined}
           />
@@ -454,6 +465,7 @@ const HunkHeader = ({ header }: { header: string }) => (
 interface DiffChunkProps {
   chunk: RenderChunk;
   filePath: string;
+  tokenMap: Map<DiffLine, SyntaxLine>;
   highlightedKeys: ReadonlySet<string>;
   annotations: Record<string, DiffAnnotation>;
   editingKey: string | null;
@@ -473,6 +485,7 @@ const DiffChunk = memo((props: DiffChunkProps) => {
   const {
     chunk,
     filePath,
+    tokenMap,
     highlightedKeys,
     annotations,
     editingKey,
@@ -544,6 +557,7 @@ const DiffChunk = memo((props: DiffChunkProps) => {
                   highlighted={
                     state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
                   }
+                  syntaxTokens={tokenMap.get(line) ?? null}
                   onAnnotate={onOpenEditor}
                   onStartDrag={onStartDrag}
                   onDragEnter={onDragEnter}
@@ -570,6 +584,7 @@ const DiffChunk = memo((props: DiffChunkProps) => {
                   rightHighlighted={
                     rightState !== null && highlightedKeys.has(diffLineTargetKey(rightState.target))
                   }
+                  tokenMap={tokenMap}
                   onAnnotate={onOpenEditor}
                   onStartDrag={onStartDrag}
                   onDragEnter={onDragEnter}
@@ -628,9 +643,40 @@ const FileDiffPane = ({
   const patch = payload.data?.patch ?? null;
   const [renderLimit, setRenderLimit] = useState(DIFF_VIEWER_INITIAL_LINE_LIMIT);
   const [drag, setDrag] = useState<DragSelection | null>(null);
+  const [tokenMap, setTokenMap] = useState<Map<DiffLine, SyntaxLine>>(new Map());
 
   const hunks = useMemo(() => (patch ? parseUnifiedDiff(patch) : []), [patch]);
   const rangeIndex = useMemo(() => buildDiffLineRangeIndex(hunks), [hunks]);
+
+  useEffect(() => {
+    const langId = detectLangId(file.path);
+    if (!langId || hunks.length === 0) {
+      setTokenMap(new Map());
+      return;
+    }
+    const allLines = hunks.flatMap((hunk) => hunk.lines);
+    if (allLines.length === 0) {
+      setTokenMap(new Map());
+      return;
+    }
+    let cancelled = false;
+    const texts = allLines.map((line) => line.text);
+    tokenizeDiffLines(texts, langId).then((syntaxLines) => {
+      if (cancelled) return;
+      if (!syntaxLines) {
+        startTransition(() => setTokenMap(new Map()));
+        return;
+      }
+      const map = new Map<DiffLine, SyntaxLine>();
+      for (let index = 0; index < allLines.length; index += 1) {
+        if (syntaxLines[index]) map.set(allLines[index], syntaxLines[index]);
+      }
+      startTransition(() => setTokenMap(map));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [file.path, hunks]);
   const renderChunks = useMemo(
     () => buildRenderChunks(hunks, viewMode, DIFF_VIEWER_RENDER_CHUNK),
     [hunks, viewMode],
@@ -775,6 +821,7 @@ const FileDiffPane = ({
           key={chunk.key}
           chunk={chunk}
           filePath={file.path}
+          tokenMap={tokenMap}
           highlightedKeys={highlightedKeys}
           annotations={annotations}
           editingKey={editingKey}

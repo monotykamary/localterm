@@ -1,5 +1,15 @@
 # localterm
 
+## 1.32.0
+
+### Minor Changes
+
+- Add syntax highlighting to the diff viewer
+
+  Diff lines are now tokenized with Shiki (JavaScript regex engine, `dark-plus` theme) and rendered with per-token color spans. Language is auto-detected from the file extension (TypeScript, Python, Rust, Go, CSS, JSON, and 25+ more). Unsupported languages fall back to plain text. Grammar modules are lazy-loaded — only the one needed is fetched when its diff is opened.
+
+  - @monotykamary/localterm-server@1.32.0
+
 ## 1.31.0
 
 ### Minor Changes
