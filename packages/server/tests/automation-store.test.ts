@@ -390,6 +390,22 @@ describe("AutomationStore", () => {
     expect(defaulted.trigger).toEqual({ kind: "watch", recursive: true });
   });
 
+  it("persists and round-trips a watch filter", () => {
+    const store = new AutomationStore(filePath);
+    const automation = store.create({
+      ...createInput,
+      trigger: { kind: "watch", recursive: false, filter: "*.mov" },
+    });
+    expect(automation.trigger).toEqual({ kind: "watch", recursive: false, filter: "*.mov" });
+
+    const reloaded = new AutomationStore(filePath);
+    expect(reloaded.get(automation.id)?.trigger).toEqual({
+      kind: "watch",
+      recursive: false,
+      filter: "*.mov",
+    });
+  });
+
   it("switches a schedule automation to a watch trigger via update", () => {
     const store = new AutomationStore(filePath);
     const automation = store.create(createInput);

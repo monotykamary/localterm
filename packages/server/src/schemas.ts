@@ -7,6 +7,7 @@ import {
   MAX_AUTOMATION_COMMAND_LENGTH,
   MAX_AUTOMATION_NAME_LENGTH,
   MAX_AUTOMATION_TIMES_PER_DAY,
+  MAX_AUTOMATION_WATCH_FILTER_LENGTH,
   MAX_CAFFEINATE_COMMAND_LENGTH,
   MAX_CAFFEINATE_COMMANDS,
   MAX_COLS,
@@ -325,7 +326,13 @@ export const automationScheduleSchema = z.discriminatedUnion("kind", [
 // cron / next-run.
 export const automationTriggerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("schedule"), schedule: automationScheduleSchema }).strict(),
-  z.object({ kind: z.literal("watch"), recursive: z.boolean() }).strict(),
+  z
+    .object({
+      kind: z.literal("watch"),
+      recursive: z.boolean(),
+      filter: z.string().min(1).max(MAX_AUTOMATION_WATCH_FILTER_LENGTH).optional(),
+    })
+    .strict(),
 ]);
 
 // Create/update accept either the structured schedule or a legacy bare cron
@@ -340,7 +347,13 @@ export const scheduleInputSchema = z.union([
 // cron string too, and `recursive` is optional (defaults true at the store).
 export const triggerInputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("schedule"), schedule: scheduleInputSchema }).strict(),
-  z.object({ kind: z.literal("watch"), recursive: z.boolean().optional() }).strict(),
+  z
+    .object({
+      kind: z.literal("watch"),
+      recursive: z.boolean().optional(),
+      filter: z.string().min(1).max(MAX_AUTOMATION_WATCH_FILTER_LENGTH).optional(),
+    })
+    .strict(),
 ]);
 
 export const automationRunLimitSchema = z.discriminatedUnion("kind", [

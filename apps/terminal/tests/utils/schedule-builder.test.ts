@@ -118,6 +118,7 @@ const withTrigger = (overrides: Partial<TriggerFormState>): TriggerFormState => 
   triggerType: "schedule",
   schedule: defaultScheduleForm(),
   watchRecursive: true,
+  watchFilter: "",
   ...overrides,
 });
 
@@ -135,6 +136,19 @@ describe("buildTriggerFromForm", () => {
       buildTriggerFromForm(withTrigger({ triggerType: "watch", watchRecursive: false })),
     ).toEqual({ kind: "watch", recursive: false });
   });
+
+  it("omits filter from a watch trigger when the field is empty", () => {
+    expect(buildTriggerFromForm(withTrigger({ triggerType: "watch", watchFilter: "" }))).toEqual({
+      kind: "watch",
+      recursive: true,
+    });
+  });
+
+  it("includes filter in a watch trigger when the field is set", () => {
+    expect(
+      buildTriggerFromForm(withTrigger({ triggerType: "watch", watchFilter: "*.mov" })),
+    ).toEqual({ kind: "watch", recursive: true, filter: "*.mov" });
+  });
 });
 
 describe("recognizeTriggerForm", () => {
@@ -142,6 +156,7 @@ describe("recognizeTriggerForm", () => {
     { kind: "schedule", schedule: { kind: "daily", hour: 9, minute: 30 } },
     { kind: "watch", recursive: true },
     { kind: "watch", recursive: false },
+    { kind: "watch", recursive: true, filter: "*.mov" },
   ];
 
   it("round-trips every trigger through the form", () => {
@@ -158,5 +173,11 @@ describe("triggerLabel", () => {
     ).toBe("Daily at 9:00 AM");
     expect(triggerLabel({ kind: "watch", recursive: true })).toBe("When files change · subfolders");
     expect(triggerLabel({ kind: "watch", recursive: false })).toBe("When files change");
+    expect(triggerLabel({ kind: "watch", recursive: true, filter: "*.mov" })).toBe(
+      "When files change matching *.mov · subfolders",
+    );
+    expect(triggerLabel({ kind: "watch", recursive: false, filter: "*.mov" })).toBe(
+      "When files change matching *.mov",
+    );
   });
 });

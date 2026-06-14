@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
+import picomatch from "picomatch";
 import type { Automation } from "./types.js";
 
 interface FolderWatchManagerEvents {
@@ -17,7 +18,7 @@ interface WatchHandle {
 type WatchFn = (
   target: string,
   options: { recursive: boolean },
-  listener: () => void,
+  listener: (event: string, filename: string | null) => void,
 ) => WatchHandle;
 
 interface FolderWatchManagerOptions {
@@ -25,6 +26,10 @@ interface FolderWatchManagerOptions {
   // a burst (one editor save emits several events; a build emits thousands) into
   // a single run.
   debounceMs: number;
+  // Grace period (ms) after a watch-triggered run finishes during which new
+  // events are dropped. Prevents the command's own side effects (e.g. deleting
+  // the source file after conversion) from retriggering the automation.
+  postRunGraceMs: number;
   // True while a run for this automation is still launching/running. Used to
   // skip overlapping launches (which also stops a command that writes back into
   // the watched tree from re-triggering itself mid-run).
@@ -40,14 +45,21 @@ interface FolderWatchManagerOptions {
 
 interface WatchEntry {
   watchers: WatchHandle[];
-  // recursive flag + cwd; the watch is torn down and rebuilt when either changes.
+  // recursive flag + cwd + filter; the watch is torn down and rebuilt when any
+  // of these change.
   signature: string;
   debounceTimer: NodeJS.Timeout | null;
+  // Set when a watch-triggered run finishes; cleared after postRunGraceMs.
+  // Events arriving during the grace window are dropped at onFsEvent time so
+  // the command's side effects (e.g. deleting the source file) don't
+  // re-trigger the automation.
+  postRunGraceTimer: NodeJS.Timeout | null;
+  postRunGraceActive: boolean;
 }
 
 const signatureOf = (automation: Automation): string =>
   automation.trigger.kind === "watch"
-    ? `${automation.trigger.recursive}:${automation.cwd}`
+    ? `${automation.trigger.recursive}:${automation.cwd}:${automation.trigger.filter ?? ""}`
     : automation.cwd;
 
 // Event-driven folder triggers for automations: one native fs.watch per "watch"
@@ -63,7 +75,8 @@ export class FolderWatchManager extends EventEmitter<FolderWatchManagerEvents> {
     super();
     this.watch =
       options.watch ??
-      ((target, watchOptions, listener) => fs.watch(target, watchOptions, () => listener()));
+      ((target, watchOptions, listener) =>
+        fs.watch(target, watchOptions, (event, filename) => listener(event, filename)));
   }
 
   // Reconcile the live watchers with the desired set (enabled + active + watch).
@@ -101,10 +114,12 @@ export class FolderWatchManager extends EventEmitter<FolderWatchManagerEvents> {
       watchers: [],
       signature: signatureOf(automation),
       debounceTimer: null,
+      postRunGraceTimer: null,
+      postRunGraceActive: false,
     };
     try {
-      const watcher = this.watch(automation.cwd, { recursive }, () => {
-        this.onFsEvent(automation.id);
+      const watcher = this.watch(automation.cwd, { recursive }, (event, filename) => {
+        this.onFsEvent(automation.id, event, filename);
       });
       // Don't keep the daemon alive on the watch alone (the http server does).
       watcher.unref?.();
@@ -116,16 +131,47 @@ export class FolderWatchManager extends EventEmitter<FolderWatchManagerEvents> {
     this.entries.set(automation.id, entry);
   }
 
-  private onFsEvent(automationId: string): void {
+  private onFsEvent(automationId: string, _event: string, filename: string | null): void {
     if (this.disposed) return;
     const entry = this.entries.get(automationId);
     if (!entry) return;
+    // Post-run grace: drop events while the command's side effects are still
+    // settling (e.g. the source file being deleted after conversion).
+    if (entry.postRunGraceActive) return;
+    // When a filter is set, only debounce events whose filename matches the
+    // pattern. Events without a filename (some platforms emit null) pass
+    // through unfiltered so watch automations without a filter still work.
+    const automation = this.options.getAutomation(automationId);
+    if (
+      automation?.trigger.kind === "watch" &&
+      automation.trigger.filter &&
+      filename !== null &&
+      !picomatch(automation.trigger.filter)(filename)
+    ) {
+      return;
+    }
     if (entry.debounceTimer !== null) clearTimeout(entry.debounceTimer);
     entry.debounceTimer = setTimeout(() => {
       entry.debounceTimer = null;
       this.fire(automationId);
     }, this.options.debounceMs);
     entry.debounceTimer.unref?.();
+  }
+
+  // Called when a watch-triggered run finishes (completed/failed). Arms the
+  // post-run grace window so side-effect events (file deletions, etc.) are
+  // dropped instead of retriggering the automation.
+  notifyRunFinished(automationId: string): void {
+    if (this.disposed) return;
+    const entry = this.entries.get(automationId);
+    if (!entry) return;
+    if (entry.postRunGraceTimer !== null) clearTimeout(entry.postRunGraceTimer);
+    entry.postRunGraceActive = true;
+    entry.postRunGraceTimer = setTimeout(() => {
+      entry.postRunGraceActive = false;
+      entry.postRunGraceTimer = null;
+    }, this.options.postRunGraceMs);
+    entry.postRunGraceTimer.unref?.();
   }
 
   private fire(automationId: string): void {
@@ -148,6 +194,11 @@ export class FolderWatchManager extends EventEmitter<FolderWatchManagerEvents> {
     if (entry.debounceTimer !== null) {
       clearTimeout(entry.debounceTimer);
       entry.debounceTimer = null;
+    }
+    if (entry.postRunGraceTimer !== null) {
+      clearTimeout(entry.postRunGraceTimer);
+      entry.postRunGraceTimer = null;
+      entry.postRunGraceActive = false;
     }
     for (const watcher of entry.watchers) {
       try {

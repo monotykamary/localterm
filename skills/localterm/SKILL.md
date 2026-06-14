@@ -38,12 +38,19 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
 
 - `trigger` — what makes the automation run, a tagged union on `kind`:
   - `{kind:"schedule", schedule}` — time-based (the common case).
-  - `{kind:"watch", recursive}` — fires when the automation's `cwd` changes,
-    observed via native filesystem events (**no polling**). `recursive` (default
-    `true`) watches the whole subtree. A burst of changes is debounced into a
-    single run, and no new run starts while a previous one is still in-flight (so
-    a command that writes into the watched folder won't loop). Watch triggers
-    have no `cron`/`nextRunAt` (both `null`).
+  - `{kind:"watch", recursive, filter?}` — fires when the automation's `cwd`
+    changes, observed via native filesystem events (**no polling**). `recursive`
+    (default `true`) watches the whole subtree. Optional `filter` is a glob
+    pattern matched against the **basename** of the changed file (e.g.
+    `"*.mov"` only fires on `.mov` files; `"*.{mov,avi}"` matches multiple
+    extensions). When `filter` is omitted or empty, **any** change triggers the
+    automation. Events from non-matching files are dropped before the debounce
+    — the command never runs, and the run limit is unaffected. After a
+    watch-triggered run finishes, a 1-second grace period suppresses new
+    events so the command's own side effects (e.g. deleting the source file
+    after conversion) don't retrigger the automation. A burst of changes is
+    debounced into a single run, and no new run starts while a previous one is
+    still in-flight. Watch triggers have no `cron`/`nextRunAt` (both `null`).
 
   A schedule trigger's `schedule` is a **structured schedule object** (preferred)
   or a bare 5-field cron string — a tagged union on `kind`:
@@ -129,6 +136,20 @@ curl -s -X POST "$BASE/automations" \
     "limit": { "kind": "count", "max": 50 }
   }'
 # → 201 {"automation":{"id":"…","cron":null,"nextRunAt":null,…}}
+
+# Create a filtered folder-watch (only triggers on .mov files)
+curl -s -X POST "$BASE/automations" \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "autoconvert mov→mp4",
+    "trigger": { "kind": "watch", "recursive": false, "filter": "*.mov" },
+    "cwd": "/Users/me/Downloads",
+    "command": "find /Users/me/Downloads -maxdepth 1 -iname *.mov -type f | while IFS= read -r f; do mp4=\"${f%.*}.mp4\"; if [ ! -f \"$mp4\" ]; then ffmpeg -y -i \"$f\" -c:v libx264 -crf 28 -preset medium -c:a aac -b:a 128k \"$mp4\" && rm \"$f\"; else rm \"$f\"; fi; done",
+    "enabled": true,
+    "limit": { "kind": "forever" },
+    "closeOnFinish": true
+  }'
+# → 201 {"automation":{"id":"…","trigger":{"kind":"watch","recursive":false,"filter":"*.mov"},…}}
 
 # Update any subset of fields (pass a `trigger` to change the schedule/watch)
 curl -s -X PATCH "$BASE/automations/<id>" \

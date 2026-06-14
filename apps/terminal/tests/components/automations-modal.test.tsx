@@ -86,6 +86,20 @@ describe("AutomationsModal", () => {
     expect(screen.getByText("On change")).toBeDefined();
   });
 
+  it("renders a watch automation with a filter in its trigger label", async () => {
+    renderModal([
+      automation({
+        name: "autoconvert",
+        trigger: { kind: "watch", recursive: false, filter: "*.mov" },
+        cron: null,
+        nextRunAt: null,
+      }),
+    ]);
+    expect((await screen.findAllByText("When files change matching *.mov")).length).toBeGreaterThan(
+      0,
+    );
+  });
+
   it("shows the last run status badge", async () => {
     renderModal([
       automation({ lastRun: { runId: "r", at: Date.now(), status: "failed", exitCode: 2 } }),

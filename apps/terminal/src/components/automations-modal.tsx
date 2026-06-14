@@ -72,6 +72,7 @@ interface AutomationFormState {
   triggerType: TriggerType;
   schedule: ScheduleFormState;
   watchRecursive: boolean;
+  watchFilter: string;
   limitMode: "forever" | "count";
   limitMax: number;
   closeOnFinish: boolean;
@@ -94,6 +95,7 @@ const emptyForm = (defaultCwd: string | null): AutomationFormState => ({
   triggerType: "schedule",
   schedule: defaultScheduleForm(),
   watchRecursive: true,
+  watchFilter: "",
   limitMode: "forever",
   limitMax: DEFAULT_LIMIT_MAX,
   closeOnFinish: false,
@@ -110,6 +112,7 @@ const formForAutomation = (automation: AutomationWithNextRun): AutomationFormSta
     triggerType: trigger.triggerType,
     schedule: trigger.schedule,
     watchRecursive: trigger.watchRecursive,
+    watchFilter: trigger.watchFilter,
     limitMode: automation.limit.kind === "count" ? "count" : "forever",
     limitMax: automation.limit.kind === "count" ? automation.limit.max : DEFAULT_LIMIT_MAX,
     closeOnFinish: automation.closeOnFinish,
@@ -1052,6 +1055,20 @@ const AutomationForm = ({
         </>
       ) : (
         <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            File filter (optional)
+            <Input
+              value={form.watchFilter}
+              placeholder="*.mov"
+              aria-label="watch file filter"
+              className={cn(FORM_INPUT_CLASSES, "font-mono")}
+              onChange={(event) => onChange({ ...form, watchFilter: event.target.value })}
+            />
+            <span className="text-[10px] text-muted-foreground/60">
+              Only trigger when changed files match this glob (e.g. *.mov,
+              {"*.{mov,avi}"}). Leave empty to trigger on any change.
+            </span>
+          </label>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span className="flex flex-col">
               Include subfolders

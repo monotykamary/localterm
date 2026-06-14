@@ -187,5 +187,9 @@ export const normalizeScheduleInput = (input: AutomationSchedule | string): Auto
 // cron string as a friendly preset).
 export const normalizeTriggerInput = (trigger: TriggerInput): AutomationTrigger =>
   trigger.kind === "watch"
-    ? { kind: "watch", recursive: trigger.recursive ?? true }
+    ? {
+        kind: "watch",
+        recursive: trigger.recursive ?? true,
+        ...(trigger.filter ? { filter: trigger.filter } : {}),
+      }
     : { kind: "schedule", schedule: normalizeScheduleInput(trigger.schedule) };

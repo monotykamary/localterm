@@ -17,6 +17,7 @@ import { CdpClient } from "./cdp/cdp-client.js";
 import {
   AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
   AUTOMATION_WATCH_DEBOUNCE_MS,
+  AUTOMATION_WATCH_POST_RUN_GRACE_MS,
   DEFAULT_HOST,
   DEFAULT_PORT,
   FRIENDLY_HOSTNAME,
@@ -216,6 +217,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // launch); getAutomation re-reads live state when the debounce fires.
   const folderWatchManager = new FolderWatchManager({
     debounceMs: AUTOMATION_WATCH_DEBOUNCE_MS,
+    postRunGraceMs: AUTOMATION_WATCH_POST_RUN_GRACE_MS,
     isRunInFlight: (automationId) => {
       const status = automationStore.get(automationId)?.runs[0]?.status;
       return status === "launched" || status === "running";
@@ -701,6 +703,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               });
               broadcastAutomations();
               closeRunTabIfRequested(claimedRun.automationId, claimedRun.runId);
+              folderWatchManager.notifyRunFinished(claimedRun.automationId);
             });
           }
 

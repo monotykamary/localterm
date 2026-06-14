@@ -209,9 +209,17 @@ export const AUTOMATION_PENDING_RUN_EXPIRY_MS = 5 * 60 * 1000;
 // build emits thousands) into a single run. Trailing-edge: the timer resets on
 // every event and fires once the directory settles.
 export const AUTOMATION_WATCH_DEBOUNCE_MS = 500;
+// After a watch-triggered run finishes, the manager keeps the in-flight guard
+// on for this long before accepting new events. Prevents a command that
+// writes/deletes files in the watched directory (e.g. ffmpeg converting .mov
+// to .mp4 and deleting the original) from retriggering itself immediately.
+// Events during the grace window are dropped (not queued). 1 second covers
+// the observed ~50ms post-exit event lag with a comfortable margin.
+export const AUTOMATION_WATCH_POST_RUN_GRACE_MS = 1_000;
 // Covers schedules that only fire on Feb 29 (the rarest valid cron target).
 export const CRON_NEXT_OCCURRENCE_SCAN_LIMIT_DAYS = 1466;
 export const MAX_AUTOMATION_EXIT_CODE_DIGITS = 4;
+export const MAX_AUTOMATION_WATCH_FILTER_LENGTH = 255;
 
 export const WS_READY_STATE_OPEN = 1;
 export const WS_CLOSE_POLICY_VIOLATION = 1008;

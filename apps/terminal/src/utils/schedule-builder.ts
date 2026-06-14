@@ -241,26 +241,37 @@ export interface TriggerFormState {
   triggerType: TriggerType;
   schedule: ScheduleFormState;
   watchRecursive: boolean;
+  watchFilter: string;
 }
 
 export const buildTriggerFromForm = (form: TriggerFormState): AutomationTrigger =>
   form.triggerType === "watch"
-    ? { kind: "watch", recursive: form.watchRecursive }
+    ? {
+        kind: "watch",
+        recursive: form.watchRecursive,
+        ...(form.watchFilter.trim() ? { filter: form.watchFilter.trim() } : {}),
+      }
     : { kind: "schedule", schedule: buildScheduleFromForm(form.schedule) };
 
 // Map a stored trigger back onto the form fields so editing reopens on the
 // matching trigger type (the inactive side keeps sensible defaults).
 export const recognizeTriggerForm = (trigger: AutomationTrigger): TriggerFormState =>
   trigger.kind === "watch"
-    ? { triggerType: "watch", schedule: defaultScheduleForm(), watchRecursive: trigger.recursive }
+    ? {
+        triggerType: "watch",
+        schedule: defaultScheduleForm(),
+        watchRecursive: trigger.recursive,
+        watchFilter: trigger.filter ?? "",
+      }
     : {
         triggerType: "schedule",
         schedule: recognizeScheduleForm(trigger.schedule),
         watchRecursive: true,
+        watchFilter: "",
       };
 
 // A compact human-readable label for the list rows and detail header.
 export const triggerLabel = (trigger: AutomationTrigger): string =>
   trigger.kind === "watch"
-    ? `When files change${trigger.recursive ? " · subfolders" : ""}`
+    ? `When files change${trigger.filter ? ` matching ${trigger.filter}` : ""}${trigger.recursive ? " · subfolders" : ""}`
     : scheduleLabel(trigger.schedule);
