@@ -46,7 +46,12 @@ import {
 import { cn } from "@/lib/utils";
 import type { SplitDiffRow } from "@/utils/build-split-diff-rows";
 import { renderSyntaxTokens } from "@/utils/render-syntax-tokens";
-import { detectLangId, tokenizeDiffLines } from "@/utils/syntax-highlight";
+import {
+  detectLangId,
+  getCachedTokens,
+  prefetchTokens,
+  tokenizeDiffLines,
+} from "@/utils/syntax-highlight";
 import {
   buildRenderChunks,
   renderChunkLength,
@@ -643,35 +648,50 @@ const FileDiffPane = ({
   const patch = payload.data?.patch ?? null;
   const [renderLimit, setRenderLimit] = useState(DIFF_VIEWER_INITIAL_LINE_LIMIT);
   const [drag, setDrag] = useState<DragSelection | null>(null);
-  const [tokenMap, setTokenMap] = useState<Map<DiffLine, SyntaxLine>>(new Map());
-
   const hunks = useMemo(() => (patch ? parseUnifiedDiff(patch) : []), [patch]);
   const rangeIndex = useMemo(() => buildDiffLineRangeIndex(hunks), [hunks]);
+
+  const [syntaxResult, setSyntaxResult] = useState<readonly SyntaxLine[] | null | undefined>(() => {
+    if (!patch) return undefined;
+    const initialHunks = parseUnifiedDiff(patch);
+    const langId = detectLangId(file.path);
+    if (!langId || initialHunks.length === 0) return null;
+    const allLines = initialHunks.flatMap((hunk) => hunk.lines);
+    const texts = allLines.map((line) => line.text);
+    return getCachedTokens(file.path, texts);
+  });
+
+  const tokenMap = useMemo(() => {
+    if (syntaxResult === undefined || syntaxResult === null) return new Map<DiffLine, SyntaxLine>();
+    const allLines = hunks.flatMap((hunk) => hunk.lines);
+    const map = new Map<DiffLine, SyntaxLine>();
+    for (let index = 0; index < allLines.length; index += 1) {
+      if (syntaxResult[index]) map.set(allLines[index], syntaxResult[index]);
+    }
+    return map;
+  }, [syntaxResult, hunks]);
 
   useEffect(() => {
     const langId = detectLangId(file.path);
     if (!langId || hunks.length === 0) {
-      setTokenMap(new Map());
+      setSyntaxResult(null);
       return;
     }
     const allLines = hunks.flatMap((hunk) => hunk.lines);
     if (allLines.length === 0) {
-      setTokenMap(new Map());
+      setSyntaxResult(null);
+      return;
+    }
+    const texts = allLines.map((line) => line.text);
+    const cached = getCachedTokens(file.path, texts);
+    if (cached !== undefined) {
+      setSyntaxResult(cached);
       return;
     }
     let cancelled = false;
-    const texts = allLines.map((line) => line.text);
-    tokenizeDiffLines(texts, langId).then((syntaxLines) => {
+    tokenizeDiffLines(file.path, texts, langId).then((result) => {
       if (cancelled) return;
-      if (!syntaxLines) {
-        startTransition(() => setTokenMap(new Map()));
-        return;
-      }
-      const map = new Map<DiffLine, SyntaxLine>();
-      for (let index = 0; index < allLines.length; index += 1) {
-        if (syntaxLines[index]) map.set(allLines[index], syntaxLines[index]);
-      }
-      startTransition(() => setTokenMap(map));
+      startTransition(() => setSyntaxResult(result));
     });
     return () => {
       cancelled = true;
@@ -1081,6 +1101,20 @@ export const DiffViewer = ({
         .then((data) => {
           if (controller.signal.aborted) return;
           patchControllersRef.current.delete(path);
+          if (data?.patch) {
+            const langId = detectLangId(path);
+            if (langId) {
+              const hunks = parseUnifiedDiff(data.patch);
+              const allLines = hunks.flatMap((hunk) => hunk.lines);
+              if (allLines.length > 0) {
+                prefetchTokens(
+                  path,
+                  allLines.map((line) => line.text),
+                  langId,
+                );
+              }
+            }
+          }
           setPatchCache((previous) => ({
             ...previous,
             [path]: data ? { state: "loaded", data } : { state: "error" },

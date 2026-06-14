@@ -99,6 +99,13 @@ const FILENAME_TO_LANG: Record<string, string> = {
 
 const THEME_ID = "dark-plus";
 
+interface TokenCacheEntry {
+  contentKey: string;
+  result: readonly SyntaxLine[] | null;
+}
+
+const tokenCache = new Map<string, TokenCacheEntry>();
+
 export const detectLangId = (filePath: string): string | null => {
   const lastSlash = filePath.lastIndexOf("/");
   const basename = lastSlash === -1 ? filePath : filePath.slice(lastSlash + 1);
@@ -127,12 +134,40 @@ const getHighlighter = () => {
   return highlighterPromise;
 };
 
+const contentKey = (lines: readonly string[]): string => lines.join("\n");
+
+export const getCachedTokens = (
+  filePath: string,
+  lines: readonly string[],
+): readonly SyntaxLine[] | null | undefined => {
+  const entry = tokenCache.get(filePath);
+  if (!entry) return undefined;
+  if (entry.contentKey !== contentKey(lines)) return undefined;
+  return entry.result;
+};
+
+export const prefetchTokens = (
+  filePath: string,
+  lines: readonly string[],
+  langId: string,
+): void => {
+  if (getCachedTokens(filePath, lines) !== undefined) return;
+  void tokenizeDiffLines(filePath, lines, langId);
+};
+
 export const tokenizeDiffLines = async (
+  filePath: string,
   lines: readonly string[],
   langId: string,
 ): Promise<readonly SyntaxLine[] | null> => {
+  const cached = getCachedTokens(filePath, lines);
+  if (cached !== undefined) return cached;
+
   const loader = LANG_LOADERS[langId];
-  if (!loader) return null;
+  if (!loader) {
+    tokenCache.set(filePath, { contentKey: contentKey(lines), result: null });
+    return null;
+  }
 
   try {
     const highlighter = await getHighlighter();
@@ -150,14 +185,18 @@ export const tokenizeDiffLines = async (
       theme: THEME_ID,
     });
 
-    return themedTokens.tokens.map((line) => ({
+    const result = themedTokens.tokens.map((line) => ({
       tokens: line.map((token) => ({
         content: token.content,
         color: token.color ?? "",
         fontStyle: token.fontStyle ?? 0,
       })),
     }));
+
+    tokenCache.set(filePath, { contentKey: contentKey(lines), result });
+    return result;
   } catch {
+    tokenCache.set(filePath, { contentKey: contentKey(lines), result: null });
     return null;
   }
 };
