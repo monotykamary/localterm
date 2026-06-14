@@ -188,15 +188,18 @@ const gitDiffSummaryMessageSchema = z
   .strict();
 
 // ----------------------------------------------------------------------------
-// Automations (file format v2).
+// Automations (file format v3).
 //
-// A v2 automation stores a STRUCTURED schedule (friendly presets + a raw-cron
+// An automation stores a STRUCTURED schedule (friendly presets + a raw-cron
 // escape hatch) instead of a bare cron string, a run-count limit + lifecycle,
-// and a capped run-history array. The cron engine stays the single timing
-// authority: every schedule kind compiles to one (or, for "timesOfDay",
-// several) 5-field cron strings via utils/compile-schedule.ts, computed on the
-// fly — no derived cron is persisted. The wire shape re-derives `cron` and the
-// legacy `lastRun` for back-compat.
+// and a capped run-history array. In v3 the schedule is wrapped in a top-level
+// `trigger` union so an automation can fire on a schedule OR when a folder
+// changes. The cron engine stays the single timing authority for SCHEDULE
+// triggers: every schedule kind compiles to one (or, for "timesOfDay", several)
+// 5-field cron strings via utils/compile-schedule.ts, computed on the fly — no
+// derived cron is persisted. WATCH triggers are event-driven (fs.watch) and
+// have no cron / next-run. The wire shape re-derives `cron` (null for watch)
+// and the legacy `lastRun` for back-compat.
 // ----------------------------------------------------------------------------
 
 // Bounds mirror cron-expression.ts exactly (minute 0-59, hour 0-23, Vixie
@@ -271,12 +274,29 @@ export const automationScheduleSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 
+// What causes an automation to run. A "schedule" trigger is time-based (the
+// cron engine compiles it on the fly); a "watch" trigger fires when the
+// automation's cwd changes, observed via native fs.watch — event-driven, never
+// polled. `recursive` watches the whole subtree. Only schedule triggers carry a
+// cron / next-run.
+export const automationTriggerSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("schedule"), schedule: automationScheduleSchema }).strict(),
+  z.object({ kind: z.literal("watch"), recursive: z.boolean() }).strict(),
+]);
+
 // Create/update accept either the structured schedule or a legacy bare cron
 // string (coerced to {kind:"cron"} at the store) so existing curl/skill
 // consumers keep working.
 export const scheduleInputSchema = z.union([
   automationScheduleSchema,
   z.string().min(1).max(MAX_CRON_EXPRESSION_LENGTH),
+]);
+
+// Trigger as accepted on the wire: the schedule payload accepts the legacy bare
+// cron string too, and `recursive` is optional (defaults true at the store).
+export const triggerInputSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("schedule"), schedule: scheduleInputSchema }).strict(),
+  z.object({ kind: z.literal("watch"), recursive: z.boolean().optional() }).strict(),
 ]);
 
 export const automationRunLimitSchema = z.discriminatedUnion("kind", [
@@ -317,8 +337,8 @@ export const automationRunRecordSchema = z
     finishedAt: z.number().int().nonnegative().nullable(),
     status: automationRunStatusSchema,
     exitCode: z.number().int().nullable(),
-    trigger: z.enum(["schedule", "manual"]),
-    // false for manual + skipped; true for scheduled launches.
+    trigger: z.enum(["schedule", "manual", "watch"]),
+    // false for manual + skipped; true for scheduled + watch launches.
     countsTowardLimit: z.boolean(),
   })
   .strict();
@@ -332,12 +352,12 @@ export const automationLastRunSchema = z
   })
   .strict();
 
-// Stored shape (automations.json v2). No derived fields (cron/lastRun/nextRunAt
+// Stored shape (automations.json v3). No derived fields (cron/lastRun/nextRunAt
 // live only on the wire).
 const automationStoredShape = {
   id: z.string().min(1),
   name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
-  schedule: automationScheduleSchema,
+  trigger: automationTriggerSchema,
   cwd: z.string().min(1),
   command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
   enabled: z.boolean(),
@@ -356,12 +376,13 @@ const automationStoredShape = {
 export const automationSchema = z.object(automationStoredShape).strict();
 
 // Wire shape: stored fields + derived nextRunAt, cron (first compiled cron,
-// for display/back-compat), and lastRun (projection of runs[0]).
+// for display/back-compat), and lastRun (projection of runs[0]). nextRunAt and
+// cron are null for watch triggers (no time-based schedule).
 export const automationWithNextRunSchema = z
   .object({
     ...automationStoredShape,
     nextRunAt: z.number().int().nullable(),
-    cron: z.string().min(1),
+    cron: z.string().min(1).nullable(),
     lastRun: automationLastRunSchema.nullable(),
   })
   .strict();
@@ -404,21 +425,60 @@ export const automationsFileV1Schema = z
   })
   .strict();
 
+// Frozen v2 file shape — read only by the v2->v3 migrator. v2 stored the
+// trigger as a bare top-level `schedule`; v3 wraps it in a `trigger` union.
+// (runs[].trigger only ever held "schedule"/"manual" in v2, which still parse
+// under the widened v3 enum.)
+export const automationV2Schema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
+    schedule: automationScheduleSchema,
+    cwd: z.string().min(1),
+    command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
+    enabled: z.boolean(),
+    limit: automationRunLimitSchema,
+    closeOnFinish: z.boolean().default(false),
+    runCount: z.number().int().nonnegative(),
+    lifecycle: automationLifecycleSchema,
+    runs: z.array(automationRunRecordSchema).max(AUTOMATION_RUN_HISTORY_CAP),
+    createdAt: z.number().int().nonnegative(),
+    updatedAt: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const automationsFileV2Schema = z
+  .object({
+    version: z.literal(2),
+    automations: z.array(automationV2Schema),
+  })
+  .strict();
+
 export const createAutomationInputSchema = z
   .object({
     name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
-    schedule: scheduleInputSchema,
+    // The new `trigger` union, or a legacy bare `schedule` (a schedule object or
+    // cron string) coerced to a schedule trigger at the store. Exactly one is
+    // required; the legacy form keeps existing curl/skill consumers working.
+    trigger: triggerInputSchema.optional(),
+    schedule: scheduleInputSchema.optional(),
     cwd: z.string().min(1),
     command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
     enabled: z.boolean().optional(),
     limit: automationRunLimitSchema.optional(),
     closeOnFinish: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .refine((data) => data.trigger !== undefined || data.schedule !== undefined, {
+    message: "either trigger or schedule is required",
+  });
 
 export const updateAutomationInputSchema = z
   .object({
     name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH).optional(),
+    // Either form changes the trigger; the legacy bare `schedule` is coerced to
+    // a schedule trigger at the store.
+    trigger: triggerInputSchema.optional(),
     schedule: scheduleInputSchema.optional(),
     cwd: z.string().min(1).optional(),
     command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH).optional(),

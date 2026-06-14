@@ -6,7 +6,7 @@ import type { Automation } from "../src/types.js";
 const automation: Automation = {
   id: "automation-1",
   name: "nightly build",
-  schedule: { kind: "daily", hour: 2, minute: 0 },
+  trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 0 } },
   cwd: "/tmp",
   command: "pnpm build",
   enabled: true,

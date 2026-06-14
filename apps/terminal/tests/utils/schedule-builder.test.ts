@@ -1,11 +1,18 @@
-import type { AutomationSchedule } from "@monotykamary/localterm-server/protocol";
+import type {
+  AutomationSchedule,
+  AutomationTrigger,
+} from "@monotykamary/localterm-server/protocol";
 import { describe, expect, it } from "vite-plus/test";
 import {
   buildScheduleFromForm,
+  buildTriggerFromForm,
   defaultScheduleForm,
   recognizeScheduleForm,
+  recognizeTriggerForm,
   scheduleLabel,
+  triggerLabel,
   type ScheduleFormState,
+  type TriggerFormState,
 } from "../../src/utils/schedule-builder";
 
 const withForm = (overrides: Partial<ScheduleFormState>): ScheduleFormState => ({
@@ -104,5 +111,52 @@ describe("scheduleLabel", () => {
       "1st, 2nd",
     );
     expect(scheduleLabel({ kind: "cron", expression: "*/5 * * * *" })).toBe("Cron: */5 * * * *");
+  });
+});
+
+const withTrigger = (overrides: Partial<TriggerFormState>): TriggerFormState => ({
+  triggerType: "schedule",
+  schedule: defaultScheduleForm(),
+  watchRecursive: true,
+  ...overrides,
+});
+
+describe("buildTriggerFromForm", () => {
+  it("builds a schedule trigger from the schedule sub-form", () => {
+    expect(
+      buildTriggerFromForm(
+        withTrigger({ schedule: { ...defaultScheduleForm(), frequency: "hourly", minute: 15 } }),
+      ),
+    ).toEqual({ kind: "schedule", schedule: { kind: "hourly", minute: 15 } });
+  });
+
+  it("builds a watch trigger carrying the recursive flag", () => {
+    expect(
+      buildTriggerFromForm(withTrigger({ triggerType: "watch", watchRecursive: false })),
+    ).toEqual({ kind: "watch", recursive: false });
+  });
+});
+
+describe("recognizeTriggerForm", () => {
+  const triggers: AutomationTrigger[] = [
+    { kind: "schedule", schedule: { kind: "daily", hour: 9, minute: 30 } },
+    { kind: "watch", recursive: true },
+    { kind: "watch", recursive: false },
+  ];
+
+  it("round-trips every trigger through the form", () => {
+    for (const trigger of triggers) {
+      expect(buildTriggerFromForm(recognizeTriggerForm(trigger))).toEqual(trigger);
+    }
+  });
+});
+
+describe("triggerLabel", () => {
+  it("labels schedule and watch triggers", () => {
+    expect(
+      triggerLabel({ kind: "schedule", schedule: { kind: "daily", hour: 9, minute: 0 } }),
+    ).toBe("Daily at 9:00 AM");
+    expect(triggerLabel({ kind: "watch", recursive: true })).toBe("When files change · subfolders");
+    expect(triggerLabel({ kind: "watch", recursive: false })).toBe("When files change");
   });
 });

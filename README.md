@@ -53,6 +53,7 @@ Schedule commands as server-managed jobs. When one is due, localterm opens a new
 
 - Open the full-screen panel from the top-right toolbar (calendar icon) or with <kbd>⌘J</kbd> / <kbd>Ctrl+J</kbd>.
 - Build schedules from friendly presets — daily, weekdays/weekends, specific days, multiple times a day, every N minutes/hours — with raw 5-field cron available as an advanced escape hatch. Evaluated in local time.
+- Or trigger on a **folder change** instead of a schedule — the job runs when its directory changes, detected via native filesystem events (no polling). Bursts are debounced into one run and a new run won't start while a previous one is still going, so a command that writes into the watched folder won't loop.
 - Cap a job with a run limit ("stop after N runs"); when reached it's marked **finished** and stays listed until you reset it. Or let it run forever.
 - Toggle **Close tab when finished** to have a run's tab close once its command exits (best-effort; needs the CDP background-tab path). Off by default — tabs stay open so you can see what ran.
 - A **recent runs** view and a per-automation history show which runs succeeded, failed, were missed, or were **skipped** because the machine was asleep at that scheduled time (reconstructed when the daemon next starts).

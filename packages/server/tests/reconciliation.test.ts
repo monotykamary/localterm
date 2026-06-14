@@ -13,7 +13,7 @@ import { enumerateMissedOccurrences } from "../src/utils/reconcile-downtime.js";
 const automationWith = (schedule: AutomationSchedule): Automation => ({
   id: "a",
   name: "n",
-  schedule,
+  trigger: { kind: "schedule", schedule },
   cwd: os.tmpdir(),
   command: "x",
   enabled: true,
@@ -80,6 +80,16 @@ describe("enumerateMissedOccurrences", () => {
     );
     expect(result.length).toBeLessThanOrEqual(AUTOMATION_DOWNTIME_RECONCILE_CAP);
     expect(result.every((occurrence) => occurrence < now)).toBe(true);
+  });
+
+  it("enumerates nothing for a watch trigger", () => {
+    const watch: Automation = {
+      ...automationWith({ kind: "daily", hour: 9, minute: 0 }),
+      trigger: { kind: "watch", recursive: true },
+    };
+    const from = new Date(2026, 0, 1, 8, 0, 0).getTime();
+    const now = new Date(2026, 0, 3, 10, 0, 0).getTime();
+    expect(enumerateMissedOccurrences(watch, from, now)).toEqual([]);
   });
 });
 

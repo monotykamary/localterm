@@ -16,6 +16,7 @@ import type { SnapshotProcesses } from "./caffeinate-process-match.js";
 import { CdpClient } from "./cdp/cdp-client.js";
 import {
   AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
+  AUTOMATION_WATCH_DEBOUNCE_MS,
   DEFAULT_HOST,
   DEFAULT_PORT,
   FRIENDLY_HOSTNAME,
@@ -40,6 +41,7 @@ import {
   WS_READY_STATE_OPEN,
 } from "./constants.js";
 import { ServerErrorException, serverError } from "./errors.js";
+import { FolderWatchManager } from "./folder-watch-manager.js";
 import { getGitDiff, getGitDiffFilePatch, getGitDiffFiles, getGitDiffSummary } from "./git-diff.js";
 import { GitDiffWatcher } from "./git-diff-watcher.js";
 import { HeartbeatStore } from "./heartbeat-store.js";
@@ -57,15 +59,15 @@ import { resolveStaticAsset } from "./static-resolver.js";
 import {
   compileSchedule,
   compileScheduleAll,
-  normalizeScheduleInput,
+  normalizeTriggerInput,
 } from "./utils/compile-schedule.js";
 import { computeNextAutomationRunAt } from "./utils/compute-next-automation-run-at.js";
 import { enumerateMissedOccurrences } from "./utils/reconcile-downtime.js";
 import type {
   Automation,
   AutomationLastRun,
-  AutomationSchedule,
   AutomationWithNextRun,
+  CreateAutomationInput,
   PendingAutomationRun,
   ServerToClientMessage,
 } from "./types.js";
@@ -201,6 +203,18 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const automationStore = new AutomationStore(path.join(stateDirectory, "automations.json"));
   const automationRunTracker = new AutomationRunTracker();
   const automationScheduler = new AutomationScheduler(automationStore);
+  // Folder-watch triggers: one fs.watch per watch automation's cwd (no polling).
+  // isRunInFlight gates overlap (a launched/running latest run blocks a new
+  // launch); getAutomation re-reads live state when the debounce fires.
+  const folderWatchManager = new FolderWatchManager({
+    debounceMs: AUTOMATION_WATCH_DEBOUNCE_MS,
+    isRunInFlight: (automationId) => {
+      const status = automationStore.get(automationId)?.runs[0]?.status;
+      return status === "launched" || status === "running";
+    },
+    getAutomation: (automationId) => automationStore.get(automationId),
+  });
+  const syncFolderWatchers = () => folderWatchManager.sync(automationStore.list());
   const heartbeatStore = new HeartbeatStore(path.join(stateDirectory, "daemon-heartbeat.json"));
   const caffeinateController = options.caffeinateController ?? new CaffeinateController();
   const caffeinatePreferencesStore = new CaffeinatePreferencesStore(
@@ -260,7 +274,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const toAutomationWithNextRun = (automation: Automation, from: Date): AutomationWithNextRun => ({
     ...automation,
     nextRunAt: computeNextAutomationRunAt(automation, from),
-    cron: compileSchedule(automation.schedule),
+    cron:
+      automation.trigger.kind === "schedule" ? compileSchedule(automation.trigger.schedule) : null,
     lastRun: deriveLastRun(automation),
   });
 
@@ -299,19 +314,19 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   caffeinateManager.on("change", broadcastCaffeinate);
 
-  // Open a browser tab for a run and record it in history. Scheduled launches
-  // count toward the limit (and can finish the automation); manual launches
-  // never count and are allowed even on a finished/disabled automation.
+  // Open a browser tab for a run and record it in history. Scheduled and watch
+  // launches count toward the limit (and can finish the automation); manual
+  // launches never count and are allowed even on a finished/disabled automation.
   const tryLaunch = (
     automation: Automation,
-    trigger: "schedule" | "manual",
+    trigger: "schedule" | "manual" | "watch",
   ): PendingAutomationRun | null => {
-    if (trigger === "schedule") {
+    if (trigger !== "manual") {
       const current = automationStore.get(automation.id);
       if (!current || !current.enabled || current.lifecycle === "finished") return null;
     }
     const run = automationRunTracker.create(automation);
-    const counts = trigger === "schedule";
+    const counts = trigger !== "manual";
     automationStore.appendRun(automation.id, {
       runId: run.runId,
       scheduledFor:
@@ -327,6 +342,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     });
     if (counts) automationStore.incrementRunCount(automation.id);
     broadcastAutomations();
+    // A watch automation that just reached its limit is now "finished"; stop
+    // watching its folder promptly instead of waiting for the next mutation.
+    syncFolderWatchers();
     const runUrl = `http://${FRIENDLY_HOSTNAME}:${actualPort}/?run=${run.runId}`;
     void tabController
       .open(runUrl)
@@ -452,10 +470,17 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
   };
 
-  // A structured schedule (or legacy bare cron string) is valid iff every cron
-  // it compiles to parses.
-  const isValidScheduleInput = (input: AutomationSchedule | string): boolean => {
-    const crons = compileScheduleAll(normalizeScheduleInput(input));
+  // The trigger (new `trigger` union or legacy bare `schedule`) is valid iff a
+  // schedule trigger compiles to ≥1 parseable cron; a watch trigger is always
+  // valid (its watched cwd is validated separately). Returns true when neither
+  // field is present — a PATCH that doesn't touch the trigger.
+  const isValidTriggerInput = (
+    input: Pick<CreateAutomationInput, "trigger" | "schedule">,
+  ): boolean => {
+    if (input.trigger === undefined && input.schedule === undefined) return true;
+    const trigger = normalizeTriggerInput(input);
+    if (trigger.kind === "watch") return true;
+    const crons = compileScheduleAll(trigger.schedule);
     return crons.length > 0 && crons.every((cron) => parseCronExpression(cron) !== null);
   };
 
@@ -467,7 +492,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     if (automationStore.size() >= MAX_AUTOMATIONS) {
       return context.json({ error: "too_many_automations" }, HTTP_STATUS_BAD_REQUEST);
     }
-    if (!isValidScheduleInput(parsed.data.schedule)) {
+    if (!isValidTriggerInput(parsed.data)) {
       return context.json({ error: "invalid_schedule" }, HTTP_STATUS_BAD_REQUEST);
     }
     if (!resolveCwdQuery(parsed.data.cwd)) {
@@ -475,6 +500,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
     const automation = automationStore.create(parsed.data);
     broadcastAutomations();
+    syncFolderWatchers();
     return context.json(
       { automation: toAutomationWithNextRun(automation, new Date()) },
       HTTP_STATUS_CREATED,
@@ -484,7 +510,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   api.patch("/automations/:id", async (context) => {
     const parsed = updateAutomationInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
-    if (parsed.data.schedule !== undefined && !isValidScheduleInput(parsed.data.schedule)) {
+    if (!isValidTriggerInput(parsed.data)) {
       return context.json({ error: "invalid_schedule" }, HTTP_STATUS_BAD_REQUEST);
     }
     if (parsed.data.cwd !== undefined && !resolveCwdQuery(parsed.data.cwd)) {
@@ -500,6 +526,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const automation = automationStore.update(context.req.param("id"), parsed.data);
     if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     broadcastAutomations();
+    syncFolderWatchers();
     return context.json({ automation: toAutomationWithNextRun(automation, new Date()) });
   });
 
@@ -508,13 +535,14 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     }
     broadcastAutomations();
+    syncFolderWatchers();
     return context.json({ ok: true });
   });
 
   api.post("/automations/:id/run", (context) => {
     const automation = automationStore.get(context.req.param("id"));
     if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
-    // tryLaunch only returns null for the "schedule" trigger (finished/disabled
+    // tryLaunch only returns null for non-manual triggers (the finished/disabled
     // guard); a manual launch always succeeds. The guard satisfies the shared
     // nullable return type before reading run.runId.
     const run = tryLaunch(automation, "manual");
@@ -528,6 +556,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const automation = automationStore.reset(context.req.param("id"), parsed.data.clearHistory);
     if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     broadcastAutomations();
+    // Reset re-enables + reactivates; a watch automation resumes watching.
+    syncFolderWatchers();
     return context.json({ automation: toAutomationWithNextRun(automation, new Date()) });
   });
 
@@ -922,6 +952,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   automationScheduler.on("due", (automation) => {
     tryLaunch(automation, "schedule");
   });
+  folderWatchManager.on("due", (automation) => {
+    tryLaunch(automation, "watch");
+  });
   automationScheduler.on("tick", (now) => {
     // Liveness heartbeat for downtime detection on the next boot.
     heartbeatStore.write(now.getTime());
@@ -940,6 +973,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   });
   reconcileOnStartup(Date.now());
   automationScheduler.start();
+  // Arm folder-watch triggers for the automations loaded at boot.
+  syncFolderWatchers();
 
   // Open the persistent CDP connection now, while the user is present at
   // `start` to clear any one-time remote-debugging prompt. Fire-and-forget:
@@ -961,6 +996,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   const stop = async () => {
     automationScheduler.dispose();
+    folderWatchManager.dispose();
     caffeinateManager.dispose();
     cdpClient?.close();
     registry.disposeAll();

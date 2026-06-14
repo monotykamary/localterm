@@ -34,16 +34,18 @@ import { formatRelativeTime } from "@/utils/format-relative-time";
 import { resetAutomation } from "@/utils/reset-automation";
 import {
   buildScheduleFromForm,
+  buildTriggerFromForm,
   defaultScheduleForm,
   formatClockTime,
   FREQUENCY_LABELS,
   HOUR_STEP_OPTIONS,
   MINUTE_STEP_OPTIONS,
-  recognizeScheduleForm,
-  scheduleLabel,
+  recognizeTriggerForm,
+  triggerLabel,
   WEEKDAY_NAMES,
   type ScheduleFormState,
   type ScheduleFrequency,
+  type TriggerType,
 } from "@/utils/schedule-builder";
 import { lifecycleBadge, runStatusBadge } from "@/utils/run-status-badge";
 import { triggerAutomationRun } from "@/utils/trigger-automation-run";
@@ -67,7 +69,9 @@ interface AutomationFormState {
   command: string;
   cwd: string;
   enabled: boolean;
+  triggerType: TriggerType;
   schedule: ScheduleFormState;
+  watchRecursive: boolean;
   limitMode: "forever" | "count";
   limitMax: number;
   closeOnFinish: boolean;
@@ -87,23 +91,30 @@ const emptyForm = (defaultCwd: string | null): AutomationFormState => ({
   command: "",
   cwd: defaultCwd ?? "",
   enabled: true,
+  triggerType: "schedule",
   schedule: defaultScheduleForm(),
+  watchRecursive: true,
   limitMode: "forever",
   limitMax: DEFAULT_LIMIT_MAX,
   closeOnFinish: false,
 });
 
-const formForAutomation = (automation: AutomationWithNextRun): AutomationFormState => ({
-  id: automation.id,
-  name: automation.name,
-  command: automation.command,
-  cwd: automation.cwd,
-  enabled: automation.enabled,
-  schedule: recognizeScheduleForm(automation.schedule),
-  limitMode: automation.limit.kind === "count" ? "count" : "forever",
-  limitMax: automation.limit.kind === "count" ? automation.limit.max : DEFAULT_LIMIT_MAX,
-  closeOnFinish: automation.closeOnFinish,
-});
+const formForAutomation = (automation: AutomationWithNextRun): AutomationFormState => {
+  const trigger = recognizeTriggerForm(automation.trigger);
+  return {
+    id: automation.id,
+    name: automation.name,
+    command: automation.command,
+    cwd: automation.cwd,
+    enabled: automation.enabled,
+    triggerType: trigger.triggerType,
+    schedule: trigger.schedule,
+    watchRecursive: trigger.watchRecursive,
+    limitMode: automation.limit.kind === "count" ? "count" : "forever",
+    limitMax: automation.limit.kind === "count" ? automation.limit.max : DEFAULT_LIMIT_MAX,
+    closeOnFinish: automation.closeOnFinish,
+  };
+};
 
 const RunRow = ({ run, nowMs }: { run: AutomationRunRecord; nowMs: number }) => {
   const badge = runStatusBadge(run.status, run.exitCode);
@@ -115,7 +126,9 @@ const RunRow = ({ run, nowMs }: { run: AutomationRunRecord; nowMs: number }) => 
           ? `was due ${formatClockTime(new Date(run.scheduledFor).getHours(), new Date(run.scheduledFor).getMinutes())} · machine off`
           : run.trigger === "manual"
             ? "manual run"
-            : "scheduled"}
+            : run.trigger === "watch"
+              ? "on change"
+              : "scheduled"}
       </span>
       <span className="shrink-0 text-muted-foreground/70 tabular-nums">
         {formatRelativeTime(runTimestamp(run), nowMs)}
@@ -523,7 +536,7 @@ export const AutomationsModal = ({
     form.name.trim().length > 0 &&
     form.command.trim().length > 0 &&
     form.cwd.trim().length > 0 &&
-    isScheduleValid &&
+    (form.triggerType === "watch" || isScheduleValid) &&
     (form.limitMode === "forever" ||
       (form.limitMax >= 1 && form.limitMax <= AUTOMATION_RUN_LIMIT_MAX));
 
@@ -532,7 +545,7 @@ export const AutomationsModal = ({
     setSaveError(false);
     const input = {
       name: form.name.trim(),
-      schedule: builtSchedule,
+      trigger: buildTriggerFromForm(form),
       cwd: form.cwd.trim(),
       command: form.command.trim(),
       enabled: form.enabled,
@@ -733,15 +746,17 @@ export const AutomationsModal = ({
                         ) : null}
                       </span>
                       <span className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/80">
-                        <span className="min-w-0 truncate">
-                          {scheduleLabel(automation.schedule)}
-                        </span>
+                        <span className="min-w-0 truncate">{triggerLabel(automation.trigger)}</span>
                         <span className="shrink-0 tabular-nums">
                           {automation.lifecycle === "finished"
                             ? "finished"
-                            : automation.nextRunAt !== null
-                              ? formatRelativeTime(automation.nextRunAt, nowMs)
-                              : "paused"}
+                            : automation.trigger.kind === "watch"
+                              ? automation.enabled
+                                ? "watching"
+                                : "paused"
+                              : automation.nextRunAt !== null
+                                ? formatRelativeTime(automation.nextRunAt, nowMs)
+                                : "paused"}
                         </span>
                       </span>
                     </button>
@@ -864,18 +879,26 @@ const AutomationDetail = ({
 
       <div className="grid grid-cols-2 gap-2 text-[11px]">
         <div className="flex flex-col gap-0.5">
-          <span className={SECTION_LABEL_CLASSES}>Schedule</span>
-          <span className="text-foreground/90">{scheduleLabel(automation.schedule)}</span>
-          <span className="font-mono text-[10px] text-muted-foreground/70">{automation.cron}</span>
+          <span className={SECTION_LABEL_CLASSES}>Trigger</span>
+          <span className="text-foreground/90">{triggerLabel(automation.trigger)}</span>
+          {automation.cron ? (
+            <span className="font-mono text-[10px] text-muted-foreground/70">
+              {automation.cron}
+            </span>
+          ) : null}
         </div>
         <div className="flex flex-col gap-0.5">
           <span className={SECTION_LABEL_CLASSES}>Next run</span>
           <span className="text-foreground/90">
             {automation.lifecycle === "finished"
               ? "Finished"
-              : automation.nextRunAt !== null
-                ? formatRelativeTime(automation.nextRunAt, nowMs)
-                : "Paused"}
+              : automation.trigger.kind === "watch"
+                ? automation.enabled
+                  ? "On change"
+                  : "Paused"
+                : automation.nextRunAt !== null
+                  ? formatRelativeTime(automation.nextRunAt, nowMs)
+                  : "Paused"}
           </span>
         </div>
         <div className="flex flex-col gap-0.5">
@@ -1000,18 +1023,54 @@ const AutomationForm = ({
     </label>
 
     <div className="flex flex-col gap-1.5">
-      <span className={SECTION_LABEL_CLASSES}>Schedule</span>
-      <ScheduleBuilder
-        schedule={form.schedule}
-        onChange={(schedule) => onChange({ ...form, schedule })}
+      <span className={SECTION_LABEL_CLASSES}>Trigger</span>
+      <SettingsSelect
+        value={form.triggerType}
+        items={[
+          { id: "schedule", label: "On a schedule" },
+          { id: "watch", label: "When a folder changes" },
+        ]}
+        ariaLabel="trigger type"
+        placeholder="Trigger"
+        onValueChange={(next) =>
+          onChange({ ...form, triggerType: next === "watch" ? "watch" : "schedule" })
+        }
       />
-      <span className="text-[10px] tabular-nums text-muted-foreground">
-        {!scheduleValid
-          ? "invalid schedule"
-          : nextPreviewAt !== null
-            ? `next run ${formatRelativeTime(nextPreviewAt, nowMs)} · cron ${cronCaption}`
-            : `schedule never fires · cron ${cronCaption}`}
-      </span>
+      {form.triggerType === "schedule" ? (
+        <>
+          <ScheduleBuilder
+            schedule={form.schedule}
+            onChange={(schedule) => onChange({ ...form, schedule })}
+          />
+          <span className="text-[10px] tabular-nums text-muted-foreground">
+            {!scheduleValid
+              ? "invalid schedule"
+              : nextPreviewAt !== null
+                ? `next run ${formatRelativeTime(nextPreviewAt, nowMs)} · cron ${cronCaption}`
+                : `schedule never fires · cron ${cronCaption}`}
+          </span>
+        </>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="flex flex-col">
+              Include subfolders
+              <span className="text-[10px] text-muted-foreground/60">
+                Watch the directory above and everything inside it.
+              </span>
+            </span>
+            <Switch
+              aria-label="include subfolders"
+              checked={form.watchRecursive}
+              onCheckedChange={(watchRecursive) => onChange({ ...form, watchRecursive })}
+            />
+          </div>
+          <span className="text-[10px] text-muted-foreground">
+            Runs the command when the directory changes — no polling. Won't start a new run while
+            one is still going; counts toward the run limit.
+          </span>
+        </div>
+      )}
     </div>
 
     <div className="flex flex-col gap-1.5">

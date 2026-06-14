@@ -2,24 +2,30 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { AUTOMATION_RUN_HISTORY_CAP, AUTOMATIONS_FILE_VERSION } from "./constants.js";
-import { automationsFileSchema, automationsFileV1Schema } from "./schemas.js";
+import {
+  automationsFileSchema,
+  automationsFileV1Schema,
+  automationsFileV2Schema,
+} from "./schemas.js";
 import type {
   Automation,
   AutomationRunRecord,
   AutomationV1,
+  AutomationV2,
   CreateAutomationInput,
   UpdateAutomationInput,
 } from "./types.js";
-import { normalizeScheduleInput } from "./utils/compile-schedule.js";
+import { normalizeScheduleInput, normalizeTriggerInput } from "./utils/compile-schedule.js";
 
 // A run is terminal once it has a definitive outcome; only those carry a
 // finishedAt when migrated from a v1 lastRun.
 const V1_TERMINAL_STATUSES = new Set(["completed", "failed", "missed"]);
 
-// v1 stored a single `lastRun` and a raw cron string. Lift each into the v2
+// v1 stored a single `lastRun` and a raw cron string. Lift each into the v3
 // shape: recognize the cron as a friendly preset where provably lossless (else
-// keep it as {kind:"cron"}), seed runCount at 0 (so a migrated automation can
-// never be spuriously "finished"), and fold lastRun into a one-entry history.
+// keep it as {kind:"cron"}) and wrap it in a schedule trigger, seed runCount at
+// 0 (so a migrated automation can never be spuriously "finished"), and fold
+// lastRun into a one-entry history.
 const migrateV1Automation = (v1: AutomationV1): Automation => {
   const runs: AutomationRunRecord[] = v1.lastRun
     ? [
@@ -38,7 +44,7 @@ const migrateV1Automation = (v1: AutomationV1): Automation => {
   return {
     id: v1.id,
     name: v1.name,
-    schedule: normalizeScheduleInput(v1.schedule),
+    trigger: { kind: "schedule", schedule: normalizeScheduleInput(v1.schedule) },
     cwd: v1.cwd,
     command: v1.command,
     enabled: v1.enabled,
@@ -50,6 +56,13 @@ const migrateV1Automation = (v1: AutomationV1): Automation => {
     createdAt: v1.createdAt,
     updatedAt: v1.updatedAt,
   };
+};
+
+// v2 stored the trigger as a bare top-level `schedule`. v3 wraps it in a
+// schedule trigger; everything else carries over unchanged.
+const migrateV2Automation = (v2: AutomationV2): Automation => {
+  const { schedule, ...rest } = v2;
+  return { ...rest, trigger: { kind: "schedule", schedule } };
 };
 
 export class AutomationStore {
@@ -76,7 +89,7 @@ export class AutomationStore {
     const automation: Automation = {
       id: randomUUID(),
       name: input.name,
-      schedule: normalizeScheduleInput(input.schedule),
+      trigger: normalizeTriggerInput(input),
       cwd: input.cwd,
       command: input.command,
       enabled: input.enabled ?? true,
@@ -105,7 +118,9 @@ export class AutomationStore {
     const updated: Automation = {
       ...current,
       ...(patch.name !== undefined ? { name: patch.name } : {}),
-      ...(patch.schedule !== undefined ? { schedule: normalizeScheduleInput(patch.schedule) } : {}),
+      ...(patch.trigger !== undefined || patch.schedule !== undefined
+        ? { trigger: normalizeTriggerInput(patch) }
+        : {}),
       ...(patch.cwd !== undefined ? { cwd: patch.cwd } : {}),
       ...(patch.command !== undefined ? { command: patch.command } : {}),
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
@@ -206,13 +221,21 @@ export class AutomationStore {
       console.warn(`automations file invalid; starting with an empty list (${this.filePath})`);
       return;
     }
-    // Fast path: already v2.
-    const v2 = automationsFileSchema.safeParse(json);
-    if (v2.success) {
-      this.automations = v2.data.automations;
+    // Fast path: already v3.
+    const v3 = automationsFileSchema.safeParse(json);
+    if (v3.success) {
+      this.automations = v3.data.automations;
       return;
     }
-    // Migrate v1 -> v2 once, then persist so later loads hit the fast path.
+    // Migrate v2 -> v3 (wrap the bare schedule in a trigger), then persist so
+    // later loads hit the fast path.
+    const v2 = automationsFileV2Schema.safeParse(json);
+    if (v2.success) {
+      this.automations = v2.data.automations.map(migrateV2Automation);
+      this.persist();
+      return;
+    }
+    // Migrate v1 -> v3 once, then persist so later loads hit the fast path.
     const v1 = automationsFileV1Schema.safeParse(json);
     if (v1.success) {
       this.automations = v1.data.automations.map(migrateV1Automation);

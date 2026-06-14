@@ -150,11 +150,9 @@ describe("automations REST API", () => {
     });
     expect(status).toBe(201);
     const automation = automationWithNextRunSchema.parse(body.automation);
-    expect(automation.schedule).toEqual({
-      kind: "weekdaysPreset",
-      preset: "weekdays",
-      hour: 9,
-      minute: 0,
+    expect(automation.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "weekdaysPreset", preset: "weekdays", hour: 9, minute: 0 },
     });
     expect(automation.cron).toBe("0 9 * * 1-5");
     expect(automation.runs).toEqual([]);
@@ -166,13 +164,66 @@ describe("automations REST API", () => {
   it("accepts a legacy bare cron string and recognizes it as a preset", async () => {
     const { body } = await request("POST", "", { ...createInput(), schedule: "0 9 * * 1-5" });
     const automation = automationWithNextRunSchema.parse(body.automation);
-    expect(automation.schedule).toEqual({
-      kind: "weekdaysPreset",
-      preset: "weekdays",
-      hour: 9,
-      minute: 0,
+    expect(automation.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "weekdaysPreset", preset: "weekdays", hour: 9, minute: 0 },
     });
   });
+
+  it("creates a watch automation with no cron or next run", async () => {
+    const watchDir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-watch-create-"));
+    try {
+      const { status, body } = await request("POST", "", {
+        name: "on change",
+        trigger: { kind: "watch", recursive: true },
+        cwd: watchDir,
+        command: "echo changed",
+      });
+      expect(status).toBe(201);
+      const automation = automationWithNextRunSchema.parse(body.automation);
+      expect(automation.trigger).toEqual({ kind: "watch", recursive: true });
+      expect(automation.cron).toBeNull();
+      expect(automation.nextRunAt).toBeNull();
+    } finally {
+      fs.rmSync(watchDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fires a watch automation on a folder change and counts it toward the limit", async () => {
+    const watchDir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-watch-fire-"));
+    try {
+      const created = await request("POST", "", {
+        name: "on change",
+        trigger: { kind: "watch", recursive: true },
+        cwd: watchDir,
+        command: "true",
+        limit: { kind: "count", max: 1 },
+      });
+      expect(created.status).toBe(201);
+
+      // Let the watcher arm, then a single change fires one debounced run that
+      // counts toward the limit and finishes the automation.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      fs.writeFileSync(path.join(watchDir, "touched.txt"), "hi");
+
+      await vi.waitFor(
+        async () => {
+          const [listed] = (await request("GET", "")).body.automations as Array<
+            Record<string, unknown>
+          >;
+          expect(listed.runCount).toBe(1);
+          expect(listed.lifecycle).toBe("finished");
+        },
+        { timeout: 15_000, interval: 100 },
+      );
+      expect(testContext.openedUrls).toHaveLength(1);
+      const [listed] = (await request("GET", "")).body.automations as Array<Record<string, unknown>>;
+      const runs = listed.runs as Array<Record<string, unknown>>;
+      expect(runs[0]).toMatchObject({ trigger: "watch", countsTowardLimit: true });
+    } finally {
+      fs.rmSync(watchDir, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it("rejects a structured schedule that cannot compile to valid cron", async () => {
     const { body } = await request("POST", "", {

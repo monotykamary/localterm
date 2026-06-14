@@ -15,7 +15,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 const automation = (overrides: Partial<AutomationWithNextRun> = {}): AutomationWithNextRun => ({
   id: "automation-1",
   name: "nightly build",
-  schedule: { kind: "daily", hour: 2, minute: 0 },
+  trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 0 } },
   cron: "0 2 * * *",
   cwd: "/tmp/project",
   command: "pnpm build",
@@ -70,6 +70,20 @@ describe("AutomationsModal", () => {
     expect(screen.getByText("pnpm build")).toBeDefined();
   });
 
+  it("renders a watch automation with its trigger label and on-change next run", async () => {
+    renderModal([
+      automation({
+        name: "on change",
+        trigger: { kind: "watch", recursive: true },
+        cron: null,
+        nextRunAt: null,
+      }),
+    ]);
+    // The trigger label shows in both the list row and the detail header.
+    expect((await screen.findAllByText("When files change · subfolders")).length).toBeGreaterThan(0);
+    expect(screen.getByText("On change")).toBeDefined();
+  });
+
   it("shows the last run status badge", async () => {
     renderModal([
       automation({ lastRun: { runId: "r", at: Date.now(), status: "failed", exitCode: 2 } }),
@@ -117,7 +131,7 @@ describe("AutomationsModal", () => {
       const body = JSON.parse(String(Reflect.get(postCalls[0][1] ?? {}, "body")));
       expect(body).toEqual({
         name: "demo",
-        schedule: { kind: "daily", hour: 9, minute: 0 },
+        trigger: { kind: "schedule", schedule: { kind: "daily", hour: 9, minute: 0 } },
         cwd: "/tmp/project",
         command: "echo hi",
         enabled: true,

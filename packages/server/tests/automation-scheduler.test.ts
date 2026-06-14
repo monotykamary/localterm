@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { AutomationScheduler } from "../src/automation-scheduler.js";
 import { AutomationStore } from "../src/automation-store.js";
-import type { Automation } from "../src/types.js";
+import type { Automation, CreateAutomationInput } from "../src/types.js";
 
 describe("AutomationScheduler", () => {
   let stateDirectory: string;
@@ -22,7 +22,7 @@ describe("AutomationScheduler", () => {
     fs.rmSync(stateDirectory, { recursive: true, force: true });
   });
 
-  const createAutomation = (overrides: Partial<Automation> = {}) =>
+  const createAutomation = (overrides: Partial<CreateAutomationInput> = {}) =>
     store.create({
       name: "every minute",
       schedule: { kind: "everyNMinutes", step: 1 },
@@ -60,6 +60,14 @@ describe("AutomationScheduler", () => {
 
   it("skips automations whose schedule does not match", () => {
     createAutomation({ schedule: { kind: "daily", hour: 2, minute: 30 } });
+    const due: Automation[] = [];
+    scheduler.on("due", (dueAutomation) => due.push(dueAutomation));
+    scheduler.runTick(new Date(2026, 5, 13, 10, 15, 0));
+    expect(due).toEqual([]);
+  });
+
+  it("never fires watch-trigger automations from a tick", () => {
+    createAutomation({ trigger: { kind: "watch", recursive: true } });
     const due: Automation[] = [];
     scheduler.on("due", (dueAutomation) => due.push(dueAutomation));
     scheduler.runTick(new Date(2026, 5, 13, 10, 15, 0));

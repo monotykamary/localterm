@@ -15,10 +15,12 @@ export const enumerateMissedOccurrences = (
   lastAliveAt: number,
   now: number,
 ): number[] => {
+  // Watch triggers have no scheduled occurrences to reconstruct after downtime.
+  if (automation.trigger.kind !== "schedule") return [];
   const effectiveFrom = Math.max(lastAliveAt, now - AUTOMATION_RECONCILE_LOOKBACK_MS);
   const fromDate = new Date(effectiveFrom);
   const collected: number[] = [];
-  for (const expression of compileScheduleAll(automation.schedule)) {
+  for (const expression of compileScheduleAll(automation.trigger.schedule)) {
     const parsed = parseCronExpression(expression);
     if (!parsed) continue;
     let cursor = nextCronOccurrence(parsed, fromDate);

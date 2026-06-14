@@ -34,10 +34,21 @@ Requests must come from the same machine; `Host` must be loopback (using
 
 ## Automations
 
-An automation is `{name, schedule, cwd, command, enabled, limit, closeOnFinish}`:
+An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
 
-- `schedule` — a **structured schedule object** (preferred) or, for back-compat,
-  a bare 5-field cron string. The object is a tagged union on `kind`:
+- `trigger` — what makes the automation run, a tagged union on `kind`:
+  - `{kind:"schedule", schedule}` — time-based (the common case).
+  - `{kind:"watch", recursive}` — fires when the automation's `cwd` changes,
+    observed via native filesystem events (**no polling**). `recursive` (default
+    `true`) watches the whole subtree. A burst of changes is debounced into a
+    single run, and no new run starts while a previous one is still in-flight (so
+    a command that writes into the watched folder won't loop). Watch triggers
+    have no `cron`/`nextRunAt` (both `null`).
+
+  For back-compat a top-level `schedule` is still accepted in place of `trigger`
+  and treated as a schedule trigger. A `schedule` is a **structured schedule
+  object** (preferred) or, for back-compat, a bare 5-field cron string — a tagged
+  union on `kind`:
 
   | `kind`           | shape                                                                  | example meaning                 |
   | ---------------- | ---------------------------------------------------------------------- | ------------------------------- |
@@ -67,7 +78,8 @@ An automation is `{name, schedule, cwd, command, enabled, limit, closeOnFinish}`
 - `limit` — `{kind:"forever"}` (default) or `{kind:"count", max:N}` = "stop after
   N runs". When the limit is reached the automation **finishes** (a terminal
   `lifecycle:"finished"` state) and stops firing but stays listed with its
-  history. Only scheduled runs count toward the limit; manual `/run` never does.
+  history. Scheduled and watch runs count toward the limit; manual `/run` never
+  does.
 - `closeOnFinish` — defaults to `false` (the tab stays open). When `true`, the
   run's browser tab is closed once the command finishes. Only honored for tabs
   opened via CDP (the background-tab path); on the `open -g` fallback it's a
@@ -90,8 +102,9 @@ cleared a single time, not per run); otherwise it falls back to the OS opener
 ### Endpoints
 
 ```bash
-# List (each item adds computed nextRunAt epoch-ms (null when disabled/finished),
-# a derived `cron` string, the capped `runs` history, and a back-compat `lastRun`)
+# List (each item adds computed nextRunAt epoch-ms (null when disabled/finished
+# or a watch trigger), a derived `cron` string (null for watch), the capped
+# `runs` history, and a back-compat `lastRun`)
 curl -s "$BASE/automations"
 
 # Create
@@ -106,6 +119,18 @@ curl -s -X POST "$BASE/automations" \
     "limit": { "kind": "forever" }
   }'
 # → 201 {"automation":{"id":"…","cron":"0 2 * * *","nextRunAt":1765591200000,…}}
+
+# Create a folder-watch automation (runs when cwd changes; no cron/nextRunAt)
+curl -s -X POST "$BASE/automations" \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "rebuild on change",
+    "trigger": { "kind": "watch", "recursive": true },
+    "cwd": "/Users/me/project",
+    "command": "pnpm build",
+    "limit": { "kind": "count", "max": 50 }
+  }'
+# → 201 {"automation":{"id":"…","cron":null,"nextRunAt":null,…}}
 
 # Update any subset of fields (a bare cron string is still accepted for schedule)
 curl -s -X PATCH "$BASE/automations/<id>" \

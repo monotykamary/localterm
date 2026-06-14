@@ -8,7 +8,7 @@ import type { AutomationRunRecord, CreateAutomationInput } from "../src/types.js
 
 const createInput: CreateAutomationInput = {
   name: "nightly build",
-  schedule: { kind: "daily", hour: 2, minute: 0 },
+  trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 0 } },
   cwd: os.tmpdir(),
   command: "pnpm build",
 };
@@ -44,7 +44,7 @@ describe("AutomationStore", () => {
     expect(store.size()).toBe(0);
   });
 
-  it("creates an automation with v2 defaults and persists it", () => {
+  it("creates an automation with v3 defaults and persists it", () => {
     const store = new AutomationStore(filePath);
     const automation = store.create(createInput);
     expect(automation.id).toMatch(/[0-9a-f-]{36}/);
@@ -54,7 +54,10 @@ describe("AutomationStore", () => {
     expect(automation.lifecycle).toBe("active");
     expect(automation.limit).toEqual({ kind: "forever" });
     expect(automation.closeOnFinish).toBe(false);
-    expect(automation.schedule).toEqual({ kind: "daily", hour: 2, minute: 0 });
+    expect(automation.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "daily", hour: 2, minute: 0 },
+    });
     expect(automation.createdAt).toBe(automation.updatedAt);
 
     const reloaded = new AutomationStore(filePath);
@@ -76,8 +79,8 @@ describe("AutomationStore", () => {
     expect(reloaded.get(automation.id)?.closeOnFinish).toBe(false);
   });
 
-  it("defaults closeOnFinish to false when absent from a persisted v2 file", () => {
-    // A v2 file written before closeOnFinish existed has no such field.
+  it("defaults closeOnFinish to false when absent from a persisted v3 file", () => {
+    // A file written before closeOnFinish existed has no such field.
     fs.writeFileSync(
       filePath,
       JSON.stringify({
@@ -86,7 +89,7 @@ describe("AutomationStore", () => {
           {
             id: "legacy",
             name: "legacy",
-            schedule: { kind: "daily", hour: 2, minute: 0 },
+            trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 0 } },
             cwd: "/tmp",
             command: "echo hi",
             enabled: true,
@@ -104,22 +107,34 @@ describe("AutomationStore", () => {
     expect(store.get("legacy")?.closeOnFinish).toBe(false);
   });
 
-  it("coerces a recognizable bare cron string into a friendly preset", () => {
+  it("coerces a legacy bare cron string into a friendly schedule trigger", () => {
     const store = new AutomationStore(filePath);
-    const automation = store.create({ ...createInput, schedule: "0 9 * * 1-5" });
-    expect(automation.schedule).toEqual({
-      kind: "weekdaysPreset",
-      preset: "weekdays",
-      hour: 9,
-      minute: 0,
+    // Legacy `schedule` body (no `trigger`) is wrapped into a schedule trigger.
+    const automation = store.create({
+      name: createInput.name,
+      cwd: createInput.cwd,
+      command: createInput.command,
+      schedule: "0 9 * * 1-5",
+    });
+    expect(automation.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "weekdaysPreset", preset: "weekdays", hour: 9, minute: 0 },
     });
   });
 
   it("keeps an unrecognizable cron string as a raw cron schedule", () => {
     const store = new AutomationStore(filePath);
     // Both day fields restricted -> Vixie OR semantics; no preset matches.
-    const automation = store.create({ ...createInput, schedule: "0 9 1 * 1" });
-    expect(automation.schedule).toEqual({ kind: "cron", expression: "0 9 1 * 1" });
+    const automation = store.create({
+      name: createInput.name,
+      cwd: createInput.cwd,
+      command: createInput.command,
+      schedule: "0 9 1 * 1",
+    });
+    expect(automation.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "cron", expression: "0 9 1 * 1" },
+    });
   });
 
   it("updates only the provided fields", () => {
@@ -214,7 +229,7 @@ describe("AutomationStore", () => {
     expect(cleared?.runs).toEqual([]);
   });
 
-  it("migrates a v1 file to v2, folding lastRun into run history", () => {
+  it("migrates a v1 file to v3, folding lastRun into run history", () => {
     const v1 = {
       version: 1,
       automations: [
@@ -235,7 +250,10 @@ describe("AutomationStore", () => {
 
     const store = new AutomationStore(filePath);
     const [automation] = store.list();
-    expect(automation.schedule).toEqual({ kind: "daily", hour: 9, minute: 0 });
+    expect(automation.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "daily", hour: 9, minute: 0 },
+    });
     expect(automation.limit).toEqual({ kind: "forever" });
     expect(automation.runCount).toBe(0);
     expect(automation.lifecycle).toBe("active");
@@ -252,9 +270,9 @@ describe("AutomationStore", () => {
       },
     ]);
 
-    // The migration persists as v2 so later loads hit the fast path.
+    // The migration persists as v3 so later loads hit the fast path.
     const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    expect(persisted.version).toBe(2);
+    expect(persisted.version).toBe(3);
   });
 
   it("migrates a v1 automation with a null lastRun to empty history", () => {
@@ -296,9 +314,9 @@ describe("AutomationStore", () => {
       ],
     };
     fs.writeFileSync(filePath, JSON.stringify(v1), "utf8");
-    expect(new AutomationStore(filePath).list()[0]?.schedule).toEqual({
-      kind: "cron",
-      expression: "0 9 1 * 1",
+    expect(new AutomationStore(filePath).list()[0]?.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "cron", expression: "0 9 1 * 1" },
     });
   });
 
@@ -326,6 +344,60 @@ describe("AutomationStore", () => {
       finishedAt: 9,
       countsTowardLimit: false,
     });
+  });
+
+  it("migrates a v2 file to v3, wrapping the bare schedule in a trigger", () => {
+    const v2 = {
+      version: 2,
+      automations: [
+        {
+          id: "a2",
+          name: "nightly",
+          schedule: { kind: "daily", hour: 9, minute: 0 },
+          cwd: os.tmpdir(),
+          command: "echo hi",
+          enabled: true,
+          limit: { kind: "forever" },
+          closeOnFinish: false,
+          runCount: 0,
+          lifecycle: "active",
+          runs: [],
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+    };
+    fs.writeFileSync(filePath, JSON.stringify(v2), "utf8");
+
+    const [automation] = new AutomationStore(filePath).list();
+    expect(automation.trigger).toEqual({
+      kind: "schedule",
+      schedule: { kind: "daily", hour: 9, minute: 0 },
+    });
+
+    // The migration persists as v3 (no leftover top-level schedule).
+    const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(persisted.version).toBe(3);
+    expect(persisted.automations[0].schedule).toBeUndefined();
+  });
+
+  it("creates a watch automation, defaulting recursive to true", () => {
+    const store = new AutomationStore(filePath);
+    const explicit = store.create({ ...createInput, trigger: { kind: "watch", recursive: false } });
+    expect(explicit.trigger).toEqual({ kind: "watch", recursive: false });
+
+    const defaulted = store.create({ ...createInput, trigger: { kind: "watch" } });
+    expect(defaulted.trigger).toEqual({ kind: "watch", recursive: true });
+  });
+
+  it("switches a schedule automation to a watch trigger via update", () => {
+    const store = new AutomationStore(filePath);
+    const automation = store.create(createInput);
+    const updated = store.update(automation.id, { trigger: { kind: "watch", recursive: true } });
+    expect(updated?.trigger).toEqual({ kind: "watch", recursive: true });
+
+    const reloaded = new AutomationStore(filePath);
+    expect(reloaded.get(automation.id)?.trigger).toEqual({ kind: "watch", recursive: true });
   });
 
   it("starts empty when the file is corrupt", () => {

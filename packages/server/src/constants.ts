@@ -161,9 +161,11 @@ export const MAX_AUTOMATION_COMMAND_LENGTH = 4096;
 export const MAX_CRON_EXPRESSION_LENGTH = 256;
 // v1 stored a raw cron string + a single lastRun. v2 stores a structured
 // schedule (with a derived cron computed on the fly), a run-count limit, a
-// lifecycle, and a capped run-history array. AutomationStore.load() migrates
-// v1 -> v2 in place on first boot so existing automations are never lost.
-export const AUTOMATIONS_FILE_VERSION = 2;
+// lifecycle, and a capped run-history array. v3 wraps the schedule in a
+// top-level `trigger` union so an automation can fire on a schedule OR when a
+// folder changes. AutomationStore.load() migrates v1/v2 -> v3 in place on first
+// boot so existing automations are never lost.
+export const AUTOMATIONS_FILE_VERSION = 3;
 // Largest "stop after N runs" budget. Generous — a limit is opt-in; the common
 // case is "forever".
 export const AUTOMATION_RUN_LIMIT_MAX = 100_000;
@@ -191,6 +193,11 @@ export const AUTOMATION_TICK_ALIGNMENT_DELAY_MS = 50;
 // A launched run that no browser tab claims within this window is marked
 // "missed" (browser closed, headless host, open() failed silently).
 export const AUTOMATION_PENDING_RUN_EXPIRY_MS = 5 * 60 * 1000;
+// Quiet period after the last filesystem event before a folder-watch trigger
+// fires. Coalesces an event storm (one editor save emits several events; a
+// build emits thousands) into a single run. Trailing-edge: the timer resets on
+// every event and fires once the directory settles.
+export const AUTOMATION_WATCH_DEBOUNCE_MS = 500;
 // Covers schedules that only fire on Feb 29 (the rarest valid cron target).
 export const CRON_NEXT_OCCURRENCE_SCAN_LIMIT_DAYS = 1466;
 export const MAX_AUTOMATION_EXIT_CODE_DIGITS = 4;

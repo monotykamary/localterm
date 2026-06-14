@@ -5,6 +5,7 @@ import {
   compileSchedule,
   compileScheduleAll,
   normalizeScheduleInput,
+  normalizeTriggerInput,
   recognizePreset,
 } from "../src/utils/compile-schedule.js";
 
@@ -124,5 +125,42 @@ describe("normalizeScheduleInput", () => {
   it("keeps an explicit cron schedule advanced even when it is recognizable", () => {
     const schedule: AutomationSchedule = { kind: "cron", expression: "0 9 * * *" };
     expect(normalizeScheduleInput(schedule)).toBe(schedule);
+  });
+});
+
+describe("normalizeTriggerInput", () => {
+  it("normalizes a schedule trigger payload (recognizing a bare cron)", () => {
+    expect(normalizeTriggerInput({ trigger: { kind: "schedule", schedule: "0 9 * * *" } })).toEqual({
+      kind: "schedule",
+      schedule: { kind: "daily", hour: 9, minute: 0 },
+    });
+  });
+
+  it("defaults watch.recursive to true and preserves an explicit value", () => {
+    expect(normalizeTriggerInput({ trigger: { kind: "watch" } })).toEqual({
+      kind: "watch",
+      recursive: true,
+    });
+    expect(normalizeTriggerInput({ trigger: { kind: "watch", recursive: false } })).toEqual({
+      kind: "watch",
+      recursive: false,
+    });
+  });
+
+  it("wraps a legacy bare schedule into a schedule trigger", () => {
+    expect(normalizeTriggerInput({ schedule: "0 9 * * 1-5" })).toEqual({
+      kind: "schedule",
+      schedule: { kind: "weekdaysPreset", preset: "weekdays", hour: 9, minute: 0 },
+    });
+    expect(normalizeTriggerInput({ schedule: { kind: "everyNMinutes", step: 5 } })).toEqual({
+      kind: "schedule",
+      schedule: { kind: "everyNMinutes", step: 5 },
+    });
+  });
+
+  it("prefers an explicit trigger over a legacy schedule when both are present", () => {
+    expect(
+      normalizeTriggerInput({ trigger: { kind: "watch", recursive: true }, schedule: "0 9 * * *" }),
+    ).toEqual({ kind: "watch", recursive: true });
   });
 });
