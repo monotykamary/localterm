@@ -20,6 +20,7 @@ export interface InstallOptions {
 export const buildPlistContent = (options: InstallOptions): string => {
   const stateDirectory = getStateDirectory();
   const logPath = path.join(stateDirectory, "server.log");
+  const currentPath = process.env.PATH ?? "/usr/bin:/bin:/usr/sbin:/sbin";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -49,6 +50,8 @@ export const buildPlistContent = (options: InstallOptions): string => {
     <dict>
         <key>HOME</key>
         <string>${os.homedir()}</string>
+        <key>PATH</key>
+        <string>${currentPath}</string>
     </dict>
 </dict>
 </plist>

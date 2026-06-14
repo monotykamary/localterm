@@ -11,6 +11,7 @@ export const MAX_TCP_PORT = 65535;
 export const FRIENDLY_HOSTNAME = "localterm.localhost";
 export const STOP_COMMAND = "npx @monotykamary/localterm@latest stop";
 export const DAEMON_CHILD_ENV_FLAG = "LOCALTERM_DAEMON_CHILD";
+export const RESTART_DAEMON_ENV_FLAG = "LOCALTERM_RESTART_DAEMON";
 /**
  * Distinctive process name set on the daemon at startup (via `process.title`).
  * `localterm stop` verifies the recorded pid's kernel-reported comm matches
@@ -28,5 +29,8 @@ export const LAUNCHD_PLIST_FILENAME = `${LAUNCHD_LABEL}.plist`;
 export const EXIT_OK = 0;
 export const EXIT_FAILURE = 1;
 export const EXIT_USAGE_ERROR = 2;
+
+export const RESTART_BIND_RETRY_INTERVAL_MS = 200;
+export const RESTART_BIND_RETRY_MAX_MS = 5000;
 
 export const getFriendlyUrl = (port: number): string => `http://${FRIENDLY_HOSTNAME}:${port}`;

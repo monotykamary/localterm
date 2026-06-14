@@ -33,6 +33,12 @@ describe("buildPlistContent", () => {
     expect(plist).toContain("<key>HOME</key>");
   });
 
+  it("includes PATH environment variable", () => {
+    const plist = buildPlistContent({ port: 3417, host: "127.0.0.1" });
+    expect(plist).toContain("<key>PATH</key>");
+    expect(plist).toContain(process.env.PATH!);
+  });
+
   it("uses custom port and host when specified", () => {
     const plist = buildPlistContent({ port: 9999, host: "0.0.0.0" });
     expect(plist).toContain("<string>9999</string>");

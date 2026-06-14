@@ -12,6 +12,7 @@ import kleur from "kleur";
 import open from "open";
 import {
   DAEMON_CHILD_ENV_FLAG,
+  RESTART_DAEMON_ENV_FLAG,
   DAEMON_PROBE_INTERVAL_MS,
   DAEMON_PROBE_MAX_WAIT_MS,
   DAEMON_PROCESS_TITLE,
@@ -19,6 +20,8 @@ import {
   EXIT_OK,
   FORCE_EXIT_TIMEOUT_MS,
   getFriendlyUrl,
+  RESTART_BIND_RETRY_INTERVAL_MS,
+  RESTART_BIND_RETRY_MAX_MS,
   STOP_COMMAND,
 } from "../constants.js";
 import { cliError, exitCodeForCliError, type CliError } from "../errors.js";
@@ -61,6 +64,7 @@ export interface StartOptions {
 }
 
 const isRunningAsDaemonChild = (): boolean => process.env[DAEMON_CHILD_ENV_FLAG] === "1";
+const isRunningAsRestartDaemon = (): boolean => process.env[RESTART_DAEMON_ENV_FLAG] === "1";
 
 export const runStart = async (options: StartOptions): Promise<void> => {
   if (options.foreground || isRunningAsDaemonChild()) {
@@ -144,15 +148,47 @@ const openInBrowser = async (url: string): Promise<void> => {
   }
 };
 
+const retryBindAfterOldDaemonExits = async (
+  options: StartOptions,
+  staticRoot: string | null,
+): Promise<Awaited<ReturnType<typeof createServer>>> => {
+  let waited = 0;
+  while (waited < RESTART_BIND_RETRY_MAX_MS) {
+    await sleep(RESTART_BIND_RETRY_INTERVAL_MS);
+    waited += RESTART_BIND_RETRY_INTERVAL_MS;
+    try {
+      return await createServer({
+        port: options.port,
+        host: options.host,
+        staticRoot,
+      });
+    } catch (retryCaughtError) {
+      const stillInUse =
+        isServerErrorException(retryCaughtError) &&
+        retryCaughtError.error.kind === "listen-failed" &&
+        retryCaughtError.error.cause instanceof Error &&
+        (retryCaughtError.error.cause as NodeJS.ErrnoException).code === "EADDRINUSE";
+      if (!stillInUse) throw retryCaughtError;
+    }
+  }
+  throw new Error(
+    `port ${options.port} still in use after ${RESTART_BIND_RETRY_MAX_MS}ms — old daemon may not have shut down`,
+  );
+};
+
 const runStartInForeground = async (options: StartOptions): Promise<void> => {
   process.title = DAEMON_PROCESS_TITLE;
 
-  const preflightError = await runStartPreflight();
-  if (preflightError !== null) {
-    if (preflightError.kind === "stale-port-file") await runStop();
-    else {
-      handlePreflightError(preflightError);
-      return;
+  const isRestart = isRunningAsRestartDaemon();
+
+  if (!isRestart) {
+    const preflightError = await runStartPreflight();
+    if (preflightError !== null) {
+      if (preflightError.kind === "stale-port-file") await runStop();
+      else {
+        handlePreflightError(preflightError);
+        return;
+      }
     }
   }
 
@@ -178,7 +214,9 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
       caughtError.error.kind === "listen-failed" &&
       caughtError.error.cause instanceof Error &&
       (caughtError.error.cause as NodeJS.ErrnoException).code === "EADDRINUSE";
-    if (isEaddrInuse) {
+    if (isEaddrInuse && isRestart) {
+      server = await retryBindAfterOldDaemonExits(options, staticRoot);
+    } else if (isEaddrInuse) {
       await runStop();
       try {
         server = await createServer({

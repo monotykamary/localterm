@@ -53,12 +53,17 @@ export const runRestart = async (options: RestartOptions): Promise<void> => {
   const { pid: childPid } = spawnDaemon({
     args: buildDaemonStartArgs(options),
     logFd,
+    restart: true,
   });
 
   if (childPid === undefined) {
     const error = cliError.daemonSpawnFailed(process.execPath, logPath);
     reportCliError(error);
     process.exit(exitCodeForCliError(error));
+  }
+
+  if (oldPid !== null && oldPid !== childPid) {
+    await terminateOldDaemon(oldPid);
   }
 
   const result = await pollForDaemonReady({
@@ -78,10 +83,6 @@ export const runRestart = async (options: RestartOptions): Promise<void> => {
     reportCliError(result.error);
     process.exit(exitCodeForCliError(result.error));
     return;
-  }
-
-  if (oldPid !== null && oldPid !== childPid) {
-    await terminateOldDaemon(oldPid);
   }
 
   console.log(kleur.green(`✔ restarted (pid ${childPid}, port ${result.port}, logs: ${logPath})`));
