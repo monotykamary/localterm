@@ -1,7 +1,7 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createSignature, initRepository, openRepository } from "es-git";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import {
   buildUntrackedPatch,
@@ -17,22 +17,72 @@ import {
   splitPatchByFile,
 } from "../src/git-diff.js";
 
-const git = (cwd: string, ...args: string[]): string =>
-  execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+const TEST_SIG = createSignature("test", "test@example.com");
 
-const commitAll = (cwd: string, message: string): void => {
-  git(cwd, "add", "--all");
-  git(
-    cwd,
-    "-c",
-    "user.name=test",
-    "-c",
-    "user.email=test@example.com",
-    "commit",
-    "--no-gpg-sign",
-    "-m",
-    message,
-  );
+interface TestRepo {
+  dir: string;
+  repo: Awaited<ReturnType<typeof openRepository>>;
+}
+
+const initRepo = async (dir: string): Promise<TestRepo> => {
+  const repo = await initRepository(dir, { initialHead: "refs/heads/main" });
+  return { dir, repo };
+};
+
+const commitAll = async (testRepo: TestRepo, message: string): Promise<void> => {
+  const idx = testRepo.repo.index();
+  idx.addAll(["*"]);
+  idx.write();
+  const treeId = idx.writeTree();
+  const tree = testRepo.repo.getTree(treeId);
+  const parents: string[] = [];
+  try {
+    const head = testRepo.repo.head();
+    const target = head.target();
+    if (target) parents.push(target);
+  } catch {
+    // Unborn branch — no parent commit yet
+  }
+  testRepo.repo.commit(tree, message, {
+    updateRef: "HEAD",
+    author: TEST_SIG,
+    committer: TEST_SIG,
+    parents,
+  });
+};
+
+const stageRename = (testRepo: TestRepo, oldFilePath: string, newFilePath: string): void => {
+  fs.renameSync(path.join(testRepo.dir, oldFilePath), path.join(testRepo.dir, newFilePath));
+  const idx = testRepo.repo.index();
+  idx.removePath(oldFilePath);
+  idx.addPath(newFilePath);
+  idx.write();
+};
+
+const checkoutBranch = (testRepo: TestRepo, branchName: string): void => {
+  testRepo.repo.setHead(`refs/heads/${branchName}`);
+  testRepo.repo.checkoutHead({ force: true });
+};
+
+const createAndCheckoutBranch = (testRepo: TestRepo, branchName: string): void => {
+  const head = testRepo.repo.head();
+  const target = head.target();
+  if (!target) throw new Error("No HEAD target to branch from");
+  const commit = testRepo.repo.findCommit(target);
+  if (!commit) throw new Error("No commit found for HEAD target");
+  testRepo.repo.createBranch(branchName, commit);
+  testRepo.repo.setHead(`refs/heads/${branchName}`);
+  testRepo.repo.checkoutHead({ force: true });
+};
+
+const addRemote = (testRepo: TestRepo, name: string, url: string): void => {
+  testRepo.repo.createRemote(name, url);
+};
+
+const stagePath = (testRepo: TestRepo, filePath: string): void => {
+  const idx = testRepo.repo.index();
+  idx.addPath(filePath);
+  idx.write();
 };
 
 const makeTempDir = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "localterm-git-test-"));
@@ -129,37 +179,29 @@ describe("buildUntrackedPatch", () => {
 });
 
 describe("getGitDiffSummary / getGitDiff", () => {
-  let repoDir: string;
+  let testRepo: TestRepo;
   let plainDir: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     plainDir = makeTempDir();
 
-    repoDir = makeTempDir();
-    git(repoDir, "init", "--initial-branch=main");
-    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "alpha\nbeta\ngamma\n");
-    fs.writeFileSync(path.join(repoDir, "removed.txt"), "to be deleted\n");
-    fs.writeFileSync(path.join(repoDir, "renamed-old.txt"), "stable content\nlots of it\n");
-    fs.writeFileSync(path.join(repoDir, "binary.bin"), Buffer.from([0, 1, 2, 3, 0, 255]));
-    commitAll(repoDir, "base");
+    testRepo = await initRepo(makeTempDir());
+    fs.writeFileSync(path.join(testRepo.dir, "tracked.txt"), "alpha\nbeta\ngamma\n");
+    fs.writeFileSync(path.join(testRepo.dir, "removed.txt"), "to be deleted\n");
+    fs.writeFileSync(path.join(testRepo.dir, "renamed-old.txt"), "stable content\nlots of it\n");
+    fs.writeFileSync(path.join(testRepo.dir, "binary.bin"), Buffer.from([0, 1, 2, 3, 0, 255]));
+    await commitAll(testRepo, "base");
 
-    // modified: 1 addition, 1 deletion
-    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "alpha\nBETA\ngamma\n");
-    // deleted
-    fs.rmSync(path.join(repoDir, "removed.txt"));
-    // renamed without content change — staged via `git mv`; an unstaged
-    // filesystem rename is correctly reported as deleted + untracked instead
-    git(repoDir, "mv", "renamed-old.txt", "renamed-new.txt");
-    // binary modified
-    fs.writeFileSync(path.join(repoDir, "binary.bin"), Buffer.from([0, 9, 9, 9, 0, 255]));
-    // untracked text: 2 additions
-    fs.writeFileSync(path.join(repoDir, "untracked.txt"), "new one\nnew two\n");
-    // untracked binary
-    fs.writeFileSync(path.join(repoDir, "untracked.bin"), Buffer.from([0, 1, 2, 0]));
+    fs.writeFileSync(path.join(testRepo.dir, "tracked.txt"), "alpha\nBETA\ngamma\n");
+    fs.rmSync(path.join(testRepo.dir, "removed.txt"));
+    stageRename(testRepo, "renamed-old.txt", "renamed-new.txt");
+    fs.writeFileSync(path.join(testRepo.dir, "binary.bin"), Buffer.from([0, 9, 9, 9, 0, 255]));
+    fs.writeFileSync(path.join(testRepo.dir, "untracked.txt"), "new one\nnew two\n");
+    fs.writeFileSync(path.join(testRepo.dir, "untracked.bin"), Buffer.from([0, 1, 2, 0]));
   });
 
   afterAll(() => {
-    fs.rmSync(repoDir, { recursive: true, force: true });
+    fs.rmSync(testRepo.dir, { recursive: true, force: true });
     fs.rmSync(plainDir, { recursive: true, force: true });
   });
 
@@ -176,23 +218,17 @@ describe("getGitDiffSummary / getGitDiff", () => {
   });
 
   it("summarizes tracked, untracked, and binary changes", async () => {
-    const summary = await getGitDiffSummary(repoDir);
+    const summary = await getGitDiffSummary(testRepo.dir);
     expect(summary.isRepo).toBe(true);
-    // tracked.txt (M), removed.txt (D), renamed (R), binary.bin (M),
-    // untracked.txt, untracked.bin
     expect(summary.files).toBe(6);
-    // 1 (tracked.txt) + 2 (untracked.txt)
     expect(summary.additions).toBe(3);
-    // 1 (tracked.txt) + 1 (removed.txt)
     expect(summary.deletions).toBe(2);
-    // binary.bin + untracked.bin
     expect(summary.binaries).toBe(2);
-    // current branch surfaced for the ambient PR-lease refresh
     expect(summary.branch).toBe("main");
   });
 
   it("returns per-file entries with patches", async () => {
-    const diff = await getGitDiff(repoDir);
+    const diff = await getGitDiff(testRepo.dir);
     expect(diff.isRepo).toBe(true);
     const byPath = new Map(diff.files.map((file) => [file.path, file]));
 
@@ -228,33 +264,31 @@ describe("getGitDiffSummary / getGitDiff", () => {
   });
 
   it("diffs against the empty tree in a repo with no commits", async () => {
-    const freshDir = makeTempDir();
+    const freshRepo = await initRepo(makeTempDir());
     try {
-      git(freshDir, "init", "--initial-branch=main");
-      fs.writeFileSync(path.join(freshDir, "staged.txt"), "first\nsecond\n");
-      git(freshDir, "add", "staged.txt");
+      fs.writeFileSync(path.join(freshRepo.dir, "staged.txt"), "first\nsecond\n");
+      stagePath(freshRepo, "staged.txt");
 
-      const summary = await getGitDiffSummary(freshDir);
+      const summary = await getGitDiffSummary(freshRepo.dir);
       expect(summary.isRepo).toBe(true);
       expect(summary.files).toBe(1);
       expect(summary.additions).toBe(2);
 
-      const diff = await getGitDiff(freshDir);
+      const diff = await getGitDiff(freshRepo.dir);
       expect(diff.files).toHaveLength(1);
       expect(diff.files[0].status).toBe("added");
       expect(diff.files[0].patch).toContain("+first");
     } finally {
-      fs.rmSync(freshDir, { recursive: true, force: true });
+      fs.rmSync(freshRepo.dir, { recursive: true, force: true });
     }
   });
 
   it("reports a clean repo as zero changes", async () => {
-    const cleanDir = makeTempDir();
+    const cleanRepo = await initRepo(makeTempDir());
     try {
-      git(cleanDir, "init", "--initial-branch=main");
-      fs.writeFileSync(path.join(cleanDir, "file.txt"), "content\n");
-      commitAll(cleanDir, "base");
-      const summary = await getGitDiffSummary(cleanDir);
+      fs.writeFileSync(path.join(cleanRepo.dir, "file.txt"), "content\n");
+      await commitAll(cleanRepo, "base");
+      const summary = await getGitDiffSummary(cleanRepo.dir);
       expect(summary).toEqual({
         isRepo: true,
         files: 0,
@@ -263,60 +297,56 @@ describe("getGitDiffSummary / getGitDiff", () => {
         binaries: 0,
         branch: "main",
       });
-      expect((await getGitDiff(cleanDir)).files).toEqual([]);
+      expect((await getGitDiff(cleanRepo.dir)).files).toEqual([]);
     } finally {
-      fs.rmSync(cleanDir, { recursive: true, force: true });
+      fs.rmSync(cleanRepo.dir, { recursive: true, force: true });
     }
   });
 });
 
 describe("getGitDiffFiles / getGitDiffFilePatch", () => {
-  let repoDir: string;
+  let testRepo: TestRepo;
   let plainDir: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     plainDir = makeTempDir();
 
-    repoDir = makeTempDir();
-    git(repoDir, "init", "--initial-branch=main");
-    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "alpha\nbeta\ngamma\n");
-    fs.writeFileSync(path.join(repoDir, "removed.txt"), "to be deleted\n");
-    // A rename that keeps >50% similarity so `git diff -M` pairs old->new into a
-    // single rename chunk rather than a delete + add.
+    testRepo = await initRepo(makeTempDir());
+    fs.writeFileSync(path.join(testRepo.dir, "tracked.txt"), "alpha\nbeta\ngamma\n");
+    fs.writeFileSync(path.join(testRepo.dir, "removed.txt"), "to be deleted\n");
     fs.writeFileSync(
-      path.join(repoDir, "renamed-old.txt"),
+      path.join(testRepo.dir, "renamed-old.txt"),
       "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
     );
-    fs.writeFileSync(path.join(repoDir, "binary.bin"), Buffer.from([0, 1, 2, 3, 0, 255]));
-    fs.mkdirSync(path.join(repoDir, "dir with space"));
-    fs.writeFileSync(path.join(repoDir, "dir with space", "café.ts"), "const a = 1;\n");
-    fs.writeFileSync(path.join(repoDir, "huge.txt"), "seed\n");
-    commitAll(repoDir, "base");
+    fs.writeFileSync(path.join(testRepo.dir, "binary.bin"), Buffer.from([0, 1, 2, 3, 0, 255]));
+    fs.mkdirSync(path.join(testRepo.dir, "dir with space"));
+    fs.writeFileSync(path.join(testRepo.dir, "dir with space", "café.ts"), "const a = 1;\n");
+    fs.writeFileSync(path.join(testRepo.dir, "huge.txt"), "seed\n");
+    await commitAll(testRepo, "base");
 
-    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "alpha\nBETA\ngamma\n");
-    fs.rmSync(path.join(repoDir, "removed.txt"));
-    git(repoDir, "mv", "renamed-old.txt", "renamed-new.txt");
+    fs.writeFileSync(path.join(testRepo.dir, "tracked.txt"), "alpha\nBETA\ngamma\n");
+    fs.rmSync(path.join(testRepo.dir, "removed.txt"));
+    stageRename(testRepo, "renamed-old.txt", "renamed-new.txt");
     fs.writeFileSync(
-      path.join(repoDir, "renamed-new.txt"),
+      path.join(testRepo.dir, "renamed-new.txt"),
       "one\nTWO\nthree\nfour\nfive\nsix\nseven\neight\n",
     );
-    fs.writeFileSync(path.join(repoDir, "binary.bin"), Buffer.from([0, 9, 9, 9, 0, 255]));
-    fs.writeFileSync(path.join(repoDir, "dir with space", "café.ts"), "const a = 2;\n");
-    // Patch will exceed the 1 MB per-file cap → patchOmitted.
-    fs.writeFileSync(path.join(repoDir, "huge.txt"), `${"x".repeat(1024)}\n`.repeat(1500));
-    fs.writeFileSync(path.join(repoDir, "untracked.txt"), "new one\nnew two\n");
-    fs.writeFileSync(path.join(repoDir, "untracked.bin"), Buffer.from([0, 1, 2, 0]));
+    fs.writeFileSync(path.join(testRepo.dir, "binary.bin"), Buffer.from([0, 9, 9, 9, 0, 255]));
+    fs.writeFileSync(path.join(testRepo.dir, "dir with space", "café.ts"), "const a = 2;\n");
+    fs.writeFileSync(path.join(testRepo.dir, "huge.txt"), `${"x".repeat(1024)}\n`.repeat(1500));
+    fs.writeFileSync(path.join(testRepo.dir, "untracked.txt"), "new one\nnew two\n");
+    fs.writeFileSync(path.join(testRepo.dir, "untracked.bin"), Buffer.from([0, 1, 2, 0]));
   });
 
   afterAll(() => {
-    fs.rmSync(repoDir, { recursive: true, force: true });
+    fs.rmSync(testRepo.dir, { recursive: true, force: true });
     fs.rmSync(plainDir, { recursive: true, force: true });
   });
 
   it("lists per-file metadata without patch bodies", async () => {
     expect(await getGitDiffFiles(plainDir)).toEqual({ isRepo: false, files: [] });
 
-    const list = await getGitDiffFiles(repoDir);
+    const list = await getGitDiffFiles(testRepo.dir);
     expect(list.isRepo).toBe(true);
     for (const file of list.files) {
       expect(file).not.toHaveProperty("patch");
@@ -340,7 +370,7 @@ describe("getGitDiffFiles / getGitDiffFilePatch", () => {
   });
 
   it("returns a modified file's patch", async () => {
-    const result = await getGitDiffFilePatch(repoDir, "tracked.txt");
+    const result = await getGitDiffFilePatch(testRepo.dir, "tracked.txt");
     expect(result.binary).toBe(false);
     expect(result.patchOmitted).toBe(false);
     expect(result.patch).toContain("-beta");
@@ -348,10 +378,9 @@ describe("getGitDiffFiles / getGitDiffFilePatch", () => {
   });
 
   it("returns a single rename chunk for a renamed file", async () => {
-    const result = await getGitDiffFilePatch(repoDir, "renamed-new.txt");
+    const result = await getGitDiffFilePatch(testRepo.dir, "renamed-new.txt");
     expect(result.binary).toBe(false);
     expect(result.patchOmitted).toBe(false);
-    // Both endpoints diffed together → one rename chunk (not an add + delete).
     expect(splitPatchByFile(result.patch ?? "")).toHaveLength(1);
     expect(result.patch).toContain("rename from renamed-old.txt");
     expect(result.patch).toContain("rename to renamed-new.txt");
@@ -360,13 +389,13 @@ describe("getGitDiffFiles / getGitDiffFilePatch", () => {
   });
 
   it("returns a deleted file's patch", async () => {
-    const result = await getGitDiffFilePatch(repoDir, "removed.txt");
+    const result = await getGitDiffFilePatch(testRepo.dir, "removed.txt");
     expect(result.patch).toContain("deleted file mode");
     expect(result.patch).toContain("-to be deleted");
   });
 
   it("reports a binary file with no patch", async () => {
-    expect(await getGitDiffFilePatch(repoDir, "binary.bin")).toEqual({
+    expect(await getGitDiffFilePatch(testRepo.dir, "binary.bin")).toEqual({
       patch: null,
       patchOmitted: false,
       binary: true,
@@ -374,26 +403,26 @@ describe("getGitDiffFiles / getGitDiffFilePatch", () => {
   });
 
   it("synthesizes a patch for an untracked text file", async () => {
-    const result = await getGitDiffFilePatch(repoDir, "untracked.txt");
+    const result = await getGitDiffFilePatch(testRepo.dir, "untracked.txt");
     expect(result.patch).toBe("@@ -0,0 +1,2 @@\n+new one\n+new two\n");
     expect(result.binary).toBe(false);
   });
 
   it("reports an untracked binary file", async () => {
-    expect(await getGitDiffFilePatch(repoDir, "untracked.bin")).toMatchObject({
+    expect(await getGitDiffFilePatch(testRepo.dir, "untracked.bin")).toMatchObject({
       patch: null,
       binary: true,
     });
   });
 
   it("handles paths with spaces and unicode", async () => {
-    const result = await getGitDiffFilePatch(repoDir, "dir with space/café.ts");
+    const result = await getGitDiffFilePatch(testRepo.dir, "dir with space/café.ts");
     expect(result.patch).toContain("-const a = 1;");
     expect(result.patch).toContain("+const a = 2;");
   });
 
   it("omits a patch that exceeds the per-file size cap", async () => {
-    expect(await getGitDiffFilePatch(repoDir, "huge.txt")).toEqual({
+    expect(await getGitDiffFilePatch(testRepo.dir, "huge.txt")).toEqual({
       patch: null,
       patchOmitted: true,
       binary: false,
@@ -401,7 +430,7 @@ describe("getGitDiffFiles / getGitDiffFilePatch", () => {
   });
 
   it("returns an empty result for an unknown path", async () => {
-    expect(await getGitDiffFilePatch(repoDir, "does-not-exist.txt")).toEqual({
+    expect(await getGitDiffFilePatch(testRepo.dir, "does-not-exist.txt")).toEqual({
       patch: null,
       patchOmitted: false,
       binary: false,
@@ -410,111 +439,102 @@ describe("getGitDiffFiles / getGitDiffFilePatch", () => {
 });
 
 describe("branch comparison mode", () => {
-  let repoDir: string;
+  let testRepo: TestRepo;
 
-  beforeAll(() => {
-    repoDir = makeTempDir();
-    git(repoDir, "init", "--initial-branch=main");
-    fs.writeFileSync(path.join(repoDir, "app.ts"), "1\n");
-    fs.writeFileSync(path.join(repoDir, "shared.ts"), "x\n");
-    commitAll(repoDir, "base");
+  beforeAll(async () => {
+    testRepo = await initRepo(makeTempDir());
+    fs.writeFileSync(path.join(testRepo.dir, "app.ts"), "1\n");
+    fs.writeFileSync(path.join(testRepo.dir, "shared.ts"), "x\n");
+    await commitAll(testRepo, "base");
 
-    // Feature branch: a committed change to app.ts.
-    git(repoDir, "checkout", "-b", "feature");
-    fs.writeFileSync(path.join(repoDir, "app.ts"), "1\n2\n");
-    commitAll(repoDir, "feature work");
+    createAndCheckoutBranch(testRepo, "feature");
+    fs.writeFileSync(path.join(testRepo.dir, "app.ts"), "1\n2\n");
+    await commitAll(testRepo, "feature work");
 
-    // main advances independently AFTER the fork — this change must NOT show up
-    // in the feature branch's merge-base diff.
-    git(repoDir, "checkout", "main");
-    fs.writeFileSync(path.join(repoDir, "shared.ts"), "x\ny\n");
-    commitAll(repoDir, "main advance");
+    checkoutBranch(testRepo, "main");
+    fs.writeFileSync(path.join(testRepo.dir, "shared.ts"), "x\ny\n");
+    await commitAll(testRepo, "main advance");
 
-    git(repoDir, "checkout", "feature");
-    // Uncommitted work + an untracked file on top of the feature commit.
-    fs.writeFileSync(path.join(repoDir, "app.ts"), "1\n2\n3\n");
-    fs.writeFileSync(path.join(repoDir, "new.ts"), "brand new\n");
+    checkoutBranch(testRepo, "feature");
+    fs.writeFileSync(path.join(testRepo.dir, "app.ts"), "1\n2\n3\n");
+    fs.writeFileSync(path.join(testRepo.dir, "new.ts"), "brand new\n");
   });
 
   afterAll(() => {
-    fs.rmSync(repoDir, { recursive: true, force: true });
+    fs.rmSync(testRepo.dir, { recursive: true, force: true });
   });
 
   it("compares the working tree to the merge base, not the base tip", async () => {
-    const list = await getGitDiffFiles(repoDir, { mode: "branch", base: "main" });
+    const list = await getGitDiffFiles(testRepo.dir, { mode: "branch", base: "main" });
     const byPath = new Map(list.files.map((file) => [file.path, file]));
 
-    // Committed-on-feature + uncommitted change, measured from the merge base.
     expect(byPath.get("app.ts")).toMatchObject({ status: "modified", additions: 2, deletions: 0 });
-    // Untracked work on top is part of "current state".
     expect(byPath.get("new.ts")?.status).toBe("untracked");
-    // shared.ts only changed on main after the fork — excluded by merge-base.
     expect(byPath.has("shared.ts")).toBe(false);
   });
 
   it("working mode shows only uncommitted changes, not the whole branch", async () => {
-    const list = await getGitDiffFiles(repoDir, { mode: "working" });
+    const list = await getGitDiffFiles(testRepo.dir, { mode: "working" });
     const byPath = new Map(list.files.map((file) => [file.path, file]));
-    // Working tree vs HEAD (feature tip): only the last, uncommitted +3 line.
     expect(byPath.get("app.ts")).toMatchObject({ status: "modified", additions: 1 });
     expect(byPath.get("new.ts")?.status).toBe("untracked");
   });
 
   it("resolves a default base branch when none is given", async () => {
-    // No remote/PR here, so default falls back to the conventional main branch.
-    const auto = await getGitDiffFiles(repoDir, { mode: "branch" });
-    const explicit = await getGitDiffFiles(repoDir, { mode: "branch", base: "main" });
+    const auto = await getGitDiffFiles(testRepo.dir, { mode: "branch" });
+    const explicit = await getGitDiffFiles(testRepo.dir, { mode: "branch", base: "main" });
     expect(auto.files.map((file) => file.path).sort()).toEqual(
       explicit.files.map((file) => file.path).sort(),
     );
   });
 
   it("returns a branch-mode patch spanning committed and uncommitted lines", async () => {
-    const result = await getGitDiffFilePatch(repoDir, "app.ts", { mode: "branch", base: "main" });
+    const result = await getGitDiffFilePatch(testRepo.dir, "app.ts", {
+      mode: "branch",
+      base: "main",
+    });
     expect(result.patchOmitted).toBe(false);
     expect(result.patch).toContain("+2");
     expect(result.patch).toContain("+3");
   });
 
   it("reports branch info with a fallback default base", async () => {
-    const info = await getGitBranchInfo(repoDir);
+    const info = await getGitBranchInfo(testRepo.dir);
     expect(info.isRepo).toBe(true);
     expect(info.currentBranch).toBe("feature");
     expect(info.branches).toContain("main");
     expect(info.branches).toContain("feature");
     expect(info.defaultBase).toBe("main");
     expect(info.defaultBaseSource).toBe("fallback");
-    // No GitHub remote/PR in a bare temp repo.
     expect(info.pr).toBeNull();
   });
 
   it("collects GitHub slugs from both fork and upstream remotes", async () => {
-    const forkDir = makeTempDir();
+    const forkRepo = await initRepo(makeTempDir());
     try {
-      git(forkDir, "init", "--initial-branch=main");
-      // Fork over SSH, upstream over HTTPS, plus a non-GitHub remote to ignore.
-      git(forkDir, "remote", "add", "origin", "git@github.com:me/fork.git");
-      git(forkDir, "remote", "add", "upstream", "https://github.com/them/repo.git");
-      git(forkDir, "remote", "add", "mirror", "https://gitlab.com/me/fork.git");
-      const slugs = await listGithubRemoteSlugs(forkDir);
+      fs.writeFileSync(path.join(forkRepo.dir, "file.txt"), "content\n");
+      await commitAll(forkRepo, "initial");
+      addRemote(forkRepo, "origin", "git@github.com:me/fork.git");
+      addRemote(forkRepo, "upstream", "https://github.com/them/repo.git");
+      addRemote(forkRepo, "mirror", "https://gitlab.com/me/fork.git");
+      const slugs = await listGithubRemoteSlugs(forkRepo.dir);
       expect(slugs).toContain("me/fork");
       expect(slugs).toContain("them/repo");
       expect(slugs).not.toContain("me/fork.git");
       expect(slugs.some((slug) => slug.includes("gitlab"))).toBe(false);
     } finally {
-      fs.rmSync(forkDir, { recursive: true, force: true });
+      fs.rmSync(forkRepo.dir, { recursive: true, force: true });
     }
   });
 
   it("returns PR data without internal headOwner field", async () => {
-    const forkDir = makeTempDir();
+    const forkRepo = await initRepo(makeTempDir());
     try {
-      git(forkDir, "init", "--initial-branch=main");
-      fs.writeFileSync(path.join(forkDir, "file.txt"), "content\n");
-      commitAll(forkDir, "initial");
-      git(forkDir, "checkout", "-b", "feature");
-      git(forkDir, "remote", "add", "origin", "git@github.com:me/fork.git");
-      git(forkDir, "remote", "add", "upstream", "https://github.com/them/repo.git");
+      fs.writeFileSync(path.join(forkRepo.dir, "file.txt"), "content\n");
+      await commitAll(forkRepo, "initial");
+      createAndCheckoutBranch(forkRepo, "feature");
+      addRemote(forkRepo, "origin", "git@github.com:me/fork.git");
+      addRemote(forkRepo, "upstream", "https://github.com/them/repo.git");
 
       setPrFetcher({
         list: async (slug, head, _state, _perPage) => {
@@ -534,7 +554,7 @@ describe("branch comparison mode", () => {
         },
       });
       try {
-        const info = await getGitBranchInfo(forkDir);
+        const info = await getGitBranchInfo(forkRepo.dir);
         expect(info.pr).not.toBeNull();
         expect(info.pr).toEqual({
           number: 42,
@@ -543,7 +563,6 @@ describe("branch comparison mode", () => {
           url: "https://github.com/them/repo/pull/42",
           state: "open",
         });
-        // Regression: headOwner must not leak into the public shape.
         expect(info.pr).not.toHaveProperty("headOwner");
       } finally {
         setPrFetcher({
@@ -551,7 +570,7 @@ describe("branch comparison mode", () => {
         });
       }
     } finally {
-      fs.rmSync(forkDir, { recursive: true, force: true });
+      fs.rmSync(forkRepo.dir, { recursive: true, force: true });
     }
   });
 
