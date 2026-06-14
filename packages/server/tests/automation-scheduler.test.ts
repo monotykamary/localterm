@@ -59,7 +59,9 @@ describe("AutomationScheduler", () => {
   });
 
   it("skips automations whose schedule does not match", () => {
-    createAutomation({ trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 30 } } });
+    createAutomation({
+      trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 30 } },
+    });
     const due: Automation[] = [];
     scheduler.on("due", (dueAutomation) => due.push(dueAutomation));
     scheduler.runTick(new Date(2026, 5, 13, 10, 15, 0));

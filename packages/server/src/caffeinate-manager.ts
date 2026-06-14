@@ -6,10 +6,7 @@ import {
   defaultSnapshotProcesses,
   type SnapshotProcesses,
 } from "./caffeinate-process-match.js";
-import {
-  CAFFEINATE_AUTO_DEFAULT_COMMANDS,
-  CAFFEINATE_AUTO_POKE_DEBOUNCE_MS,
-} from "./constants.js";
+import { CAFFEINATE_AUTO_DEFAULT_COMMANDS, CAFFEINATE_AUTO_POKE_DEBOUNCE_MS } from "./constants.js";
 import type { CaffeinateMode } from "./types.js";
 
 export interface CaffeinateManagerOptions {

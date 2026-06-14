@@ -40,9 +40,12 @@ export const fetchGitDiffFiles = async (
   signal?: AbortSignal,
 ): Promise<GitDiffFileListResponse | null> => {
   try {
-    const response = await fetch(buildEndpointUrl(GIT_DIFF_FILES_ENDPOINT, diffParams(cwd, query)), {
-      signal,
-    });
+    const response = await fetch(
+      buildEndpointUrl(GIT_DIFF_FILES_ENDPOINT, diffParams(cwd, query)),
+      {
+        signal,
+      },
+    );
     if (!response.ok) return null;
     const parsed = gitDiffFileListResponseSchema.safeParse(await response.json());
     return parsed.success ? parsed.data : null;

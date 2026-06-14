@@ -32,14 +32,7 @@ const BRANCH_INFO: GitBranchInfo = {
   },
 };
 
-const MODIFIED_PATCH = [
-  "@@ -1,3 +1,3 @@",
-  " alpha",
-  "-beta",
-  "+BETA",
-  " gamma",
-  "",
-].join("\n");
+const MODIFIED_PATCH = ["@@ -1,3 +1,3 @@", " alpha", "-beta", "+BETA", " gamma", ""].join("\n");
 
 const FILE_LIST: GitDiffFileListResponse = {
   isRepo: true,
@@ -76,9 +69,11 @@ const mockHappyPath = () => {
 
 // branchInfo is leased by the parent and passed in as a prop; tests pass it
 // directly (null = no PR / not loaded).
-const renderDiffViewer = (
-  { onClose = () => {}, branchInfo = null }: { onClose?: () => void; branchInfo?: GitBranchInfo | null } = {},
-) => render(<DiffViewer open cwd="/repo" branchInfo={branchInfo} onClose={onClose} />);
+const renderDiffViewer = ({
+  onClose = () => {},
+  branchInfo = null,
+}: { onClose?: () => void; branchInfo?: GitBranchInfo | null } = {}) =>
+  render(<DiffViewer open cwd="/repo" branchInfo={branchInfo} onClose={onClose} />);
 
 afterEach(() => {
   filesMock.mockReset();
@@ -304,7 +299,9 @@ describe("DiffViewer", () => {
     renderDiffViewer({ branchInfo: { ...BRANCH_INFO, pr: null } });
     await screen.findByText("BETA");
 
-    expect(screen.getByRole("radio", { name: "Working" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Working" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
     expect(screen.queryByText("#123")).toBeNull();
   });
 });

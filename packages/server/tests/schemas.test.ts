@@ -30,9 +30,9 @@ describe("clientToServerMessageSchema", () => {
 
   it("accepts caffeinate-mode frames for every mode", () => {
     for (const mode of ["off", "on", "automatic"]) {
-      expect(
-        clientToServerMessageSchema.safeParse({ type: "caffeinate-mode", mode }).success,
-      ).toBe(true);
+      expect(clientToServerMessageSchema.safeParse({ type: "caffeinate-mode", mode }).success).toBe(
+        true,
+      );
     }
   });
 

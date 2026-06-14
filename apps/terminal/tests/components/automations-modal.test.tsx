@@ -80,7 +80,9 @@ describe("AutomationsModal", () => {
       }),
     ]);
     // The trigger label shows in both the list row and the detail header.
-    expect((await screen.findAllByText("When files change · subfolders")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("When files change · subfolders")).length).toBeGreaterThan(
+      0,
+    );
     expect(screen.getByText("On change")).toBeDefined();
   });
 

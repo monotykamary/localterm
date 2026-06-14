@@ -232,7 +232,9 @@ describe("automations REST API", () => {
         { timeout: 15_000, interval: 100 },
       );
       expect(testContext.openedUrls).toHaveLength(1);
-      const [listed] = (await request("GET", "")).body.automations as Array<Record<string, unknown>>;
+      const [listed] = (await request("GET", "")).body.automations as Array<
+        Record<string, unknown>
+      >;
       const runs = listed.runs as Array<Record<string, unknown>>;
       expect(runs[0]).toMatchObject({ trigger: "watch", countsTowardLimit: true });
     } finally {
