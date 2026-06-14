@@ -235,6 +235,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     store: caffeinatePreferencesStore,
     listSessionPids: () => registry.pids(),
     snapshotProcesses: options.caffeinateSnapshotProcesses,
+    hasRecentOutput: (pids, withinMs) => registry.hasRecentOutput(pids, withinMs),
   });
   const clientSockets = new Set<BroadcastSocket>();
   const cdpBackgroundTabsDisabled = process.env.LOCALTERM_DISABLE_CDP_TABS === "1";
@@ -309,6 +310,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     supported: caffeinateManager.supported,
     active: caffeinateManager.active,
     mode: caffeinateManager.mode,
+    activityGate: caffeinateManager.activityGate,
     defaultCommands: [...caffeinateManager.defaultCommands],
     commands: caffeinateManager.commands,
   });
@@ -776,6 +778,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           // this guards against drift.
           const onOutput = (data: string) => {
             outputBatch += data;
+            registry.noteOutput(newSession.pid);
+            caffeinateManager.noteOutputActivity();
             if (outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
               if (outputBatchTimer !== null) {
                 clearTimeout(outputBatchTimer);
@@ -869,6 +873,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             caffeinateManager.setMode(parsed.data.mode);
           } else if (parsed.data.type === "caffeinate-commands") {
             caffeinateManager.setCommands(parsed.data.commands);
+          } else if (parsed.data.type === "caffeinate-activity-gate") {
+            caffeinateManager.setActivityGate(parsed.data.enabled);
           } else {
             session.resize(
               parsed.data.cols,

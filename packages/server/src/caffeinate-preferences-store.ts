@@ -10,13 +10,17 @@ import type { CaffeinateMode } from "./types.js";
 
 interface CaffeinatePreferences {
   mode: CaffeinateMode;
+  activityGate: boolean;
   commands: string[];
 }
 
 // Default to "automatic": keep-awake follows recognized programs out of the box
 // (the behavior the user asked to make default), with no custom commands yet.
+// The activity gate is on by default: caffeinate only stays active while a
+// recognized program is producing output.
 const DEFAULT_PREFERENCES: CaffeinatePreferences = {
   mode: "automatic",
+  activityGate: true,
   commands: [],
 };
 
@@ -57,6 +61,17 @@ export class CaffeinatePreferencesStore {
     return [...this.preferences.commands];
   }
 
+  getActivityGate(): boolean {
+    return this.preferences.activityGate;
+  }
+
+  setActivityGate(enabled: boolean): boolean {
+    if (enabled === this.preferences.activityGate) return this.preferences.activityGate;
+    this.preferences = { ...this.preferences, activityGate: enabled };
+    this.persist();
+    return this.preferences.activityGate;
+  }
+
   setMode(mode: CaffeinateMode): CaffeinateMode {
     if (mode !== this.preferences.mode) {
       this.preferences = { ...this.preferences, mode };
@@ -85,6 +100,17 @@ export class CaffeinatePreferencesStore {
       console.warn(`caffeinate preferences file invalid; using defaults (${this.filePath})`);
       return;
     }
+    // v1 files lack `activityGate`; migrate before validation.
+    if (
+      json &&
+      typeof json === "object" &&
+      "version" in json &&
+      (json as Record<string, unknown>).version === 1 &&
+      !("activityGate" in json)
+    ) {
+      (json as Record<string, unknown>).activityGate = true;
+      (json as Record<string, unknown>).version = CAFFEINATE_PREFERENCES_FILE_VERSION;
+    }
     const parsed = caffeinatePreferencesFileSchema.safeParse(json);
     if (!parsed.success) {
       console.warn(`caffeinate preferences file invalid; using defaults (${this.filePath})`);
@@ -92,6 +118,7 @@ export class CaffeinatePreferencesStore {
     }
     this.preferences = {
       mode: parsed.data.mode,
+      activityGate: parsed.data.activityGate,
       commands: sanitizeCommands(parsed.data.commands),
     };
   }
@@ -101,6 +128,7 @@ export class CaffeinatePreferencesStore {
     const payload = {
       version: CAFFEINATE_PREFERENCES_FILE_VERSION,
       mode: this.preferences.mode,
+      activityGate: this.preferences.activityGate,
       commands: this.preferences.commands,
     };
     const tmpPath = `${this.filePath}.tmp`;

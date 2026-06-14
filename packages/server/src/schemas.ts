@@ -71,11 +71,22 @@ const caffeinateCommandsInputMessageSchema = z
   })
   .strict();
 
+// Toggle the activity gate for automatic mode. When enabled (the default),
+// caffeinate only stays active while a recognized program is producing output;
+// after CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS of silence caffeinate releases.
+const caffeinateActivityGateInputMessageSchema = z
+  .object({
+    type: z.literal("caffeinate-activity-gate"),
+    enabled: z.boolean(),
+  })
+  .strict();
+
 export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   inputMessageSchema,
   resizeMessageSchema,
   caffeinateModeInputMessageSchema,
   caffeinateCommandsInputMessageSchema,
+  caffeinateActivityGateInputMessageSchema,
 ]);
 
 const outputMessageSchema = z
@@ -553,15 +564,17 @@ const automationsMessageSchema = z
 // Current keep-awake state, broadcast to every tab so the coffee control stays
 // in lockstep. `supported` is false off macOS, where `caffeinate` does not
 // exist. `active` is whether the process is running right now (drives the icon
-// tint); `mode` is the selected off/on/automatic. `defaultCommands` are the
-// fixed automatic triggers (shown read-only); `commands` are the user's
-// additions.
+// tint); `mode` is the selected off/on/automatic. `activityGate` is whether
+// automatic mode requires recent stdout from a recognized program (defaults
+// true). `defaultCommands` are the fixed automatic triggers (shown read-only);
+// `commands` are the user's additions.
 const caffeinateStateMessageSchema = z
   .object({
     type: z.literal("caffeinate"),
     supported: z.boolean(),
     active: z.boolean(),
     mode: caffeinateModeSchema,
+    activityGate: z.boolean(),
     defaultCommands: z.array(z.string()),
     commands: z.array(z.string()),
   })
@@ -572,6 +585,7 @@ export const caffeinatePreferencesFileSchema = z
   .object({
     version: z.literal(CAFFEINATE_PREFERENCES_FILE_VERSION),
     mode: caffeinateModeSchema,
+    activityGate: z.boolean(),
     commands: z.array(caffeinateCommandSchema).max(MAX_CAFFEINATE_COMMANDS),
   })
   .strict();

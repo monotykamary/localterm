@@ -23,12 +23,18 @@ export const CAFFEINATE_AUTO_DEFAULT_COMMANDS: readonly string[] = [
   "opencode",
   "pi",
 ];
-export const CAFFEINATE_PREFERENCES_FILE_VERSION = 1;
+export const CAFFEINATE_PREFERENCES_FILE_VERSION = 2;
 // Automatic detection is event-driven (no timer): a `ps` snapshot is taken only
 // in response to a foreground change or a session connect/disconnect. This
 // debounce window coalesces a burst of such events into a single snapshot; it
 // fires once and does not repeat.
 export const CAFFEINATE_AUTO_POKE_DEBOUNCE_MS = 150;
+// When the activity gate is enabled, caffeinate only stays active while a
+// recognized program is producing output. This debounce is the grace period
+// after the last output byte before caffeinate turns off — long enough that
+// an agent's brief "thinking" pause does not drop the power assertion
+// mid-task, short enough to release promptly when the program goes idle.
+export const CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS = 5_000;
 export const MAX_CAFFEINATE_COMMANDS = 50;
 export const MAX_CAFFEINATE_COMMAND_LENGTH = 128;
 

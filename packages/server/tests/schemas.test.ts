@@ -213,6 +213,7 @@ describe("serverToClientMessageSchema", () => {
       supported: true,
       active: true,
       mode: "automatic",
+      activityGate: true,
       defaultCommands: ["claude", "codex"],
       commands: ["ollama"],
     });

@@ -19,6 +19,7 @@ const caffeinateState = (overrides: Record<string, unknown> = {}) => ({
   supported: true,
   active: false,
   mode: "automatic",
+  activityGate: true,
   defaultCommands: [...CAFFEINATE_AUTO_DEFAULT_COMMANDS],
   commands: [],
   ...overrides,

@@ -6,6 +6,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { PANEL_ANIMATION_CLASSES, TRANSLUCENT_PANEL_CLASSES } from "@/lib/animation-classes";
 import { CAFFEINATE_ACCENT_COLOR, TOOLTIP_SIDE_OFFSET_PX } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -16,10 +17,12 @@ export type { CaffeinateMode };
 interface KeepAwakeMenuProps {
   mode: CaffeinateMode;
   active: boolean;
+  activityGate: boolean;
   defaultCommands: readonly string[];
   commands: readonly string[];
   onModeChange: (mode: CaffeinateMode) => void;
   onCommandsChange: (commands: string[]) => void;
+  onActivityGateChange: (enabled: boolean) => void;
   onPopoverOpenChange?: (open: boolean) => void;
   onClose?: () => void;
 }
@@ -48,10 +51,12 @@ const CHIP_CLASSES =
 export const KeepAwakeMenu = ({
   mode,
   active,
+  activityGate,
   defaultCommands,
   commands,
   onModeChange,
   onCommandsChange,
+  onActivityGateChange,
   onPopoverOpenChange,
   onClose,
 }: KeepAwakeMenuProps) => {
@@ -170,6 +175,22 @@ export const KeepAwakeMenu = ({
 
           {mode === "automatic" ? (
             <>
+              <Separator className="bg-border/40" />
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[11px] font-medium text-foreground/90">Activity gate</span>
+                  <p className="text-[10px] leading-snug text-muted-foreground">
+                    Only keep awake while a recognized program is producing output.
+                  </p>
+                </div>
+                <Switch
+                  size="sm"
+                  checked={activityGate}
+                  onCheckedChange={onActivityGateChange}
+                  aria-label="toggle activity gate"
+                />
+              </div>
+
               <Separator className="bg-border/40" />
               <Field orientation="vertical" className="gap-1.5">
                 <FieldLabel className={SECTION_LABEL_CLASSES}>Detected automatically</FieldLabel>

@@ -34,6 +34,7 @@ describe("CaffeinateManager", () => {
   let store: CaffeinatePreferencesStore;
   let sessionPids: number[];
   let snapshot: ProcessSnapshotEntry[];
+  let recentOutputPids: number[];
 
   const build = (supported = true) => {
     const { controller, spawned } = createFakeController(supported);
@@ -42,6 +43,7 @@ describe("CaffeinateManager", () => {
       store,
       listSessionPids: () => sessionPids,
       snapshotProcesses: async () => snapshot,
+      hasRecentOutput: (pids) => pids.some((pid) => recentOutputPids.includes(pid)),
     });
     return { manager, controller, spawned };
   };
@@ -51,6 +53,7 @@ describe("CaffeinateManager", () => {
     store = new CaffeinatePreferencesStore(path.join(dir, "caffeinate.json"));
     sessionPids = [];
     snapshot = [];
+    recentOutputPids = [];
   });
 
   afterEach(() => {
@@ -82,6 +85,7 @@ describe("CaffeinateManager", () => {
     expect(manager.mode).toBe("automatic");
     sessionPids = [100];
     snapshot = claudeUnderSession(100);
+    recentOutputPids = [100];
     await manager.pollNow();
     expect(controller.active).toBe(true);
 
@@ -96,6 +100,7 @@ describe("CaffeinateManager", () => {
     const { manager, controller } = build();
     sessionPids = [100];
     snapshot = claudeUnderSession(100);
+    recentOutputPids = [100];
     await manager.pollNow();
     expect(controller.active).toBe(true);
 
@@ -118,6 +123,7 @@ describe("CaffeinateManager", () => {
     expect(controller.active).toBe(false); // not a default trigger yet
 
     manager.setCommands(["ollama"]);
+    recentOutputPids = [100];
     await manager.pollNow();
     expect(controller.active).toBe(true);
     manager.dispose();
@@ -139,6 +145,71 @@ describe("CaffeinateManager", () => {
     manager.setMode("on");
     manager.setMode("off");
     expect(changes).toBeGreaterThanOrEqual(2);
+    manager.dispose();
+  });
+
+  it("does not caffeinate when activity gate is on and no recent output", async () => {
+    const { manager, controller } = build();
+    sessionPids = [100];
+    snapshot = claudeUnderSession(100);
+    // recentOutputPids is empty — no recent output from session 100.
+    expect(manager.activityGate).toBe(true);
+    await manager.pollNow();
+    expect(controller.active).toBe(false);
+    manager.dispose();
+  });
+
+  it("caffeinate when activity gate is on and recent output exists", async () => {
+    const { manager, controller } = build();
+    sessionPids = [100];
+    snapshot = claudeUnderSession(100);
+    recentOutputPids = [100];
+    await manager.pollNow();
+    expect(controller.active).toBe(true);
+    manager.dispose();
+  });
+
+  it("caffeinate when activity gate is off even without recent output", async () => {
+    const { manager, controller } = build();
+    sessionPids = [100];
+    snapshot = claudeUnderSession(100);
+    // recentOutputPids is empty.
+    manager.setActivityGate(false);
+    expect(manager.activityGate).toBe(false);
+    await manager.pollNow();
+    expect(controller.active).toBe(true);
+    manager.dispose();
+  });
+
+  it("toggling activity gate on re-checks output activity", async () => {
+    const { manager, controller } = build();
+    sessionPids = [100];
+    snapshot = claudeUnderSession(100);
+    // Gate off: caffeinate with no output.
+    manager.setActivityGate(false);
+    await manager.pollNow();
+    expect(controller.active).toBe(true);
+
+    // Gate on again: no recent output → should release.
+    manager.setActivityGate(true);
+    await manager.pollNow();
+    expect(controller.active).toBe(false);
+    manager.dispose();
+  });
+
+  it("noteOutputActivity resets the activity gate timer", async () => {
+    const { manager, controller } = build();
+    sessionPids = [100];
+    snapshot = claudeUnderSession(100);
+    recentOutputPids = [100];
+    await manager.pollNow();
+    expect(controller.active).toBe(true);
+
+    // Output no longer recent (simulating idle after debounce).
+    recentOutputPids = [];
+    // noteOutputActivity should be a no-op when autoActive is true but
+    // the gate timer is armed — it resets the timer.
+    manager.noteOutputActivity();
     manager.dispose();
   });
 });

@@ -283,6 +283,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const toggleAutomationsRef = useRef<(() => void) | null>(null);
   const setCaffeinateModeRef = useRef<((mode: CaffeinateMode) => void) | null>(null);
   const setCaffeinateCommandsRef = useRef<((commands: string[]) => void) | null>(null);
+  const setCaffeinateActivityGateRef = useRef<((enabled: boolean) => void) | null>(null);
   const toolbarHoverTimeoutRef = useRef<number | null>(null);
   const isSettingsPopoverOpenRef = useRef(false);
   const isAutomationsOpenRef = useRef(false);
@@ -347,6 +348,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [caffeinateMode, setCaffeinateMode] = useState<CaffeinateMode>("automatic");
   const [caffeinateDefaultCommands, setCaffeinateDefaultCommands] = useState<string[]>([]);
   const [caffeinateCommands, setCaffeinateCommands] = useState<string[]>([]);
+  const [caffeinateActivityGate, setCaffeinateActivityGate] = useState(true);
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
   const { summary: diffSummary, setGitDiffSummary } = useGitDiffSummary();
   const hasDiff = diffSummary !== null && diffSummary.isRepo && diffSummary.files > 0;
@@ -728,6 +730,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       send({ type: "caffeinate-mode", mode });
     setCaffeinateCommandsRef.current = (commands: string[]) =>
       send({ type: "caffeinate-commands", commands });
+    setCaffeinateActivityGateRef.current = (enabled: boolean) =>
+      send({ type: "caffeinate-activity-gate", enabled });
 
     const clearResizeScrollRestore = () => {
       const state = resizeScrollRestoreRef.current;
@@ -999,6 +1003,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           setCaffeinateMode(message.mode);
           setCaffeinateDefaultCommands(message.defaultCommands);
           setCaffeinateCommands(message.commands);
+          setCaffeinateActivityGate(message.activityGate);
         } else if (message.type === "cwd") {
           setLiveCwd(message.cwd);
           setGitDiffSummary(null);
@@ -1304,6 +1309,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
   const handleCaffeinateCommandsChange = useCallback((commands: string[]) => {
     setCaffeinateCommandsRef.current?.(commands);
+  }, []);
+
+  const handleCaffeinateActivityGateChange = useCallback((enabled: boolean) => {
+    setCaffeinateActivityGateRef.current?.(enabled);
   }, []);
 
   const handleKeepAwakePopoverOpenChange = useCallback((open: boolean) => {
@@ -1869,10 +1878,12 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                     <KeepAwakeMenu
                       mode={caffeinateMode}
                       active={caffeinateActive}
+                      activityGate={caffeinateActivityGate}
                       defaultCommands={caffeinateDefaultCommands}
                       commands={caffeinateCommands}
                       onModeChange={handleCaffeinateModeChange}
                       onCommandsChange={handleCaffeinateCommandsChange}
+                      onActivityGateChange={handleCaffeinateActivityGateChange}
                       onPopoverOpenChange={handleKeepAwakePopoverOpenChange}
                       onClose={refocusTerminalRef.current ?? undefined}
                     />

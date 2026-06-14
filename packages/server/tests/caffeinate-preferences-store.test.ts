@@ -21,16 +21,19 @@ describe("CaffeinatePreferencesStore", () => {
   it("defaults to automatic mode with no commands when no file exists", () => {
     const store = new CaffeinatePreferencesStore(filePath);
     expect(store.getMode()).toBe("automatic");
+    expect(store.getActivityGate()).toBe(true);
     expect(store.getCommands()).toEqual([]);
   });
 
-  it("persists mode and commands across reloads", () => {
+  it("persists mode, activity gate, and commands across reloads", () => {
     const store = new CaffeinatePreferencesStore(filePath);
     store.setMode("on");
+    store.setActivityGate(false);
     store.setCommands(["ollama"]);
 
     const reloaded = new CaffeinatePreferencesStore(filePath);
     expect(reloaded.getMode()).toBe("on");
+    expect(reloaded.getActivityGate()).toBe(false);
     expect(reloaded.getCommands()).toEqual(["ollama"]);
   });
 
@@ -52,6 +55,15 @@ describe("CaffeinatePreferencesStore", () => {
     fs.writeFileSync(filePath, "{ not valid json", "utf8");
     const store = new CaffeinatePreferencesStore(filePath);
     expect(store.getMode()).toBe("automatic");
+    expect(store.getActivityGate()).toBe(true);
     expect(store.getCommands()).toEqual([]);
+  });
+
+  it("migrates v1 files by defaulting activityGate to true", () => {
+    fs.mkdirSync(dir, { recursive: true });
+    const v1 = { version: 1, mode: "automatic", commands: [] };
+    fs.writeFileSync(filePath, JSON.stringify(v1), "utf8");
+    const store = new CaffeinatePreferencesStore(filePath);
+    expect(store.getActivityGate()).toBe(true);
   });
 });

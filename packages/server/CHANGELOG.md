@@ -1,5 +1,18 @@
 # localterm-server
 
+## 1.31.0
+
+### Minor Changes
+
+- Add activity gate for automatic keep-awake mode
+
+  When the activity gate is enabled (the default), automatic mode now only
+  keeps the system awake while a recognized program is actively producing
+  output. After 5 seconds of silence, caffeinate releases — so an idle
+  coding agent at a prompt no longer holds a power assertion. Users who
+  prefer the old behavior can toggle the activity gate off in the keep-awake
+  menu.
+
 ## 1.25.4
 
 ### Patch Changes

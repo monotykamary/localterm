@@ -6,7 +6,11 @@ import {
   defaultSnapshotProcesses,
   type SnapshotProcesses,
 } from "./caffeinate-process-match.js";
-import { CAFFEINATE_AUTO_DEFAULT_COMMANDS, CAFFEINATE_AUTO_POKE_DEBOUNCE_MS } from "./constants.js";
+import {
+  CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS,
+  CAFFEINATE_AUTO_DEFAULT_COMMANDS,
+  CAFFEINATE_AUTO_POKE_DEBOUNCE_MS,
+} from "./constants.js";
 import type { CaffeinateMode } from "./types.js";
 
 export interface CaffeinateManagerOptions {
@@ -19,6 +23,10 @@ export interface CaffeinateManagerOptions {
   snapshotProcesses?: SnapshotProcesses;
   // Injectable trigger defaults; defaults to the fixed recognized commands.
   defaultCommands?: readonly string[];
+  // Check whether any session produced output recently. When the activity gate
+  // is enabled, caffeinate only stays active while a recognized program is
+  // producing output within the debounce window.
+  hasRecentOutput?: (pids: readonly number[], withinMs: number) => boolean;
 }
 
 interface CaffeinateManagerEvents {
@@ -29,24 +37,32 @@ interface CaffeinateManagerEvents {
 // dumb CaffeinateController (which only knows start/stop). In "on" it is always
 // active, in "off" never, and in "automatic" it tracks whether any recognized
 // program is running in a localterm session — discovered by walking the `ps`
-// process tree under each session's shell. Emits `change` whenever any
-// broadcastable field (mode/active/commands) moves.
+// process tree under each session's shell. When the activity gate is enabled
+// (the default), caffeinate further requires that a recognized program is
+// producing output; after CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS of silence,
+// caffeinate releases. Emits `change` whenever any broadcastable field
+// (mode/active/commands) moves.
 //
 // Automatic detection is event-driven: it never polls on a timer. A `ps`
 // snapshot is taken only in response to an event — a session's foreground
-// process changing, a session connecting/disconnecting, or a mode/command
-// change — via the debounced `pokeAuto`. (The foreground signal itself rides
-// on node-pty's existing per-session foreground tracking, which powers the
-// favicon and exists independently of keep-awake.)
+// process changing, a session connecting/disconnecting, an output-activity
+// change, or a mode/command change — via the debounced `pokeAuto`. (The
+// foreground signal itself rides on node-pty's existing per-session foreground
+// tracking, which powers the favicon and exists independently of keep-awake.)
+// The activity gate is driven by a trailing-edge timer: output resets it, and
+// when it finally fires (no output for the debounce window), it pokes a
+// re-check.
 export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
   private readonly controller: CaffeinateController;
   private readonly store: CaffeinatePreferencesStore;
   private readonly listSessionPids: () => number[];
   private readonly snapshotProcesses: SnapshotProcesses;
+  private readonly checkRecentOutput?: (pids: readonly number[], withinMs: number) => boolean;
   readonly defaultCommands: readonly string[];
 
   private autoActive = false;
   private pokeTimer: NodeJS.Timeout | null = null;
+  private activityGateTimer: NodeJS.Timeout | null = null;
   private polling = false;
   private pollQueued = false;
   private disposed = false;
@@ -58,6 +74,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.listSessionPids = options.listSessionPids;
     this.snapshotProcesses = options.snapshotProcesses ?? defaultSnapshotProcesses;
     this.defaultCommands = options.defaultCommands ?? CAFFEINATE_AUTO_DEFAULT_COMMANDS;
+    this.checkRecentOutput = options.hasRecentOutput;
 
     // An unexpected death of the caffeinate process flips controller state; pass
     // that through so every tab rebroadcasts the authoritative `active`.
@@ -85,12 +102,19 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     return this.store.getCommands();
   }
 
+  get activityGate(): boolean {
+    return this.store.getActivityGate();
+  }
+
   setMode(mode: CaffeinateMode): void {
     if (this.disposed) return;
     this.store.setMode(mode);
     // Leaving automatic clears the cached detection so a later return to
     // automatic re-derives it from scratch rather than trusting a stale flag.
-    if (mode !== "automatic") this.autoActive = false;
+    if (mode !== "automatic") {
+      this.autoActive = false;
+      this.clearActivityGateTimer();
+    }
     this.recompute();
     if (mode === "automatic" && this.supported) void this.pollAuto();
     this.emit("change");
@@ -101,6 +125,22 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.store.setCommands(commands);
     // The trigger set changed; re-derive automatic detection immediately.
     if (this.mode === "automatic" && this.supported) void this.pollAuto();
+    this.emit("change");
+  }
+
+  setActivityGate(enabled: boolean): void {
+    if (this.disposed) return;
+    this.store.setActivityGate(enabled);
+    if (enabled) {
+      // Gate just turned on — re-check whether caffeinate should still be
+      // active given current output activity.
+      if (this.mode === "automatic" && this.supported) void this.pollAuto();
+    } else {
+      // Gate turned off — no need to re-snapshot; just recompute (which will
+      // drop the output check from the condition).
+      this.clearActivityGateTimer();
+      this.recompute();
+    }
     this.emit("change");
   }
 
@@ -118,6 +158,30 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.pokeTimer.unref?.();
   }
 
+  // Record that output just arrived from a session. When the activity gate is
+  // on, this resets the trailing-edge timer that checks whether caffeinate
+  // should stay active. Output arriving while caffeinate is inactive is a
+  // no-op (the foreground-change poke already handles the transition).
+  noteOutputActivity(): void {
+    if (this.disposed || this.mode !== "automatic" || !this.activityGate || !this.supported) {
+      return;
+    }
+    if (!this.autoActive) {
+      // Caffeinate is off but output just arrived — nudge a re-check
+      // (the registry already recorded the fresh output timestamp).
+      this.pokeAuto();
+      return;
+    }
+    this.clearActivityGateTimer();
+    // Schedule a re-check after the debounce window. If more output arrives
+    // before this fires, the timer resets (trailing-edge).
+    this.activityGateTimer = setTimeout(() => {
+      this.activityGateTimer = null;
+      void this.pollAuto();
+    }, CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS);
+    this.activityGateTimer.unref?.();
+  }
+
   // Force an immediate automatic re-check and resolve when it settles. Used by
   // tests; production code re-checks via the event-driven debounced pokeAuto.
   pollNow(): Promise<void> {
@@ -130,6 +194,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
       clearTimeout(this.pokeTimer);
       this.pokeTimer = null;
     }
+    this.clearActivityGateTimer();
     this.controller.dispose();
     this.removeAllListeners();
   }
@@ -149,6 +214,13 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.controller.setActive(desired);
   }
 
+  private clearActivityGateTimer(): void {
+    if (this.activityGateTimer !== null) {
+      clearTimeout(this.activityGateTimer);
+      this.activityGateTimer = null;
+    }
+  }
+
   private async pollAuto(): Promise<void> {
     if (this.disposed || this.mode !== "automatic" || !this.supported) return;
     // Serialize: if a snapshot is already running, run exactly one more after it
@@ -163,15 +235,25 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
       let next = false;
       if (pids.length > 0) {
         const snapshot = await this.snapshotProcesses();
-        next = anySessionRunsTrigger(pids, snapshot, this.triggerSet());
+        const triggering = anySessionRunsTrigger(pids, snapshot, this.triggerSet());
+        if (triggering) {
+          if (!this.activityGate) {
+            next = true;
+          } else if (this.checkRecentOutput) {
+            next = this.checkRecentOutput(pids, CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS);
+          }
+        }
       }
       if (this.disposed || this.mode !== "automatic") return;
       if (next !== this.autoActive) {
         this.autoActive = next;
         this.recompute();
-        // controller emits `change` only when `active` actually flips; if the
-        // process state didn't change but detection did, no broadcast is needed
-        // since `active` is unchanged.
+      }
+      // If the activity gate is on and caffeinate is active, ensure the
+      // trailing-edge idle timer is armed. (It may have been cleared by
+      // noteOutputActivity or by a mode/command change.)
+      if (this.activityGate && this.autoActive) {
+        this.armActivityGateTimerIfNeeded();
       }
     } finally {
       this.polling = false;
@@ -180,5 +262,14 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
         void this.pollAuto();
       }
     }
+  }
+
+  private armActivityGateTimerIfNeeded(): void {
+    if (this.activityGateTimer !== null) return;
+    this.activityGateTimer = setTimeout(() => {
+      this.activityGateTimer = null;
+      void this.pollAuto();
+    }, CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS);
+    this.activityGateTimer.unref?.();
   }
 }
