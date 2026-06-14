@@ -313,7 +313,7 @@ export class Session extends EventEmitter<SessionEvents> {
         mkdirSync(hookDir, { recursive: true, mode: 0o700 });
         this.hookCleanupPaths.push(hookDir);
         const hookScript = this.zshOsc7ChpwdFunction();
-        const userZdotdir = env.ZDOTDIR || os.homedir();
+        const userZdotdir = env.__LOCALTERM_ORIG_ZDOTDIR || env.ZDOTDIR || os.homedir();
         const escapedZdotdir = userZdotdir.replace(/'/g, "'\\''");
         const lines = [
           `source '${escapedZdotdir}/.zshenv' 2>/dev/null`,
