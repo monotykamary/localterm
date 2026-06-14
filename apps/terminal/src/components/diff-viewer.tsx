@@ -845,8 +845,11 @@ export const DiffViewer = ({
 }: DiffViewerProps) => {
   const [mounted, setMounted] = useState(false);
   const [settled, setSettled] = useState(false);
-  const [fileList, setFileList] = useState<GitDiffFileListResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  // Per-mode file lists, pre-fetched on cwd change (even while the viewer is
+  // closed) so data is ready instantly on open. No cross-component ref — state
+  // triggers re-renders, so the viewer always reflects the latest fetch.
+  const [workingFiles, setWorkingFiles] = useState<GitDiffFileListResponse | null>(null);
+  const [branchFiles, setBranchFiles] = useState<GitDiffFileListResponse | null>(null);
   const [hasError, setHasError] = useState(false);
   const [patchCache, setPatchCache] = useState<Record<string, PatchEntry>>({});
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -904,42 +907,82 @@ export const DiffViewer = ({
     patchControllersRef.current.clear();
   }, []);
 
-  // Switching repos forgets the previous repo's base pick and mode override.
+  // Switching repos resets mode overrides, file-list state, and patches.
   useEffect(() => {
     setBaseOverride(null);
     setUserPickedMode(null);
+    setWorkingFiles(null);
+    setBranchFiles(null);
+    setHasError(false);
   }, [cwd]);
 
-  // Fetch the file list (metadata only) on open/refresh/mode change — the viewer
-  // renders its sidebar and totals instantly; patches load lazily per selected
-  // file. Branch mode does NOT wait on branch metadata: it sends only an explicit
-  // user override as the base, letting the server resolve a local default fast.
+  // Pre-fetch both file lists on cwd change. Runs while the viewer is closed so
+  // data is ready on open. Branch fetch is chained after working (sequential) to
+  // keep peak concurrent git processes low (~2-3 at a time, not 6+).
+  useEffect(() => {
+    if (!cwd) return;
+    const controller = new AbortController();
+    void (async () => {
+      const working = await fetchGitDiffFiles(cwd, { mode: "working" }, controller.signal);
+      if (controller.signal.aborted || !working) return;
+      setWorkingFiles(working);
+      const branch = await fetchGitDiffFiles(cwd, { mode: "branch" }, controller.signal);
+      if (controller.signal.aborted || !branch) return;
+      setBranchFiles(branch);
+    })();
+    return () => controller.abort();
+  }, [cwd]);
+
+  // On-open revalidation: when the viewer opens with data already present, show
+  // it immediately and silently refresh in the background. When data is missing
+  // (first load on a fresh cwd, or explicit refresh), fetch with the center
+  // spinner. Mode switches read from the per-mode state — no spinner.
   useEffect(() => {
     if (!open || !cwd) {
       abortPatchFetches();
       return;
     }
-    const controller = new AbortController();
-    setIsLoading(true);
+    const currentData = compareMode === "branch" ? branchFiles : workingFiles;
+    const setter = compareMode === "branch" ? setBranchFiles : setWorkingFiles;
+    const query = { mode: compareMode, base: baseOverride };
+
+    if (currentData) {
+      const controller = new AbortController();
+      void (async () => {
+        const response = await fetchGitDiffFiles(cwd, query, controller.signal);
+        if (controller.signal.aborted || !response) return;
+        setter(response);
+      })();
+      return () => controller.abort();
+    }
+
     setHasError(false);
-    // A fresh list (new query) invalidates every cached patch.
     abortPatchFetches();
     setPatchCache({});
-    void fetchGitDiffFiles(cwd, { mode: compareMode, base: baseOverride }, controller.signal).then(
-      (response) => {
-        if (controller.signal.aborted) return;
-        setIsLoading(false);
-        if (!response) {
-          setHasError(true);
-          return;
-        }
-        setFileList(response);
-      },
-    );
+    const controller = new AbortController();
+    void (async () => {
+      const response = await fetchGitDiffFiles(cwd, query, controller.signal);
+      if (controller.signal.aborted) return;
+      if (!response) {
+        setHasError(true);
+        return;
+      }
+      setter(response);
+    })();
     return () => controller.abort();
-  }, [open, cwd, refreshCount, compareMode, baseOverride, abortPatchFetches]);
+  }, [
+    open,
+    cwd,
+    refreshCount,
+    compareMode,
+    baseOverride,
+    branchFiles,
+    workingFiles,
+    abortPatchFetches,
+  ]);
 
-  const files = useMemo(() => fileList?.files ?? [], [fileList]);
+  const displayFileList = compareMode === "branch" ? branchFiles : workingFiles;
+  const files = useMemo(() => displayFileList?.files ?? [], [displayFileList]);
 
   const loadPatch = useCallback(
     (path: string | null | undefined) => {
@@ -970,10 +1013,10 @@ export const DiffViewer = ({
   // Keep a valid selection: follow the current file across refreshes, fall back
   // to the first file when it disappears.
   useEffect(() => {
-    if (!fileList) return;
+    if (!displayFileList) return;
     if (selectedPath && files.some((file) => file.path === selectedPath)) return;
     setSelectedPath(files[0]?.path ?? null);
-  }, [fileList, files, selectedPath]);
+  }, [displayFileList, files, selectedPath]);
 
   // Load the selected file's patch on demand, and prefetch its neighbors so j/k
   // navigation stays instant.
@@ -1071,9 +1114,12 @@ export const DiffViewer = ({
 
   // Refresh both the diff and the leased branch/PR metadata.
   const handleRefresh = useCallback(() => {
+    if (compareMode === "branch") setBranchFiles(null);
+    else setWorkingFiles(null);
+    setHasError(false);
     setRefreshCount((count) => count + 1);
     onRefreshBranchInfo?.();
-  }, [onRefreshBranchInfo]);
+  }, [compareMode, onRefreshBranchInfo]);
 
   const openAnnotationEditor = useCallback((key: string, range?: PendingAnnotationRange) => {
     setEditingKey(key);
@@ -1140,8 +1186,8 @@ export const DiffViewer = ({
   if (!mounted) return null;
 
   const isVisible = open && settled;
-  const isRepo = (fileList?.isRepo ?? true) && (branchInfo?.isRepo ?? true);
-  const isEmpty = fileList !== null && isRepo && files.length === 0;
+  const isRepo = (displayFileList?.isRepo ?? true) && (branchInfo?.isRepo ?? true);
+  const isEmpty = displayFileList !== null && isRepo && files.length === 0;
   const isBranchMode = compareMode === "branch";
   const pr = branchInfo?.pr ?? null;
   // Branch metadata is leased but no plausible base branch exists (e.g. a
@@ -1235,7 +1281,9 @@ export const DiffViewer = ({
               <span className="text-muted-foreground/70"> · {totals.binaries} binary</span>
             ) : null}
           </span>
-          {isLoading ? <Spinner className="size-3.5" aria-label="loading diff" /> : null}
+          {displayFileList === null ? (
+            <Spinner className="size-3.5" aria-label="loading diff" />
+          ) : null}
           <div className="ml-auto flex items-center gap-1">
             <div
               role="radiogroup"
@@ -1302,7 +1350,7 @@ export const DiffViewer = ({
               ? `No changes between ${displayBase ?? "the base branch"} and your working tree.`
               : "Working tree clean — nothing to diff."}
           </div>
-        ) : fileList === null ? (
+        ) : displayFileList === null ? (
           <div className="flex flex-1 items-center justify-center">
             <Spinner aria-label="loading diff" />
           </div>

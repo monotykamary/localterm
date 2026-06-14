@@ -1,5 +1,6 @@
 {
   "name": "@monotykamary/localterm-monorepo",
+  "version": "1.26.1",
   "private": true,
   "workspaces": [
     "apps/*",
