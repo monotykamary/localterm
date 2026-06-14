@@ -842,7 +842,15 @@ const detectPr = async (cwd: string, r: OpenRepo): Promise<GitBranchPr | null> =
       const key = pr.url ?? `#${pr.number}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      if (pr.state === "open") return pr;
+      if (pr.state === "open") {
+        return {
+          number: pr.number,
+          title: pr.title,
+          baseRefName: pr.baseRefName,
+          url: pr.url,
+          state: pr.state,
+        };
+      }
       fallback ??= pr;
     }
   }
