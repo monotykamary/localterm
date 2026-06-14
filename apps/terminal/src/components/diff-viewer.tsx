@@ -992,7 +992,8 @@ export const DiffViewer = ({
     (path: string | null | undefined, force = false) => {
       if (!path || !cwd) return;
       const existing = patchCacheRef.current[path];
-      if (!force && existing && (existing.state === "loaded" || existing.state === "loading")) return;
+      if (!force && existing && (existing.state === "loaded" || existing.state === "loading"))
+        return;
       if (force && existing?.state === "loading") return;
       const previousData = existing?.state === "loaded" ? existing.data : undefined;
       setPatchCache((previous) => ({
