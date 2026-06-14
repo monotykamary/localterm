@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.25.0
+
+### Minor Changes
+
+- Add launchd install/uninstall commands and spawn-first restart handoff
+
 ## 1.24.1
 
 ### Patch Changes
