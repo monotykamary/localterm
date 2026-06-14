@@ -76,10 +76,28 @@ export class Session extends EventEmitter<SessionEvents> {
 
     const env: Record<string, string> = {};
     const denied = new Set(PTY_ENV_DENYLIST);
+    const isLocaltermPath = (value: string) => /localterm-(?:zdot|bash)-/.test(value);
+    // The daemon may inherit a stale ZDOTDIR / __LOCALTERM_ORIG_ZDOTDIR from
+    // its login-shell wrapper — the previous session set ZDOTDIR to a temp
+    // hook dir and the plist's `zsh -l -c` re-sources that hook .zshrc. Strip
+    // any value that points to a localterm temp dir; pass through a legitimate
+    // user-set ZDOTDIR (e.g. dotfiles managed via custom ZDOTDIR). ZDOTDIR
+    // takes priority over __LOCALTERM_ORIG_ZDOTDIR because it reflects the
+    // user's current environment.
+    const inheritedZdotdir = process.env.ZDOTDIR;
+    const inheritedOrigZdotdir = process.env.__LOCALTERM_ORIG_ZDOTDIR;
+    const userZdotdirFromEnv =
+      inheritedZdotdir && !isLocaltermPath(inheritedZdotdir)
+        ? inheritedZdotdir
+        : inheritedOrigZdotdir && !isLocaltermPath(inheritedOrigZdotdir)
+          ? inheritedOrigZdotdir
+          : undefined;
     for (const [key, value] of Object.entries(process.env)) {
       if (denied.has(key)) continue;
       if (typeof value === "string") env[key] = value;
     }
+    if (userZdotdirFromEnv) env.__LOCALTERM_ORIG_ZDOTDIR = userZdotdirFromEnv;
+    else delete env.__LOCALTERM_ORIG_ZDOTDIR;
     if (input.env) {
       for (const [key, value] of Object.entries(input.env)) {
         env[key] = value;
@@ -317,7 +335,10 @@ export class Session extends EventEmitter<SessionEvents> {
         const escapedZdotdir = userZdotdir.replace(/'/g, "'\\''");
         const lines = [
           `source '${escapedZdotdir}/.zshenv' 2>/dev/null`,
+          '__localterm_saved_zdotdir="${ZDOTDIR}"',
+          `ZDOTDIR='${escapedZdotdir}'`,
           `source '${escapedZdotdir}/.zshrc' 2>/dev/null`,
+          'ZDOTDIR="${__localterm_saved_zdotdir}"',
           hookScript,
           "chpwd_functions=(${chpwd_functions[@]} __localterm_osc7_chpwd)",
           "__localterm_osc7_chpwd",

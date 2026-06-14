@@ -58,6 +58,7 @@ export const PTY_ENV_DENYLIST = [
   "GHOSTTY_BIN_DIR",
   "VSCODE_INJECTION",
   "VSCODE_GIT_IPC_HANDLE",
+  "ZDOTDIR",
 ];
 
 export const MAX_INPUT_BYTES = 64 * 1024;
