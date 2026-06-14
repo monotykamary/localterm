@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.25.2
+
+### Patch Changes
+
+- Fix zsh prompt reverting to macOS default when daemon is spawned from inside localterm
+
 ## 1.25.1
 
 ### Patch Changes
