@@ -9,6 +9,11 @@ export const TERM_TYPE = "xterm-256color";
 export const COLORTERM_VALUE = "truecolor";
 export const LOCALTERM_VALUE = "1";
 
+// Keep-awake (macOS only). `-d` display, `-i` idle, `-m` disk, `-s` system
+// sleep — held for as long as the spawned process lives.
+export const CAFFEINATE_BINARY = "caffeinate";
+export const CAFFEINATE_ARGS: readonly string[] = ["-dims"];
+
 export const TITLE_MAX_PATH_SEGMENTS = 1;
 
 /**

@@ -14,6 +14,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Coffee,
   Copy,
   FileDiff,
   MonitorCog,
@@ -48,6 +49,7 @@ import { DiffViewer } from "@/components/diff-viewer";
 import { SettingsMenu } from "@/components/settings-menu";
 import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
 import {
+  CAFFEINATE_ACCENT_COLOR,
   COPY_FEEDBACK_MS,
   DEAD_SESSION_TITLE_PREFIX,
   DEFAULT_DOCUMENT_TITLE,
@@ -118,38 +120,58 @@ import { removeRunQueryParam, RUN_QUERY_PARAM } from "@/utils/remove-run-query-p
 import {
   loadStoredTerminalCursorBlink,
   storeTerminalCursorBlink,
+  subscribeStoredTerminalCursorBlink,
 } from "@/utils/stored-terminal-cursor-blink";
 import {
   loadStoredTerminalCursorStyle,
   storeTerminalCursorStyle,
+  subscribeStoredTerminalCursorStyle,
 } from "@/utils/stored-terminal-cursor-style";
-import { loadStoredTerminalFontId, storeTerminalFontId } from "@/utils/stored-terminal-font-id";
+import {
+  loadStoredTerminalFontId,
+  storeTerminalFontId,
+  subscribeStoredTerminalFontId,
+} from "@/utils/stored-terminal-font-id";
 import {
   loadStoredTerminalFontSize,
   storeTerminalFontSize,
+  subscribeStoredTerminalFontSize,
 } from "@/utils/stored-terminal-font-size";
 import {
   loadStoredTerminalLineHeight,
   storeTerminalLineHeight,
+  subscribeStoredTerminalLineHeight,
 } from "@/utils/stored-terminal-line-height";
 import {
   loadStoredTerminalScrollback,
   storeTerminalScrollback,
+  subscribeStoredTerminalScrollback,
 } from "@/utils/stored-terminal-scrollback";
 import {
   loadStoredTerminalScrollOnUserInput,
   storeTerminalScrollOnUserInput,
+  subscribeStoredTerminalScrollOnUserInput,
 } from "@/utils/stored-terminal-scroll-on-user-input";
-import { loadStoredTerminalThemeId, storeTerminalThemeId } from "@/utils/stored-terminal-theme-id";
+import {
+  loadStoredTerminalThemeId,
+  storeTerminalThemeId,
+  subscribeStoredTerminalThemeId,
+} from "@/utils/stored-terminal-theme-id";
 import {
   loadStoredTerminalPaddingX,
   storeTerminalPaddingX,
+  subscribeStoredTerminalPaddingX,
 } from "@/utils/stored-terminal-padding-x";
 import {
   loadStoredTerminalPaddingY,
   storeTerminalPaddingY,
+  subscribeStoredTerminalPaddingY,
 } from "@/utils/stored-terminal-padding-y";
-import { loadStoredNerdFontEnabled, storeNerdFontEnabled } from "@/utils/stored-nerd-font-enabled";
+import {
+  loadStoredNerdFontEnabled,
+  storeNerdFontEnabled,
+  subscribeStoredNerdFontEnabled,
+} from "@/utils/stored-nerd-font-enabled";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
@@ -255,6 +277,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [isAutomationsOpen, setIsAutomationsOpen] = useState(false);
   const [automations, setAutomations] = useState<AutomationWithNextRun[] | null>(null);
   const toggleAutomationsRef = useRef<(() => void) | null>(null);
+  const setCaffeinateRef = useRef<((enabled: boolean) => void) | null>(null);
   const toolbarHoverTimeoutRef = useRef<number | null>(null);
   const isSettingsPopoverOpenRef = useRef(false);
   const isAutomationsOpenRef = useRef(false);
@@ -308,6 +331,11 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const liveCwdRef = useRef<string | null>(null);
   const wsConnectedRef = useRef(false);
   const isMac = useMemo(detectIsMacPlatform, []);
+  // Keep-awake (caffeinate) is daemon-owned global state: the server is the
+  // source of truth and broadcasts changes to every tab. Seed `supported` from
+  // the platform so the button doesn't flash in before the first WS frame.
+  const [isCaffeinated, setIsCaffeinated] = useState(false);
+  const [isCaffeinateSupported, setIsCaffeinateSupported] = useState(isMac);
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
   const { summary: diffSummary, setGitDiffSummary } = useGitDiffSummary();
   const hasDiff = diffSummary !== null && diffSummary.isRepo && diffSummary.files > 0;
@@ -665,6 +693,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
     };
 
+    setCaffeinateRef.current = (enabled: boolean) => send({ type: "caffeinate", enabled });
+
     const clearResizeScrollRestore = () => {
       const state = resizeScrollRestoreRef.current;
       if (state) cancelAnimationFrame(state.frameId);
@@ -927,6 +957,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           removeRunQueryParam();
         } else if (message.type === "automations") {
           setAutomations(message.automations);
+        } else if (message.type === "caffeinate") {
+          setIsCaffeinated(message.active);
+          setIsCaffeinateSupported(message.supported);
         } else if (message.type === "cwd") {
           setLiveCwd(message.cwd);
           setGitDiffSummary(null);
@@ -1189,12 +1222,42 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     storeTerminalPaddingY(clamped);
   }, []);
 
+  // Settings persist to localStorage, so changing one in any tab fires a
+  // `storage` event in every OTHER tab. Re-applying each setting there keeps
+  // theme/font/cursor/padding/… in lockstep across all open tabs — the
+  // terminal-option effects above already react to these setters. Each
+  // subscription self-filters by its storage key.
+  useEffect(() => {
+    const unsubscribes = [
+      subscribeStoredTerminalThemeId(setActiveThemeId),
+      subscribeStoredTerminalFontId(setActiveFontId),
+      subscribeStoredNerdFontEnabled(setActiveNerdFontEnabled),
+      subscribeStoredTerminalFontSize(setActiveFontSize),
+      subscribeStoredTerminalLineHeight(setActiveLineHeight),
+      subscribeStoredTerminalCursorStyle(setActiveCursorStyle),
+      subscribeStoredTerminalCursorBlink(setActiveCursorBlink),
+      subscribeStoredTerminalScrollback(setActiveScrollback),
+      subscribeStoredTerminalScrollOnUserInput(setActiveScrollOnUserInput),
+      subscribeStoredTerminalPaddingX(setActivePaddingX),
+      subscribeStoredTerminalPaddingY(setActivePaddingY),
+    ];
+    return () => {
+      for (const unsubscribe of unsubscribes) unsubscribe();
+    };
+  }, []);
+
   const handleNotificationsPermissionRequest = useCallback(() => {
     if (!("Notification" in window)) return;
     void Notification.requestPermission().then((result) => {
       setNotificationsPermission(result);
     });
   }, []);
+
+  // Server-authoritative: we only request the flip and let the broadcast update
+  // every tab's button, so all open tabs stay in lockstep.
+  const handleCaffeinateToggle = useCallback(() => {
+    setCaffeinateRef.current?.(!isCaffeinated);
+  }, [isCaffeinated]);
 
   useEffect(() => {
     if (!isSearchOpen) return;
@@ -1726,6 +1789,20 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                     onOpen={() => handleAutomationsOpenChange(true)}
                     isMac={isMac}
                   />
+                  {isCaffeinateSupported ? (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="keep system awake"
+                      aria-pressed={isCaffeinated}
+                      title={isCaffeinated ? "Keeping system awake" : "Keep system awake"}
+                      onClick={handleCaffeinateToggle}
+                      className="hover:text-foreground"
+                      style={isCaffeinated ? { color: CAFFEINATE_ACCENT_COLOR } : undefined}
+                    >
+                      <Coffee />
+                    </Button>
+                  ) : null}
                   <Button
                     variant="ghost"
                     size="icon-sm"

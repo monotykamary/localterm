@@ -10,3 +10,4 @@ const setting = createStringLookupStoredSetting(
 
 export const loadStoredTerminalFontId = setting.load;
 export const storeTerminalFontId = setting.store;
+export const subscribeStoredTerminalFontId = setting.subscribe;

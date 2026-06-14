@@ -9,6 +9,7 @@ import open from "open";
 import { AutomationRunTracker } from "./automation-run-tracker.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
+import { CaffeinateController } from "./caffeinate-controller.js";
 import { CdpClient } from "./cdp/cdp-client.js";
 import {
   AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
@@ -79,6 +80,12 @@ export interface ServerOptions {
    * closeable).
    */
   tabController?: AutomationTabController;
+  /**
+   * Override the keep-awake controller. Defaults to a `caffeinate -dims`-backed
+   * controller, enabled only on macOS. Injectable so tests never hold a real
+   * power assertion.
+   */
+  caffeinateController?: CaffeinateController;
 }
 
 /** Opens and (optionally) closes the browser tab for an automation run. */
@@ -186,6 +193,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const automationRunTracker = new AutomationRunTracker();
   const automationScheduler = new AutomationScheduler(automationStore);
   const heartbeatStore = new HeartbeatStore(path.join(stateDirectory, "daemon-heartbeat.json"));
+  const caffeinateController = options.caffeinateController ?? new CaffeinateController();
   const clientSockets = new Set<BroadcastSocket>();
   const cdpBackgroundTabsDisabled = process.env.LOCALTERM_DISABLE_CDP_TABS === "1";
   // One persistent CDP socket for the daemon's lifetime — opened once at start
@@ -252,6 +260,23 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       safeSend(clientSocket, payload);
     }
   };
+
+  const caffeinateStatePayload = (): ServerToClientMessage => ({
+    type: "caffeinate",
+    active: caffeinateController.active,
+    supported: caffeinateController.supported,
+  });
+
+  // The daemon owns the single keep-awake process, so its state is broadcast to
+  // every tab — exactly like automations — and the coffee toggles stay in sync.
+  const broadcastCaffeinate = () => {
+    const payload = caffeinateStatePayload();
+    for (const clientSocket of clientSockets) {
+      safeSend(clientSocket, payload);
+    }
+  };
+
+  caffeinateController.on("change", broadcastCaffeinate);
 
   // Open a browser tab for a run and record it in history. Scheduled launches
   // count toward the limit (and can finish the automation); manual launches
@@ -701,6 +726,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             cwd: newSession.cwd,
             title: newSession.initialDocumentTitle,
           });
+          // Tell this tab the current keep-awake state so its coffee toggle
+          // renders correctly (and is hidden where caffeinate is unsupported).
+          safeSend(ws, caffeinateStatePayload());
         },
         onMessage(event) {
           if (!session) return;
@@ -715,6 +743,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           if (!parsed.success) return;
           if (parsed.data.type === "input") {
             session.write(parsed.data.data);
+          } else if (parsed.data.type === "caffeinate") {
+            caffeinateController.setActive(parsed.data.enabled);
           } else {
             session.resize(
               parsed.data.cols,
@@ -872,6 +902,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   const stop = async () => {
     automationScheduler.dispose();
+    caffeinateController.dispose();
     cdpClient?.close();
     registry.disposeAll();
     // Forcibly tear down every WS first. node-pty + ws upgraded sockets
@@ -917,6 +948,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
 export type { Session } from "./session.js";
 export type { SessionRegistry } from "./session-registry.js";
+export { CaffeinateController } from "./caffeinate-controller.js";
+export type {
+  CaffeinateControllerOptions,
+  CaffeinateProcessHandle,
+} from "./caffeinate-controller.js";
 export type * from "./types.js";
 export { DEFAULT_HOST, DEFAULT_PORT, WS_CLOSE_BACKPRESSURE } from "./constants.js";
 export { isLoopbackHost, isPrivateHost, isAllowedSourceIp } from "./security.js";

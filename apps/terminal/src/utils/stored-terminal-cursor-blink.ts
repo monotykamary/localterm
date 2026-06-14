@@ -8,3 +8,4 @@ const setting = createBooleanStoredSetting(
 
 export const loadStoredTerminalCursorBlink = setting.load;
 export const storeTerminalCursorBlink = setting.store;
+export const subscribeStoredTerminalCursorBlink = setting.subscribe;

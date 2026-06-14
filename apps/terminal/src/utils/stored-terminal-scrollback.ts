@@ -16,3 +16,4 @@ const setting = createNumericStoredSetting(
 
 export const loadStoredTerminalScrollback = setting.load;
 export const storeTerminalScrollback = setting.store;
+export const subscribeStoredTerminalScrollback = setting.subscribe;

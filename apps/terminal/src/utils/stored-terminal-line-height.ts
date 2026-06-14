@@ -10,3 +10,4 @@ const setting = createNumericStoredSetting(
 
 export const loadStoredTerminalLineHeight = setting.load;
 export const storeTerminalLineHeight = setting.store;
+export const subscribeStoredTerminalLineHeight = setting.subscribe;

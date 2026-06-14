@@ -11,3 +11,4 @@ const setting = createBooleanStoredSetting(
 
 export const loadStoredTerminalScrollOnUserInput = setting.load;
 export const storeTerminalScrollOnUserInput = setting.store;
+export const subscribeStoredTerminalScrollOnUserInput = setting.subscribe;

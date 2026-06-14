@@ -69,6 +69,10 @@ export const SEARCH_MATCH_BACKGROUND_HEX = "#ffc79944";
 export const SEARCH_ACTIVE_MATCH_BACKGROUND_HEX = "#ffc799";
 export const SEARCH_ACTIVE_MATCH_BORDER_HEX = "#ff8080";
 
+// Coffee button (keep-awake toggle). The icon tints to a warm coffee tone when
+// active; otherwise it renders like the other toolbar icons.
+export const CAFFEINATE_ACCENT_COLOR = "#c8956c";
+
 export const TERMINAL_THEME_STORAGE_KEY = "localterm:terminal-theme-id";
 export const TERMINAL_FONT_STORAGE_KEY = "localterm:terminal-font-id";
 export const TERMINAL_FONT_SIZE_STORAGE_KEY = "localterm:terminal-font-size";

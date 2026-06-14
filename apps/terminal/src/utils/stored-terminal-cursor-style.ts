@@ -10,3 +10,4 @@ const setting = createStringValidatedStoredSetting(
 
 export const loadStoredTerminalCursorStyle = setting.load;
 export const storeTerminalCursorStyle = setting.store;
+export const subscribeStoredTerminalCursorStyle = setting.subscribe;

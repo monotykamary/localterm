@@ -28,6 +28,19 @@ describe("clientToServerMessageSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts a caffeinate toggle frame", () => {
+    expect(
+      clientToServerMessageSchema.safeParse({ type: "caffeinate", enabled: true }).success,
+    ).toBe(true);
+    expect(
+      clientToServerMessageSchema.safeParse({ type: "caffeinate", enabled: false }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a caffeinate frame missing enabled", () => {
+    expect(clientToServerMessageSchema.safeParse({ type: "caffeinate" }).success).toBe(false);
+  });
+
   it("rejects negative dimensions", () => {
     expect(
       clientToServerMessageSchema.safeParse({ type: "resize", cols: 0, rows: 24 }).success,
@@ -172,5 +185,20 @@ describe("serverToClientMessageSchema", () => {
       process: oversized,
     });
     expect(result.success).toBe(false);
+  });
+
+  it("accepts a caffeinate state frame", () => {
+    const result = serverToClientMessageSchema.safeParse({
+      type: "caffeinate",
+      active: true,
+      supported: true,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects caffeinate state frames missing fields", () => {
+    expect(
+      serverToClientMessageSchema.safeParse({ type: "caffeinate", active: true }).success,
+    ).toBe(false);
   });
 });

@@ -10,3 +10,4 @@ const setting = createNumericStoredSetting(
 
 export const loadStoredTerminalPaddingX = setting.load;
 export const storeTerminalPaddingX = setting.store;
+export const subscribeStoredTerminalPaddingX = setting.subscribe;

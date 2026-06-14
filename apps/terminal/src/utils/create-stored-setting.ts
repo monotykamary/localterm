@@ -18,75 +18,88 @@ const storeRaw = (key: string, value: string): void => {
   }
 };
 
-interface NumericStoredSetting {
-  load: () => number;
-  store: (value: number) => void;
+// The browser fires a `storage` event in every OTHER same-origin tab when this
+// tab mutates localStorage — the native cross-tab channel. `event.key === null`
+// means the whole store was cleared (localStorage.clear()), which should also
+// re-sync. Returns an unsubscribe.
+const subscribeToStorageKey = (key: string, onChange: () => void): (() => void) => {
+  if (typeof window === "undefined") return () => {};
+  const handleStorageEvent = (event: StorageEvent) => {
+    if (event.key !== null && event.key !== key) return;
+    onChange();
+  };
+  window.addEventListener("storage", handleStorageEvent);
+  return () => window.removeEventListener("storage", handleStorageEvent);
+};
+
+interface StoredSetting<T> {
+  load: () => T;
+  store: (value: T) => void;
+  subscribe: (onChange: (value: T) => void) => () => void;
 }
 
 export const createNumericStoredSetting = (
   key: string,
   defaultValue: number,
   clamp: (value: number) => number,
-): NumericStoredSetting => ({
-  load: () => {
+): StoredSetting<number> => {
+  const load = (): number => {
     const raw = loadRaw(key);
     if (raw === null) return defaultValue;
     const parsed = Number(raw);
     if (!Number.isFinite(parsed)) return defaultValue;
     return clamp(parsed);
-  },
-  store: (value) => storeRaw(key, String(value)),
-});
-
-interface BooleanStoredSetting {
-  load: () => boolean;
-  store: (value: boolean) => void;
-}
+  };
+  return {
+    load,
+    store: (value) => storeRaw(key, String(value)),
+    subscribe: (onChange) => subscribeToStorageKey(key, () => onChange(load())),
+  };
+};
 
 export const createBooleanStoredSetting = (
   key: string,
   defaultValue: boolean,
-): BooleanStoredSetting => ({
-  load: () => {
+): StoredSetting<boolean> => {
+  const load = (): boolean => {
     const raw = loadRaw(key);
     if (raw === "true") return true;
     if (raw === "false") return false;
     return defaultValue;
-  },
-  store: (value) => storeRaw(key, String(value)),
-});
-
-interface StringValidatedStoredSetting<T extends string> {
-  load: () => T;
-  store: (value: T) => void;
-}
+  };
+  return {
+    load,
+    store: (value) => storeRaw(key, String(value)),
+    subscribe: (onChange) => subscribeToStorageKey(key, () => onChange(load())),
+  };
+};
 
 export const createStringValidatedStoredSetting = <T extends string>(
   key: string,
   defaultValue: T,
   isValid: (value: string) => value is T,
-): StringValidatedStoredSetting<T> => ({
-  load: () => {
+): StoredSetting<T> => {
+  const load = (): T => {
     const raw = loadRaw(key);
     if (raw !== null && isValid(raw)) return raw;
     return defaultValue;
-  },
-  store: (value) => storeRaw(key, value),
-});
-
-interface StringLookupStoredSetting<T> {
-  load: () => T;
-  store: (value: T) => void;
-}
+  };
+  return {
+    load,
+    store: (value) => storeRaw(key, value),
+    subscribe: (onChange) => subscribeToStorageKey(key, () => onChange(load())),
+  };
+};
 
 export const createStringLookupStoredSetting = <T>(
   key: string,
   lookup: (raw: string | null) => T,
   getId: (value: T) => string,
-): StringLookupStoredSetting<T> => ({
-  load: () => {
-    const raw = loadRaw(key);
-    return lookup(raw);
-  },
-  store: (value) => storeRaw(key, getId(value)),
-});
+): StoredSetting<T> => {
+  const load = (): T => lookup(loadRaw(key));
+  return {
+    load,
+    store: (value) => storeRaw(key, getId(value)),
+    subscribe: (onChange) => subscribeToStorageKey(key, () => onChange(load())),
+  };
+};

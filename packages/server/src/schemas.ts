@@ -40,9 +40,19 @@ const resizeMessageSchema = z
   })
   .strict();
 
+// Toggle the machine-wide keep-awake (`caffeinate -dims`). The daemon owns the
+// single process; this just expresses the desired on/off state.
+const caffeinateInputMessageSchema = z
+  .object({
+    type: z.literal("caffeinate"),
+    enabled: z.boolean(),
+  })
+  .strict();
+
 export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   inputMessageSchema,
   resizeMessageSchema,
+  caffeinateInputMessageSchema,
 ]);
 
 const outputMessageSchema = z
@@ -380,6 +390,16 @@ const automationsMessageSchema = z
   })
   .strict();
 
+// Current keep-awake state, broadcast to every tab so the coffee toggle stays
+// in lockstep. `supported` is false off macOS, where `caffeinate` does not exist.
+const caffeinateStateMessageSchema = z
+  .object({
+    type: z.literal("caffeinate"),
+    active: z.boolean(),
+    supported: z.boolean(),
+  })
+  .strict();
+
 export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   outputMessageSchema,
   exitMessageSchema,
@@ -390,6 +410,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   notificationMessageSchema,
   gitDiffSummaryMessageSchema,
   automationsMessageSchema,
+  caffeinateStateMessageSchema,
 ]);
 
 export const gitDiffFileSchema = z

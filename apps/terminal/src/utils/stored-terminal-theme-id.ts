@@ -10,3 +10,4 @@ const setting = createStringLookupStoredSetting(
 
 export const loadStoredTerminalThemeId = setting.load;
 export const storeTerminalThemeId = setting.store;
+export const subscribeStoredTerminalThemeId = setting.subscribe;

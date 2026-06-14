@@ -10,3 +10,4 @@ const setting = createNumericStoredSetting(
 
 export const loadStoredTerminalFontSize = setting.load;
 export const storeTerminalFontSize = setting.store;
+export const subscribeStoredTerminalFontSize = setting.subscribe;
