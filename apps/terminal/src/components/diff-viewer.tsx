@@ -722,7 +722,7 @@ const FileDiffPane = ({
     return keys;
   }, [rangeIndex, dragRange, pendingRange, annotations, file.path]);
 
-  if (payload.state === "loading") {
+  if (payload.state === "loading" && !payload.data) {
     return (
       <DiffPaneNotice>
         <Spinner className="size-4" aria-label="loading diff" />
@@ -882,6 +882,10 @@ export const DiffViewer = ({
   const fileListRef = useRef<HTMLDivElement | null>(null);
   // In-flight per-file patch fetches, so they can be aborted on close/refresh.
   const patchControllersRef = useRef<Map<string, AbortController>>(new Map());
+  // Tracks the last-seen file metadata per path so the patch-loading effect
+  // can detect real changes (additions/deletions/status) vs mere reference
+  // identity changes from re-fetches returning identical data.
+  const lastFileMetaRef = useRef<Map<string, string>>(new Map());
   // Latest cache, read by loadPatch without making it depend on patchCache.
   const patchCacheRef = useRef(patchCache);
   patchCacheRef.current = patchCache;
@@ -985,11 +989,16 @@ export const DiffViewer = ({
   const files = useMemo(() => displayFileList?.files ?? [], [displayFileList]);
 
   const loadPatch = useCallback(
-    (path: string | null | undefined) => {
+    (path: string | null | undefined, force = false) => {
       if (!path || !cwd) return;
       const existing = patchCacheRef.current[path];
-      if (existing && (existing.state === "loaded" || existing.state === "loading")) return;
-      setPatchCache((previous) => ({ ...previous, [path]: { state: "loading" } }));
+      if (!force && existing && (existing.state === "loaded" || existing.state === "loading")) return;
+      if (force && existing?.state === "loading") return;
+      const previousData = existing?.state === "loaded" ? existing.data : undefined;
+      setPatchCache((previous) => ({
+        ...previous,
+        [path]: { state: "loading", ...(previousData ? { data: previousData } : {}) },
+      }));
       patchControllersRef.current.get(path)?.abort();
       const controller = new AbortController();
       patchControllersRef.current.set(path, controller);
@@ -1019,16 +1028,25 @@ export const DiffViewer = ({
   }, [displayFileList, files, selectedPath]);
 
   // Load the selected file's patch on demand, and prefetch its neighbors so j/k
-  // navigation stays instant.
+  // navigation stays instant. When the selected file's metadata changes
+  // (different additions/deletions/status), force a re-fetch so files updated
+  // on disk never show a stale diff.
   useEffect(() => {
     if (!selectedPath) return;
-    loadPatch(selectedPath);
+    const selectedMeta = files.find((file) => file.path === selectedPath);
+    const metaKey = selectedMeta
+      ? `${selectedMeta.additions}:${selectedMeta.deletions}:${selectedMeta.status}:${selectedMeta.binary}`
+      : "";
+    const lastKey = lastFileMetaRef.current.get(selectedPath);
+    const fileChanged = lastKey !== undefined && lastKey !== metaKey;
+    lastFileMetaRef.current.set(selectedPath, metaKey);
+    loadPatch(selectedPath, fileChanged);
     const index = files.findIndex((file) => file.path === selectedPath);
     if (index >= 0) {
       loadPatch(files[index - 1]?.path);
       loadPatch(files[index + 1]?.path);
     }
-  }, [selectedPath, files, loadPatch]);
+  }, [selectedPath, displayFileList, files, loadPatch]);
 
   const selectedFile = files.find((file) => file.path === selectedPath) ?? null;
   const selectedIndex = selectedFile ? files.indexOf(selectedFile) : -1;
