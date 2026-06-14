@@ -2,9 +2,11 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  GH_COMMAND_TIMEOUT_MS,
   GIT_BINARY_SNIFF_BYTES,
   GIT_COMMAND_TIMEOUT_MS,
   GIT_EMPTY_TREE_HASH,
+  GIT_MAX_BRANCHES,
   GIT_MAX_OUTPUT_BYTES,
   GIT_MAX_PATCH_BYTES_PER_FILE,
   GIT_MAX_TOTAL_PATCH_BYTES,
@@ -12,14 +14,29 @@ import {
   GIT_MAX_UNTRACKED_FILE_BYTES,
 } from "./constants.js";
 import type {
+  GitBaseSource,
+  GitBranchInfo,
+  GitBranchPr,
+  GitBranchPrState,
   GitDiffFile,
   GitDiffFileListResponse,
   GitDiffFileMeta,
   GitDiffFilePatch,
   GitDiffFileStatus,
+  GitDiffMode,
   GitDiffResponse,
   GitDiffSummary,
 } from "./types.js";
+
+// Options shared by every diff getter. `mode` selects the comparison; `base` is
+// the user-picked base ref for "branch" mode (a branch name or any committish),
+// or undefined to let the server resolve a sensible default.
+export interface GitDiffOptions {
+  mode: GitDiffMode;
+  base?: string | null;
+}
+
+const WORKING_OPTIONS: GitDiffOptions = { mode: "working" };
 
 const EMPTY_SUMMARY: GitDiffSummary = {
   isRepo: false,
@@ -69,6 +86,223 @@ const resolveDiffBase = async (cwd: string): Promise<string> => {
     return "HEAD";
   } catch {
     return GIT_EMPTY_TREE_HASH;
+  }
+};
+
+// Run `gh` for PR discovery. Best-effort: gh may be absent, unauthenticated, or
+// slow on the network, so every failure (including a non-zero exit when the
+// branch has no PR) collapses to null and the caller falls back to local git.
+const runGh = (cwd: string, args: string[]): Promise<string | null> =>
+  new Promise((resolve) => {
+    execFile(
+      "gh",
+      args,
+      { cwd, timeout: GH_COMMAND_TIMEOUT_MS, maxBuffer: GIT_MAX_OUTPUT_BYTES, encoding: "utf8" },
+      (error, stdout) => resolve(error ? null : stdout),
+    );
+  });
+
+// True when `ref` names a commit in this repo. `^{commit}` forces peeling so a
+// tag or tree can't masquerade as a valid diff base.
+const refExists = async (cwd: string, ref: string): Promise<boolean> => {
+  try {
+    await runGit(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// First existing ref among the candidates, tried in order. Used to map a bare
+// branch name (e.g. a PR's baseRefName "main") onto a ref that actually exists,
+// preferring the remote-tracking copy over a possibly-stale local branch.
+const firstExistingRef = async (cwd: string, candidates: string[]): Promise<string | null> => {
+  for (const candidate of candidates) {
+    if (candidate && (await refExists(cwd, candidate))) return candidate;
+  }
+  return null;
+};
+
+// Discover the PR for the current branch via gh. Returns null whenever gh is
+// unavailable or there is no PR — never throws.
+// gh reports PR state in upper case (OPEN/CLOSED/MERGED); map to our enum.
+const normalizePrState = (raw: unknown): GitBranchPrState =>
+  raw === "MERGED" ? "merged" : raw === "CLOSED" ? "closed" : "open";
+
+// Parse `gh pr list --json …` output (an array) into our PR shape.
+const parsePrList = (stdout: string | null): GitBranchPr[] => {
+  if (!stdout) return [];
+  try {
+    const parsed = JSON.parse(stdout) as Array<{
+      number?: number;
+      title?: string;
+      baseRefName?: string;
+      url?: string;
+      state?: string;
+    }>;
+    if (!Array.isArray(parsed)) return [];
+    const prs: GitBranchPr[] = [];
+    for (const item of parsed) {
+      if (typeof item?.number !== "number" || !item.baseRefName) continue;
+      prs.push({
+        number: item.number,
+        title: typeof item.title === "string" ? item.title : "",
+        baseRefName: item.baseRefName,
+        url: typeof item.url === "string" && item.url.length > 0 ? item.url : null,
+        state: normalizePrState(item.state),
+      });
+    }
+    return prs;
+  } catch {
+    return [];
+  }
+};
+
+// GitHub "owner/repo" slugs parsed from the repo's remotes, so PR lookup can be
+// retried against each one. Order preserves `git remote -v` order (origin first).
+export const listGithubRemoteSlugs = async (cwd: string): Promise<string[]> => {
+  try {
+    const stdout = await runGit(cwd, ["remote", "-v"]);
+    const slugs: string[] = [];
+    for (const line of stdout.split("\n")) {
+      // Matches both SSH (git@github.com:owner/repo.git) and HTTPS
+      // (https://github.com/owner/repo) forms.
+      const match = /github\.com[/:]([^\s/]+\/[^\s]+?)(?:\.git)?(?:\s|$)/.exec(line);
+      if (match && !slugs.includes(match[1])) slugs.push(match[1]);
+    }
+    return slugs;
+  } catch {
+    return [];
+  }
+};
+
+const PR_LIST_FIELDS = "number,title,baseRefName,url,state";
+
+// Discover the PR for the current branch via gh. Returns null whenever gh is
+// unavailable or there is no PR — never throws.
+//
+// Uses `gh pr list --head <branch> --state all` (not `gh pr view`) for two
+// reasons: it finds MERGED/CLOSED PRs, not just open ones; and `gh pr view`
+// can't be combined with `--repo` for the implicit current branch. We try the
+// default base repo first, then each GitHub remote explicitly — a fork's PR
+// usually targets the upstream remote, which gh won't pick as the default base
+// repo. An open PR wins; otherwise the most recent merged/closed one.
+const detectPr = async (cwd: string): Promise<GitBranchPr | null> => {
+  const currentBranch = await getCurrentBranch(cwd);
+  if (!currentBranch) return null;
+  const slugs = await listGithubRemoteSlugs(cwd);
+  // Prefer explicit per-remote queries (a fork's PR lives on the upstream); only
+  // fall back to gh's default base repo when there are no GitHub remotes.
+  const repoArgsList: string[][] = slugs.length > 0 ? slugs.map((slug) => ["--repo", slug]) : [[]];
+
+  // gh process spawn + network dominate, so query every candidate repo in
+  // parallel — collapses N sequential round-trips into one.
+  const results = await Promise.all(
+    repoArgsList.map((repoArgs) =>
+      runGh(cwd, [
+        "pr",
+        "list",
+        ...repoArgs,
+        "--head",
+        currentBranch,
+        "--state",
+        "all",
+        "--json",
+        PR_LIST_FIELDS,
+        "--limit",
+        "10",
+      ]).then(parsePrList),
+    ),
+  );
+
+  const seen = new Set<string>();
+  let fallback: GitBranchPr | null = null;
+  for (const prs of results) {
+    for (const pr of prs) {
+      const key = pr.url ?? `#${pr.number}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (pr.state === "open") return pr;
+      fallback ??= pr;
+    }
+  }
+  return fallback;
+};
+
+// Pick the base branch to compare against when the client hasn't chosen one,
+// using LOCAL git only (no gh) so the branch diff loads as fast as the working
+// diff. Order of preference: the repo's default branch (origin/HEAD), then a
+// conventional main/master/develop. The current branch is never its own base.
+// Returns a concrete, existing ref plus how it was found. PR detection is kept
+// off this path on purpose — the PR's base is almost always the default branch,
+// and a non-default PR base can be chosen from the picker.
+const resolveDefaultBase = async (
+  cwd: string,
+  currentBranch: string | null,
+): Promise<{ ref: string; source: GitBaseSource } | null> => {
+  // origin/HEAD -> refs/remotes/origin/main (the remote's default branch).
+  try {
+    const stdout = await runGit(cwd, [
+      "symbolic-ref",
+      "--quiet",
+      "--short",
+      "refs/remotes/origin/HEAD",
+    ]);
+    const ref = stdout.trim();
+    if (ref && ref !== currentBranch && (await refExists(cwd, ref))) {
+      return { ref, source: "remoteHead" };
+    }
+  } catch {
+    // No origin/HEAD configured — fall through to the conventional names.
+  }
+
+  for (const name of ["main", "master", "develop"]) {
+    if (name === currentBranch) continue;
+    const ref = await firstExistingRef(cwd, [`origin/${name}`, name]);
+    if (ref) return { ref, source: "fallback" };
+  }
+  return null;
+};
+
+// Resolve the actual `git diff` base for the requested mode. "working" diffs
+// against HEAD (or the empty tree). "branch" diffs the working tree against the
+// MERGE BASE of the chosen base ref and HEAD, so changes the base branch made
+// after we forked don't show up — the same set GitHub shows for a PR, plus any
+// uncommitted/untracked work on top. Returns null when a branch base can't be
+// resolved, signalling the caller to report an empty diff.
+const resolveEffectiveBase = async (
+  cwd: string,
+  options: GitDiffOptions,
+): Promise<string | null> => {
+  if (options.mode !== "branch") return resolveDiffBase(cwd);
+
+  let baseRef = options.base?.trim() || null;
+  if (baseRef) {
+    if (!(await refExists(cwd, baseRef))) baseRef = null;
+  }
+  if (!baseRef) {
+    const currentBranch = await getCurrentBranch(cwd);
+    const resolved = await resolveDefaultBase(cwd, currentBranch);
+    baseRef = resolved?.ref ?? null;
+  }
+  if (!baseRef) return null;
+
+  try {
+    const mergeBase = (await runGit(cwd, ["merge-base", baseRef, "HEAD"])).trim();
+    if (mergeBase) return mergeBase;
+  } catch {
+    // Unrelated histories or detached/no HEAD — diff against the ref directly.
+  }
+  return baseRef;
+};
+
+// Short current-branch name, or null when detached (rev-parse returns "HEAD").
+const getCurrentBranch = async (cwd: string): Promise<string | null> => {
+  try {
+    const name = (await runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+    return name && name !== "HEAD" ? name : null;
+  } catch {
+    return null;
   }
 };
 
@@ -217,10 +451,14 @@ const listUntrackedPaths = async (cwd: string): Promise<string[]> => {
   return stdout.split("\0").filter((entry) => entry.length > 0);
 };
 
-export const getGitDiffSummary = async (cwd: string): Promise<GitDiffSummary> => {
+export const getGitDiffSummary = async (
+  cwd: string,
+  options: GitDiffOptions = WORKING_OPTIONS,
+): Promise<GitDiffSummary> => {
   if (!(await isGitRepo(cwd))) return EMPTY_SUMMARY;
   try {
-    const base = await resolveDiffBase(cwd);
+    const base = await resolveEffectiveBase(cwd, options);
+    if (base === null) return { ...EMPTY_SUMMARY, isRepo: true };
     const [numstatRaw, untrackedPaths] = await Promise.all([
       runGit(cwd, ["diff", base, "-M", "--no-ext-diff", "--no-textconv", "--numstat", "-z"]),
       listUntrackedPaths(cwd),
@@ -329,10 +567,14 @@ const pickPatchChunk = (chunks: string[], newPath: string): string | null => {
   );
 };
 
-export const getGitDiff = async (cwd: string): Promise<GitDiffResponse> => {
+export const getGitDiff = async (
+  cwd: string,
+  options: GitDiffOptions = WORKING_OPTIONS,
+): Promise<GitDiffResponse> => {
   if (!(await isGitRepo(cwd))) return { isRepo: false, files: [] };
 
-  const base = await resolveDiffBase(cwd);
+  const base = await resolveEffectiveBase(cwd, options);
+  if (base === null) return { isRepo: true, files: [] };
   let tracked: NumstatEntry[] = [];
   let statuses = new Map<string, GitDiffFileStatus>();
   try {
@@ -425,10 +667,14 @@ export const getGitDiff = async (cwd: string): Promise<GitDiffResponse> => {
 // (numstat + name-status + stat-only untracked) and small, so the viewer can
 // render its sidebar and totals the instant it opens. Patches load on demand via
 // getGitDiffFilePatch.
-export const getGitDiffFiles = async (cwd: string): Promise<GitDiffFileListResponse> => {
+export const getGitDiffFiles = async (
+  cwd: string,
+  options: GitDiffOptions = WORKING_OPTIONS,
+): Promise<GitDiffFileListResponse> => {
   if (!(await isGitRepo(cwd))) return { isRepo: false, files: [] };
 
-  const base = await resolveDiffBase(cwd);
+  const base = await resolveEffectiveBase(cwd, options);
+  if (base === null) return { isRepo: true, files: [] };
   let tracked: NumstatEntry[] = [];
   let statuses = new Map<string, GitDiffFileStatus>();
   try {
@@ -475,11 +721,13 @@ export const getGitDiffFiles = async (cwd: string): Promise<GitDiffFileListRespo
 export const getGitDiffFilePatch = async (
   cwd: string,
   requestedPath: string,
+  options: GitDiffOptions = WORKING_OPTIONS,
 ): Promise<GitDiffFilePatch> => {
   const empty: GitDiffFilePatch = { patch: null, patchOmitted: false, binary: false };
   if (!(await isGitRepo(cwd))) return empty;
 
-  const base = await resolveDiffBase(cwd);
+  const base = await resolveEffectiveBase(cwd, options);
+  if (base === null) return empty;
   let tracked: NumstatEntry[] = [];
   try {
     ({ tracked } = await collectTrackedMeta(cwd, base));
@@ -533,4 +781,62 @@ export const getGitDiffFilePatch = async (
     return { patch: null, patchOmitted: true, binary: file.binary };
   }
   return { patch: file.patch, patchOmitted: file.patchOmitted, binary: file.binary };
+};
+
+// Candidate base branches for the picker: local heads + remote-tracking
+// branches, newest-committed-first so the most relevant refs surface at the top.
+// The synthetic `*/HEAD` symref entries are dropped (they're aliases, not
+// branches). Bounded by GIT_MAX_BRANCHES.
+const listBranches = async (cwd: string): Promise<string[]> => {
+  try {
+    const stdout = await runGit(cwd, [
+      "for-each-ref",
+      "--sort=-committerdate",
+      "--format=%(refname:short)",
+      "refs/heads",
+      "refs/remotes",
+    ]);
+    const seen = new Set<string>();
+    const branches: string[] = [];
+    for (const line of stdout.split("\n")) {
+      const ref = line.trim();
+      if (!ref || ref.endsWith("/HEAD") || seen.has(ref)) continue;
+      seen.add(ref);
+      branches.push(ref);
+      if (branches.length >= GIT_MAX_BRANCHES) break;
+    }
+    return branches;
+  } catch {
+    return [];
+  }
+};
+
+// Everything the base-branch picker needs, gathered in one request so the client
+// never polls: the candidate refs, a preselected default (with provenance), the
+// current branch, and the PR the branch maps to (via gh, best-effort).
+export const getGitBranchInfo = async (cwd: string): Promise<GitBranchInfo> => {
+  if (!(await isGitRepo(cwd))) {
+    return {
+      isRepo: false,
+      currentBranch: null,
+      defaultBase: null,
+      defaultBaseSource: null,
+      branches: [],
+      pr: null,
+    };
+  }
+  const [currentBranch, branches, pr] = await Promise.all([
+    getCurrentBranch(cwd),
+    listBranches(cwd),
+    detectPr(cwd),
+  ]);
+  const defaultBase = await resolveDefaultBase(cwd, currentBranch);
+  return {
+    isRepo: true,
+    currentBranch,
+    defaultBase: defaultBase?.ref ?? null,
+    defaultBaseSource: defaultBase?.source ?? null,
+    branches,
+    pr,
+  };
 };

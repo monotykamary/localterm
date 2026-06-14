@@ -5,6 +5,8 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import {
   buildUntrackedPatch,
+  getGitBranchInfo,
+  listGithubRemoteSlugs,
   getGitDiff,
   getGitDiffFilePatch,
   getGitDiffFiles,
@@ -399,5 +401,119 @@ describe("getGitDiffFiles / getGitDiffFilePatch", () => {
       patchOmitted: false,
       binary: false,
     });
+  });
+});
+
+describe("branch comparison mode", () => {
+  let repoDir: string;
+
+  beforeAll(() => {
+    repoDir = makeTempDir();
+    git(repoDir, "init", "--initial-branch=main");
+    fs.writeFileSync(path.join(repoDir, "app.ts"), "1\n");
+    fs.writeFileSync(path.join(repoDir, "shared.ts"), "x\n");
+    commitAll(repoDir, "base");
+
+    // Feature branch: a committed change to app.ts.
+    git(repoDir, "checkout", "-b", "feature");
+    fs.writeFileSync(path.join(repoDir, "app.ts"), "1\n2\n");
+    commitAll(repoDir, "feature work");
+
+    // main advances independently AFTER the fork — this change must NOT show up
+    // in the feature branch's merge-base diff.
+    git(repoDir, "checkout", "main");
+    fs.writeFileSync(path.join(repoDir, "shared.ts"), "x\ny\n");
+    commitAll(repoDir, "main advance");
+
+    git(repoDir, "checkout", "feature");
+    // Uncommitted work + an untracked file on top of the feature commit.
+    fs.writeFileSync(path.join(repoDir, "app.ts"), "1\n2\n3\n");
+    fs.writeFileSync(path.join(repoDir, "new.ts"), "brand new\n");
+  });
+
+  afterAll(() => {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it("compares the working tree to the merge base, not the base tip", async () => {
+    const list = await getGitDiffFiles(repoDir, { mode: "branch", base: "main" });
+    const byPath = new Map(list.files.map((file) => [file.path, file]));
+
+    // Committed-on-feature + uncommitted change, measured from the merge base.
+    expect(byPath.get("app.ts")).toMatchObject({ status: "modified", additions: 2, deletions: 0 });
+    // Untracked work on top is part of "current state".
+    expect(byPath.get("new.ts")?.status).toBe("untracked");
+    // shared.ts only changed on main after the fork — excluded by merge-base.
+    expect(byPath.has("shared.ts")).toBe(false);
+  });
+
+  it("working mode shows only uncommitted changes, not the whole branch", async () => {
+    const list = await getGitDiffFiles(repoDir, { mode: "working" });
+    const byPath = new Map(list.files.map((file) => [file.path, file]));
+    // Working tree vs HEAD (feature tip): only the last, uncommitted +3 line.
+    expect(byPath.get("app.ts")).toMatchObject({ status: "modified", additions: 1 });
+    expect(byPath.get("new.ts")?.status).toBe("untracked");
+  });
+
+  it("resolves a default base branch when none is given", async () => {
+    // No remote/PR here, so default falls back to the conventional main branch.
+    const auto = await getGitDiffFiles(repoDir, { mode: "branch" });
+    const explicit = await getGitDiffFiles(repoDir, { mode: "branch", base: "main" });
+    expect(auto.files.map((file) => file.path).sort()).toEqual(
+      explicit.files.map((file) => file.path).sort(),
+    );
+  });
+
+  it("returns a branch-mode patch spanning committed and uncommitted lines", async () => {
+    const result = await getGitDiffFilePatch(repoDir, "app.ts", { mode: "branch", base: "main" });
+    expect(result.patchOmitted).toBe(false);
+    expect(result.patch).toContain("+2");
+    expect(result.patch).toContain("+3");
+  });
+
+  it("reports branch info with a fallback default base", async () => {
+    const info = await getGitBranchInfo(repoDir);
+    expect(info.isRepo).toBe(true);
+    expect(info.currentBranch).toBe("feature");
+    expect(info.branches).toContain("main");
+    expect(info.branches).toContain("feature");
+    expect(info.defaultBase).toBe("main");
+    expect(info.defaultBaseSource).toBe("fallback");
+    // No GitHub remote/PR in a bare temp repo.
+    expect(info.pr).toBeNull();
+  });
+
+  it("collects GitHub slugs from both fork and upstream remotes", async () => {
+    const forkDir = makeTempDir();
+    try {
+      git(forkDir, "init", "--initial-branch=main");
+      // Fork over SSH, upstream over HTTPS, plus a non-GitHub remote to ignore.
+      git(forkDir, "remote", "add", "origin", "git@github.com:me/fork.git");
+      git(forkDir, "remote", "add", "upstream", "https://github.com/them/repo.git");
+      git(forkDir, "remote", "add", "mirror", "https://gitlab.com/me/fork.git");
+      const slugs = await listGithubRemoteSlugs(forkDir);
+      expect(slugs).toContain("me/fork");
+      expect(slugs).toContain("them/repo");
+      expect(slugs).not.toContain("me/fork.git");
+      expect(slugs.some((slug) => slug.includes("gitlab"))).toBe(false);
+    } finally {
+      fs.rmSync(forkDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a non-repo directory for branch info", async () => {
+    const plainDir = makeTempDir();
+    try {
+      expect(await getGitBranchInfo(plainDir)).toEqual({
+        isRepo: false,
+        currentBranch: null,
+        defaultBase: null,
+        defaultBaseSource: null,
+        branches: [],
+        pr: null,
+      });
+    } finally {
+      fs.rmSync(plainDir, { recursive: true, force: true });
+    }
   });
 });

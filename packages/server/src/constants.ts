@@ -151,6 +151,18 @@ export const GIT_MAX_PATCH_BYTES_PER_FILE = 1 * 1024 * 1024;
 export const GIT_MAX_TOTAL_PATCH_BYTES = 10 * 1024 * 1024;
 export const GIT_DIRTY_THROTTLE_MS = 100;
 
+// "Branch" diff mode compares the working tree against a base branch (via
+// merge-base). `gh pr view` is consulted first to discover the current branch's
+// PR base; it can hit the network, so it gets its own (shorter) timeout and any
+// failure degrades to the local default-branch heuristic.
+export const GH_COMMAND_TIMEOUT_MS = 8_000;
+// Upper bound on the ref a client may pass as the comparison base. Git refs are
+// already short; this just caps a hostile/garbage value before it reaches git.
+export const GIT_MAX_REF_LENGTH = 255;
+// Cap the branch list returned for the base-branch picker so a repo with
+// thousands of remote refs can't bloat the response.
+export const GIT_MAX_BRANCHES = 500;
+
 export const HTTP_STATUS_CREATED = 201;
 
 export const MS_PER_MINUTE = 60_000;

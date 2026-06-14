@@ -15,11 +15,16 @@ import type {
   caffeinateModeSchema,
   clientToServerMessageSchema,
   createAutomationInputSchema,
+  gitBaseSourceSchema,
+  gitBranchInfoSchema,
+  gitBranchPrSchema,
+  gitBranchPrStateSchema,
   gitDiffFileListResponseSchema,
   gitDiffFileMetaSchema,
   gitDiffFilePatchSchema,
   gitDiffFileSchema,
   gitDiffFileStatusSchema,
+  gitDiffModeSchema,
   gitDiffResponseSchema,
   gitDiffSummarySchema,
   resetAutomationInputSchema,
@@ -68,6 +73,11 @@ export type UpdateAutomationInput = z.infer<typeof updateAutomationInputSchema>;
 export type ResetAutomationInput = z.infer<typeof resetAutomationInputSchema>;
 
 export type GitDiffFileStatus = z.infer<typeof gitDiffFileStatusSchema>;
+export type GitDiffMode = z.infer<typeof gitDiffModeSchema>;
+export type GitBaseSource = z.infer<typeof gitBaseSourceSchema>;
+export type GitBranchPrState = z.infer<typeof gitBranchPrStateSchema>;
+export type GitBranchPr = z.infer<typeof gitBranchPrSchema>;
+export type GitBranchInfo = z.infer<typeof gitBranchInfoSchema>;
 export type GitDiffSummary = z.infer<typeof gitDiffSummarySchema>;
 export type GitDiffFileMeta = z.infer<typeof gitDiffFileMetaSchema>;
 export type GitDiffFileListResponse = z.infer<typeof gitDiffFileListResponseSchema>;

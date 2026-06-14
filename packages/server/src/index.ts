@@ -20,6 +20,7 @@ import {
   DEFAULT_HOST,
   DEFAULT_PORT,
   FRIENDLY_HOSTNAME,
+  GIT_MAX_REF_LENGTH,
   HTTP_STATUS_BAD_REQUEST,
   HTTP_STATUS_CREATED,
   HTTP_STATUS_NOT_FOUND,
@@ -42,7 +43,14 @@ import {
 } from "./constants.js";
 import { ServerErrorException, serverError } from "./errors.js";
 import { FolderWatchManager } from "./folder-watch-manager.js";
-import { getGitDiff, getGitDiffFilePatch, getGitDiffFiles, getGitDiffSummary } from "./git-diff.js";
+import {
+  getGitBranchInfo,
+  getGitDiff,
+  getGitDiffFilePatch,
+  getGitDiffFiles,
+  getGitDiffSummary,
+  type GitDiffOptions,
+} from "./git-diff.js";
 import { GitDiffWatcher } from "./git-diff-watcher.js";
 import { HeartbeatStore } from "./heartbeat-store.js";
 import { parseCronExpression } from "./cron-expression.js";
@@ -440,17 +448,42 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     return rawPath;
   };
 
+  // Base ref for "branch" mode. execFile never invokes a shell, so the only risk
+  // is git interpreting the value as an option (leading "-") or a pathological
+  // refname; reject those and anything outside a conservative refname charset. A
+  // malformed base degrades to null so the server resolves its own default.
+  const sanitizeRef = (rawRef: string | undefined): string | null => {
+    if (!rawRef) return null;
+    const ref = rawRef.trim();
+    if (!ref || ref.length > GIT_MAX_REF_LENGTH) return null;
+    if (ref.startsWith("-") || ref.includes("..")) return null;
+    if (!/^[A-Za-z0-9._/+@-]+$/.test(ref)) return null;
+    return ref;
+  };
+
+  // Diff comparison selector shared by the file-list and per-file endpoints. An
+  // absent/invalid mode falls back to the always-available working-tree diff.
+  const parseDiffOptions = (
+    rawMode: string | undefined,
+    rawBase: string | undefined,
+  ): GitDiffOptions => ({
+    mode: rawMode === "branch" ? "branch" : "working",
+    base: sanitizeRef(rawBase),
+  });
+
   api.get("/git/diff", async (context) => {
     const cwd = resolveCwdQuery(context.req.query("cwd"));
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
-    return context.json(await getGitDiff(cwd));
+    const options = parseDiffOptions(context.req.query("mode"), context.req.query("base"));
+    return context.json(await getGitDiff(cwd, options));
   });
 
   // File list without patch bodies — lets the viewer open instantly.
   api.get("/git/diff/files", async (context) => {
     const cwd = resolveCwdQuery(context.req.query("cwd"));
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
-    return context.json(await getGitDiffFiles(cwd));
+    const options = parseDiffOptions(context.req.query("mode"), context.req.query("base"));
+    return context.json(await getGitDiffFiles(cwd, options));
   });
 
   // One file's patch, fetched lazily when that file is selected.
@@ -459,7 +492,17 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
     const filePath = sanitizeDiffPath(context.req.query("path"));
     if (!filePath) return context.json({ error: "invalid_path" }, HTTP_STATUS_BAD_REQUEST);
-    return context.json(await getGitDiffFilePatch(cwd, filePath));
+    const options = parseDiffOptions(context.req.query("mode"), context.req.query("base"));
+    return context.json(await getGitDiffFilePatch(cwd, filePath, options));
+  });
+
+  // Base-branch picker data for "branch" mode: candidate refs, a preselected
+  // default, and the PR the branch maps to (via gh). Fetched once when the viewer
+  // needs it — never polled.
+  api.get("/git/branches", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json(await getGitBranchInfo(cwd));
   });
 
   const readJsonBody = async (context: { req: { json: () => Promise<unknown> } }) => {

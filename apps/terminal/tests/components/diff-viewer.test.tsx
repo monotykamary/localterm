@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import type {
+  GitBranchInfo,
   GitDiffFileListResponse,
   GitDiffFilePatch,
 } from "@monotykamary/localterm-server/protocol";
@@ -15,6 +16,21 @@ import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "../../src/utils/fetch-
 
 const filesMock = vi.mocked(fetchGitDiffFiles);
 const patchMock = vi.mocked(fetchGitDiffFilePatch);
+
+const BRANCH_INFO: GitBranchInfo = {
+  isRepo: true,
+  currentBranch: "feature",
+  defaultBase: "origin/main",
+  defaultBaseSource: "pr",
+  branches: ["origin/main", "feature", "origin/develop"],
+  pr: {
+    number: 123,
+    title: "Add diff modes",
+    baseRefName: "main",
+    url: "https://example.test/pr/123",
+    state: "open",
+  },
+};
 
 const MODIFIED_PATCH = [
   "@@ -1,3 +1,3 @@",
@@ -58,8 +74,11 @@ const mockHappyPath = () => {
   patchMock.mockImplementation((_cwd, path) => Promise.resolve(PATCHES[path] ?? null));
 };
 
-const renderDiffViewer = (onClose: () => void = () => {}) =>
-  render(<DiffViewer open cwd="/repo" onClose={onClose} />);
+// branchInfo is leased by the parent and passed in as a prop; tests pass it
+// directly (null = no PR / not loaded).
+const renderDiffViewer = (
+  { onClose = () => {}, branchInfo = null }: { onClose?: () => void; branchInfo?: GitBranchInfo | null } = {},
+) => render(<DiffViewer open cwd="/repo" branchInfo={branchInfo} onClose={onClose} />);
 
 afterEach(() => {
   filesMock.mockReset();
@@ -74,7 +93,11 @@ describe("DiffViewer", () => {
 
     const fileOption = await screen.findByRole("option", { name: /app\.ts/, selected: true });
     expect(fileOption).toBeTruthy();
-    expect(filesMock).toHaveBeenCalledWith("/repo", expect.any(AbortSignal));
+    expect(filesMock).toHaveBeenCalledWith(
+      "/repo",
+      expect.objectContaining({ mode: "working" }),
+      expect.any(AbortSignal),
+    );
 
     expect(await screen.findByText("beta")).toBeTruthy();
     expect(screen.getByText("BETA")).toBeTruthy();
@@ -108,7 +131,7 @@ describe("DiffViewer", () => {
   it("closes on Escape", async () => {
     mockHappyPath();
     const onClose = vi.fn();
-    renderDiffViewer(onClose);
+    renderDiffViewer({ onClose });
     await screen.findByText("BETA");
 
     fireEvent.keyDown(window, { key: "Escape" });
@@ -219,5 +242,69 @@ describe("DiffViewer", () => {
     expect(await screen.findByText("line 0")).toBeTruthy();
     expect(screen.queryByText(`line ${lineCount - 1}`)).toBeNull();
     expect(screen.getByText(/rendering .* more lines/)).toBeTruthy();
+  });
+
+  it("auto-switches to branch mode when the leased branchInfo has a PR", async () => {
+    mockHappyPath();
+    renderDiffViewer({ branchInfo: BRANCH_INFO });
+
+    // No manual toggle — the leased PR derives branch mode immediately.
+    await vi.waitFor(() =>
+      expect(screen.getByRole("radio", { name: "Branch" }).getAttribute("aria-checked")).toBe(
+        "true",
+      ),
+    );
+    // Base picker preselects the leased default; the PR is surfaced distinctly.
+    const baseSelect = (await screen.findByLabelText("base branch")) as HTMLSelectElement;
+    expect(baseSelect.value).toBe("origin/main");
+    expect(screen.getByText("#123")).toBeTruthy();
+
+    // The branch diff is fetched without a base override — the server resolves
+    // the default base locally, so the diff never waits on gh.
+    await vi.waitFor(() =>
+      expect(filesMock).toHaveBeenCalledWith(
+        "/repo",
+        expect.objectContaining({ mode: "branch" }),
+        expect.any(AbortSignal),
+      ),
+    );
+  });
+
+  it("re-fetches against a user-picked base branch", async () => {
+    mockHappyPath();
+    renderDiffViewer({ branchInfo: BRANCH_INFO });
+
+    const baseSelect = (await screen.findByLabelText("base branch")) as HTMLSelectElement;
+    fireEvent.change(baseSelect, { target: { value: "origin/develop" } });
+
+    await vi.waitFor(() =>
+      expect(filesMock).toHaveBeenCalledWith(
+        "/repo",
+        expect.objectContaining({ mode: "branch", base: "origin/develop" }),
+        expect.any(AbortSignal),
+      ),
+    );
+  });
+
+  it("keeps the PR badge visible after switching to working mode", async () => {
+    mockHappyPath();
+    renderDiffViewer({ branchInfo: BRANCH_INFO });
+
+    // Derived to branch; the user switches back to working.
+    await screen.findByLabelText("base branch");
+    fireEvent.click(screen.getByRole("radio", { name: "Working" }));
+
+    // The base picker is branch-only, but the PR badge stays as an indicator.
+    expect(screen.queryByLabelText("base branch")).toBeNull();
+    expect(screen.getByText("#123")).toBeTruthy();
+  });
+
+  it("stays in working mode when there is no PR", async () => {
+    mockHappyPath();
+    renderDiffViewer({ branchInfo: { ...BRANCH_INFO, pr: null } });
+    await screen.findByText("BETA");
+
+    expect(screen.getByRole("radio", { name: "Working" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByText("#123")).toBeNull();
   });
 });

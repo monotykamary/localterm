@@ -187,6 +187,46 @@ const gitDiffSummaryMessageSchema = z
   })
   .strict();
 
+// Which diff the viewer is asking for. "working" is the working tree vs HEAD
+// (the ambient, always-available diff). "branch" compares the working tree
+// against a base branch via merge-base — committed changes on this branch plus
+// any uncommitted/untracked work on top, i.e. "what this PR adds, plus where I
+// am right now".
+export const gitDiffModeSchema = z.enum(["working", "branch"]);
+
+// The PR (if any) the current branch maps to, discovered via `gh`. Null whenever
+// gh is missing, unauthenticated, or there's no PR for the branch. `state`
+// distinguishes an open PR from an already merged/closed one (both are surfaced).
+export const gitBranchPrStateSchema = z.enum(["open", "closed", "merged"]);
+
+export const gitBranchPrSchema = z
+  .object({
+    number: z.number().int().positive(),
+    title: z.string(),
+    baseRefName: z.string().min(1),
+    url: z.string().min(1).nullable(),
+    state: gitBranchPrStateSchema,
+  })
+  .strict();
+
+// How the default base branch was resolved, surfaced so the UI can explain the
+// preselected comparison ("base of PR #12", "repo default branch", …).
+export const gitBaseSourceSchema = z.enum(["pr", "remoteHead", "fallback"]);
+
+// Everything the base-branch picker needs: the candidate refs, the preselected
+// default (a concrete, existing ref), and the detected PR. defaultBase is null
+// when no plausible base could be found (e.g. a brand-new repo with one branch).
+export const gitBranchInfoSchema = z
+  .object({
+    isRepo: z.boolean(),
+    currentBranch: z.string().min(1).nullable(),
+    defaultBase: z.string().min(1).nullable(),
+    defaultBaseSource: gitBaseSourceSchema.nullable(),
+    branches: z.array(z.string().min(1)),
+    pr: gitBranchPrSchema.nullable(),
+  })
+  .strict();
+
 // ----------------------------------------------------------------------------
 // Automations (file format v3).
 //

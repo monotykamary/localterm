@@ -17,11 +17,13 @@ import {
   Coffee,
   Copy,
   FileDiff,
+  GitPullRequest,
   MonitorCog,
   Plus,
   Search,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PR_STATE_STYLES } from "@/lib/pr-state-styles";
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,
@@ -48,6 +50,7 @@ import { CommandPalette, type CommandItem } from "@/components/command-palette";
 import { DiffViewer } from "@/components/diff-viewer";
 import { KeepAwakeMenu, type CaffeinateMode } from "@/components/keep-awake-menu";
 import { SettingsMenu } from "@/components/settings-menu";
+import { useGitBranchInfo } from "@/hooks/use-git-branch-info";
 import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
 import {
   COPY_FEEDBACK_MS,
@@ -347,6 +350,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
   const { summary: diffSummary, setGitDiffSummary } = useGitDiffSummary();
   const hasDiff = diffSummary !== null && diffSummary.isRepo && diffSummary.files > 0;
+  // Ambient branch/PR lease for the active cwd: drives the toolbar PR indicator
+  // and is handed to the diff viewer so it opens in branch mode instantly.
+  const { branchInfo, refresh: refreshBranchInfo } = useGitBranchInfo(liveCwd);
+  const branchPr = branchInfo?.pr ?? null;
+  // Either indicator (working-changes count or PR) keeps the toolbar "peeking":
+  // the indicator stays visible while the action buttons collapse behind it and
+  // expand on hover.
+  const hasToolbarIndicator = hasDiff || branchPr !== null;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1733,7 +1744,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         <div
           className={cn(
             "absolute right-0 top-0 z-10 flex flex-col items-end pr-3 pt-1",
-            isToolbarVisible || isSearchOpen || hasDiff
+            isToolbarVisible || isSearchOpen || hasToolbarIndicator
               ? "pointer-events-auto"
               : "pointer-events-none",
           )}
@@ -1744,7 +1755,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
             aria-hidden="true"
             className={cn(
               "pointer-events-auto mr-0.5 h-[2px] w-5 rounded-full bg-muted-foreground/25 transition-opacity duration-150",
-              isToolbarVisible || isSearchOpen || hasDiff ? "opacity-0" : "opacity-100",
+              isToolbarVisible || isSearchOpen || hasToolbarIndicator ? "opacity-0" : "opacity-100",
             )}
           />
           {!isSearchOpen && (
@@ -1754,7 +1765,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
               className={cn(
                 "mt-1 flex items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md",
                 "transition-[opacity,transform] duration-200 ease-snappy",
-                isToolbarVisible || hasDiff
+                isToolbarVisible || hasToolbarIndicator
                   ? "translate-y-0 opacity-100"
                   : "pointer-events-none -translate-y-1 opacity-0",
               )}
@@ -1771,21 +1782,24 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                 }
               }}
             >
-              {/* With a diff showing, the action buttons collapse behind the
-                  always-visible indicator and expand on hover via the
-                  0fr -> 1fr grid-column transition. */}
+              {/* With an indicator (working changes or a PR) showing, the action
+                  buttons collapse behind the always-visible indicator and expand
+                  on hover via the 0fr -> 1fr grid-column transition. */}
               <div
                 className={cn(
                   "grid",
-                  hasDiff && "transition-[grid-template-columns] duration-200 ease-snappy",
-                  hasDiff && !isToolbarVisible ? "grid-cols-[0fr]" : "grid-cols-[1fr]",
+                  hasToolbarIndicator &&
+                    "transition-[grid-template-columns] duration-200 ease-snappy",
+                  hasToolbarIndicator && !isToolbarVisible ? "grid-cols-[0fr]" : "grid-cols-[1fr]",
                 )}
               >
                 <div
                   className={cn(
                     "flex min-w-0 items-center gap-0.5 overflow-hidden",
-                    hasDiff && "transition-opacity duration-200 ease-snappy",
-                    hasDiff && !isToolbarVisible ? "pointer-events-none opacity-0" : "opacity-100",
+                    hasToolbarIndicator && "transition-opacity duration-200 ease-snappy",
+                    hasToolbarIndicator && !isToolbarVisible
+                      ? "pointer-events-none opacity-0"
+                      : "opacity-100",
                   )}
                 >
                   <SettingsMenu
@@ -1864,25 +1878,46 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                   </Button>
                 </div>
               </div>
-              {hasDiff && diffSummary !== null ? (
-                <button
-                  type="button"
-                  onClick={openDiffViewer}
-                  aria-label={`view git diff: ${diffSummary.additions} additions, ${diffSummary.deletions} deletions${diffSummary.binaries > 0 ? `, ${diffSummary.binaries} binary files changed` : ""}`}
-                  title={`${isMac ? "⌘" : "Ctrl+"}G`}
-                  className="flex h-8 items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 font-mono text-xs tabular-nums outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                >
-                  <span className="text-emerald-400">
-                    +{formatDiffCount(diffSummary.additions)}
-                  </span>
-                  <span className="text-red-400">−{formatDiffCount(diffSummary.deletions)}</span>
-                  {diffSummary.binaries > 0 ? (
-                    <span className="flex items-center gap-0.5 text-muted-foreground">
-                      <Binary className="size-3" aria-hidden="true" />
-                      {diffSummary.binaries}
-                    </span>
+              {(hasDiff && diffSummary !== null) || branchPr ? (
+                <div className="flex items-center">
+                  {hasDiff && diffSummary !== null ? (
+                    <button
+                      type="button"
+                      onClick={openDiffViewer}
+                      aria-label={`view git diff: ${diffSummary.additions} additions, ${diffSummary.deletions} deletions${diffSummary.binaries > 0 ? `, ${diffSummary.binaries} binary files changed` : ""}`}
+                      title={`${isMac ? "⌘" : "Ctrl+"}G`}
+                      className="flex h-8 items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 font-mono text-xs tabular-nums outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                    >
+                      <span className="text-emerald-400">
+                        +{formatDiffCount(diffSummary.additions)}
+                      </span>
+                      <span className="text-red-400">
+                        −{formatDiffCount(diffSummary.deletions)}
+                      </span>
+                      {diffSummary.binaries > 0 ? (
+                        <span className="flex items-center gap-0.5 text-muted-foreground">
+                          <Binary className="size-3" aria-hidden="true" />
+                          {diffSummary.binaries}
+                        </span>
+                      ) : null}
+                    </button>
                   ) : null}
-                </button>
+                  {branchPr ? (
+                    <button
+                      type="button"
+                      onClick={openDiffViewer}
+                      aria-label={`view pull request diff: PR #${branchPr.number} (${branchPr.state})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
+                      title={`PR #${branchPr.number} (${branchPr.state})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
+                      className={cn(
+                        "flex h-8 items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 font-mono text-xs tabular-nums outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+                        PR_STATE_STYLES[branchPr.state].text,
+                      )}
+                    >
+                      <GitPullRequest className="size-3.5" aria-hidden="true" />
+                      <span>#{branchPr.number}</span>
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           )}
@@ -1942,8 +1977,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       <DiffViewer
         open={isDiffViewerOpen}
         cwd={liveCwd}
+        branchInfo={branchInfo}
         onClose={closeDiffViewer}
         onSendToTerminal={sendDiffReviewToTerminal}
+        onRefreshBranchInfo={refreshBranchInfo}
       />
 
       <AutomationsModal

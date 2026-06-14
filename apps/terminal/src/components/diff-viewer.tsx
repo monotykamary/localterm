@@ -1,10 +1,15 @@
 import type {
+  GitBranchInfo,
+  GitBranchPr,
   GitDiffFileListResponse,
   GitDiffFileMeta,
   GitDiffFilePatch,
+  GitDiffMode,
 } from "@monotykamary/localterm-server/protocol";
 import {
   FileWarning,
+  GitBranch,
+  GitPullRequest,
   MessageSquare,
   MessageSquarePlus,
   Pencil,
@@ -53,6 +58,7 @@ import {
   type DiffLineRange,
   type DiffLineTarget,
 } from "@/utils/diff-line-ranges";
+import { PR_STATE_STYLES } from "@/lib/pr-state-styles";
 import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "@/utils/fetch-git-diff";
 import {
   annotationRangeStart,
@@ -70,8 +76,15 @@ import {
 interface DiffViewerProps {
   open: boolean;
   cwd: string | null;
+  // Ambient branch/PR metadata leased from the parent (fetched once per cwd), so
+  // the viewer opens straight into branch mode when a PR exists — no gh wait.
+  // Null while the lease is still loading or unavailable.
+  branchInfo: GitBranchInfo | null;
   onClose: () => void;
   onSendToTerminal?: (text: string) => void;
+  // Ask the parent to re-fetch the leased branch info (wired to the refresh
+  // button alongside re-fetching the diff).
+  onRefreshBranchInfo?: () => void;
 }
 
 // A multiline drag that just ended: the range the open annotation editor will
@@ -784,7 +797,52 @@ const FileDiffPane = ({
   );
 };
 
-export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerProps) => {
+// "This branch has a GitHub PR" chip — color-coded by state and set apart from
+// the add/delete greens and reds so a detected PR is obvious at a glance. Links
+// to the PR when gh gave us a URL.
+const PrBadge = ({ pr }: { pr: GitBranchPr }) => {
+  const style = PR_STATE_STYLES[pr.state];
+  const className = cn(
+    "inline-flex max-w-64 shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] transition-colors",
+    style.badge,
+  );
+  const label = `PR #${pr.number} (${pr.state})${pr.title ? ` — ${pr.title}` : ""}`;
+  const content = (
+    <>
+      <GitPullRequest className="size-3 shrink-0" aria-hidden="true" />
+      <span className="shrink-0">#{pr.number}</span>
+      {pr.state !== "open" ? (
+        <span className="shrink-0 uppercase opacity-70">{pr.state}</span>
+      ) : null}
+      {pr.title ? <span className="truncate opacity-80">{pr.title}</span> : null}
+    </>
+  );
+  return pr.url ? (
+    <a
+      href={pr.url}
+      target="_blank"
+      rel="noreferrer"
+      title={label}
+      aria-label={`open ${label}`}
+      className={cn(className, style.hover)}
+    >
+      {content}
+    </a>
+  ) : (
+    <span title={label} aria-label={label} className={className}>
+      {content}
+    </span>
+  );
+};
+
+export const DiffViewer = ({
+  open,
+  cwd,
+  branchInfo,
+  onClose,
+  onSendToTerminal,
+  onRefreshBranchInfo,
+}: DiffViewerProps) => {
   const [mounted, setMounted] = useState(false);
   const [settled, setSettled] = useState(false);
   const [fileList, setFileList] = useState<GitDiffFileListResponse | null>(null);
@@ -793,7 +851,23 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
   const [patchCache, setPatchCache] = useState<Record<string, PatchEntry>>({});
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<DiffViewMode>(() => loadStoredDiffViewMode());
+  // Comparison mode is EPHEMERAL, not persisted: it defaults to working, and to
+  // branch when the branch has a PR. `userPickedMode` (null = follow that
+  // default) holds an explicit per-open toggle so the user can override; it's
+  // reset on open and repo change.
+  const [userPickedMode, setUserPickedMode] = useState<GitDiffMode | null>(null);
+  // User-picked base ref for branch mode; null falls back to the server's
+  // locally-resolved default branch. Reset per repo.
+  const [baseOverride, setBaseOverride] = useState<string | null>(null);
   const [refreshCount, setRefreshCount] = useState(0);
+
+  const compareMode: GitDiffMode = userPickedMode ?? (branchInfo?.pr ? "branch" : "working");
+  // Base ref shown in the picker. The DIFF fetch, however, only sends an explicit
+  // base when the user overrode one — otherwise it sends none and the server
+  // resolves a local default instantly, so the branch diff never waits on the
+  // (slower, gh-backed) branch metadata.
+  const displayBase =
+    compareMode === "branch" ? (baseOverride ?? branchInfo?.defaultBase ?? null) : null;
   // Pending review annotations survive close/reopen until they are sent.
   const [annotations, setAnnotations] = useState<Record<string, DiffAnnotation>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -812,6 +886,9 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
   useEffect(() => {
     if (open) {
       setMounted(true);
+      // Each open re-derives the mode from PR presence (ephemeral) unless the
+      // user toggles during this session.
+      setUserPickedMode(null);
       const frame = requestAnimationFrame(() => setSettled(true));
       return () => cancelAnimationFrame(frame);
     }
@@ -827,8 +904,16 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
     patchControllersRef.current.clear();
   }, []);
 
-  // Fetch the file list (metadata only) on open/refresh — the viewer renders its
-  // sidebar and totals instantly; patches load lazily per selected file.
+  // Switching repos forgets the previous repo's base pick and mode override.
+  useEffect(() => {
+    setBaseOverride(null);
+    setUserPickedMode(null);
+  }, [cwd]);
+
+  // Fetch the file list (metadata only) on open/refresh/mode change — the viewer
+  // renders its sidebar and totals instantly; patches load lazily per selected
+  // file. Branch mode does NOT wait on branch metadata: it sends only an explicit
+  // user override as the base, letting the server resolve a local default fast.
   useEffect(() => {
     if (!open || !cwd) {
       abortPatchFetches();
@@ -837,20 +922,22 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
     const controller = new AbortController();
     setIsLoading(true);
     setHasError(false);
-    // A fresh list invalidates every cached patch.
+    // A fresh list (new query) invalidates every cached patch.
     abortPatchFetches();
     setPatchCache({});
-    void fetchGitDiffFiles(cwd, controller.signal).then((response) => {
-      if (controller.signal.aborted) return;
-      setIsLoading(false);
-      if (!response) {
-        setHasError(true);
-        return;
-      }
-      setFileList(response);
-    });
+    void fetchGitDiffFiles(cwd, { mode: compareMode, base: baseOverride }, controller.signal).then(
+      (response) => {
+        if (controller.signal.aborted) return;
+        setIsLoading(false);
+        if (!response) {
+          setHasError(true);
+          return;
+        }
+        setFileList(response);
+      },
+    );
     return () => controller.abort();
-  }, [open, cwd, refreshCount, abortPatchFetches]);
+  }, [open, cwd, refreshCount, compareMode, baseOverride, abortPatchFetches]);
 
   const files = useMemo(() => fileList?.files ?? [], [fileList]);
 
@@ -863,7 +950,12 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
       patchControllersRef.current.get(path)?.abort();
       const controller = new AbortController();
       patchControllersRef.current.set(path, controller);
-      void fetchGitDiffFilePatch(cwd, path, controller.signal).then((data) => {
+      void fetchGitDiffFilePatch(
+        cwd,
+        path,
+        { mode: compareMode, base: baseOverride },
+        controller.signal,
+      ).then((data) => {
         if (controller.signal.aborted) return;
         patchControllersRef.current.delete(path);
         setPatchCache((previous) => ({
@@ -872,7 +964,7 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
         }));
       });
     },
-    [cwd],
+    [cwd, compareMode, baseOverride],
   );
 
   // Keep a valid selection: follow the current file across refreshes, fall back
@@ -944,7 +1036,12 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
         return;
       }
       if (isTextArea) return;
-      if (target instanceof HTMLElement && target.tagName === "INPUT") return;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" || target.tagName === "SELECT")
+      ) {
+        return;
+      }
       if (event.key === "ArrowDown" || event.key === "j") {
         event.preventDefault();
         moveSelection(1);
@@ -965,6 +1062,18 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
     setViewMode(nextMode);
     storeDiffViewMode(nextMode);
   }, []);
+
+  // An explicit toggle overrides the PR-derived default for the rest of this open
+  // (cleared on close/reopen — the mode is intentionally not persisted).
+  const handleCompareModeChange = useCallback((nextMode: GitDiffMode) => {
+    setUserPickedMode(nextMode);
+  }, []);
+
+  // Refresh both the diff and the leased branch/PR metadata.
+  const handleRefresh = useCallback(() => {
+    setRefreshCount((count) => count + 1);
+    onRefreshBranchInfo?.();
+  }, [onRefreshBranchInfo]);
 
   const openAnnotationEditor = useCallback((key: string, range?: PendingAnnotationRange) => {
     setEditingKey(key);
@@ -995,6 +1104,14 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
     );
   }, []);
 
+  // Options for the base picker: the candidate refs, plus the active base if it
+  // somehow isn't among them (e.g. a detached default), so the select can show it.
+  const baseOptions = useMemo(() => {
+    const refs = branchInfo?.branches ?? [];
+    if (displayBase && !refs.includes(displayBase)) return [displayBase, ...refs];
+    return refs;
+  }, [branchInfo, displayBase]);
+
   const annotationList = useMemo(() => Object.values(annotations), [annotations]);
 
   const annotationCounts = useMemo(() => {
@@ -1023,8 +1140,13 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
   if (!mounted) return null;
 
   const isVisible = open && settled;
-  const isRepo = fileList?.isRepo ?? true;
+  const isRepo = (fileList?.isRepo ?? true) && (branchInfo?.isRepo ?? true);
   const isEmpty = fileList !== null && isRepo && files.length === 0;
+  const isBranchMode = compareMode === "branch";
+  const pr = branchInfo?.pr ?? null;
+  // Branch metadata is leased but no plausible base branch exists (e.g. a
+  // single-branch repo).
+  const branchNoBase = isBranchMode && branchInfo !== null && displayBase === null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
@@ -1049,8 +1171,64 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
         )}
       >
         <header className="flex shrink-0 items-center gap-3 border-b border-border/40 px-4 py-2.5">
-          <h2 className="text-sm font-medium text-foreground">Changes</h2>
-          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+          <h2 className="shrink-0 text-sm font-medium text-foreground">Changes</h2>
+          <div
+            role="radiogroup"
+            aria-label="diff comparison"
+            className="flex shrink-0 items-center rounded-md border border-border/60 p-0.5"
+          >
+            {(
+              [
+                ["working", "Working"],
+                ["branch", "Branch"],
+              ] as const
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={compareMode === mode}
+                onClick={() => handleCompareModeChange(mode)}
+                className={cn(
+                  "rounded-sm px-2 py-0.5 text-xs transition-colors",
+                  compareMode === mode
+                    ? "bg-foreground/10 text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {isBranchMode ? (
+            <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="shrink-0">vs</span>
+              <select
+                aria-label="base branch"
+                value={displayBase ?? ""}
+                disabled={branchInfo === null}
+                onChange={(event) => setBaseOverride(event.target.value || null)}
+                className="max-w-48 truncate rounded-md border border-border/60 bg-background px-1.5 py-0.5 font-mono text-xs text-foreground outline-none focus-visible:border-ring disabled:opacity-50 [&>option]:bg-popover [&>option]:text-foreground"
+              >
+                {branchInfo === null ? (
+                  <option value="">Loading…</option>
+                ) : baseOptions.length === 0 ? (
+                  <option value="">No branches</option>
+                ) : (
+                  baseOptions.map((ref) => (
+                    <option key={ref} value={ref}>
+                      {ref}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+          ) : null}
+          {/* PR badge shows in both modes so even the working-tree diff signals
+              "this branch has a PR" (with its open/merged/closed status). */}
+          {pr ? <PrBadge pr={pr} /> : null}
+          <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
             <span className={ADDITIONS_CLASSES}>+{totals.additions.toLocaleString()}</span>{" "}
             <span className={DELETIONS_CLASSES}>−{totals.deletions.toLocaleString()}</span>
             {totals.binaries > 0 ? (
@@ -1085,7 +1263,7 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
             <Button
               variant="ghost"
               size="icon-sm"
-              onClick={() => setRefreshCount((count) => count + 1)}
+              onClick={handleRefresh}
               aria-label="refresh diff"
               className="hover:text-foreground"
             >
@@ -1106,11 +1284,7 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
         {hasError ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
             Couldn't load the diff from the localterm daemon.
-            <Button
-              variant="outline"
-              size="xs"
-              onClick={() => setRefreshCount((count) => count + 1)}
-            >
+            <Button variant="outline" size="xs" onClick={handleRefresh}>
               Retry
             </Button>
           </div>
@@ -1118,9 +1292,15 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
             Not a git repository.
           </div>
+        ) : branchNoBase ? (
+          <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+            Couldn't find a base branch to compare against. Pick one once more branches exist.
+          </div>
         ) : isEmpty ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Working tree clean — nothing to diff.
+          <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+            {isBranchMode
+              ? `No changes between ${displayBase ?? "the base branch"} and your working tree.`
+              : "Working tree clean — nothing to diff."}
           </div>
         ) : fileList === null ? (
           <div className="flex flex-1 items-center justify-center">
