@@ -11,7 +11,7 @@
 // firing schedule never changes.
 
 import { parseCronExpression, type ParsedCronExpression } from "../cron-expression.js";
-import type { AutomationSchedule, AutomationTrigger, CreateAutomationInput } from "../types.js";
+import type { AutomationSchedule, AutomationTrigger, TriggerInput } from "../types.js";
 
 const WEEKDAYS_CRON_DOW = "1-5";
 const WEEKENDS_CRON_DOW = "0,6";
@@ -182,23 +182,10 @@ export const normalizeScheduleInput = (input: AutomationSchedule | string): Auto
   return recognizePreset(trimmed) ?? { kind: "cron", expression: trimmed };
 };
 
-// The trigger-level counterpart: resolve the new `trigger` union (defaulting
-// watch.recursive, normalizing a schedule payload) or fall back to the legacy
-// bare `schedule` field (coerced to a schedule trigger). Both create and update
-// inputs carry optional `trigger` + `schedule`.
-type TriggerInput = Pick<CreateAutomationInput, "trigger" | "schedule">;
-
-export const normalizeTriggerInput = (input: TriggerInput): AutomationTrigger => {
-  if (input.trigger) {
-    return input.trigger.kind === "watch"
-      ? { kind: "watch", recursive: input.trigger.recursive ?? true }
-      : { kind: "schedule", schedule: normalizeScheduleInput(input.trigger.schedule) };
-  }
-  if (input.schedule !== undefined) {
-    return { kind: "schedule", schedule: normalizeScheduleInput(input.schedule) };
-  }
-  // Unreachable: create validates that one is present, and update only calls
-  // this when patch.trigger or patch.schedule is set. The guard keeps the return
-  // total and surfaces a contract violation loudly rather than writing junk.
-  throw new Error("normalizeTriggerInput requires a trigger or schedule");
-};
+// The trigger-level counterpart of normalizeScheduleInput: default watch's
+// `recursive`, and normalize a schedule trigger's payload (recognizing a bare
+// cron string as a friendly preset).
+export const normalizeTriggerInput = (trigger: TriggerInput): AutomationTrigger =>
+  trigger.kind === "watch"
+    ? { kind: "watch", recursive: trigger.recursive ?? true }
+    : { kind: "schedule", schedule: normalizeScheduleInput(trigger.schedule) };

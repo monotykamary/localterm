@@ -89,7 +89,7 @@ export class AutomationStore {
     const automation: Automation = {
       id: randomUUID(),
       name: input.name,
-      trigger: normalizeTriggerInput(input),
+      trigger: normalizeTriggerInput(input.trigger),
       cwd: input.cwd,
       command: input.command,
       enabled: input.enabled ?? true,
@@ -118,9 +118,7 @@ export class AutomationStore {
     const updated: Automation = {
       ...current,
       ...(patch.name !== undefined ? { name: patch.name } : {}),
-      ...(patch.trigger !== undefined || patch.schedule !== undefined
-        ? { trigger: normalizeTriggerInput(patch) }
-        : {}),
+      ...(patch.trigger !== undefined ? { trigger: normalizeTriggerInput(patch.trigger) } : {}),
       ...(patch.cwd !== undefined ? { cwd: patch.cwd } : {}),
       ...(patch.command !== undefined ? { command: patch.command } : {}),
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),

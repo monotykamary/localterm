@@ -25,7 +25,7 @@ describe("AutomationScheduler", () => {
   const createAutomation = (overrides: Partial<CreateAutomationInput> = {}) =>
     store.create({
       name: "every minute",
-      schedule: { kind: "everyNMinutes", step: 1 },
+      trigger: { kind: "schedule", schedule: { kind: "everyNMinutes", step: 1 } },
       cwd: os.tmpdir(),
       command: "true",
       ...overrides,
@@ -59,7 +59,7 @@ describe("AutomationScheduler", () => {
   });
 
   it("skips automations whose schedule does not match", () => {
-    createAutomation({ schedule: { kind: "daily", hour: 2, minute: 30 } });
+    createAutomation({ trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 30 } } });
     const due: Automation[] = [];
     scheduler.on("due", (dueAutomation) => due.push(dueAutomation));
     scheduler.runTick(new Date(2026, 5, 13, 10, 15, 0));
@@ -76,12 +76,15 @@ describe("AutomationScheduler", () => {
 
   it("matches a multiple-times-a-day schedule on any of its times", () => {
     const automation = createAutomation({
-      schedule: {
-        kind: "timesOfDay",
-        times: [
-          { hour: 9, minute: 0 },
-          { hour: 10, minute: 15 },
-        ],
+      trigger: {
+        kind: "schedule",
+        schedule: {
+          kind: "timesOfDay",
+          times: [
+            { hour: 9, minute: 0 },
+            { hour: 10, minute: 15 },
+          ],
+        },
       },
     });
     const due: Automation[] = [];
@@ -103,7 +106,9 @@ describe("AutomationScheduler", () => {
   it("tolerates invalid schedules without firing", () => {
     const valid = createAutomation();
     const invalid = createAutomation();
-    store.update(invalid.id, { schedule: { kind: "cron", expression: "not a cron" } });
+    store.update(invalid.id, {
+      trigger: { kind: "schedule", schedule: { kind: "cron", expression: "not a cron" } },
+    });
     const due: Automation[] = [];
     scheduler.on("due", (dueAutomation) => due.push(dueAutomation));
     scheduler.runTick(new Date(2026, 5, 13, 10, 15, 0));

@@ -67,9 +67,9 @@ import type {
   Automation,
   AutomationLastRun,
   AutomationWithNextRun,
-  CreateAutomationInput,
   PendingAutomationRun,
   ServerToClientMessage,
+  TriggerInput,
 } from "./types.js";
 
 export interface ServerOptions {
@@ -470,17 +470,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
   };
 
-  // The trigger (new `trigger` union or legacy bare `schedule`) is valid iff a
-  // schedule trigger compiles to ≥1 parseable cron; a watch trigger is always
-  // valid (its watched cwd is validated separately). Returns true when neither
-  // field is present — a PATCH that doesn't touch the trigger.
-  const isValidTriggerInput = (
-    input: Pick<CreateAutomationInput, "trigger" | "schedule">,
-  ): boolean => {
-    if (input.trigger === undefined && input.schedule === undefined) return true;
-    const trigger = normalizeTriggerInput(input);
-    if (trigger.kind === "watch") return true;
-    const crons = compileScheduleAll(trigger.schedule);
+  // A trigger is valid iff a schedule trigger compiles to ≥1 parseable cron; a
+  // watch trigger is always valid (its watched cwd is validated separately).
+  const isValidTriggerInput = (trigger: TriggerInput): boolean => {
+    const normalized = normalizeTriggerInput(trigger);
+    if (normalized.kind === "watch") return true;
+    const crons = compileScheduleAll(normalized.schedule);
     return crons.length > 0 && crons.every((cron) => parseCronExpression(cron) !== null);
   };
 
@@ -492,7 +487,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     if (automationStore.size() >= MAX_AUTOMATIONS) {
       return context.json({ error: "too_many_automations" }, HTTP_STATUS_BAD_REQUEST);
     }
-    if (!isValidTriggerInput(parsed.data)) {
+    if (!isValidTriggerInput(parsed.data.trigger)) {
       return context.json({ error: "invalid_schedule" }, HTTP_STATUS_BAD_REQUEST);
     }
     if (!resolveCwdQuery(parsed.data.cwd)) {
@@ -510,7 +505,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   api.patch("/automations/:id", async (context) => {
     const parsed = updateAutomationInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
-    if (!isValidTriggerInput(parsed.data)) {
+    if (parsed.data.trigger !== undefined && !isValidTriggerInput(parsed.data.trigger)) {
       return context.json({ error: "invalid_schedule" }, HTTP_STATUS_BAD_REQUEST);
     }
     if (parsed.data.cwd !== undefined && !resolveCwdQuery(parsed.data.cwd)) {

@@ -14,7 +14,7 @@ interface TestContext {
 
 const createInput = () => ({
   name: "nightly build",
-  schedule: "0 2 * * *",
+  trigger: { kind: "schedule", schedule: "0 2 * * *" },
   cwd: os.tmpdir(),
   command: "pnpm build",
 });
@@ -86,9 +86,14 @@ describe("automations REST API", () => {
 
   it("rejects invalid bodies, schedules, and directories", async () => {
     expect((await request("POST", "", { nope: true })).status).toBe(400);
-    expect((await request("POST", "", { ...createInput(), schedule: "bad" })).body.error).toBe(
-      "invalid_schedule",
-    );
+    expect(
+      (
+        await request("POST", "", {
+          ...createInput(),
+          trigger: { kind: "schedule", schedule: "bad" },
+        })
+      ).body.error,
+    ).toBe("invalid_schedule");
     expect(
       (await request("POST", "", { ...createInput(), cwd: "/definitely/not/a/dir" })).body.error,
     ).toBe("invalid_cwd");
@@ -107,9 +112,13 @@ describe("automations REST API", () => {
   it("rejects updates with invalid fields and unknown ids", async () => {
     const created = await request("POST", "", createInput());
     const automation = automationWithNextRunSchema.parse(created.body.automation);
-    expect((await request("PATCH", `/${automation.id}`, { schedule: "bad" })).body.error).toBe(
-      "invalid_schedule",
-    );
+    expect(
+      (
+        await request("PATCH", `/${automation.id}`, {
+          trigger: { kind: "schedule", schedule: "bad" },
+        })
+      ).body.error,
+    ).toBe("invalid_schedule");
     expect((await request("PATCH", "/missing", { enabled: false })).status).toBe(404);
   });
 
@@ -144,7 +153,10 @@ describe("automations REST API", () => {
   it("creates with a structured schedule and exposes derived cron + empty history", async () => {
     const { status, body } = await request("POST", "", {
       name: "weekday standup",
-      schedule: { kind: "weekdaysPreset", preset: "weekdays", hour: 9, minute: 0 },
+      trigger: {
+        kind: "schedule",
+        schedule: { kind: "weekdaysPreset", preset: "weekdays", hour: 9, minute: 0 },
+      },
       cwd: os.tmpdir(),
       command: "echo standup",
     });
@@ -161,8 +173,11 @@ describe("automations REST API", () => {
     expect(automation.lifecycle).toBe("active");
   });
 
-  it("accepts a legacy bare cron string and recognizes it as a preset", async () => {
-    const { body } = await request("POST", "", { ...createInput(), schedule: "0 9 * * 1-5" });
+  it("accepts a bare cron string inside a schedule trigger and recognizes it as a preset", async () => {
+    const { body } = await request("POST", "", {
+      ...createInput(),
+      trigger: { kind: "schedule", schedule: "0 9 * * 1-5" },
+    });
     const automation = automationWithNextRunSchema.parse(body.automation);
     expect(automation.trigger).toEqual({
       kind: "schedule",
@@ -228,7 +243,7 @@ describe("automations REST API", () => {
   it("rejects a structured schedule that cannot compile to valid cron", async () => {
     const { body } = await request("POST", "", {
       ...createInput(),
-      schedule: { kind: "cron", expression: "totally invalid" },
+      trigger: { kind: "schedule", schedule: { kind: "cron", expression: "totally invalid" } },
     });
     expect(body.error).toBe("invalid_schedule");
   });
@@ -328,7 +343,7 @@ describe("automations REST API", () => {
     try {
       const created = await request("POST", "", {
         name: "marker",
-        schedule: "0 2 * * *",
+        trigger: { kind: "schedule", schedule: "0 2 * * *" },
         cwd: automationCwd,
         command: "echo automation-ran-marker",
       });
@@ -442,7 +457,7 @@ describe("automations REST API", () => {
 
       const created = (await post("", {
         name: "closer",
-        schedule: "0 2 * * *",
+        trigger: { kind: "schedule", schedule: "0 2 * * *" },
         cwd: dir,
         command: "echo automation-ran-marker",
         closeOnFinish: true,
@@ -489,7 +504,7 @@ describe("automations REST API", () => {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             name: "no-closer",
-            schedule: "0 2 * * *",
+            trigger: { kind: "schedule", schedule: "0 2 * * *" },
             cwd: dir,
             command: "echo automation-ran-marker",
           }),

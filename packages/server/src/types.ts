@@ -24,6 +24,7 @@ import type {
   gitDiffSummarySchema,
   resetAutomationInputSchema,
   serverToClientMessageSchema,
+  triggerInputSchema,
   updateAutomationInputSchema,
 } from "./schemas.js";
 
@@ -53,6 +54,7 @@ export type AutomationLastRunStatus = z.infer<typeof automationLastRunStatusSche
 export type AutomationLastRun = z.infer<typeof automationLastRunSchema>;
 export type AutomationSchedule = z.infer<typeof automationScheduleSchema>;
 export type AutomationTrigger = z.infer<typeof automationTriggerSchema>;
+export type TriggerInput = z.infer<typeof triggerInputSchema>;
 export type AutomationRunLimit = z.infer<typeof automationRunLimitSchema>;
 export type AutomationLifecycle = z.infer<typeof automationLifecycleSchema>;
 export type AutomationRunStatus = z.infer<typeof automationRunStatusSchema>;

@@ -45,10 +45,8 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
     a command that writes into the watched folder won't loop). Watch triggers
     have no `cron`/`nextRunAt` (both `null`).
 
-  For back-compat a top-level `schedule` is still accepted in place of `trigger`
-  and treated as a schedule trigger. A `schedule` is a **structured schedule
-  object** (preferred) or, for back-compat, a bare 5-field cron string — a tagged
-  union on `kind`:
+  A schedule trigger's `schedule` is a **structured schedule object** (preferred)
+  or a bare 5-field cron string — a tagged union on `kind`:
 
   | `kind`           | shape                                                                  | example meaning                 |
   | ---------------- | ---------------------------------------------------------------------- | ------------------------------- |
@@ -112,7 +110,7 @@ curl -s -X POST "$BASE/automations" \
   -H 'content-type: application/json' \
   -d '{
     "name": "nightly build",
-    "schedule": { "kind": "daily", "hour": 2, "minute": 0 },
+    "trigger": { "kind": "schedule", "schedule": { "kind": "daily", "hour": 2, "minute": 0 } },
     "cwd": "/Users/me/project",
     "command": "pnpm build && pnpm test",
     "enabled": true,
@@ -132,7 +130,7 @@ curl -s -X POST "$BASE/automations" \
   }'
 # → 201 {"automation":{"id":"…","cron":null,"nextRunAt":null,…}}
 
-# Update any subset of fields (a bare cron string is still accepted for schedule)
+# Update any subset of fields (pass a `trigger` to change the schedule/watch)
 curl -s -X PATCH "$BASE/automations/<id>" \
   -H 'content-type: application/json' \
   -d '{"limit": {"kind": "count", "max": 20}}'

@@ -130,37 +130,27 @@ describe("normalizeScheduleInput", () => {
 
 describe("normalizeTriggerInput", () => {
   it("normalizes a schedule trigger payload (recognizing a bare cron)", () => {
-    expect(normalizeTriggerInput({ trigger: { kind: "schedule", schedule: "0 9 * * *" } })).toEqual({
+    expect(normalizeTriggerInput({ kind: "schedule", schedule: "0 9 * * *" })).toEqual({
       kind: "schedule",
       schedule: { kind: "daily", hour: 9, minute: 0 },
     });
   });
 
-  it("defaults watch.recursive to true and preserves an explicit value", () => {
-    expect(normalizeTriggerInput({ trigger: { kind: "watch" } })).toEqual({
-      kind: "watch",
-      recursive: true,
-    });
-    expect(normalizeTriggerInput({ trigger: { kind: "watch", recursive: false } })).toEqual({
-      kind: "watch",
-      recursive: false,
-    });
-  });
-
-  it("wraps a legacy bare schedule into a schedule trigger", () => {
-    expect(normalizeTriggerInput({ schedule: "0 9 * * 1-5" })).toEqual({
+  it("recognizes a bare cron string inside a schedule trigger as a preset", () => {
+    expect(normalizeTriggerInput({ kind: "schedule", schedule: "0 9 * * 1-5" })).toEqual({
       kind: "schedule",
       schedule: { kind: "weekdaysPreset", preset: "weekdays", hour: 9, minute: 0 },
     });
-    expect(normalizeTriggerInput({ schedule: { kind: "everyNMinutes", step: 5 } })).toEqual({
-      kind: "schedule",
-      schedule: { kind: "everyNMinutes", step: 5 },
-    });
+    expect(
+      normalizeTriggerInput({ kind: "schedule", schedule: { kind: "everyNMinutes", step: 5 } }),
+    ).toEqual({ kind: "schedule", schedule: { kind: "everyNMinutes", step: 5 } });
   });
 
-  it("prefers an explicit trigger over a legacy schedule when both are present", () => {
-    expect(
-      normalizeTriggerInput({ trigger: { kind: "watch", recursive: true }, schedule: "0 9 * * *" }),
-    ).toEqual({ kind: "watch", recursive: true });
+  it("defaults watch.recursive to true and preserves an explicit value", () => {
+    expect(normalizeTriggerInput({ kind: "watch" })).toEqual({ kind: "watch", recursive: true });
+    expect(normalizeTriggerInput({ kind: "watch", recursive: false })).toEqual({
+      kind: "watch",
+      recursive: false,
+    });
   });
 });

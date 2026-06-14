@@ -120,7 +120,7 @@ describe("startup downtime reconciliation (integration)", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         name: "hourly",
-        schedule: { kind: "hourly", minute: 30 },
+        trigger: { kind: "schedule", schedule: { kind: "hourly", minute: 30 } },
         cwd: os.tmpdir(),
         command: "true",
       }),

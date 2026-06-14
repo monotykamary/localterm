@@ -457,29 +457,19 @@ export const automationsFileV2Schema = z
 export const createAutomationInputSchema = z
   .object({
     name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
-    // The new `trigger` union, or a legacy bare `schedule` (a schedule object or
-    // cron string) coerced to a schedule trigger at the store. Exactly one is
-    // required; the legacy form keeps existing curl/skill consumers working.
-    trigger: triggerInputSchema.optional(),
-    schedule: scheduleInputSchema.optional(),
+    trigger: triggerInputSchema,
     cwd: z.string().min(1),
     command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
     enabled: z.boolean().optional(),
     limit: automationRunLimitSchema.optional(),
     closeOnFinish: z.boolean().optional(),
   })
-  .strict()
-  .refine((data) => data.trigger !== undefined || data.schedule !== undefined, {
-    message: "either trigger or schedule is required",
-  });
+  .strict();
 
 export const updateAutomationInputSchema = z
   .object({
     name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH).optional(),
-    // Either form changes the trigger; the legacy bare `schedule` is coerced to
-    // a schedule trigger at the store.
     trigger: triggerInputSchema.optional(),
-    schedule: scheduleInputSchema.optional(),
     cwd: z.string().min(1).optional(),
     command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH).optional(),
     enabled: z.boolean().optional(),

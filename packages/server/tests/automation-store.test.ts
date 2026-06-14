@@ -114,7 +114,7 @@ describe("AutomationStore", () => {
       name: createInput.name,
       cwd: createInput.cwd,
       command: createInput.command,
-      schedule: "0 9 * * 1-5",
+      trigger: { kind: "schedule", schedule: "0 9 * * 1-5" },
     });
     expect(automation.trigger).toEqual({
       kind: "schedule",
@@ -129,7 +129,7 @@ describe("AutomationStore", () => {
       name: createInput.name,
       cwd: createInput.cwd,
       command: createInput.command,
-      schedule: "0 9 1 * 1",
+      trigger: { kind: "schedule", schedule: "0 9 1 * 1" },
     });
     expect(automation.trigger).toEqual({
       kind: "schedule",
