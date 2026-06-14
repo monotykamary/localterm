@@ -951,6 +951,8 @@ export const DiffViewer = ({
       void (async () => {
         const response = await fetchGitDiffFiles(cwd, query, controller.signal);
         if (controller.signal.aborted || !response) return;
+        abortPatchFetches();
+        setPatchCache({});
         setter(response);
       })();
       return () => controller.abort();
