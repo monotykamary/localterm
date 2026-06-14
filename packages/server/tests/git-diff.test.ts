@@ -6,6 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import {
   buildUntrackedPatch,
   getGitDiff,
+  getGitDiffFilePatch,
+  getGitDiffFiles,
   getGitDiffSummary,
   parseNameStatusZ,
   parseNumstatZ,
@@ -258,5 +260,144 @@ describe("getGitDiffSummary / getGitDiff", () => {
     } finally {
       fs.rmSync(cleanDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("getGitDiffFiles / getGitDiffFilePatch", () => {
+  let repoDir: string;
+  let plainDir: string;
+
+  beforeAll(() => {
+    plainDir = makeTempDir();
+
+    repoDir = makeTempDir();
+    git(repoDir, "init", "--initial-branch=main");
+    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "alpha\nbeta\ngamma\n");
+    fs.writeFileSync(path.join(repoDir, "removed.txt"), "to be deleted\n");
+    // A rename that keeps >50% similarity so `git diff -M` pairs old->new into a
+    // single rename chunk rather than a delete + add.
+    fs.writeFileSync(
+      path.join(repoDir, "renamed-old.txt"),
+      "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+    );
+    fs.writeFileSync(path.join(repoDir, "binary.bin"), Buffer.from([0, 1, 2, 3, 0, 255]));
+    fs.mkdirSync(path.join(repoDir, "dir with space"));
+    fs.writeFileSync(path.join(repoDir, "dir with space", "café.ts"), "const a = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "huge.txt"), "seed\n");
+    commitAll(repoDir, "base");
+
+    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "alpha\nBETA\ngamma\n");
+    fs.rmSync(path.join(repoDir, "removed.txt"));
+    git(repoDir, "mv", "renamed-old.txt", "renamed-new.txt");
+    fs.writeFileSync(
+      path.join(repoDir, "renamed-new.txt"),
+      "one\nTWO\nthree\nfour\nfive\nsix\nseven\neight\n",
+    );
+    fs.writeFileSync(path.join(repoDir, "binary.bin"), Buffer.from([0, 9, 9, 9, 0, 255]));
+    fs.writeFileSync(path.join(repoDir, "dir with space", "café.ts"), "const a = 2;\n");
+    // Patch will exceed the 1 MB per-file cap → patchOmitted.
+    fs.writeFileSync(path.join(repoDir, "huge.txt"), `${"x".repeat(1024)}\n`.repeat(1500));
+    fs.writeFileSync(path.join(repoDir, "untracked.txt"), "new one\nnew two\n");
+    fs.writeFileSync(path.join(repoDir, "untracked.bin"), Buffer.from([0, 1, 2, 0]));
+  });
+
+  afterAll(() => {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+    fs.rmSync(plainDir, { recursive: true, force: true });
+  });
+
+  it("lists per-file metadata without patch bodies", async () => {
+    expect(await getGitDiffFiles(plainDir)).toEqual({ isRepo: false, files: [] });
+
+    const list = await getGitDiffFiles(repoDir);
+    expect(list.isRepo).toBe(true);
+    for (const file of list.files) {
+      expect(file).not.toHaveProperty("patch");
+      expect(file).not.toHaveProperty("patchOmitted");
+    }
+    const byPath = new Map(list.files.map((file) => [file.path, file]));
+    expect(byPath.get("tracked.txt")).toMatchObject({
+      status: "modified",
+      additions: 1,
+      deletions: 1,
+      binary: false,
+    });
+    expect(byPath.get("removed.txt")?.status).toBe("deleted");
+    expect(byPath.get("renamed-new.txt")).toMatchObject({
+      status: "renamed",
+      oldPath: "renamed-old.txt",
+    });
+    expect(byPath.get("binary.bin")?.binary).toBe(true);
+    expect(byPath.get("untracked.txt")?.status).toBe("untracked");
+    expect(byPath.get("untracked.bin")).toMatchObject({ status: "untracked", binary: true });
+  });
+
+  it("returns a modified file's patch", async () => {
+    const result = await getGitDiffFilePatch(repoDir, "tracked.txt");
+    expect(result.binary).toBe(false);
+    expect(result.patchOmitted).toBe(false);
+    expect(result.patch).toContain("-beta");
+    expect(result.patch).toContain("+BETA");
+  });
+
+  it("returns a single rename chunk for a renamed file", async () => {
+    const result = await getGitDiffFilePatch(repoDir, "renamed-new.txt");
+    expect(result.binary).toBe(false);
+    expect(result.patchOmitted).toBe(false);
+    // Both endpoints diffed together → one rename chunk (not an add + delete).
+    expect(splitPatchByFile(result.patch ?? "")).toHaveLength(1);
+    expect(result.patch).toContain("rename from renamed-old.txt");
+    expect(result.patch).toContain("rename to renamed-new.txt");
+    expect(result.patch).toContain("-two");
+    expect(result.patch).toContain("+TWO");
+  });
+
+  it("returns a deleted file's patch", async () => {
+    const result = await getGitDiffFilePatch(repoDir, "removed.txt");
+    expect(result.patch).toContain("deleted file mode");
+    expect(result.patch).toContain("-to be deleted");
+  });
+
+  it("reports a binary file with no patch", async () => {
+    expect(await getGitDiffFilePatch(repoDir, "binary.bin")).toEqual({
+      patch: null,
+      patchOmitted: false,
+      binary: true,
+    });
+  });
+
+  it("synthesizes a patch for an untracked text file", async () => {
+    const result = await getGitDiffFilePatch(repoDir, "untracked.txt");
+    expect(result.patch).toBe("@@ -0,0 +1,2 @@\n+new one\n+new two\n");
+    expect(result.binary).toBe(false);
+  });
+
+  it("reports an untracked binary file", async () => {
+    expect(await getGitDiffFilePatch(repoDir, "untracked.bin")).toMatchObject({
+      patch: null,
+      binary: true,
+    });
+  });
+
+  it("handles paths with spaces and unicode", async () => {
+    const result = await getGitDiffFilePatch(repoDir, "dir with space/café.ts");
+    expect(result.patch).toContain("-const a = 1;");
+    expect(result.patch).toContain("+const a = 2;");
+  });
+
+  it("omits a patch that exceeds the per-file size cap", async () => {
+    expect(await getGitDiffFilePatch(repoDir, "huge.txt")).toEqual({
+      patch: null,
+      patchOmitted: true,
+      binary: false,
+    });
+  });
+
+  it("returns an empty result for an unknown path", async () => {
+    expect(await getGitDiffFilePatch(repoDir, "does-not-exist.txt")).toEqual({
+      patch: null,
+      patchOmitted: false,
+      binary: false,
+    });
   });
 });

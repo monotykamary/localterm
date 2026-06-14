@@ -116,6 +116,37 @@ export const gitDiffFileStatusSchema = z.enum([
   "untracked",
 ]);
 
+// Per-file metadata for the diff viewer's file list. The patch body is fetched
+// lazily per file (gitDiffFilePatchSchema) so opening the viewer never blocks on
+// generating every changed file's diff.
+export const gitDiffFileMetaSchema = z
+  .object({
+    path: z.string().min(1),
+    oldPath: z.string().min(1).nullable(),
+    status: gitDiffFileStatusSchema,
+    additions: z.number().int().nonnegative(),
+    deletions: z.number().int().nonnegative(),
+    binary: z.boolean(),
+  })
+  .strict();
+
+export const gitDiffFileListResponseSchema = z
+  .object({
+    isRepo: z.boolean(),
+    files: z.array(gitDiffFileMetaSchema),
+  })
+  .strict();
+
+// One file's unified diff text, fetched on demand. patch is null when the file
+// is binary or the patch was dropped for size (patchOmitted distinguishes them).
+export const gitDiffFilePatchSchema = z
+  .object({
+    patch: z.string().nullable(),
+    patchOmitted: z.boolean(),
+    binary: z.boolean(),
+  })
+  .strict();
+
 // Lightweight working-tree stats polled by the browser for the diff indicator.
 export const gitDiffSummarySchema = z
   .object({
@@ -413,14 +444,8 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   caffeinateStateMessageSchema,
 ]);
 
-export const gitDiffFileSchema = z
-  .object({
-    path: z.string().min(1),
-    oldPath: z.string().min(1).nullable(),
-    status: gitDiffFileStatusSchema,
-    additions: z.number().int().nonnegative(),
-    deletions: z.number().int().nonnegative(),
-    binary: z.boolean(),
+export const gitDiffFileSchema = gitDiffFileMetaSchema
+  .extend({
     // Unified diff text for this file. Null when the file is binary or the
     // patch was dropped for size (patchOmitted distinguishes the two).
     patch: z.string().nullable(),

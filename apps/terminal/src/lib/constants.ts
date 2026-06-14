@@ -34,10 +34,13 @@ export const FAVICON_DEAD_OPACITY = 0.35;
 export const COMMAND_PALETTE_CLOSE_TRANSITION_MS = 150;
 
 export const DIFF_VIEWER_CLOSE_TRANSITION_MS = 150;
-// Render cap per file in the diff viewer. Beyond this the remaining hunks are
-// hidden behind a "show all" button so a generated-file diff can't lock up
-// the main thread on first paint.
+// Lines rendered on a file's first paint in the diff viewer. The rest stream in
+// progressively (DIFF_VIEWER_RENDER_CHUNK lines per animation frame) so a
+// generated-file diff paints its first screen instantly without locking up the
+// main thread.
 export const DIFF_VIEWER_INITIAL_LINE_LIMIT = 2000;
+// Lines revealed per frame as the diff renders progressively after first paint.
+export const DIFF_VIEWER_RENDER_CHUNK = 2000;
 export const DIFF_VIEW_MODE_STORAGE_KEY = "localterm:diff-view-mode";
 
 export const AUTOMATIONS_RELATIVE_TIME_REFRESH_MS = 30_000;

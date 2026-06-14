@@ -1,4 +1,8 @@
-import type { GitDiffFile, GitDiffResponse } from "@monotykamary/localterm-server/protocol";
+import type {
+  GitDiffFileListResponse,
+  GitDiffFileMeta,
+  GitDiffFilePatch,
+} from "@monotykamary/localterm-server/protocol";
 import {
   FileWarning,
   MessageSquare,
@@ -9,7 +13,17 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  Fragment,
+  memo,
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,9 +32,18 @@ import {
   COMMAND_PALETTE_PANEL_CLASSES,
   MODAL_PANEL_CLASSES,
 } from "@/lib/animation-classes";
-import { DIFF_VIEWER_CLOSE_TRANSITION_MS, DIFF_VIEWER_INITIAL_LINE_LIMIT } from "@/lib/constants";
+import {
+  DIFF_VIEWER_CLOSE_TRANSITION_MS,
+  DIFF_VIEWER_INITIAL_LINE_LIMIT,
+  DIFF_VIEWER_RENDER_CHUNK,
+} from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import { buildSplitDiffRows } from "@/utils/build-split-diff-rows";
+import type { SplitDiffRow } from "@/utils/build-split-diff-rows";
+import {
+  buildRenderChunks,
+  renderChunkLength,
+  type RenderChunk,
+} from "@/utils/build-render-chunks";
 import {
   buildDiffLineRangeIndex,
   coveredTargetKeys,
@@ -30,19 +53,14 @@ import {
   type DiffLineRange,
   type DiffLineTarget,
 } from "@/utils/diff-line-ranges";
-import { fetchGitDiff } from "@/utils/fetch-git-diff";
+import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "@/utils/fetch-git-diff";
 import {
   annotationRangeStart,
   diffAnnotationKey,
   formatReviewPrompt,
   type DiffAnnotation,
 } from "@/utils/format-review-prompt";
-import {
-  countHunkLines,
-  parseUnifiedDiff,
-  type DiffHunk,
-  type DiffLine,
-} from "@/utils/parse-unified-diff";
+import { parseUnifiedDiff, type DiffLine } from "@/utils/parse-unified-diff";
 import {
   loadStoredDiffViewMode,
   storeDiffViewMode,
@@ -62,6 +80,26 @@ interface PendingAnnotationRange extends DiffLineRange {
   filePath: string;
 }
 
+// Per-file patch fetched lazily when a file is selected.
+interface PatchEntry {
+  state: "loading" | "loaded" | "error";
+  data?: GitDiffFilePatch;
+}
+
+interface LineAnnotationState {
+  key: string;
+  target: DiffLineTarget;
+  saved: DiffAnnotation | undefined;
+  isEditing: boolean;
+  rangeStart: DiffLineTarget | null;
+  save: (comment: string) => void;
+}
+
+interface DragSelection {
+  anchor: DiffLineTarget;
+  focus: DiffLineTarget;
+}
+
 const formatRangeLabel = (start: DiffLineTarget, end: DiffLineTarget): string => {
   const sideRef = (target: DiffLineTarget) =>
     `${target.side === "old" ? "old " : ""}L${target.lineNumber}`;
@@ -79,7 +117,7 @@ const RangeHighlight = () => (
   />
 );
 
-const STATUS_LABELS: Record<GitDiffFile["status"], { letter: string; className: string }> = {
+const STATUS_LABELS: Record<GitDiffFileMeta["status"], { letter: string; className: string }> = {
   modified: { letter: "M", className: "text-amber-400" },
   added: { letter: "A", className: "text-emerald-400" },
   deleted: { letter: "D", className: "text-red-400" },
@@ -245,48 +283,62 @@ const AnnotationBlock = ({
   </div>
 );
 
-const UnifiedDiffLine = ({
-  line,
-  highlighted,
-  onAnnotate,
-  onDragStart,
-  onDragEnter,
-}: {
-  line: DiffLine;
-  highlighted: boolean;
-  onAnnotate?: () => void;
-  onDragStart?: () => void;
-  onDragEnter?: () => void;
-}) => (
-  <div
-    className={cn("group/line relative flex", lineBackgroundClasses(line.type))}
-    onPointerEnter={onDragEnter}
-  >
-    {onAnnotate && onDragStart ? (
-      <AnnotateLineButton onClick={onAnnotate} onDragStart={onDragStart} />
-    ) : null}
-    <span className={LINE_NUMBER_CELL_CLASSES}>{line.oldLine ?? ""}</span>
-    <span className={LINE_NUMBER_CELL_CLASSES}>{line.newLine ?? ""}</span>
-    <span
-      className={cn(
-        "w-5 shrink-0 select-none text-center",
-        line.type === "add" && ADDITIONS_CLASSES,
-        line.type === "del" && DELETIONS_CLASSES,
-      )}
+// Stable per-line callbacks (defined once in FileDiffPane) take the line/key as
+// an argument so the leaf row components below can be memoized: during the
+// progressive grow, an already-mounted line keeps identical props and bails out.
+interface LineCallbacks {
+  onAnnotate?: (key: string) => void;
+  onStartDrag?: (line: DiffLine) => void;
+  onDragEnter?: (line: DiffLine) => void;
+}
+
+const UnifiedDiffLine = memo(
+  ({
+    line,
+    annotateKey,
+    highlighted,
+    onAnnotate,
+    onStartDrag,
+    onDragEnter,
+  }: {
+    line: DiffLine;
+    annotateKey: string | null;
+    highlighted: boolean;
+  } & LineCallbacks) => (
+    <div
+      className={cn("group/line relative flex", lineBackgroundClasses(line.type))}
+      onPointerEnter={onDragEnter ? () => onDragEnter(line) : undefined}
     >
-      {line.type === "add" ? "+" : line.type === "del" ? "-" : ""}
-    </span>
-    <span className={cn("whitespace-pre pr-4", lineTextClasses(line.type))}>
-      {line.text}
-      {line.noNewline ? (
-        <span className="select-none text-muted-foreground/50" title="No newline at end of file">
-          {" ⊘"}
-        </span>
+      {annotateKey !== null && onAnnotate && onStartDrag ? (
+        <AnnotateLineButton
+          onClick={() => onAnnotate(annotateKey)}
+          onDragStart={() => onStartDrag(line)}
+        />
       ) : null}
-    </span>
-    {highlighted ? <RangeHighlight /> : null}
-  </div>
+      <span className={LINE_NUMBER_CELL_CLASSES}>{line.oldLine ?? ""}</span>
+      <span className={LINE_NUMBER_CELL_CLASSES}>{line.newLine ?? ""}</span>
+      <span
+        className={cn(
+          "w-5 shrink-0 select-none text-center",
+          line.type === "add" && ADDITIONS_CLASSES,
+          line.type === "del" && DELETIONS_CLASSES,
+        )}
+      >
+        {line.type === "add" ? "+" : line.type === "del" ? "-" : ""}
+      </span>
+      <span className={cn("whitespace-pre pr-4", lineTextClasses(line.type))}>
+        {line.text}
+        {line.noNewline ? (
+          <span className="select-none text-muted-foreground/50" title="No newline at end of file">
+            {" ⊘"}
+          </span>
+        ) : null}
+      </span>
+      {highlighted ? <RangeHighlight /> : null}
+    </div>
+  ),
 );
+UnifiedDiffLine.displayName = "UnifiedDiffLine";
 
 const SplitDiffCell = ({
   line,
@@ -331,154 +383,105 @@ const SplitDiffCell = ({
   );
 };
 
-const HunkHeader = ({ hunk }: { hunk: DiffHunk }) => (
-  <div className="select-none bg-muted/30 px-4 py-0.5 text-muted-foreground/60">{hunk.header}</div>
+const SplitDiffRowView = memo(
+  ({
+    row,
+    leftKey,
+    leftHighlighted,
+    rightKey,
+    rightHighlighted,
+    onAnnotate,
+    onStartDrag,
+    onDragEnter,
+  }: {
+    row: SplitDiffRow;
+    leftKey: string | null;
+    leftHighlighted: boolean;
+    rightKey: string | null;
+    rightHighlighted: boolean;
+  } & LineCallbacks) => {
+    const left = row.left;
+    const right = row.right;
+    return (
+      <div className="flex">
+        <div
+          className="group/line relative flex w-1/2 min-w-0 border-r border-border/40"
+          onPointerEnter={onDragEnter && left ? () => onDragEnter(left) : undefined}
+        >
+          <SplitDiffCell
+            line={left}
+            side="left"
+            onAnnotate={leftKey !== null && onAnnotate ? () => onAnnotate(leftKey) : undefined}
+            onDragStart={left && onStartDrag ? () => onStartDrag(left) : undefined}
+          />
+          {leftHighlighted ? <RangeHighlight /> : null}
+        </div>
+        <div
+          className="group/line relative flex w-1/2 min-w-0"
+          onPointerEnter={onDragEnter && right ? () => onDragEnter(right) : undefined}
+        >
+          <SplitDiffCell
+            line={right}
+            side="right"
+            onAnnotate={rightKey !== null && onAnnotate ? () => onAnnotate(rightKey) : undefined}
+            onDragStart={right && onStartDrag ? () => onStartDrag(right) : undefined}
+          />
+          {rightHighlighted ? <RangeHighlight /> : null}
+        </div>
+      </div>
+    );
+  },
+);
+SplitDiffRowView.displayName = "SplitDiffRowView";
+
+const HunkHeader = ({ header }: { header: string }) => (
+  <div className="select-none bg-muted/30 px-4 py-0.5 text-muted-foreground/60">{header}</div>
 );
 
-interface FileDiffPaneProps {
-  file: GitDiffFile;
-  viewMode: DiffViewMode;
+interface DiffChunkProps {
+  chunk: RenderChunk;
+  filePath: string;
+  highlightedKeys: ReadonlySet<string>;
   annotations: Record<string, DiffAnnotation>;
   editingKey: string | null;
   pendingRange: PendingAnnotationRange | null;
-  // Set while a drag selection is active so the viewer's Escape handler can
-  // cancel the drag instead of closing the dialog.
-  dragCancelRef: RefObject<(() => void) | null>;
   onOpenEditor: (key: string, range?: PendingAnnotationRange) => void;
   onSaveAnnotation: (annotation: DiffAnnotation) => void;
   onCancelEditor: () => void;
   onDeleteAnnotation: (key: string) => void;
+  onStartDrag: (line: DiffLine) => void;
+  onDragEnter: (line: DiffLine) => void;
 }
 
-interface LineAnnotationState {
-  key: string;
-  target: DiffLineTarget;
-  saved: DiffAnnotation | undefined;
-  isEditing: boolean;
-  rangeStart: DiffLineTarget | null;
-  save: (comment: string) => void;
-}
-
-interface DragSelection {
-  anchor: DiffLineTarget;
-  focus: DiffLineTarget;
-}
-
-const FileDiffPane = ({
-  file,
-  viewMode,
-  annotations,
-  editingKey,
-  pendingRange,
-  dragCancelRef,
-  onOpenEditor,
-  onSaveAnnotation,
-  onCancelEditor,
-  onDeleteAnnotation,
-}: FileDiffPaneProps) => {
-  const [showAllLines, setShowAllLines] = useState(false);
-  const [drag, setDrag] = useState<DragSelection | null>(null);
-  const hunks = useMemo(() => (file.patch ? parseUnifiedDiff(file.patch) : []), [file.patch]);
-  const totalLines = useMemo(() => countHunkLines(hunks), [hunks]);
-  const rangeIndex = useMemo(() => buildDiffLineRangeIndex(hunks), [hunks]);
-
-  const isDragging = drag !== null;
-  const dragRange = drag ? resolveDragRange(rangeIndex, drag.anchor, drag.focus) : null;
-  const dragRangeRef = useRef(dragRange);
-  dragRangeRef.current = dragRange;
-
-  const startDrag = (target: DiffLineTarget) => setDrag({ anchor: target, focus: target });
-  const dragOver = (target: DiffLineTarget) =>
-    setDrag((previous) => (previous ? { ...previous, focus: target } : previous));
-
-  useEffect(() => {
-    setShowAllLines(false);
-    setDrag(null);
-  }, [file.path]);
-
-  // Releasing the pointer anywhere commits the drag and opens the editor on
-  // the last line of the range; a plain click is just a single-line range.
-  useEffect(() => {
-    if (!isDragging) return;
-    const cancelDrag = () => setDrag(null);
-    dragCancelRef.current = cancelDrag;
-    const commitDrag = () => {
-      setDrag(null);
-      const range = dragRangeRef.current;
-      if (!range) return;
-      const key = diffAnnotationKey({ filePath: file.path, ...range.end });
-      const isMultiline = diffLineTargetKey(range.start) !== diffLineTargetKey(range.end);
-      onOpenEditor(key, isMultiline ? { filePath: file.path, ...range } : undefined);
-    };
-    window.addEventListener("pointerup", commitDrag);
-    window.addEventListener("pointercancel", cancelDrag);
-    return () => {
-      dragCancelRef.current = null;
-      window.removeEventListener("pointerup", commitDrag);
-      window.removeEventListener("pointercancel", cancelDrag);
-    };
-  }, [isDragging, file.path, onOpenEditor, dragCancelRef]);
-
-  // Lines covered by the live drag, the just-committed editor range, or any
-  // saved multiline annotation in this file.
-  const highlightedKeys = useMemo(() => {
-    const keys = new Set<string>();
-    const addRange = (range: DiffLineRange | null) => {
-      if (!range) return;
-      for (const key of coveredTargetKeys(rangeIndex, range)) keys.add(key);
-    };
-    addRange(dragRange);
-    if (pendingRange && pendingRange.filePath === file.path) addRange(pendingRange);
-    for (const annotation of Object.values(annotations)) {
-      if (annotation.filePath !== file.path) continue;
-      const start = annotationRangeStart(annotation);
-      if (start) {
-        addRange({ start, end: { side: annotation.side, lineNumber: annotation.lineNumber } });
-      }
-    }
-    return keys;
-  }, [rangeIndex, dragRange, pendingRange, annotations, file.path]);
-
-  if (file.binary) {
-    return <DiffPaneNotice icon>Binary file — no text diff to show.</DiffPaneNotice>;
-  }
-  if (file.patchOmitted) {
-    return <DiffPaneNotice icon>Diff too large to display.</DiffPaneNotice>;
-  }
-  if (hunks.length === 0) {
-    return (
-      <DiffPaneNotice>
-        {file.status === "renamed"
-          ? "Renamed without content changes."
-          : file.status === "untracked" && file.additions === 0
-            ? "Empty file."
-            : "No content changes."}
-      </DiffPaneNotice>
-    );
-  }
-
-  const lineLimit = showAllLines ? Number.POSITIVE_INFINITY : DIFF_VIEWER_INITIAL_LINE_LIMIT;
-  let renderedLines = 0;
-  const visibleHunks: DiffHunk[] = [];
-  for (const hunk of hunks) {
-    if (renderedLines >= lineLimit) break;
-    const remaining = lineLimit - renderedLines;
-    const lines = hunk.lines.length <= remaining ? hunk.lines : hunk.lines.slice(0, remaining);
-    visibleHunks.push(lines === hunk.lines ? hunk : { header: hunk.header, lines });
-    renderedLines += lines.length;
-  }
-  const hiddenLineCount = totalLines - renderedLines;
+// One rendered slice of the diff. Memoized: during the progressive grow every
+// prop is referentially stable for already-mounted chunks, so only the newly
+// revealed chunk renders (keeps growth O(chunk), not O(total)).
+const DiffChunk = memo((props: DiffChunkProps) => {
+  const {
+    chunk,
+    filePath,
+    highlightedKeys,
+    annotations,
+    editingKey,
+    pendingRange,
+    onOpenEditor,
+    onSaveAnnotation,
+    onCancelEditor,
+    onDeleteAnnotation,
+    onStartDrag,
+    onDragEnter,
+  } = props;
 
   const annotationStateFor = (line: DiffLine): LineAnnotationState | null => {
     const target = diffLineTargetFor(line);
     if (!target) return null;
-    const key = diffAnnotationKey({ filePath: file.path, ...target });
+    const key = diffAnnotationKey({ filePath, ...target });
     const saved = annotations[key];
     const isEditing = editingKey === key;
-    // A drag that just ended supplies the editor's range; re-editing an
-    // existing multiline annotation keeps its saved range.
+    // A drag that just ended supplies the editor's range; re-editing an existing
+    // multiline annotation keeps its saved range.
     const rangeStart =
-      isEditing && pendingRange && pendingRange.filePath === file.path
+      isEditing && pendingRange && pendingRange.filePath === filePath
         ? pendingRange.start
         : saved
           ? annotationRangeStart(saved)
@@ -491,7 +494,7 @@ const FileDiffPane = ({
       rangeStart,
       save: (comment: string) =>
         onSaveAnnotation({
-          filePath: file.path,
+          filePath,
           ...target,
           ...(rangeStart
             ? { startSide: rangeStart.side, startLineNumber: rangeStart.lineNumber }
@@ -515,6 +518,236 @@ const FileDiffPane = ({
     ) : null;
 
   return (
+    <div>
+      {chunk.header !== null ? <HunkHeader header={chunk.header} /> : null}
+      {chunk.mode === "unified"
+        ? chunk.lines.map((line, lineIndex) => {
+            const state = annotationStateFor(line);
+            return (
+              <Fragment key={lineIndex}>
+                <UnifiedDiffLine
+                  line={line}
+                  annotateKey={state ? state.key : null}
+                  highlighted={
+                    state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
+                  }
+                  onAnnotate={onOpenEditor}
+                  onStartDrag={onStartDrag}
+                  onDragEnter={onDragEnter}
+                />
+                {renderAnnotation(state)}
+              </Fragment>
+            );
+          })
+        : chunk.rows.map((row, rowIndex) => {
+            const leftState = row.left ? annotationStateFor(row.left) : null;
+            const rightState = row.right ? annotationStateFor(row.right) : null;
+            // A context line is the same object on both sides — render its
+            // annotation once.
+            const isSharedAnnotation = leftState !== null && leftState.key === rightState?.key;
+            return (
+              <Fragment key={rowIndex}>
+                <SplitDiffRowView
+                  row={row}
+                  leftKey={leftState ? leftState.key : null}
+                  leftHighlighted={
+                    leftState !== null && highlightedKeys.has(diffLineTargetKey(leftState.target))
+                  }
+                  rightKey={rightState ? rightState.key : null}
+                  rightHighlighted={
+                    rightState !== null && highlightedKeys.has(diffLineTargetKey(rightState.target))
+                  }
+                  onAnnotate={onOpenEditor}
+                  onStartDrag={onStartDrag}
+                  onDragEnter={onDragEnter}
+                />
+                {renderAnnotation(leftState)}
+                {isSharedAnnotation ? null : renderAnnotation(rightState)}
+              </Fragment>
+            );
+          })}
+    </div>
+  );
+});
+DiffChunk.displayName = "DiffChunk";
+
+const DiffPaneNotice = ({ children, icon }: { children: React.ReactNode; icon?: boolean }) => (
+  <div className="flex h-full min-h-32 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+    {icon ? <FileWarning className="size-4" aria-hidden="true" /> : null}
+    {children}
+  </div>
+);
+
+interface FileDiffPaneProps {
+  file: GitDiffFileMeta;
+  payload: PatchEntry;
+  viewMode: DiffViewMode;
+  annotations: Record<string, DiffAnnotation>;
+  editingKey: string | null;
+  pendingRange: PendingAnnotationRange | null;
+  // Set while a drag selection is active so the viewer's Escape handler can
+  // cancel the drag instead of closing the dialog.
+  dragCancelRef: RefObject<(() => void) | null>;
+  onOpenEditor: (key: string, range?: PendingAnnotationRange) => void;
+  onSaveAnnotation: (annotation: DiffAnnotation) => void;
+  onCancelEditor: () => void;
+  onDeleteAnnotation: (key: string) => void;
+  onRetry: () => void;
+}
+
+// Mounted with key={file.path} by the parent, so switching files remounts it —
+// renderLimit and any active drag reset cleanly, with no transition straddling
+// two files.
+const FileDiffPane = ({
+  file,
+  payload,
+  viewMode,
+  annotations,
+  editingKey,
+  pendingRange,
+  dragCancelRef,
+  onOpenEditor,
+  onSaveAnnotation,
+  onCancelEditor,
+  onDeleteAnnotation,
+  onRetry,
+}: FileDiffPaneProps) => {
+  const patch = payload.data?.patch ?? null;
+  const [renderLimit, setRenderLimit] = useState(DIFF_VIEWER_INITIAL_LINE_LIMIT);
+  const [drag, setDrag] = useState<DragSelection | null>(null);
+
+  const hunks = useMemo(() => (patch ? parseUnifiedDiff(patch) : []), [patch]);
+  const rangeIndex = useMemo(() => buildDiffLineRangeIndex(hunks), [hunks]);
+  const renderChunks = useMemo(
+    () => buildRenderChunks(hunks, viewMode, DIFF_VIEWER_RENDER_CHUNK),
+    [hunks, viewMode],
+  );
+  const totalRenderRows = useMemo(
+    () => renderChunks.reduce((total, chunk) => total + renderChunkLength(chunk), 0),
+    [renderChunks],
+  );
+  const visibleChunks = useMemo(
+    () => renderChunks.filter((chunk) => chunk.startIndex < renderLimit),
+    [renderChunks, renderLimit],
+  );
+  const renderedRows = useMemo(
+    () => visibleChunks.reduce((total, chunk) => total + renderChunkLength(chunk), 0),
+    [visibleChunks],
+  );
+
+  const isDragging = drag !== null;
+  const isDraggingRef = useRef(isDragging);
+  isDraggingRef.current = isDragging;
+  const dragRange = drag ? resolveDragRange(rangeIndex, drag.anchor, drag.focus) : null;
+  const dragRangeRef = useRef(dragRange);
+  dragRangeRef.current = dragRange;
+
+  // Stable across renders so memoized rows bail out during the grow; identity is
+  // gated on a ref instead of `isDragging` so starting a drag doesn't churn props.
+  const handleStartDrag = useCallback((line: DiffLine) => {
+    const target = diffLineTargetFor(line);
+    if (target) setDrag({ anchor: target, focus: target });
+  }, []);
+  const handleDragEnter = useCallback((line: DiffLine) => {
+    if (!isDraggingRef.current) return;
+    const target = diffLineTargetFor(line);
+    if (target) setDrag((previous) => (previous ? { ...previous, focus: target } : previous));
+  }, []);
+
+  // Reveal one more chunk per frame until the whole file is rendered. Wrapped in
+  // a transition so streaming the tail never blocks pointer/scroll/keyboard input.
+  useEffect(() => {
+    if (renderLimit >= totalRenderRows) return;
+    const frame = requestAnimationFrame(() => {
+      startTransition(() =>
+        setRenderLimit((limit) => Math.min(totalRenderRows, limit + DIFF_VIEWER_RENDER_CHUNK)),
+      );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [renderLimit, totalRenderRows]);
+
+  // Releasing the pointer anywhere commits the drag and opens the editor on the
+  // last line of the range; a plain click is just a single-line range.
+  useEffect(() => {
+    if (!isDragging) return;
+    const cancelDrag = () => setDrag(null);
+    dragCancelRef.current = cancelDrag;
+    const commitDrag = () => {
+      setDrag(null);
+      const range = dragRangeRef.current;
+      if (!range) return;
+      const key = diffAnnotationKey({ filePath: file.path, ...range.end });
+      const isMultiline = diffLineTargetKey(range.start) !== diffLineTargetKey(range.end);
+      onOpenEditor(key, isMultiline ? { filePath: file.path, ...range } : undefined);
+    };
+    window.addEventListener("pointerup", commitDrag);
+    window.addEventListener("pointercancel", cancelDrag);
+    return () => {
+      dragCancelRef.current = null;
+      window.removeEventListener("pointerup", commitDrag);
+      window.removeEventListener("pointercancel", cancelDrag);
+    };
+  }, [isDragging, file.path, onOpenEditor, dragCancelRef]);
+
+  // Lines covered by the live drag, the just-committed editor range, or any saved
+  // multiline annotation in this file.
+  const highlightedKeys = useMemo(() => {
+    const keys = new Set<string>();
+    const addRange = (range: DiffLineRange | null) => {
+      if (!range) return;
+      for (const key of coveredTargetKeys(rangeIndex, range)) keys.add(key);
+    };
+    addRange(dragRange);
+    if (pendingRange && pendingRange.filePath === file.path) addRange(pendingRange);
+    for (const annotation of Object.values(annotations)) {
+      if (annotation.filePath !== file.path) continue;
+      const start = annotationRangeStart(annotation);
+      if (start) {
+        addRange({ start, end: { side: annotation.side, lineNumber: annotation.lineNumber } });
+      }
+    }
+    return keys;
+  }, [rangeIndex, dragRange, pendingRange, annotations, file.path]);
+
+  if (payload.state === "loading") {
+    return (
+      <DiffPaneNotice>
+        <Spinner className="size-4" aria-label="loading diff" />
+        Loading diff…
+      </DiffPaneNotice>
+    );
+  }
+  if (payload.state === "error" || !payload.data) {
+    return (
+      <DiffPaneNotice icon>
+        Couldn't load this file's diff.
+        <Button variant="outline" size="xs" onClick={onRetry}>
+          Retry
+        </Button>
+      </DiffPaneNotice>
+    );
+  }
+  if (payload.data.binary) {
+    return <DiffPaneNotice icon>Binary file — no text diff to show.</DiffPaneNotice>;
+  }
+  if (payload.data.patchOmitted) {
+    return <DiffPaneNotice icon>Diff too large to display.</DiffPaneNotice>;
+  }
+  if (hunks.length === 0) {
+    return (
+      <DiffPaneNotice>
+        {file.status === "renamed"
+          ? "Renamed without content changes."
+          : file.status === "untracked" && file.additions === 0
+            ? "Empty file."
+            : "No content changes."}
+      </DiffPaneNotice>
+    );
+  }
+
+  const hiddenRows = totalRenderRows - renderedRows;
+
+  return (
     <div
       className={cn(
         "pb-4 font-mono text-xs leading-5",
@@ -524,100 +757,40 @@ const FileDiffPane = ({
         isDragging && "select-none",
       )}
     >
-      {visibleHunks.map((hunk) => (
-        <div key={hunk.header + String(hunk.lines[0]?.newLine ?? hunk.lines[0]?.oldLine ?? "")}>
-          <HunkHeader hunk={hunk} />
-          {viewMode === "unified"
-            ? hunk.lines.map((line, lineIndex) => {
-                const state = annotationStateFor(line);
-                return (
-                  <Fragment key={lineIndex}>
-                    <UnifiedDiffLine
-                      line={line}
-                      highlighted={
-                        state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
-                      }
-                      onAnnotate={state ? () => onOpenEditor(state.key) : undefined}
-                      onDragStart={state ? () => startDrag(state.target) : undefined}
-                      onDragEnter={isDragging && state ? () => dragOver(state.target) : undefined}
-                    />
-                    {renderAnnotation(state)}
-                  </Fragment>
-                );
-              })
-            : buildSplitDiffRows(hunk).map((row, rowIndex) => {
-                const leftState = row.left ? annotationStateFor(row.left) : null;
-                const rightState = row.right ? annotationStateFor(row.right) : null;
-                // A context line is the same object on both sides — render its
-                // annotation once.
-                const isSharedAnnotation = leftState !== null && leftState.key === rightState?.key;
-                return (
-                  <Fragment key={rowIndex}>
-                    <div className="flex">
-                      <div
-                        className="group/line relative flex w-1/2 min-w-0 border-r border-border/40"
-                        onPointerEnter={
-                          isDragging && leftState ? () => dragOver(leftState.target) : undefined
-                        }
-                      >
-                        <SplitDiffCell
-                          line={row.left}
-                          side="left"
-                          onAnnotate={leftState ? () => onOpenEditor(leftState.key) : undefined}
-                          onDragStart={leftState ? () => startDrag(leftState.target) : undefined}
-                        />
-                        {leftState && highlightedKeys.has(diffLineTargetKey(leftState.target)) ? (
-                          <RangeHighlight />
-                        ) : null}
-                      </div>
-                      <div
-                        className="group/line relative flex w-1/2 min-w-0"
-                        onPointerEnter={
-                          isDragging && rightState ? () => dragOver(rightState.target) : undefined
-                        }
-                      >
-                        <SplitDiffCell
-                          line={row.right}
-                          side="right"
-                          onAnnotate={rightState ? () => onOpenEditor(rightState.key) : undefined}
-                          onDragStart={rightState ? () => startDrag(rightState.target) : undefined}
-                        />
-                        {rightState && highlightedKeys.has(diffLineTargetKey(rightState.target)) ? (
-                          <RangeHighlight />
-                        ) : null}
-                      </div>
-                    </div>
-                    {renderAnnotation(leftState)}
-                    {isSharedAnnotation ? null : renderAnnotation(rightState)}
-                  </Fragment>
-                );
-              })}
-        </div>
+      {visibleChunks.map((chunk) => (
+        <DiffChunk
+          key={chunk.key}
+          chunk={chunk}
+          filePath={file.path}
+          highlightedKeys={highlightedKeys}
+          annotations={annotations}
+          editingKey={editingKey}
+          pendingRange={pendingRange}
+          onOpenEditor={onOpenEditor}
+          onSaveAnnotation={onSaveAnnotation}
+          onCancelEditor={onCancelEditor}
+          onDeleteAnnotation={onDeleteAnnotation}
+          onStartDrag={handleStartDrag}
+          onDragEnter={handleDragEnter}
+        />
       ))}
-      {hiddenLineCount > 0 ? (
-        <div className="px-4 py-2">
-          <Button variant="outline" size="xs" onClick={() => setShowAllLines(true)}>
-            Show {hiddenLineCount.toLocaleString()} more lines
-          </Button>
+      {hiddenRows > 0 ? (
+        <div className="flex items-center gap-2 px-4 py-2 text-muted-foreground/70">
+          <Spinner className="size-3" aria-label="rendering diff" />
+          rendering {hiddenRows.toLocaleString()} more lines…
         </div>
       ) : null}
     </div>
   );
 };
 
-const DiffPaneNotice = ({ children, icon }: { children: React.ReactNode; icon?: boolean }) => (
-  <div className="flex h-full min-h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
-    {icon ? <FileWarning className="size-4" aria-hidden="true" /> : null}
-    {children}
-  </div>
-);
-
 export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerProps) => {
   const [mounted, setMounted] = useState(false);
   const [settled, setSettled] = useState(false);
-  const [diff, setDiff] = useState<GitDiffResponse | null>(null);
+  const [fileList, setFileList] = useState<GitDiffFileListResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [patchCache, setPatchCache] = useState<Record<string, PatchEntry>>({});
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<DiffViewMode>(() => loadStoredDiffViewMode());
   const [refreshCount, setRefreshCount] = useState(0);
@@ -630,6 +803,11 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
   const dragCancelRef = useRef<(() => void) | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const fileListRef = useRef<HTMLDivElement | null>(null);
+  // In-flight per-file patch fetches, so they can be aborted on close/refresh.
+  const patchControllersRef = useRef<Map<string, AbortController>>(new Map());
+  // Latest cache, read by loadPatch without making it depend on patchCache.
+  const patchCacheRef = useRef(patchCache);
+  patchCacheRef.current = patchCache;
 
   useEffect(() => {
     if (open) {
@@ -644,32 +822,78 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
     }
   }, [open]);
 
+  const abortPatchFetches = useCallback(() => {
+    for (const controller of patchControllersRef.current.values()) controller.abort();
+    patchControllersRef.current.clear();
+  }, []);
+
+  // Fetch the file list (metadata only) on open/refresh — the viewer renders its
+  // sidebar and totals instantly; patches load lazily per selected file.
   useEffect(() => {
-    if (!open || !cwd) return;
+    if (!open || !cwd) {
+      abortPatchFetches();
+      return;
+    }
     const controller = new AbortController();
     setIsLoading(true);
     setHasError(false);
-    void fetchGitDiff(cwd, controller.signal).then((response) => {
+    // A fresh list invalidates every cached patch.
+    abortPatchFetches();
+    setPatchCache({});
+    void fetchGitDiffFiles(cwd, controller.signal).then((response) => {
       if (controller.signal.aborted) return;
       setIsLoading(false);
       if (!response) {
         setHasError(true);
         return;
       }
-      setDiff(response);
+      setFileList(response);
     });
     return () => controller.abort();
-  }, [open, cwd, refreshCount]);
+  }, [open, cwd, refreshCount, abortPatchFetches]);
 
-  const files = diff?.files ?? [];
+  const files = useMemo(() => fileList?.files ?? [], [fileList]);
 
-  // Keep a valid selection: follow the current file across refreshes, fall
-  // back to the first file when it disappears.
+  const loadPatch = useCallback(
+    (path: string | null | undefined) => {
+      if (!path || !cwd) return;
+      const existing = patchCacheRef.current[path];
+      if (existing && (existing.state === "loaded" || existing.state === "loading")) return;
+      setPatchCache((previous) => ({ ...previous, [path]: { state: "loading" } }));
+      patchControllersRef.current.get(path)?.abort();
+      const controller = new AbortController();
+      patchControllersRef.current.set(path, controller);
+      void fetchGitDiffFilePatch(cwd, path, controller.signal).then((data) => {
+        if (controller.signal.aborted) return;
+        patchControllersRef.current.delete(path);
+        setPatchCache((previous) => ({
+          ...previous,
+          [path]: data ? { state: "loaded", data } : { state: "error" },
+        }));
+      });
+    },
+    [cwd],
+  );
+
+  // Keep a valid selection: follow the current file across refreshes, fall back
+  // to the first file when it disappears.
   useEffect(() => {
-    if (!diff) return;
-    if (selectedPath && diff.files.some((file) => file.path === selectedPath)) return;
-    setSelectedPath(diff.files[0]?.path ?? null);
-  }, [diff, selectedPath]);
+    if (!fileList) return;
+    if (selectedPath && files.some((file) => file.path === selectedPath)) return;
+    setSelectedPath(files[0]?.path ?? null);
+  }, [fileList, files, selectedPath]);
+
+  // Load the selected file's patch on demand, and prefetch its neighbors so j/k
+  // navigation stays instant.
+  useEffect(() => {
+    if (!selectedPath) return;
+    loadPatch(selectedPath);
+    const index = files.findIndex((file) => file.path === selectedPath);
+    if (index >= 0) {
+      loadPatch(files[index - 1]?.path);
+      loadPatch(files[index + 1]?.path);
+    }
+  }, [selectedPath, files, loadPatch]);
 
   const selectedFile = files.find((file) => file.path === selectedPath) ?? null;
   const selectedIndex = selectedFile ? files.indexOf(selectedFile) : -1;
@@ -704,8 +928,8 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
     if (!open || !mounted) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
-      // The annotation editor's textarea handles Escape itself (closes just
-      // the editor) and owns all typing.
+      // The annotation editor's textarea handles Escape itself (closes just the
+      // editor) and owns all typing.
       const isTextArea = target instanceof HTMLElement && target.tagName === "TEXTAREA";
       if (event.key === "Escape") {
         if (isTextArea) return;
@@ -799,8 +1023,8 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
   if (!mounted) return null;
 
   const isVisible = open && settled;
-  const isRepo = diff?.isRepo ?? true;
-  const isEmpty = diff !== null && isRepo && files.length === 0;
+  const isRepo = fileList?.isRepo ?? true;
+  const isEmpty = fileList !== null && isRepo && files.length === 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
@@ -898,7 +1122,7 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
             Working tree clean — nothing to diff.
           </div>
-        ) : diff === null ? (
+        ) : fileList === null ? (
           <div className="flex flex-1 items-center justify-center">
             <Spinner aria-label="loading diff" />
           </div>
@@ -986,7 +1210,9 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
                   </div>
                   <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
                     <FileDiffPane
+                      key={selectedFile.path}
                       file={selectedFile}
+                      payload={patchCache[selectedFile.path] ?? { state: "loading" }}
                       viewMode={viewMode}
                       annotations={annotations}
                       editingKey={editingKey}
@@ -996,6 +1222,7 @@ export const DiffViewer = ({ open, cwd, onClose, onSendToTerminal }: DiffViewerP
                       onSaveAnnotation={saveAnnotation}
                       onCancelEditor={cancelAnnotationEditor}
                       onDeleteAnnotation={deleteAnnotation}
+                      onRetry={() => loadPatch(selectedFile.path)}
                     />
                   </div>
                 </>

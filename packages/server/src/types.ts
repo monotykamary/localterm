@@ -12,6 +12,9 @@ import type {
   automationWithNextRunSchema,
   clientToServerMessageSchema,
   createAutomationInputSchema,
+  gitDiffFileListResponseSchema,
+  gitDiffFileMetaSchema,
+  gitDiffFilePatchSchema,
   gitDiffFileSchema,
   gitDiffFileStatusSchema,
   gitDiffResponseSchema,
@@ -57,5 +60,8 @@ export type ResetAutomationInput = z.infer<typeof resetAutomationInputSchema>;
 
 export type GitDiffFileStatus = z.infer<typeof gitDiffFileStatusSchema>;
 export type GitDiffSummary = z.infer<typeof gitDiffSummarySchema>;
+export type GitDiffFileMeta = z.infer<typeof gitDiffFileMetaSchema>;
+export type GitDiffFileListResponse = z.infer<typeof gitDiffFileListResponseSchema>;
+export type GitDiffFilePatch = z.infer<typeof gitDiffFilePatchSchema>;
 export type GitDiffFile = z.infer<typeof gitDiffFileSchema>;
 export type GitDiffResponse = z.infer<typeof gitDiffResponseSchema>;

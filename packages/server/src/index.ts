@@ -37,7 +37,7 @@ import {
   WS_READY_STATE_OPEN,
 } from "./constants.js";
 import { ServerErrorException, serverError } from "./errors.js";
-import { getGitDiff, getGitDiffSummary } from "./git-diff.js";
+import { getGitDiff, getGitDiffFilePatch, getGitDiffFiles, getGitDiffSummary } from "./git-diff.js";
 import { GitDiffWatcher } from "./git-diff-watcher.js";
 import { HeartbeatStore } from "./heartbeat-store.js";
 import { parseCronExpression } from "./cron-expression.js";
@@ -391,10 +391,36 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     return context.json(await getGitDiffSummary(cwd));
   });
 
+  // Repo-relative pathspec for the per-file diff. Reject absolute paths and any
+  // `..` segment: the diff is read-only, but a traversal pathspec would just make
+  // git return nothing useful, so fail fast with a clean 400 instead.
+  const sanitizeDiffPath = (rawPath: string | undefined): string | null => {
+    if (!rawPath) return null;
+    if (rawPath.startsWith("/")) return null;
+    if (rawPath.split("/").some((segment) => segment === "..")) return null;
+    return rawPath;
+  };
+
   api.get("/git/diff", async (context) => {
     const cwd = resolveCwdQuery(context.req.query("cwd"));
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
     return context.json(await getGitDiff(cwd));
+  });
+
+  // File list without patch bodies — lets the viewer open instantly.
+  api.get("/git/diff/files", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json(await getGitDiffFiles(cwd));
+  });
+
+  // One file's patch, fetched lazily when that file is selected.
+  api.get("/git/diff/file", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    const filePath = sanitizeDiffPath(context.req.query("path"));
+    if (!filePath) return context.json({ error: "invalid_path" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json(await getGitDiffFilePatch(cwd, filePath));
   });
 
   const readJsonBody = async (context: { req: { json: () => Promise<unknown> } }) => {

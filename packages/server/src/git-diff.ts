@@ -11,7 +11,15 @@ import {
   GIT_MAX_UNTRACKED_FILES,
   GIT_MAX_UNTRACKED_FILE_BYTES,
 } from "./constants.js";
-import type { GitDiffFile, GitDiffFileStatus, GitDiffResponse, GitDiffSummary } from "./types.js";
+import type {
+  GitDiffFile,
+  GitDiffFileListResponse,
+  GitDiffFileMeta,
+  GitDiffFilePatch,
+  GitDiffFileStatus,
+  GitDiffResponse,
+  GitDiffSummary,
+} from "./types.js";
 
 const EMPTY_SUMMARY: GitDiffSummary = {
   isRepo: false,
@@ -288,6 +296,39 @@ const buildUntrackedDiffFile = async (
   };
 };
 
+// Collect per-file metadata (counts, rename old paths, status letters) without
+// generating any patch text. Shared by the bulk diff, the file-list endpoint,
+// and the per-file patch fetch. Rejects propagate to the caller's try/catch.
+const collectTrackedMeta = async (
+  cwd: string,
+  base: string,
+): Promise<{ tracked: NumstatEntry[]; statuses: Map<string, GitDiffFileStatus> }> => {
+  const [numstatRaw, nameStatusRaw] = await Promise.all([
+    runGit(cwd, ["diff", base, "-M", "--no-ext-diff", "--no-textconv", "--numstat", "-z"]),
+    runGit(cwd, ["diff", base, "-M", "--no-ext-diff", "--no-textconv", "--name-status", "-z"]),
+  ]);
+  return { tracked: parseNumstatZ(numstatRaw), statuses: parseNameStatusZ(nameStatusRaw) };
+};
+
+const resolveFileStatus = (
+  entry: NumstatEntry,
+  statuses: Map<string, GitDiffFileStatus>,
+): GitDiffFileStatus => statuses.get(entry.path) ?? (entry.oldPath ? "renamed" : "modified");
+
+// Select the patch chunk whose new-side path matches the requested file. Our
+// per-file diff normally yields exactly one chunk; an odd worktree state can
+// split it, and we'd rather show nothing than attach the wrong file's patch.
+const pickPatchChunk = (chunks: string[], newPath: string): string | null => {
+  if (chunks.length === 0) return null;
+  if (chunks.length === 1) return chunks[0];
+  return (
+    chunks.find(
+      (chunk) =>
+        chunk.includes(`\n+++ b/${newPath}\n`) || chunk.includes(`\nrename to ${newPath}\n`),
+    ) ?? null
+  );
+};
+
 export const getGitDiff = async (cwd: string): Promise<GitDiffResponse> => {
   if (!(await isGitRepo(cwd))) return { isRepo: false, files: [] };
 
@@ -295,12 +336,7 @@ export const getGitDiff = async (cwd: string): Promise<GitDiffResponse> => {
   let tracked: NumstatEntry[] = [];
   let statuses = new Map<string, GitDiffFileStatus>();
   try {
-    const [numstatRaw, nameStatusRaw] = await Promise.all([
-      runGit(cwd, ["diff", base, "-M", "--no-ext-diff", "--no-textconv", "--numstat", "-z"]),
-      runGit(cwd, ["diff", base, "-M", "--no-ext-diff", "--no-textconv", "--name-status", "-z"]),
-    ]);
-    tracked = parseNumstatZ(numstatRaw);
-    statuses = parseNameStatusZ(nameStatusRaw);
+    ({ tracked, statuses } = await collectTrackedMeta(cwd, base));
   } catch {
     return { isRepo: true, files: [] };
   }
@@ -328,7 +364,7 @@ export const getGitDiff = async (cwd: string): Promise<GitDiffResponse> => {
 
   let totalPatchBytes = 0;
   const files: GitDiffFile[] = tracked.map((entry, index) => {
-    const status = statuses.get(entry.path) ?? (entry.oldPath ? "renamed" : "modified");
+    const status = resolveFileStatus(entry, statuses);
     let patch: string | null = null;
     let patchOmitted = false;
     if (entry.binary) {
@@ -383,4 +419,118 @@ export const getGitDiff = async (cwd: string): Promise<GitDiffResponse> => {
   }
 
   return { isRepo: true, files };
+};
+
+// File list for the diff viewer: per-file metadata only, no patch bodies. Cheap
+// (numstat + name-status + stat-only untracked) and small, so the viewer can
+// render its sidebar and totals the instant it opens. Patches load on demand via
+// getGitDiffFilePatch.
+export const getGitDiffFiles = async (cwd: string): Promise<GitDiffFileListResponse> => {
+  if (!(await isGitRepo(cwd))) return { isRepo: false, files: [] };
+
+  const base = await resolveDiffBase(cwd);
+  let tracked: NumstatEntry[] = [];
+  let statuses = new Map<string, GitDiffFileStatus>();
+  try {
+    ({ tracked, statuses } = await collectTrackedMeta(cwd, base));
+  } catch {
+    return { isRepo: true, files: [] };
+  }
+
+  const files: GitDiffFileMeta[] = tracked.map((entry) => ({
+    path: entry.path,
+    oldPath: entry.oldPath,
+    status: resolveFileStatus(entry, statuses),
+    additions: entry.additions,
+    deletions: entry.deletions,
+    binary: entry.binary,
+  }));
+
+  let untrackedPaths: string[] = [];
+  try {
+    untrackedPaths = await listUntrackedPaths(cwd);
+  } catch {
+    untrackedPaths = [];
+  }
+  for (const relativePath of untrackedPaths.slice(0, GIT_MAX_UNTRACKED_FILES)) {
+    const stats = await getUntrackedStats(path.join(cwd, relativePath));
+    if (!stats) continue;
+    files.push({
+      path: relativePath,
+      oldPath: null,
+      status: "untracked",
+      additions: stats.binary ? 0 : stats.lines,
+      deletions: 0,
+      binary: stats.binary,
+    });
+  }
+
+  return { isRepo: true, files };
+};
+
+// Unified diff for a SINGLE file, fetched on demand. Unlike getGitDiff this is
+// NOT subject to the whole-response cap (GIT_MAX_TOTAL_PATCH_BYTES) — only the
+// per-file cap applies — so a file the bulk endpoint dropped because the response
+// total was exhausted still loads when opened individually.
+export const getGitDiffFilePatch = async (
+  cwd: string,
+  requestedPath: string,
+): Promise<GitDiffFilePatch> => {
+  const empty: GitDiffFilePatch = { patch: null, patchOmitted: false, binary: false };
+  if (!(await isGitRepo(cwd))) return empty;
+
+  const base = await resolveDiffBase(cwd);
+  let tracked: NumstatEntry[] = [];
+  try {
+    ({ tracked } = await collectTrackedMeta(cwd, base));
+  } catch {
+    return empty;
+  }
+
+  const entry = tracked.find((candidate) => candidate.path === requestedPath);
+  if (entry) {
+    if (entry.binary) return { patch: null, patchOmitted: false, binary: true };
+    // A rename must diff BOTH endpoints so `-M` pairs them into one chunk;
+    // diffing only the new path would report it as an addition.
+    const pathspecs = entry.oldPath ? [entry.oldPath, entry.path] : [entry.path];
+    let raw: string;
+    try {
+      raw = await runGit(cwd, [
+        "diff",
+        base,
+        "-M",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "--patch",
+        "--",
+        ...pathspecs,
+      ]);
+    } catch {
+      // Timed out or exceeded maxBuffer on a single pathological file.
+      return { patch: null, patchOmitted: true, binary: false };
+    }
+    const chunk = pickPatchChunk(splitPatchByFile(raw), entry.path);
+    if (chunk === null) return empty;
+    if (chunk.length > GIT_MAX_PATCH_BYTES_PER_FILE) {
+      return { patch: null, patchOmitted: true, binary: false };
+    }
+    return { patch: chunk, patchOmitted: false, binary: false };
+  }
+
+  // Not tracked: it may be an untracked file (synthesize a patch like getGitDiff
+  // does), otherwise it was committed/reverted since the file list was fetched.
+  let untrackedPaths: string[] = [];
+  try {
+    untrackedPaths = await listUntrackedPaths(cwd);
+  } catch {
+    return empty;
+  }
+  if (!untrackedPaths.includes(requestedPath)) return empty;
+  const file = await buildUntrackedDiffFile(cwd, requestedPath);
+  if (!file) return empty;
+  if (file.patch !== null && file.patch.length > GIT_MAX_PATCH_BYTES_PER_FILE) {
+    return { patch: null, patchOmitted: true, binary: file.binary };
+  }
+  return { patch: file.patch, patchOmitted: file.patchOmitted, binary: file.binary };
 };
