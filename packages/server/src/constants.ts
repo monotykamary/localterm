@@ -127,11 +127,6 @@ export const HTTP_STATUS_BAD_REQUEST = 400;
 // seconds, so every limit here exists to keep one poll cheap and to keep a
 // pathological working tree (huge generated file, thousands of untracked
 // files) from wedging the daemon or ballooning a single HTTP response.
-export const GIT_COMMAND_TIMEOUT_MS = 10_000;
-// `git diff` of a large working tree can legitimately produce tens of MB;
-// execFile kills the child past maxBuffer, which we degrade into a
-// "patches omitted" response rather than an error.
-export const GIT_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 // SHA of git's well-known empty tree object — the diff base for a repository
 // that has no commits yet, so a brand-new repo still reports its staged files.
 export const GIT_EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -152,10 +147,9 @@ export const GIT_MAX_TOTAL_PATCH_BYTES = 10 * 1024 * 1024;
 export const GIT_DIRTY_THROTTLE_MS = 100;
 
 // "Branch" diff mode compares the working tree against a base branch (via
-// merge-base). `gh pr view` is consulted first to discover the current branch's
-// PR base; it can hit the network, so it gets its own (shorter) timeout and any
-// failure degrades to the local default-branch heuristic.
-export const GH_COMMAND_TIMEOUT_MS = 8_000;
+// merge-base). The GitHub REST API is consulted to discover the current branch's
+// PR base; it can hit the network, so any failure degrades to the local
+// default-branch heuristic.
 // Upper bound on the ref a client may pass as the comparison base. Git refs are
 // already short; this just caps a hostile/garbage value before it reaches git.
 export const GIT_MAX_REF_LENGTH = 255;

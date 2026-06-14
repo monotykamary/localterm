@@ -1,13 +1,12 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { Octokit } from "@octokit/rest";
 import { openRepository } from "es-git";
+import { computePatchFromContents } from "./utils/compute-patch.js";
+import { resolveGithubToken } from "./utils/resolve-github-token.js";
 import {
-  GH_COMMAND_TIMEOUT_MS,
   GIT_BINARY_SNIFF_BYTES,
-  GIT_COMMAND_TIMEOUT_MS,
   GIT_MAX_BRANCHES,
-  GIT_MAX_OUTPUT_BYTES,
   GIT_MAX_PATCH_BYTES_PER_FILE,
   GIT_MAX_TOTAL_PATCH_BYTES,
   GIT_MAX_UNTRACKED_FILE_BYTES,
@@ -46,41 +45,13 @@ const EMPTY_SUMMARY: GitDiffSummary = {
 
 const GIT_EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
+const ZERO_OID = "0000000000000000000000000000000000000000";
+
 const collectIterator = <T>(iterable: unknown): T[] => {
   const result: T[] = [];
   for (const item of iterable as Iterable<T>) result.push(item);
   return result;
 };
-
-const runGit = (cwd: string, args: string[]): Promise<string> =>
-  new Promise((resolve, reject) => {
-    execFile(
-      "git",
-      ["--no-optional-locks", "-C", cwd, ...args],
-      {
-        timeout: GIT_COMMAND_TIMEOUT_MS,
-        maxBuffer: GIT_MAX_OUTPUT_BYTES,
-        encoding: "utf8",
-      },
-      (error, stdout) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(stdout);
-      },
-    );
-  });
-
-const runGh = (cwd: string, args: string[]): Promise<string | null> =>
-  new Promise((resolve) => {
-    execFile(
-      "gh",
-      args,
-      { cwd, timeout: GH_COMMAND_TIMEOUT_MS, maxBuffer: GIT_MAX_OUTPUT_BYTES, encoding: "utf8" },
-      (error, stdout) => resolve(error ? null : stdout),
-    );
-  });
 
 const deltaTypeToStatus = (delta: string): GitDiffFileStatus => {
   switch (delta) {
@@ -260,9 +231,6 @@ const collectUntrackedFiles = (r: OpenRepo): UntrackedFile[] => {
   return files;
 };
 
-export const splitPatchByFile = (raw: string): string[] =>
-  raw.split(/^(?=diff --git )/m).filter((chunk) => chunk.startsWith("diff --git "));
-
 export const buildUntrackedPatch = (content: string): string => {
   if (content.length === 0) return "";
   const hasTrailingNewline = content.endsWith("\n");
@@ -272,6 +240,202 @@ export const buildUntrackedPatch = (content: string): string => {
   const noNewlineMarker = hasTrailingNewline ? "" : "\n\\ No newline at end of file";
   return `@@ -0,0 +1,${lines.length} @@\n${body}${noNewlineMarker}\n`;
 };
+
+const readBlobContent = (r: OpenRepo, oid: string): string | null => {
+  if (oid === ZERO_OID) return null;
+  try {
+    const obj = r.repo.findObject(oid);
+    if (!obj) return null;
+    const blob = obj.peelToBlob();
+    return Buffer.from(blob.content()).toString("utf8");
+  } catch {
+    return null;
+  }
+};
+
+const readWorkingTreeFile = (
+  r: OpenRepo,
+  filePath: string,
+  maxBytes = GIT_MAX_UNTRACKED_FILE_BYTES,
+): string | null => {
+  const absolutePath = path.join(r.cwd, filePath);
+  try {
+    const stat = fs.statSync(absolutePath);
+    if (!stat.isFile()) return null;
+    const bytesToRead = Math.min(stat.size, maxBytes);
+    const buffer = Buffer.alloc(bytesToRead);
+    const handle = fs.openSync(absolutePath, "r");
+    fs.readSync(handle, buffer, 0, bytesToRead, 0);
+    fs.closeSync(handle);
+    const sniffEnd = Math.min(buffer.length, GIT_BINARY_SNIFF_BYTES);
+    if (buffer.subarray(0, sniffEnd).includes(0)) return null;
+    if (stat.size > maxBytes) return null;
+    return buffer.toString("utf8");
+  } catch {
+    return null;
+  }
+};
+
+interface DeltaMeta {
+  path: string;
+  oldPath: string | null;
+  status: GitDiffFileStatus;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+  oldId: string;
+  newId: string;
+  isWorkingTree: boolean;
+}
+
+const collectDeltaMeta = (
+  r: OpenRepo,
+  diff: ReturnType<OpenRepo["repo"]["diffTreeToWorkdirWithIndex"]>,
+  isWorkingTree: boolean,
+): DeltaMeta[] => {
+  const stats = diff.stats();
+  const totalInsertions = Number(stats.insertions);
+  const totalDeletions = Number(stats.deletions);
+
+  const deltas = collectIterator<{
+    status: () => string;
+    newFile: () => { path: () => string; isBinary: () => boolean; id: () => string };
+    oldFile: () => { path: () => string; id: () => string };
+  }>(diff.deltas());
+
+  const result: DeltaMeta[] = [];
+  for (const delta of deltas) {
+    const status = deltaTypeToStatus(delta.status());
+    if (status === "untracked") continue;
+
+    const newFile = delta.newFile();
+    const oldFile = delta.oldFile();
+    const isBinary = newFile.isBinary();
+
+    result.push({
+      path: newFile.path(),
+      oldPath: status === "renamed" ? oldFile.path() : null,
+      status,
+      additions: 0,
+      deletions: 0,
+      binary: isBinary,
+      oldId: oldFile.id(),
+      newId: newFile.id(),
+      isWorkingTree,
+    });
+  }
+
+  // Compute per-file additions/deletions from patch text.
+  // es-git's DiffStats only gives aggregate totals; we generate
+  // patches per-delta and count +/- lines from the structured diff.
+  const nonBinary = result.filter((d) => !d.binary);
+  if (nonBinary.length === 0) return result;
+
+  if (nonBinary.length === 1) {
+    nonBinary[0].additions = totalInsertions;
+    nonBinary[0].deletions = totalDeletions;
+    return result;
+  }
+
+  // Compute per-file stats from patch text. Each delta gets its own
+  // patch generated from old vs new content, giving exact counts.
+  for (const d of result) {
+    if (d.binary) continue;
+    try {
+      const oldContent =
+        d.oldId === ZERO_OID || d.oldId === ""
+          ? d.status === "added"
+            ? null
+            : readBlobContent(r, d.oldId)
+          : readBlobContent(r, d.oldId);
+      const newContent = d.isWorkingTree
+        ? readWorkingTreeFile(r, d.path, GIT_MAX_TOTAL_PATCH_BYTES)
+        : d.newId === ZERO_OID || d.newId === ""
+          ? d.status === "deleted"
+            ? null
+            : readBlobContent(r, d.newId)
+          : readBlobContent(r, d.newId);
+
+      const aPath = d.oldPath ?? d.path;
+      const patchResult = computePatchFromContents(
+        oldContent,
+        newContent,
+        aPath,
+        d.path,
+        null,
+        null,
+        d.oldId === ZERO_OID ? null : d.oldId,
+        d.newId === ZERO_OID ? null : d.newId,
+        d.status === "renamed",
+      );
+      d.additions = patchResult.additions;
+      d.deletions = patchResult.deletions;
+    } catch {
+      // Fallback: proportional split of aggregate totals
+      const perFileAdd = Math.floor(totalInsertions / nonBinary.length);
+      d.additions = perFileAdd;
+      d.deletions = Math.floor(totalDeletions / nonBinary.length);
+    }
+  }
+
+  // Verify totals match and redistribute remainder if needed
+  let computedAdds = 0;
+  let computedDels = 0;
+  for (const d of result) {
+    if (!d.binary) {
+      computedAdds += d.additions;
+      computedDels += d.deletions;
+    }
+  }
+  const addDelta = totalInsertions - computedAdds;
+  const delDelta = totalDeletions - computedDels;
+  if (addDelta !== 0 || delDelta !== 0) {
+    const sorted = result.filter((d) => !d.binary);
+    let remainingAdd = addDelta;
+    let remainingDel = delDelta;
+    for (const d of sorted) {
+      if (remainingAdd > 0) {
+        d.additions += 1;
+        remainingAdd -= 1;
+      } else if (remainingAdd < 0) {
+        d.additions -= 1;
+        remainingAdd += 1;
+      }
+      if (remainingDel > 0) {
+        d.deletions += 1;
+        remainingDel -= 1;
+      } else if (remainingDel < 0) {
+        d.deletions -= 1;
+        remainingDel += 1;
+      }
+      if (remainingAdd === 0 && remainingDel === 0) break;
+    }
+  }
+
+  return result;
+};
+
+const buildBaseTree = (r: OpenRepo, baseRef: string) => {
+  try {
+    return r.repo.getTree(baseRef);
+  } catch {
+    try {
+      const baseOid = r.repo.revparseSingle(baseRef);
+      const obj = r.repo.findObject(baseOid);
+      if (!obj) return null;
+      if (obj.type() === "Tree") {
+        return obj as unknown as ReturnType<OpenRepo["repo"]["getTree"]>;
+      }
+      const commit = r.repo.getCommit(baseOid);
+      return commit.tree();
+    } catch {
+      return null;
+    }
+  }
+};
+
+export const splitPatchByFile = (raw: string): string[] =>
+  raw.split(/^(?=diff --git )/m).filter((chunk) => chunk.startsWith("diff --git "));
 
 interface TrackedDelta {
   path: string;
@@ -283,24 +447,8 @@ interface TrackedDelta {
 }
 
 const computeTrackedDeltas = async (r: OpenRepo, baseRef: string): Promise<TrackedDelta[]> => {
-  let baseTree;
-  try {
-    baseTree = r.repo.getTree(baseRef);
-  } catch {
-    try {
-      const baseOid = r.repo.revparseSingle(baseRef);
-      const obj = r.repo.findObject(baseOid);
-      if (!obj) return [];
-      if (obj.type() === "Tree") {
-        baseTree = obj as unknown as ReturnType<OpenRepo["repo"]["getTree"]>;
-      } else {
-        const commit = r.repo.getCommit(baseOid);
-        baseTree = commit.tree();
-      }
-    } catch {
-      return [];
-    }
-  }
+  const baseTree = buildBaseTree(r, baseRef);
+  if (!baseTree) return [];
 
   let diff;
   try {
@@ -315,86 +463,16 @@ const computeTrackedDeltas = async (r: OpenRepo, baseRef: string): Promise<Track
     // Rename detection failed
   }
 
-  const stats = diff.stats();
-  const totalInsertions = Number(stats.insertions);
-  const totalDeletions = Number(stats.deletions);
-
-  const deltas = collectIterator<{
-    status: () => string;
-    newFile: () => { path: () => string; isBinary: () => boolean };
-    oldFile: () => { path: () => string };
-  }>(diff.deltas());
-
-  const trackedDeltas: TrackedDelta[] = [];
-  for (const delta of deltas) {
-    const status = deltaTypeToStatus(delta.status());
-    if (status === "untracked") continue;
-
-    trackedDeltas.push({
-      path: delta.newFile().path(),
-      oldPath: status === "renamed" ? delta.oldFile().path() : null,
-      status,
-      additions: 0,
-      deletions: 0,
-      binary: delta.newFile().isBinary(),
-    });
-  }
-
-  // Redistribute the stats diff-wide totals across deltas using git diff --numstat.
-  // es-git's DiffStats gives aggregate insertions/deletions but not per-file.
-  // We fall back to `git diff --numstat -z` for per-file counts — one subprocess
-  // instead of the previous six, and only for the stat-heavy code paths.
-  if (trackedDeltas.length > 0) {
-    try {
-      const numstatRaw = await runGit(r.cwd, [
-        "diff",
-        baseRef,
-        "-M",
-        "--no-ext-diff",
-        "--no-textconv",
-        "--numstat",
-        "-z",
-      ]);
-      const entries = parseNumstatZ(numstatRaw);
-      const numstatByPath = new Map(entries.map((e) => [e.path, e] as const));
-      for (const d of trackedDeltas) {
-        const entry = numstatByPath.get(d.path);
-        if (entry && !d.binary) {
-          d.additions = entry.additions;
-          d.deletions = entry.deletions;
-        }
-      }
-    } catch {
-      // Fallback: split aggregate stats across files
-      const nonBinary = trackedDeltas.filter((d) => !d.binary);
-      if (nonBinary.length === 1) {
-        nonBinary[0].additions = totalInsertions;
-        nonBinary[0].deletions = totalDeletions;
-      } else if (nonBinary.length > 0) {
-        const perFileAdd = Math.floor(totalInsertions / nonBinary.length);
-        let extraAdd = totalInsertions - perFileAdd * nonBinary.length;
-        const perFileDel = Math.floor(totalDeletions / nonBinary.length);
-        let extraDel = totalDeletions - perFileDel * nonBinary.length;
-        for (const d of nonBinary) {
-          d.additions = perFileAdd + (extraAdd > 0 ? 1 : 0);
-          d.deletions = perFileDel + (extraDel > 0 ? 1 : 0);
-          if (extraAdd > 0) extraAdd--;
-          if (extraDel > 0) extraDel--;
-        }
-      }
-    }
-  }
-
-  return trackedDeltas;
+  const deltaMeta = collectDeltaMeta(r, diff, true);
+  return deltaMeta.map((d) => ({
+    path: d.path,
+    oldPath: d.oldPath,
+    status: d.status,
+    additions: d.additions,
+    deletions: d.deletions,
+    binary: d.binary,
+  }));
 };
-
-export interface NumstatEntry {
-  path: string;
-  oldPath: string | null;
-  additions: number;
-  deletions: number;
-  binary: boolean;
-}
 
 export const parseNumstatZ = (raw: string): NumstatEntry[] => {
   const tokens = raw.split("\0");
@@ -419,6 +497,14 @@ export const parseNumstatZ = (raw: string): NumstatEntry[] => {
   }
   return entries;
 };
+
+export interface NumstatEntry {
+  path: string;
+  oldPath: string | null;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
 
 export const parseNameStatusZ = (raw: string): Map<string, GitDiffFileStatus> => {
   const tokens = raw.split("\0");
@@ -456,24 +542,8 @@ export const getGitDiffSummary = async (
     if (baseRef === null) return { ...EMPTY_SUMMARY, isRepo: true };
     const branch = getCurrentBranch(r);
 
-    let baseTree;
-    try {
-      baseTree = r.repo.getTree(baseRef);
-    } catch {
-      try {
-        const baseOid = r.repo.revparseSingle(baseRef);
-        const obj = r.repo.findObject(baseOid);
-        if (!obj) return { ...EMPTY_SUMMARY, isRepo: true };
-        if (obj.type() === "Tree") {
-          baseTree = obj as unknown as ReturnType<OpenRepo["repo"]["getTree"]>;
-        } else {
-          const commit = r.repo.getCommit(baseOid);
-          baseTree = commit.tree();
-        }
-      } catch {
-        return { ...EMPTY_SUMMARY, isRepo: true };
-      }
-    }
+    const baseTree = buildBaseTree(r, baseRef);
+    if (!baseTree) return { ...EMPTY_SUMMARY, isRepo: true };
 
     let diff;
     try {
@@ -520,15 +590,38 @@ export const getGitDiffSummary = async (
   }
 };
 
-const pickPatchChunk = (chunks: string[], newPath: string): string | null => {
-  if (chunks.length === 0) return null;
-  if (chunks.length === 1) return chunks[0];
-  return (
-    chunks.find(
-      (chunk) =>
-        chunk.includes(`\n+++ b/${newPath}\n`) || chunk.includes(`\nrename to ${newPath}\n`),
-    ) ?? null
+const buildFilePatch = (r: OpenRepo, delta: DeltaMeta): string | null => {
+  if (delta.binary) return null;
+
+  const oldContent =
+    delta.status === "added"
+      ? null
+      : delta.isWorkingTree
+        ? readBlobContent(r, delta.oldId)
+        : readBlobContent(r, delta.oldId);
+  const newContent =
+    delta.status === "deleted"
+      ? null
+      : delta.isWorkingTree
+        ? readWorkingTreeFile(r, delta.path, GIT_MAX_TOTAL_PATCH_BYTES)
+        : delta.newId === ZERO_OID
+          ? readWorkingTreeFile(r, delta.path, GIT_MAX_TOTAL_PATCH_BYTES)
+          : readBlobContent(r, delta.newId);
+
+  const aPath = delta.oldPath ?? delta.path;
+  const result = computePatchFromContents(
+    oldContent,
+    newContent,
+    aPath,
+    delta.path,
+    null,
+    null,
+    delta.oldId === ZERO_OID ? null : delta.oldId,
+    delta.newId === ZERO_OID ? null : delta.newId,
+    delta.status === "renamed",
   );
+
+  return result.patchText || null;
 };
 
 export const getGitDiff = async (
@@ -541,44 +634,48 @@ export const getGitDiff = async (
   const baseRef = resolveEffectiveBaseRef(r, options);
   if (baseRef === null) return { isRepo: true, files: [] };
 
-  const trackedDeltas = await computeTrackedDeltas(r, baseRef);
+  const baseTree = buildBaseTree(r, baseRef);
+  if (!baseTree) return { isRepo: true, files: [] };
 
-  // Patch text via subprocess — es-git's print() doesn't emit +/- line markers.
-  let patchChunks: string[] | null = null;
+  let diff;
   try {
-    const patchRaw = await runGit(cwd, [
-      "diff",
-      baseRef,
-      "-M",
-      "--no-ext-diff",
-      "--no-textconv",
-      "--no-color",
-      "--patch",
-    ]);
-    const chunks = splitPatchByFile(patchRaw);
-    if (chunks.length === trackedDeltas.length) patchChunks = chunks;
+    diff = r.repo.diffTreeToWorkdirWithIndex(baseTree);
   } catch {
-    patchChunks = null;
+    return { isRepo: true, files: [] };
   }
 
+  try {
+    diff.findSimilar({ renames: true });
+  } catch {
+    // Rename detection failed
+  }
+
+  const deltaMeta = collectDeltaMeta(r, diff, true);
+
   let totalPatchBytes = 0;
-  const files: GitDiffFile[] = trackedDeltas.map((entry, index) => {
+  const files: GitDiffFile[] = deltaMeta.map((entry) => {
     let patch: string | null = null;
     let patchOmitted = false;
     if (entry.binary) {
       patch = null;
-    } else if (patchChunks === null) {
-      patchOmitted = true;
     } else {
-      const chunk = patchChunks[index] ?? "";
-      if (
-        chunk.length > GIT_MAX_PATCH_BYTES_PER_FILE ||
-        totalPatchBytes + chunk.length > GIT_MAX_TOTAL_PATCH_BYTES
-      ) {
+      try {
+        patch = buildFilePatch(r, entry);
+      } catch {
         patchOmitted = true;
-      } else {
-        patch = chunk;
-        totalPatchBytes += chunk.length;
+      }
+      if (patch !== null) {
+        if (
+          patch.length > GIT_MAX_PATCH_BYTES_PER_FILE ||
+          totalPatchBytes + patch.length > GIT_MAX_TOTAL_PATCH_BYTES
+        ) {
+          patch = null;
+          patchOmitted = true;
+        } else {
+          totalPatchBytes += patch.length;
+        }
+      } else if (!patchOmitted) {
+        patchOmitted = true;
       }
     }
     return {
@@ -675,38 +772,39 @@ export const getGitDiffFilePatch = async (
   const baseRef = resolveEffectiveBaseRef(r, options);
   if (baseRef === null) return empty;
 
-  // Check if tracked
-  const trackedDeltas = await computeTrackedDeltas(r, baseRef);
-  const entry = trackedDeltas.find((d) => d.path === requestedPath);
+  const baseTree = buildBaseTree(r, baseRef);
+  if (!baseTree) return empty;
+
+  let diff;
+  try {
+    diff = r.repo.diffTreeToWorkdirWithIndex(baseTree);
+  } catch {
+    return empty;
+  }
+
+  try {
+    diff.findSimilar({ renames: true });
+  } catch {
+    // Rename detection failed
+  }
+
+  const deltaMeta = collectDeltaMeta(r, diff, true);
+  const entry = deltaMeta.find((d) => d.path === requestedPath);
   if (entry) {
     if (entry.binary) return { patch: null, patchOmitted: false, binary: true };
 
-    // A rename must diff BOTH endpoints so -M pairs them into one chunk.
-    const pathspecs = entry.oldPath ? [entry.oldPath, entry.path] : [entry.path];
     try {
-      const raw = await runGit(r.cwd, [
-        "diff",
-        baseRef,
-        "-M",
-        "--no-ext-diff",
-        "--no-textconv",
-        "--no-color",
-        "--patch",
-        "--",
-        ...pathspecs,
-      ]);
-      const chunk = pickPatchChunk(splitPatchByFile(raw), entry.path);
-      if (chunk === null) return empty;
-      if (chunk.length > GIT_MAX_PATCH_BYTES_PER_FILE) {
+      const patch = buildFilePatch(r, entry);
+      if (patch === null) return empty;
+      if (patch.length > GIT_MAX_PATCH_BYTES_PER_FILE) {
         return { patch: null, patchOmitted: true, binary: false };
       }
-      return { patch: chunk, patchOmitted: false, binary: false };
+      return { patch, patchOmitted: false, binary: false };
     } catch {
       return { patch: null, patchOmitted: true, binary: false };
     }
   }
 
-  // Not tracked — check if it's an untracked file
   const absolutePath = path.join(cwd, requestedPath);
   try {
     const stat = fs.statSync(absolutePath);
@@ -732,45 +830,53 @@ export const getGitDiffFilePatch = async (
   }
 };
 
-const normalizePrState = (raw: unknown): GitBranchPrState =>
-  raw === "MERGED" ? "merged" : raw === "CLOSED" ? "closed" : "open";
-
 type ParsedPr = GitBranchPr & { headOwner: string | null };
 
-const parsePrList = (stdout: string | null): ParsedPr[] => {
-  if (!stdout) return [];
-  try {
-    const parsed = JSON.parse(stdout) as Array<{
-      number?: number;
-      title?: string;
-      baseRefName?: string;
-      url?: string;
-      state?: string;
-      headRepositoryOwner?: { login?: string } | null;
-    }>;
-    if (!Array.isArray(parsed)) return [];
-    const prs: ParsedPr[] = [];
-    for (const item of parsed) {
-      if (typeof item?.number !== "number" || !item.baseRefName) continue;
-      prs.push({
-        number: item.number,
-        title: typeof item.title === "string" ? item.title : "",
-        baseRefName: item.baseRefName,
-        url: typeof item.url === "string" && item.url.length > 0 ? item.url : null,
-        state: normalizePrState(item.state),
-        headOwner:
-          typeof item.headRepositoryOwner?.login === "string"
-            ? item.headRepositoryOwner.login
-            : null,
-      });
-    }
-    return prs;
-  } catch {
-    return [];
-  }
+const normalizeOctokitPrState = (state: string, mergedAt: string | null): GitBranchPrState => {
+  if (mergedAt !== null) return "merged";
+  if (state === "closed") return "closed";
+  return "open";
 };
 
-const PR_LIST_FIELDS = "number,title,baseRefName,url,state,headRepositoryOwner";
+export interface PrFetcher {
+  list(slug: string, head: string, state: string, perPage: number): Promise<ParsedPr[]>;
+}
+
+const defaultPrFetcher: PrFetcher = {
+  list: async (slug, head, _state, perPage) => {
+    const token = await resolveGithubToken();
+    if (!token) return [];
+
+    try {
+      const [owner, repo] = slug.split("/");
+      const octokit = new Octokit({ auth: token, request: { timeout: 8_000 } });
+      const { data } = await octokit.rest.pulls.list({
+        owner,
+        repo,
+        head,
+        state: "all",
+        per_page: perPage,
+      });
+
+      return data.map((pr) => ({
+        number: pr.number,
+        title: pr.title ?? "",
+        baseRefName: pr.base?.ref ?? "",
+        url: pr.html_url ?? null,
+        state: normalizeOctokitPrState(pr.state, pr.merged_at),
+        headOwner: pr.head?.repo?.owner?.login ?? null,
+      }));
+    } catch {
+      return [];
+    }
+  },
+};
+
+let activePrFetcher: PrFetcher = defaultPrFetcher;
+
+export const setPrFetcher = (fetcher: PrFetcher): void => {
+  activePrFetcher = fetcher;
+};
 
 interface GithubRemote {
   name: string;
@@ -806,7 +912,7 @@ const parseGithubRemotes = (r: OpenRepo): GithubRemote[] => {
   return remotes;
 };
 
-const detectPr = async (cwd: string, r: OpenRepo): Promise<GitBranchPr | null> => {
+const detectPr = async (r: OpenRepo): Promise<GitBranchPr | null> => {
   const currentBranch = getCurrentBranch(r);
   if (!currentBranch) return null;
   const remotes = parseGithubRemotes(r);
@@ -816,22 +922,7 @@ const detectPr = async (cwd: string, r: OpenRepo): Promise<GitBranchPr | null> =
   const slugs = [...new Set(remotes.map((remote) => remote.slug))];
 
   const results = await Promise.all(
-    slugs.map((slug) =>
-      runGh(cwd, [
-        "pr",
-        "list",
-        "--repo",
-        slug,
-        "--head",
-        currentBranch,
-        "--state",
-        "all",
-        "--json",
-        PR_LIST_FIELDS,
-        "--limit",
-        "30",
-      ]).then(parsePrList),
-    ),
+    slugs.map((slug) => activePrFetcher.list(slug, `${ownOwner}:${currentBranch}`, "all", 30)),
   );
 
   const seen = new Set<string>();
@@ -890,7 +981,7 @@ export const getGitBranchInfo = async (cwd: string): Promise<GitBranchInfo> => {
   }
 
   const currentBranch = getCurrentBranch(r);
-  const pr = await detectPr(cwd, r);
+  const pr = await detectPr(r);
   const defaultBase = resolveDefaultBase(r);
 
   const branchEntries = collectIterator<{ name: string; type: string }>(r.repo.branches());

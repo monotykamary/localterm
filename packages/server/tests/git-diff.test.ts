@@ -13,6 +13,7 @@ import {
   getGitDiffSummary,
   parseNameStatusZ,
   parseNumstatZ,
+  setPrFetcher,
   splitPatchByFile,
 } from "../src/git-diff.js";
 
@@ -515,25 +516,23 @@ describe("branch comparison mode", () => {
       git(forkDir, "remote", "add", "origin", "git@github.com:me/fork.git");
       git(forkDir, "remote", "add", "upstream", "https://github.com/them/repo.git");
 
-      // Put a fake gh on PATH that returns a mock PR
-      const binDir = path.join(forkDir, "bin");
-      fs.mkdirSync(binDir);
-      const ghScript = path.join(binDir, "gh");
-      const payload = JSON.stringify([
-        {
-          number: 42,
-          title: "Test PR",
-          baseRefName: "main",
-          url: "https://github.com/them/repo/pull/42",
-          state: "OPEN",
-          headRepositoryOwner: { login: "me" },
+      setPrFetcher({
+        list: async (slug, head, _state, _perPage) => {
+          if (slug === "them/repo" && head === "me:feature") {
+            return [
+              {
+                number: 42,
+                title: "Test PR",
+                baseRefName: "main",
+                url: "https://github.com/them/repo/pull/42",
+                state: "open" as const,
+                headOwner: "me",
+              },
+            ];
+          }
+          return [];
         },
-      ]);
-      fs.writeFileSync(ghScript, `#!/bin/sh\necho '${payload}'\n`);
-      fs.chmodSync(ghScript, 0o755);
-
-      const originalPath = process.env.PATH;
-      process.env.PATH = `${binDir}:${originalPath}`;
+      });
       try {
         const info = await getGitBranchInfo(forkDir);
         expect(info.pr).not.toBeNull();
@@ -547,7 +546,9 @@ describe("branch comparison mode", () => {
         // Regression: headOwner must not leak into the public shape.
         expect(info.pr).not.toHaveProperty("headOwner");
       } finally {
-        process.env.PATH = originalPath;
+        setPrFetcher({
+          list: async () => [],
+        });
       }
     } finally {
       fs.rmSync(forkDir, { recursive: true, force: true });
