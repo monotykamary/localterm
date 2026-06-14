@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.25.1
+
+### Patch Changes
+
+- Fix restart daemon dying on startup and plist missing PATH
+
 ## 1.25.0
 
 ### Minor Changes
