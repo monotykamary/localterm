@@ -1,5 +1,25 @@
 # localterm
 
+## 1.22.0
+
+### Minor Changes
+
+- ffd6112: Give the keep-awake coffee control three modes: off, on, and automatic (the new default).
+
+  The coffee button is now a dropdown like the settings menu. **Automatic** keeps the system awake
+  only while a recognized program is running in a localterm session — `claude`, `codex`, `opencode`,
+  and `pi` are detected out of the box, and you can add your own commands on top. Detection matches the
+  full command line of processes running under each session's shell, so a CLI launched as
+  `node …/claude` still counts. Automatic carries a small corner badge to set it apart, and the coffee
+  icon tints to its warm accent only while keep-awake is actually engaged. The selected mode and your
+  custom commands are owned by the daemon, persisted to `~/.localterm/caffeinate.json`, and broadcast
+  to every tab so all open tabs stay in lockstep. macOS only, where `caffeinate` exists.
+
+### Patch Changes
+
+- Updated dependencies [ffd6112]
+  - @monotykamary/localterm-server@1.22.0
+
 ## 1.21.0
 
 ### Minor Changes
@@ -31,6 +51,7 @@
 - d682087: fix: stop stale spinner/status lines when output contains non-Latin combining marks
 
   Claude Code measures text with `Bun.stringWidth`, which counts most non-Latin combining marks (Cyrillic, Hebrew points, Arabic harakat, Indic, CJK voicing, …) as a spacing column instead of zero-width. The terminal joined them onto the base, so any line containing one drifted Claude's relative-cursor math by a column and left stale lines behind — e.g. a frozen spinner frame — until a resize forced a full repaint. The width provider now mirrors `Bun.stringWidth` for those marks, but only in the normal screen buffer where Claude runs; full-screen TUIs (vim, less, tmux) in the alternate buffer keep correct combining-mark rendering.
+
   - @monotykamary/localterm-server@1.19.2
 
 ## 1.19.1
@@ -219,6 +240,7 @@
 ### Patch Changes
 
 - Fix security, CLI lifecycle, and frontend bugs from full codebase review
+
   - security: stripPort now treats `localhost:3417` correctly (was rejected with 403)
   - security: maxPayload capped at 256KB on WebSocket server
   - security: shell hook temp dirs use mode 0o700, rc files use mode 0o600
