@@ -384,6 +384,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     let lastOutputTimestamp = 0;
     let faviconState: "ready" | "running" | "alive-quiet" = "ready";
     let faviconBadge = false;
+    let hadForegroundThisCycle = false;
     let hasForegroundProcess = false;
     // Kitty keyboard protocol (https://sw.kovidgoyal.net/kitty/keyboard-protocol/)
     // tracks a stack of flags so a TUI can push/pop reporting modes. We only
@@ -408,9 +409,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         faviconRunningTimer = null;
       }
       if (faviconState === "running") {
-        if (document.hidden) {
+        if (document.hidden && hadForegroundThisCycle) {
           faviconBadge = true;
         }
+        if (!hasForegroundProcess) hadForegroundThisCycle = false;
         if (hasForegroundProcess) {
           faviconState = "alive-quiet";
           setTabFaviconState("alive-quiet", faviconBadge);
@@ -450,6 +452,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         faviconBadge = false;
         setTabFaviconState("ready");
       }
+      hadForegroundThisCycle = false;
     };
 
     const initialFont = findTerminalFontById(initialFontIdRef.current);
@@ -887,9 +890,11 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
     const observer = new ResizeObserver(scheduleFit);
     const onVisibilityChange = () => {
-      if (!document.hidden && faviconBadge) {
-        faviconBadge = false;
-        setTabFaviconState(faviconState);
+      if (!document.hidden) {
+        if (faviconBadge) {
+          faviconBadge = false;
+          setTabFaviconState(faviconState);
+        }
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -1002,8 +1007,12 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         } else if (message.type === "foreground") {
           const nowHasProcess = message.process !== null;
           onForegroundProcessChange?.(nowHasProcess);
-          if (!nowHasProcess && faviconState === "alive-quiet") {
+          if (nowHasProcess) {
+            hadForegroundThisCycle = true;
+          } else if (faviconState === "alive-quiet") {
+            if (document.hidden && hadForegroundThisCycle) faviconBadge = true;
             faviconState = "ready";
+            hadForegroundThisCycle = false;
             setTabFaviconState("ready", faviconBadge);
           }
           hasForegroundProcess = nowHasProcess;

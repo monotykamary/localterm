@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.25.4
+
+### Patch Changes
+
+- fix: suppress startup red-dot favicon badge when no foreground process ran
+
 ## 1.25.3
 
 ### Patch Changes
