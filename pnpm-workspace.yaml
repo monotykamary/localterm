@@ -12,6 +12,7 @@ onlyBuiltDependencies:
   - node-pty
   - sharp
   - spawn-sync
+  - es-git
   - unrs-resolver
 
 overrides:
