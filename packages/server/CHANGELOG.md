@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.25.3
+
+### Patch Changes
+
+- Fix optical centering of "A" badge in keep-awake automatic mode
+
 ## 1.25.2
 
 ### Patch Changes

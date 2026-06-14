@@ -138,7 +138,7 @@ export const KeepAwakeMenu = ({
               )}
               style={active ? { backgroundColor: CAFFEINATE_ACCENT_COLOR } : undefined}
             >
-              <span className="translate-y-[0.5px]">A</span>
+              <span className="translate-x-[0.125px] translate-y-[-0.25px]">A</span>
             </span>
           ) : null}
         </span>
