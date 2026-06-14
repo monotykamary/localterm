@@ -22,6 +22,9 @@ export const DAEMON_CHILD_ENV_FLAG = "LOCALTERM_DAEMON_CHILD";
  */
 export const DAEMON_PROCESS_TITLE = "localtermd";
 
+export const LAUNCHD_LABEL = "com.monotykamary.localterm";
+export const LAUNCHD_PLIST_FILENAME = `${LAUNCHD_LABEL}.plist`;
+
 export const EXIT_OK = 0;
 export const EXIT_FAILURE = 1;
 export const EXIT_USAGE_ERROR = 2;

@@ -11,6 +11,7 @@ const STANDARD_OPTIONS = {
 const noopSleep = (): Promise<void> => Promise.resolve();
 const neverHealthy = (): Promise<boolean> => Promise.resolve(false);
 const noopReadHost = (): string | null => "127.0.0.1";
+const noopReadPid = (): number | null => null;
 
 const noopProbeHealth = (): Promise<boolean> => neverHealthy();
 
@@ -26,6 +27,7 @@ describe("pollForDaemonReady", () => {
         return tick < 3 ? null : 4242;
       },
       readHost: noopReadHost,
+      readPid: noopReadPid,
       sleep: noopSleep,
       probeHealth: noopProbeHealth,
     });
@@ -46,6 +48,7 @@ describe("pollForDaemonReady", () => {
         return newPort;
       },
       readHost: noopReadHost,
+      readPid: noopReadPid,
       sleep: noopSleep,
       probeHealth: noopProbeHealth,
     });
@@ -63,6 +66,7 @@ describe("pollForDaemonReady", () => {
       },
       readPort: () => null,
       readHost: noopReadHost,
+      readPid: noopReadPid,
       sleep: noopSleep,
       probeHealth: noopProbeHealth,
     });
@@ -80,6 +84,7 @@ describe("pollForDaemonReady", () => {
       isAlive: () => true,
       readPort: () => null,
       readHost: noopReadHost,
+      readPid: noopReadPid,
       sleep: noopSleep,
       probeHealth: noopProbeHealth,
     });
@@ -99,6 +104,7 @@ describe("pollForDaemonReady", () => {
       isAlive,
       readPort,
       readHost: noopReadHost,
+      readPid: noopReadPid,
       sleep: noopSleep,
       probeHealth: noopProbeHealth,
     });
@@ -118,13 +124,14 @@ describe("pollForDaemonReady", () => {
       isAlive: () => true,
       readPort: () => null,
       readHost: noopReadHost,
+      readPid: noopReadPid,
       sleep: sleepSpy,
       probeHealth: noopProbeHealth,
     });
     expect(sleepSpy).toHaveBeenCalledTimes(10);
   });
 
-  it("resolves when port file matches initialPort but health probe succeeds", async () => {
+  it("resolves when PID file matches childPid and health probe succeeds", async () => {
     const stalePort = 3417;
     const result = await pollForDaemonReady({
       ...STANDARD_OPTIONS,
@@ -132,13 +139,31 @@ describe("pollForDaemonReady", () => {
       isAlive: () => true,
       readPort: () => stalePort,
       readHost: noopReadHost,
+      readPid: () => STANDARD_OPTIONS.childPid,
       sleep: noopSleep,
       probeHealth: () => Promise.resolve(true),
     });
     expect(result).toEqual({ ok: true, port: stalePort });
   });
 
-  it("continues polling when port file matches and health probe fails", async () => {
+  it("skips health probe when PID file does not match childPid", async () => {
+    const stalePort = 3417;
+    const probeHealth = vi.fn(() => Promise.resolve(true));
+    const result = await pollForDaemonReady({
+      ...STANDARD_OPTIONS,
+      initialPort: stalePort,
+      isAlive: () => true,
+      readPort: () => stalePort,
+      readHost: noopReadHost,
+      readPid: () => 99999,
+      sleep: noopSleep,
+      probeHealth,
+    });
+    expect(result.ok).toBe(false);
+    expect(probeHealth).not.toHaveBeenCalled();
+  });
+
+  it("continues polling when PID file matches but health probe fails", async () => {
     const stalePort = 3417;
     let tick = 0;
     const result = await pollForDaemonReady({
@@ -147,6 +172,7 @@ describe("pollForDaemonReady", () => {
       isAlive: () => true,
       readPort: () => stalePort,
       readHost: noopReadHost,
+      readPid: () => STANDARD_OPTIONS.childPid,
       sleep: noopSleep,
       probeHealth: () => {
         tick += 1;

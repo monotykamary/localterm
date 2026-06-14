@@ -10,7 +10,7 @@
     "postinstall": "node scripts/fix-node-pty.mjs",
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
-    "start": "node packages/cli/bin/localterm.mjs stop && node packages/cli/bin/localterm.mjs start",
+    "start": "node packages/cli/bin/localterm.mjs restart",
     "stop": "node packages/cli/bin/localterm.mjs stop",
     "cli": "node packages/cli/bin/localterm.mjs",
     "test": "turbo run test",

@@ -92,6 +92,13 @@ interface HealthCheckFailedError {
   cause: Error;
 }
 
+interface InstallFailedError {
+  kind: "install-failed";
+  code: "E_LT_CLI_INSTALL_FAILED";
+  severity: "error";
+  message: string;
+}
+
 export type CliError =
   | InvalidPortError
   | InvalidHostError
@@ -103,7 +110,8 @@ export type CliError =
   | ServerStartFailedError
   | PidNotOursError
   | SignalFailedError
-  | HealthCheckFailedError;
+  | HealthCheckFailedError
+  | InstallFailedError;
 
 export type CliErrorCode = CliError["code"];
 export type CliErrorKind = CliError["kind"];
@@ -188,6 +196,12 @@ export const cliError = {
     port,
     cause,
   }),
+  installFailed: (message: string): InstallFailedError => ({
+    kind: "install-failed",
+    code: "E_LT_CLI_INSTALL_FAILED",
+    severity: "error",
+    message,
+  }),
 };
 
 const exhaustivenessGuard = (impossible: never): never => {
@@ -218,6 +232,8 @@ export const formatCliError = (error: CliError): string => {
       return `failed to signal pid ${error.pid}: ${error.cause.message}`;
     case "health-check-failed":
       return `pid ${error.pid} is alive but health check failed: ${error.cause.message}`;
+    case "install-failed":
+      return error.message;
     default:
       return exhaustivenessGuard(error);
   }
@@ -241,6 +257,7 @@ export const hintForCliError = (error: CliError): string | null => {
     case "pid-not-ours":
     case "signal-failed":
     case "health-check-failed":
+    case "install-failed":
       return null;
     default:
       return exhaustivenessGuard(error);
@@ -262,6 +279,7 @@ export const exitCodeForCliError = (error: CliError): number => {
     case "server-start-failed":
     case "signal-failed":
     case "health-check-failed":
+    case "install-failed":
       return EXIT_FAILURE;
     default:
       return exhaustivenessGuard(error);

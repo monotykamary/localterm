@@ -11,6 +11,7 @@ export interface DaemonProbeOptions {
   isAlive: (pid: number) => boolean;
   readPort: () => number | null;
   readHost: () => string | null;
+  readPid: () => number | null;
   sleep: (durationMs: number) => Promise<void>;
   probeHealth?: (host: string, port: number) => Promise<boolean>;
 }
@@ -41,7 +42,7 @@ export const pollForDaemonReady = async (
     if (observedPort !== null && observedPort !== options.initialPort) {
       return { ok: true, port: observedPort };
     }
-    if (observedPort !== null) {
+    if (observedPort !== null && options.readPid() === options.childPid) {
       const resolvedHost = options.readHost() ?? "127.0.0.1";
       const healthy = await probeHealth(resolvedHost, observedPort);
       if (healthy) return { ok: true, port: observedPort };

@@ -22,7 +22,15 @@ import {
   STOP_COMMAND,
 } from "../constants.js";
 import { cliError, exitCodeForCliError, type CliError } from "../errors.js";
-import { clearPid, ensureLogFile, isAlive, readHost, readPort, writePid } from "../state.js";
+import {
+  clearPid,
+  ensureLogFile,
+  isAlive,
+  readHost,
+  readPid,
+  readPort,
+  writePid,
+} from "../state.js";
 import { buildDaemonStartArgs } from "../utils/build-daemon-args.js";
 import { pollForDaemonReady } from "../utils/poll-for-daemon-ready.js";
 import { reportCliError } from "../utils/report-cli-error.js";
@@ -100,6 +108,7 @@ const runStartAsDaemon = async (options: StartOptions): Promise<void> => {
     isAlive,
     readPort,
     readHost,
+    readPid,
     sleep,
   });
 

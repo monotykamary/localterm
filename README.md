@@ -39,13 +39,32 @@ Reloads and connection drops spawn a fresh shell (auto-reconnect is built in for
 ## CLI
 
 ```bash
-localterm start [-p 3417] [-H 127.0.0.1] [--no-open]   # daemonizes by default
+localterm start [-p 3417] [-H 127.0.0.1] [--open]   # daemonizes by default
 localterm stop
 localterm status
 localterm restart
+localterm install [-p 3417] [-H 127.0.0.1]  # auto-start at login (macOS)
+localterm uninstall                              # remove auto-start service
 ```
 
 State lives in `~/.localterm/` (PID, port, server log at `~/.localterm/server.log`).
+
+## Auto-start (macOS)
+
+`localterm install` creates a [launchd](https://support.apple.com/guide/terminal/launchd-apda4e235115/2.14/mac/14.1) plist in `~/Library/LaunchAgents/` with `RunAtLoad` and `KeepAlive` enabled:
+
+- **RunAtLoad** — localterm starts automatically when you log in.
+- **KeepAlive** — launchd restarts the daemon immediately if it crashes.
+
+One-time setup:
+
+```bash
+npx @monotykamary/localterm@latest install
+# or with a global install:
+localterm install
+```
+
+Remove with `localterm uninstall`.
 
 ## Automations
 

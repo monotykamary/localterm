@@ -1,5 +1,6 @@
 import { DEFAULT_HOST, DEFAULT_PORT } from "@monotykamary/localterm-server";
 import { Command } from "commander";
+import { runInstall, runUninstall } from "./commands/install.js";
 import { runRestart } from "./commands/restart.js";
 import { runStart } from "./commands/start.js";
 import { runStatus } from "./commands/status.js";
@@ -66,6 +67,22 @@ program
       host: options.host,
       open: options.open,
     });
+  });
+
+program
+  .command("install")
+  .description("install launchd service for auto-start at login (macOS only)")
+  .option("-p, --port <port>", "port to bind", parsePortOption, resolveInitialPort())
+  .option("-H, --host <host>", "host to bind", DEFAULT_HOST)
+  .action(async (options: { port: number; host: string }) => {
+    await runInstall({ port: options.port, host: options.host });
+  });
+
+program
+  .command("uninstall")
+  .description("remove the launchd auto-start service (macOS only)")
+  .action(async () => {
+    await runUninstall();
   });
 
 program.parseAsync().catch((error: unknown) => {
