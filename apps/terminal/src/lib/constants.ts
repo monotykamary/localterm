@@ -44,6 +44,8 @@ export const DIFF_VIEWER_RENDER_CHUNK = 2000;
 export const SPLIT_DIFF_STACK_WIDTH_PX = 640;
 export const SIDEBAR_COLLAPSE_WIDTH_PX = 768;
 export const DIFF_VIEW_MODE_STORAGE_KEY = "localterm:diff-view-mode";
+export const PATCH_PREFETCH_CONCURRENCY = 3;
+export const PATCH_PREFETCH_NEIGHBOR_RADIUS = 5;
 
 export const AUTOMATIONS_SORT_STORAGE_KEY = "localterm:automations-sort";
 export const AUTOMATIONS_SORT_DEFAULT = "last-run" as const;

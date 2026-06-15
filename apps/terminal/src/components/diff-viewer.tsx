@@ -51,6 +51,8 @@ import {
   DIFF_VIEWER_CLOSE_TRANSITION_MS,
   DIFF_VIEWER_INITIAL_LINE_LIMIT,
   DIFF_VIEWER_RENDER_CHUNK,
+  PATCH_PREFETCH_CONCURRENCY,
+  PATCH_PREFETCH_NEIGHBOR_RADIUS,
   SIDEBAR_COLLAPSE_WIDTH_PX,
   SPLIT_DIFF_STACK_WIDTH_PX,
 } from "@/lib/constants";
@@ -75,6 +77,7 @@ import {
 } from "@/utils/diff-line-ranges";
 import { PR_STATE_STYLES } from "@/lib/pr-state-styles";
 import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "@/utils/fetch-git-diff";
+import { PrefetchQueue, type PrefetchQueueItem } from "@/utils/prefetch-queue";
 import {
   annotationRangeStart,
   diffAnnotationKey,
@@ -1175,6 +1178,7 @@ export const DiffViewer = ({
   // effect can detect real changes (additions/deletions/status) vs mere
   // reference identity changes from re-fetches returning identical data.
   // Includes compareMode+base so switching modes invalidates stale patches.
+  const prefetchQueueRef = useRef<PrefetchQueue | null>(null);
   const lastFileMetaRef = useRef<Map<string, string>>(new Map());
   // Latest cache, read by loadPatch without making it depend on patchCache.
   const patchCacheRef = useRef(patchCache);
@@ -1201,6 +1205,7 @@ export const DiffViewer = ({
   const abortPatchFetches = useCallback(() => {
     for (const controller of patchControllersRef.current.values()) controller.abort();
     patchControllersRef.current.clear();
+    prefetchQueueRef.current?.clear();
   }, []);
 
   // Switching repos resets mode overrides, file-list state, and patches.
@@ -1212,6 +1217,7 @@ export const DiffViewer = ({
     setHasError(false);
     setPatchCache({});
     lastFileMetaRef.current.clear();
+    prefetchQueueRef.current = null;
     abortPatchFetches();
   }, [cwd, abortPatchFetches]);
 
@@ -1301,6 +1307,7 @@ export const DiffViewer = ({
     abortPatchFetches();
     setPatchCache({});
     lastFileMetaRef.current.clear();
+    prefetchQueueRef.current = null;
   }, [compareMode, baseOverride, abortPatchFetches]);
 
   const displayFileList = compareMode === "branch" ? branchFiles : workingFiles;
@@ -1367,6 +1374,18 @@ export const DiffViewer = ({
     [cwd, compareMode, baseOverride],
   );
 
+  const getOrCreatePrefetchQueue = useCallback(() => {
+    if (!prefetchQueueRef.current) {
+      prefetchQueueRef.current = new PrefetchQueue(
+        PATCH_PREFETCH_CONCURRENCY,
+        async (path, force) => {
+          loadPatch(path, force);
+        },
+      );
+    }
+    return prefetchQueueRef.current;
+  }, [loadPatch]);
+
   // Keep a valid selection: follow the current file across refreshes, fall back
   // to the first file when it disappears.
   useEffect(() => {
@@ -1375,12 +1394,14 @@ export const DiffViewer = ({
     setSelectedPath(files[0]?.path ?? null);
   }, [displayFileList, files, selectedPath]);
 
-  // Load the selected file's patch on demand, and prefetch its neighbors so j/k
-  // navigation stays instant. When the selected file's metadata changes
-  // (different additions/deletions/status), force a re-fetch so files updated
-  // on disk never show a stale diff.
+  // Unified prefetch: the selected file (priority 0), its neighbors (priority
+  // 1..N), and remaining uncached files (priority N+1+) all route through a
+  // single concurrency-limited queue. When the selected file's metadata
+  // changes (additions/deletions/status), the force flag invalidates its
+  // cached patch so the queue re-fetches it.
   useEffect(() => {
-    if (!selectedPath) return;
+    if (files.length === 0 || !selectedPath) return;
+    const queue = getOrCreatePrefetchQueue();
     const selectedMeta = files.find((file) => file.path === selectedPath);
     const modeKey = `${compareMode}:${baseOverride ?? ""}`;
     const metaKey = selectedMeta
@@ -1389,13 +1410,31 @@ export const DiffViewer = ({
     const lastKey = lastFileMetaRef.current.get(selectedPath);
     const fileChanged = lastKey !== undefined && lastKey !== metaKey;
     lastFileMetaRef.current.set(selectedPath, metaKey);
-    loadPatch(selectedPath, fileChanged);
-    const index = files.findIndex((file) => file.path === selectedPath);
-    if (index >= 0) {
-      loadPatch(files[index - 1]?.path);
-      loadPatch(files[index + 1]?.path);
+
+    const items: PrefetchQueueItem[] = [];
+    items.push({ path: selectedPath, priority: 0, force: fileChanged });
+
+    const selectedIndex = files.findIndex((file) => file.path === selectedPath);
+    if (selectedIndex >= 0) {
+      for (let offset = 1; offset <= PATCH_PREFETCH_NEIGHBOR_RADIUS; offset++) {
+        const prev = files[selectedIndex - offset]?.path;
+        const next = files[selectedIndex + offset]?.path;
+        if (prev) items.push({ path: prev, priority: offset });
+        if (next) items.push({ path: next, priority: offset });
+      }
     }
-  }, [selectedPath, displayFileList, files, loadPatch]);
+
+    for (const file of files) {
+      if (items.some((item) => item.path === file.path)) continue;
+      const distance = Math.abs(files.indexOf(file) - (selectedIndex >= 0 ? selectedIndex : 0));
+      items.push({
+        path: file.path,
+        priority: PATCH_PREFETCH_NEIGHBOR_RADIUS + distance,
+      });
+    }
+
+    queue.enqueue(items);
+  }, [selectedPath, displayFileList, files, compareMode, baseOverride, getOrCreatePrefetchQueue]);
 
   const selectedFile = files.find((file) => file.path === selectedPath) ?? null;
   const selectedIndex = selectedFile ? files.indexOf(selectedFile) : -1;
