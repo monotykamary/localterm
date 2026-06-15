@@ -119,6 +119,7 @@ const withTrigger = (overrides: Partial<TriggerFormState>): TriggerFormState => 
   schedule: defaultScheduleForm(),
   watchRecursive: true,
   watchFilter: "",
+  eventName: "git-dirty",
   ...overrides,
 });
 
@@ -149,6 +150,12 @@ describe("buildTriggerFromForm", () => {
       buildTriggerFromForm(withTrigger({ triggerType: "watch", watchFilter: "*.mov" })),
     ).toEqual({ kind: "watch", recursive: true, filter: "*.mov" });
   });
+
+  it("builds an event trigger carrying the event name", () => {
+    expect(
+      buildTriggerFromForm(withTrigger({ triggerType: "event", eventName: "notification" })),
+    ).toEqual({ kind: "event", event: "notification" });
+  });
 });
 
 describe("recognizeTriggerForm", () => {
@@ -157,6 +164,8 @@ describe("recognizeTriggerForm", () => {
     { kind: "watch", recursive: true },
     { kind: "watch", recursive: false },
     { kind: "watch", recursive: true, filter: "*.mov" },
+    { kind: "event", event: "git-dirty" },
+    { kind: "event", event: "notification" },
   ];
 
   it("round-trips every trigger through the form", () => {
@@ -178,6 +187,10 @@ describe("triggerLabel", () => {
     );
     expect(triggerLabel({ kind: "watch", recursive: false, filter: "*.mov" })).toBe(
       "When files change matching *.mov",
+    );
+    expect(triggerLabel({ kind: "event", event: "git-dirty" })).toBe("On Git changes detected");
+    expect(triggerLabel({ kind: "event", event: "notification" })).toBe(
+      "On Shell notification (OSC 9)",
     );
   });
 });

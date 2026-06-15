@@ -4,6 +4,7 @@ import {
   nextCronOccurrence,
   parseCronExpression,
   type AutomationRunRecord,
+  type AutomationSessionEvent,
   type AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
 import { CalendarClock, ChevronDown, Pencil, Play, Plus, RotateCcw, Trash2, X } from "lucide-react";
@@ -41,6 +42,9 @@ import {
   HOUR_STEP_OPTIONS,
   MINUTE_STEP_OPTIONS,
   recognizeTriggerForm,
+  SESSION_EVENT_DESCRIPTIONS,
+  SESSION_EVENT_LABELS,
+  SESSION_EVENTS,
   triggerLabel,
   WEEKDAY_NAMES,
   type ScheduleFormState,
@@ -73,6 +77,7 @@ interface AutomationFormState {
   schedule: ScheduleFormState;
   watchRecursive: boolean;
   watchFilter: string;
+  eventName: AutomationSessionEvent;
   limitMode: "forever" | "count";
   limitMax: number;
   closeOnFinish: boolean;
@@ -96,6 +101,7 @@ const emptyForm = (defaultCwd: string | null): AutomationFormState => ({
   schedule: defaultScheduleForm(),
   watchRecursive: true,
   watchFilter: "",
+  eventName: "git-dirty",
   limitMode: "forever",
   limitMax: DEFAULT_LIMIT_MAX,
   closeOnFinish: false,
@@ -113,6 +119,7 @@ const formForAutomation = (automation: AutomationWithNextRun): AutomationFormSta
     schedule: trigger.schedule,
     watchRecursive: trigger.watchRecursive,
     watchFilter: trigger.watchFilter,
+    eventName: trigger.eventName,
     limitMode: automation.limit.kind === "count" ? "count" : "forever",
     limitMax: automation.limit.kind === "count" ? automation.limit.max : DEFAULT_LIMIT_MAX,
     closeOnFinish: automation.closeOnFinish,
@@ -131,7 +138,9 @@ const RunRow = ({ run, nowMs }: { run: AutomationRunRecord; nowMs: number }) => 
             ? "manual run"
             : run.trigger === "watch"
               ? "on change"
-              : "scheduled"}
+              : run.trigger === "event"
+                ? "on event"
+                : "scheduled"}
       </span>
       <span className="shrink-0 text-muted-foreground/70 tabular-nums">
         {formatRelativeTime(runTimestamp(run), nowMs)}
@@ -539,7 +548,7 @@ export const AutomationsModal = ({
     form.name.trim().length > 0 &&
     form.command.trim().length > 0 &&
     form.cwd.trim().length > 0 &&
-    (form.triggerType === "watch" || isScheduleValid) &&
+    (form.triggerType === "watch" || form.triggerType === "event" || isScheduleValid) &&
     (form.limitMode === "forever" ||
       (form.limitMax >= 1 && form.limitMax <= AUTOMATION_RUN_LIMIT_MAX));
 
@@ -757,9 +766,13 @@ export const AutomationsModal = ({
                               ? automation.enabled
                                 ? "watching"
                                 : "paused"
-                              : automation.nextRunAt !== null
-                                ? formatRelativeTime(automation.nextRunAt, nowMs)
-                                : "paused"}
+                              : automation.trigger.kind === "event"
+                                ? automation.enabled
+                                  ? "listening"
+                                  : "paused"
+                                : automation.nextRunAt !== null
+                                  ? formatRelativeTime(automation.nextRunAt, nowMs)
+                                  : "paused"}
                         </span>
                       </span>
                     </button>
@@ -899,9 +912,13 @@ const AutomationDetail = ({
                 ? automation.enabled
                   ? "On change"
                   : "Paused"
-                : automation.nextRunAt !== null
-                  ? formatRelativeTime(automation.nextRunAt, nowMs)
-                  : "Paused"}
+                : automation.trigger.kind === "event"
+                  ? automation.enabled
+                    ? "On event"
+                    : "Paused"
+                  : automation.nextRunAt !== null
+                    ? formatRelativeTime(automation.nextRunAt, nowMs)
+                    : "Paused"}
           </span>
         </div>
         <div className="flex flex-col gap-0.5">
@@ -1032,12 +1049,11 @@ const AutomationForm = ({
         items={[
           { id: "schedule", label: "On a schedule" },
           { id: "watch", label: "When a folder changes" },
+          { id: "event", label: "On a session event" },
         ]}
         ariaLabel="trigger type"
         placeholder="Trigger"
-        onValueChange={(next) =>
-          onChange({ ...form, triggerType: next === "watch" ? "watch" : "schedule" })
-        }
+        onValueChange={(next) => onChange({ ...form, triggerType: next as TriggerType })}
       />
       {form.triggerType === "schedule" ? (
         <>
@@ -1053,7 +1069,7 @@ const AutomationForm = ({
                 : `schedule never fires · cron ${cronCaption}`}
           </span>
         </>
-      ) : (
+      ) : form.triggerType === "watch" ? (
         <div className="flex flex-col gap-2">
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             File filter (optional)
@@ -1085,6 +1101,31 @@ const AutomationForm = ({
           <span className="text-[10px] text-muted-foreground">
             Runs the command when the directory changes — no polling. Won't start a new run while
             one is still going; counts toward the run limit.
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Event
+            <SettingsSelect
+              value={form.eventName}
+              items={SESSION_EVENTS.map((event) => ({
+                id: event,
+                label: SESSION_EVENT_LABELS[event],
+              }))}
+              ariaLabel="session event"
+              placeholder="Event"
+              onValueChange={(next) =>
+                onChange({ ...form, eventName: next as AutomationSessionEvent })
+              }
+            />
+          </label>
+          <span className="text-[10px] text-muted-foreground">
+            {SESSION_EVENT_DESCRIPTIONS[form.eventName]}
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            Fires when any localterm session in this directory emits the event. Won't start a new
+            run while one is still going; counts toward the run limit.
           </span>
         </div>
       )}
@@ -1220,7 +1261,13 @@ const RecentRunsView = ({
                 {automation.name}
               </span>
               <span className="shrink-0 text-[10px] text-muted-foreground/70">
-                {run.trigger === "manual" ? "manual" : "scheduled"}
+                {run.trigger === "manual"
+                  ? "manual"
+                  : run.trigger === "watch"
+                    ? "watch"
+                    : run.trigger === "event"
+                      ? "event"
+                      : "scheduled"}
               </span>
               <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
                 {formatRelativeTime(runTimestamp(run), nowMs)}

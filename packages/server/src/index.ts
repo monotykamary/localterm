@@ -16,6 +16,7 @@ import type { SnapshotProcesses } from "./caffeinate-process-match.js";
 import { CdpClient } from "./cdp/cdp-client.js";
 import {
   AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
+  AUTOMATION_EVENT_DEBOUNCE_MS,
   AUTOMATION_WATCH_DEBOUNCE_MS,
   AUTOMATION_WATCH_POST_RUN_GRACE_MS,
   DEFAULT_HOST,
@@ -44,6 +45,7 @@ import {
 } from "./constants.js";
 import { ServerErrorException, serverError } from "./errors.js";
 import { FolderWatchManager } from "./folder-watch-manager.js";
+import { SessionEventManager } from "./session-event-manager.js";
 import {
   getGitBranchInfo,
   getGitDiff,
@@ -225,6 +227,16 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     getAutomation: (automationId) => automationStore.get(automationId),
   });
   const syncFolderWatchers = () => folderWatchManager.sync(automationStore.list());
+  const sessionEventManager = new SessionEventManager({
+    debounceMs: AUTOMATION_EVENT_DEBOUNCE_MS,
+    postRunGraceMs: AUTOMATION_WATCH_POST_RUN_GRACE_MS,
+    isRunInFlight: (automationId) => {
+      const status = automationStore.get(automationId)?.runs[0]?.status;
+      return status === "launched" || status === "running";
+    },
+    getAutomation: (automationId) => automationStore.get(automationId),
+  });
+  const syncSessionEventListeners = () => sessionEventManager.sync(automationStore.list());
   const heartbeatStore = new HeartbeatStore(path.join(stateDirectory, "daemon-heartbeat.json"));
   const caffeinateController = options.caffeinateController ?? new CaffeinateController();
   const caffeinatePreferencesStore = new CaffeinatePreferencesStore(
@@ -331,7 +343,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // launches never count and are allowed even on a finished/disabled automation.
   const tryLaunch = (
     automation: Automation,
-    trigger: "schedule" | "manual" | "watch",
+    trigger: "schedule" | "manual" | "watch" | "event",
   ): PendingAutomationRun | null => {
     if (trigger !== "manual") {
       const current = automationStore.get(automation.id);
@@ -357,6 +369,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     // A watch automation that just reached its limit is now "finished"; stop
     // watching its folder promptly instead of waiting for the next mutation.
     syncFolderWatchers();
+    syncSessionEventListeners();
     const runUrl = `http://${FRIENDLY_HOSTNAME}:${actualPort}/?run=${run.runId}`;
     void tabController
       .open(runUrl)
@@ -517,11 +530,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
   };
 
-  // A trigger is valid iff a schedule trigger compiles to ≥1 parseable cron; a
-  // watch trigger is always valid (its watched cwd is validated separately).
+  // A trigger is valid iff a schedule trigger compiles to ≥1 parseable cron;
+  // watch and event triggers are always valid (their cwd is validated
+  // separately).
   const isValidTriggerInput = (trigger: TriggerInput): boolean => {
     const normalized = normalizeTriggerInput(trigger);
-    if (normalized.kind === "watch") return true;
+    if (normalized.kind === "watch" || normalized.kind === "event") return true;
     const crons = compileScheduleAll(normalized.schedule);
     return crons.length > 0 && crons.every((cron) => parseCronExpression(cron) !== null);
   };
@@ -543,6 +557,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const automation = automationStore.create(parsed.data);
     broadcastAutomations();
     syncFolderWatchers();
+    syncSessionEventListeners();
     return context.json(
       { automation: toAutomationWithNextRun(automation, new Date()) },
       HTTP_STATUS_CREATED,
@@ -569,6 +584,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     broadcastAutomations();
     syncFolderWatchers();
+    syncSessionEventListeners();
     return context.json({ automation: toAutomationWithNextRun(automation, new Date()) });
   });
 
@@ -578,6 +594,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
     broadcastAutomations();
     syncFolderWatchers();
+    syncSessionEventListeners();
     return context.json({ ok: true });
   });
 
@@ -600,6 +617,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     broadcastAutomations();
     // Reset re-enables + reactivates; a watch automation resumes watching.
     syncFolderWatchers();
+    syncSessionEventListeners();
     return context.json({ automation: toAutomationWithNextRun(automation, new Date()) });
   });
 
@@ -706,6 +724,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               broadcastAutomations();
               closeRunTabIfRequested(claimedRun.automationId, claimedRun.runId);
               folderWatchManager.notifyRunFinished(claimedRun.automationId);
+              sessionEventManager.notifyRunFinished(claimedRun.automationId);
             });
           }
 
@@ -842,20 +861,45 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           });
           gitDiffWatcher.start(newSession.cwd);
 
+          // Automation-run sessions should not feed events into the session
+          // event manager — only user-driven sessions count.
+          const isAutomationSession = claimedRun !== null;
+
           newSession.on("git-dirty", () => {
             void handleGitDirty();
+            if (!isAutomationSession) {
+              sessionEventManager.onSessionEvent("git-dirty", newSession.lastEmittedCwd);
+            }
           });
           newSession.on("cwd", (changedCwd: string) => {
             gitDiffWatcher.stop();
             gitDiffWatcher.start(changedCwd);
+            if (!isAutomationSession) {
+              sessionEventManager.onSessionEvent("cwd", changedCwd);
+            }
           });
 
           newSession.on("output", onOutput);
           newSession.on("title", onTitle);
           newSession.on("cwd", onCwd);
-          newSession.on("foreground", onForeground);
-          newSession.on("notification", onNotification);
-          newSession.on("exit", onExit);
+          newSession.on("foreground", (foregroundProcess: string | null) => {
+            onForeground(foregroundProcess);
+            if (!isAutomationSession) {
+              sessionEventManager.onSessionEvent("foreground", newSession.lastEmittedCwd);
+            }
+          });
+          newSession.on("notification", (body: string) => {
+            onNotification(body);
+            if (!isAutomationSession) {
+              sessionEventManager.onSessionEvent("notification", newSession.lastEmittedCwd);
+            }
+          });
+          newSession.on("exit", (code: number | null) => {
+            onExit(code);
+            if (!isAutomationSession && newSession.lastEmittedCwd) {
+              sessionEventManager.onSessionEvent("exit", newSession.lastEmittedCwd);
+            }
+          });
 
           safeSend(ws, {
             type: "session",
@@ -1015,6 +1059,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   folderWatchManager.on("due", (automation) => {
     tryLaunch(automation, "watch");
   });
+  sessionEventManager.on("due", (automation) => {
+    tryLaunch(automation, "event");
+  });
   automationScheduler.on("tick", (now) => {
     // Liveness heartbeat for downtime detection on the next boot.
     heartbeatStore.write(now.getTime());
@@ -1035,6 +1082,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   automationScheduler.start();
   // Arm folder-watch triggers for the automations loaded at boot.
   syncFolderWatchers();
+  syncSessionEventListeners();
 
   // Open the persistent CDP connection now, while the user is present at
   // `start` to clear any one-time remote-debugging prompt. Fire-and-forget:

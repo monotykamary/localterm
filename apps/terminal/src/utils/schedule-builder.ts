@@ -1,5 +1,6 @@
 import type {
   AutomationSchedule,
+  AutomationSessionEvent,
   AutomationTrigger,
 } from "@monotykamary/localterm-server/protocol";
 
@@ -242,7 +243,35 @@ export interface TriggerFormState {
   schedule: ScheduleFormState;
   watchRecursive: boolean;
   watchFilter: string;
+  eventName: AutomationSessionEvent;
 }
+
+export const SESSION_EVENT_LABELS: Record<AutomationSessionEvent, string> = {
+  "git-dirty": "Git changes detected",
+  notification: "Shell notification (OSC 9)",
+  cwd: "Directory changed",
+  foreground: "Foreground process changed",
+  exit: "Shell exited",
+};
+
+export const SESSION_EVENT_DESCRIPTIONS: Record<AutomationSessionEvent, string> = {
+  "git-dirty":
+    "Fires on each prompt after the working tree changes — commits, checkouts, stashes, edits.",
+  notification:
+    "Fires when a shell command emits OSC 9 (printf '\e]9;message\a'). Use your own scripts as event sources.",
+  cwd: "Fires when you cd into or out of the automation's directory.",
+  foreground:
+    "Fires when the foreground process changes (e.g. vim starts or stops) in the directory.",
+  exit: "Fires when a shell session in the directory closes.",
+};
+
+export const SESSION_EVENTS: AutomationSessionEvent[] = [
+  "git-dirty",
+  "notification",
+  "cwd",
+  "foreground",
+  "exit",
+];
 
 export const buildTriggerFromForm = (form: TriggerFormState): AutomationTrigger =>
   form.triggerType === "watch"
@@ -251,7 +280,9 @@ export const buildTriggerFromForm = (form: TriggerFormState): AutomationTrigger 
         recursive: form.watchRecursive,
         ...(form.watchFilter.trim() ? { filter: form.watchFilter.trim() } : {}),
       }
-    : { kind: "schedule", schedule: buildScheduleFromForm(form.schedule) };
+    : form.triggerType === "event"
+      ? { kind: "event", event: form.eventName }
+      : { kind: "schedule", schedule: buildScheduleFromForm(form.schedule) };
 
 // Map a stored trigger back onto the form fields so editing reopens on the
 // matching trigger type (the inactive side keeps sensible defaults).
@@ -262,16 +293,28 @@ export const recognizeTriggerForm = (trigger: AutomationTrigger): TriggerFormSta
         schedule: defaultScheduleForm(),
         watchRecursive: trigger.recursive,
         watchFilter: trigger.filter ?? "",
+        eventName: "git-dirty",
       }
-    : {
-        triggerType: "schedule",
-        schedule: recognizeScheduleForm(trigger.schedule),
-        watchRecursive: true,
-        watchFilter: "",
-      };
+    : trigger.kind === "event"
+      ? {
+          triggerType: "event",
+          schedule: defaultScheduleForm(),
+          watchRecursive: true,
+          watchFilter: "",
+          eventName: trigger.event,
+        }
+      : {
+          triggerType: "schedule",
+          schedule: recognizeScheduleForm(trigger.schedule),
+          watchRecursive: true,
+          watchFilter: "",
+          eventName: "git-dirty",
+        };
 
 // A compact human-readable label for the list rows and detail header.
 export const triggerLabel = (trigger: AutomationTrigger): string =>
   trigger.kind === "watch"
     ? `When files change${trigger.filter ? ` matching ${trigger.filter}` : ""}${trigger.recursive ? " · subfolders" : ""}`
-    : scheduleLabel(trigger.schedule);
+    : trigger.kind === "event"
+      ? `On ${SESSION_EVENT_LABELS[trigger.event]}`
+      : scheduleLabel(trigger.schedule);

@@ -8,6 +8,7 @@ import type {
   automationRunStatusSchema,
   automationScheduleSchema,
   automationSchema,
+  automationSessionEventSchema,
   automationTriggerSchema,
   automationV1Schema,
   automationV2Schema,
@@ -58,6 +59,7 @@ export type CaffeinateMode = z.infer<typeof caffeinateModeSchema>;
 export type AutomationLastRunStatus = z.infer<typeof automationLastRunStatusSchema>;
 export type AutomationLastRun = z.infer<typeof automationLastRunSchema>;
 export type AutomationSchedule = z.infer<typeof automationScheduleSchema>;
+export type AutomationSessionEvent = z.infer<typeof automationSessionEventSchema>;
 export type AutomationTrigger = z.infer<typeof automationTriggerSchema>;
 export type TriggerInput = z.infer<typeof triggerInputSchema>;
 export type AutomationRunLimit = z.infer<typeof automationRunLimitSchema>;

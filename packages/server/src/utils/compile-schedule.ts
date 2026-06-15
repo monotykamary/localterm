@@ -187,4 +187,6 @@ export const normalizeTriggerInput = (trigger: TriggerInput): AutomationTrigger 
         recursive: trigger.recursive ?? true,
         ...(trigger.filter ? { filter: trigger.filter } : {}),
       }
-    : { kind: "schedule", schedule: normalizeScheduleInput(trigger.schedule) };
+    : trigger.kind === "event"
+      ? { kind: "event", event: trigger.event }
+      : { kind: "schedule", schedule: normalizeScheduleInput(trigger.schedule) };

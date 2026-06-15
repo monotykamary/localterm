@@ -217,6 +217,12 @@ export const AUTOMATION_WATCH_DEBOUNCE_MS = 500;
 // Events during the grace window are dropped (not queued). 1 second covers
 // the observed ~50ms post-exit event lag with a comfortable margin.
 export const AUTOMATION_WATCH_POST_RUN_GRACE_MS = 1_000;
+// Quiet period after the last session event before an event-triggered automation
+// fires. Coalesces a burst of rapid events (e.g. foreground changes during
+// process startup, cwd + git-dirty on the same cd) into a single run.
+// Trailing-edge: the timer resets on every matching event and fires once the
+// session settles.
+export const AUTOMATION_EVENT_DEBOUNCE_MS = 500;
 // Covers schedules that only fire on Feb 29 (the rarest valid cron target).
 export const CRON_NEXT_OCCURRENCE_SCAN_LIMIT_DAYS = 1466;
 export const MAX_AUTOMATION_EXIT_CODE_DIGITS = 4;

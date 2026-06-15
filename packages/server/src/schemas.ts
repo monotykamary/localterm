@@ -333,8 +333,18 @@ export const automationScheduleSchema = z.discriminatedUnion("kind", [
 // What causes an automation to run. A "schedule" trigger is time-based (the
 // cron engine compiles it on the fly); a "watch" trigger fires when the
 // automation's cwd changes, observed via native fs.watch — event-driven, never
-// polled. `recursive` watches the whole subtree. Only schedule triggers carry a
-// cron / next-run.
+// polled; an "event" trigger fires when a localterm session emits a named
+// event (git-dirty, notification, cwd, foreground, exit) whose cwd matches
+// the automation's cwd or is inside it. `recursive` watches the whole subtree.
+// Only schedule triggers carry a cron / next-run.
+export const automationSessionEventSchema = z.enum([
+  "git-dirty",
+  "notification",
+  "cwd",
+  "foreground",
+  "exit",
+]);
+
 export const automationTriggerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("schedule"), schedule: automationScheduleSchema }).strict(),
   z
@@ -344,6 +354,7 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
       filter: z.string().min(1).max(MAX_AUTOMATION_WATCH_FILTER_LENGTH).optional(),
     })
     .strict(),
+  z.object({ kind: z.literal("event"), event: automationSessionEventSchema }).strict(),
 ]);
 
 // Create/update accept either the structured schedule or a legacy bare cron
@@ -355,7 +366,8 @@ export const scheduleInputSchema = z.union([
 ]);
 
 // Trigger as accepted on the wire: the schedule payload accepts the legacy bare
-// cron string too, and `recursive` is optional (defaults true at the store).
+// cron string too, `recursive` is optional (defaults true at the store), and
+// the event trigger accepts a session event name.
 export const triggerInputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("schedule"), schedule: scheduleInputSchema }).strict(),
   z
@@ -365,6 +377,7 @@ export const triggerInputSchema = z.discriminatedUnion("kind", [
       filter: z.string().min(1).max(MAX_AUTOMATION_WATCH_FILTER_LENGTH).optional(),
     })
     .strict(),
+  z.object({ kind: z.literal("event"), event: automationSessionEventSchema }).strict(),
 ]);
 
 export const automationRunLimitSchema = z.discriminatedUnion("kind", [
@@ -405,7 +418,7 @@ export const automationRunRecordSchema = z
     finishedAt: z.number().int().nonnegative().nullable(),
     status: automationRunStatusSchema,
     exitCode: z.number().int().nullable(),
-    trigger: z.enum(["schedule", "manual", "watch"]),
+    trigger: z.enum(["schedule", "manual", "watch", "event"]),
     // false for manual + skipped; true for scheduled + watch launches.
     countsTowardLimit: z.boolean(),
   })

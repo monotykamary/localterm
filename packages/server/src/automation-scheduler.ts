@@ -40,8 +40,9 @@ export class AutomationScheduler extends EventEmitter<AutomationSchedulerEvents>
     for (const automation of automations) {
       if (!automation.enabled) continue;
       if (automation.lifecycle === "finished") continue;
-      // Watch triggers are event-driven (FolderWatchManager owns them); the
-      // minute ticker only fires time-based schedules.
+      // Watch and event triggers are event-driven (FolderWatchManager and
+      // SessionEventManager own them); the minute ticker only fires time-based
+      // schedules.
       if (automation.trigger.kind !== "schedule") continue;
       const matched = compileScheduleAll(automation.trigger.schedule).some((expression) => {
         const parsed = parseCronExpression(expression);

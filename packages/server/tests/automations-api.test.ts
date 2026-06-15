@@ -185,6 +185,28 @@ describe("automations REST API", () => {
     });
   });
 
+  it("creates an event automation with no cron or next run", async () => {
+    const { status, body } = await request("POST", "", {
+      name: "on git dirty",
+      trigger: { kind: "event", event: "git-dirty" },
+      cwd: os.tmpdir(),
+      command: "echo dirty",
+    });
+    expect(status).toBe(201);
+    const automation = automationWithNextRunSchema.parse(body.automation);
+    expect(automation.trigger).toEqual({ kind: "event", event: "git-dirty" });
+    expect(automation.cron).toBeNull();
+    expect(automation.nextRunAt).toBeNull();
+  });
+
+  it("rejects an event trigger with an invalid event name", async () => {
+    const { body } = await request("POST", "", {
+      ...createInput(),
+      trigger: { kind: "event", event: "not-a-real-event" },
+    });
+    expect(body.error).toBe("invalid_body");
+  });
+
   it("creates a watch automation with no cron or next run", async () => {
     const watchDir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-watch-create-"));
     try {

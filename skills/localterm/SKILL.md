@@ -1,6 +1,6 @@
 ---
 name: localterm
-description: Drive the localterm daemon's HTTP API — schedule automations (cron jobs that open a terminal tab and run a command), trigger runs, inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage recurring commands/cron jobs in localterm, or to script against the localterm server.
+description: Drive the localterm daemon's HTTP API — schedule automations, set up event-driven triggers (git changes, shell notifications, directory changes), trigger runs, inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage automations in localterm, or to script against the localterm server.
 ---
 
 # localterm API
@@ -51,6 +51,28 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
     after conversion) don't retrigger the automation. A burst of changes is
     debounced into a single run, and no new run starts while a previous one is
     still in-flight. Watch triggers have no `cron`/`nextRunAt` (both `null`).
+  - `{kind:"event", event}` — fires when a localterm session emits a named
+    event whose cwd matches the automation's `cwd` (or is inside it). This is
+    **session-scoped** — the automation only triggers when you are _in_
+    localterm and the event occurs, not from background filesystem noise. A
+    burst of events is debounced into a single run and no new run starts while
+    a previous one is still in-flight. Event triggers have no
+    `cron`/`nextRunAt` (both `null`). The available events:
+
+    | event          | fires when                                                             |
+    | -------------- | ---------------------------------------------------------------------- |
+    | `git-dirty`    | the shell's prompt hook detects the working tree may have changed      |
+    |                | (commits, checkouts, stashes, edits, `git add`, etc.)                  |
+    | `notification` | a command emits OSC 9 (`printf '\e]9;message\a'`)                      |
+    |                | in a session whose cwd matches — use your own scripts as event sources |
+    | `cwd`          | you `cd` into or out of the automation's directory                     |
+    | `foreground`   | the foreground process changes in a matching session (e.g. vim starts) |
+    | `exit`         | a shell session in a matching directory closes                         |
+
+    The most common use case is `git-dirty`: create one event automation per
+    repo directory and it fires every time you do something git-related while
+    working in that repo inside localterm — no polling, no false positives
+    from background processes.
 
   A schedule trigger's `schedule` is a **structured schedule object** (preferred)
   or a bare 5-field cron string — a tagged union on `kind`:
@@ -83,7 +105,7 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
 - `limit` — `{kind:"forever"}` (default) or `{kind:"count", max:N}` = "stop after
   N runs". When the limit is reached the automation **finishes** (a terminal
   `lifecycle:"finished"` state) and stops firing but stays listed with its
-  history. Scheduled and watch runs count toward the limit; manual `/run` never
+  history. Scheduled, watch, and event runs count toward the limit; manual `/run` never
   does.
 - `closeOnFinish` — defaults to `false` (the tab stays open). When `true`, the
   run's browser tab is closed once the command finishes. Only honored for tabs
@@ -108,7 +130,7 @@ cleared a single time, not per run); otherwise it falls back to the OS opener
 
 ```bash
 # List (each item adds computed nextRunAt epoch-ms (null when disabled/finished
-# or a watch trigger), a derived `cron` string (null for watch), the capped
+# or a watch/event trigger), a derived `cron` string (null for watch/event), the capped
 # `runs` history, and a back-compat `lastRun`)
 curl -s "$BASE/automations"
 
@@ -151,7 +173,38 @@ curl -s -X POST "$BASE/automations" \
   }'
 # → 201 {"automation":{"id":"…","trigger":{"kind":"watch","recursive":false,"filter":"*.mov"},…}}
 
-# Update any subset of fields (pass a `trigger` to change the schedule/watch)
+# Create an event-triggered automation (fires on git changes in the directory)
+curl -s -X POST "$BASE/automations" \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "notify on push",
+    "trigger": { "kind": "event", "event": "git-dirty" },
+    "cwd": "/Users/me/project",
+    "command": "git log --oneline -1 HEAD",
+    "enabled": true,
+    "limit": { "kind": "forever" }
+  }'
+# → 201 {"automation":{"id":"…","cron":null,"nextRunAt":null,…}}
+# Runs the command whenever a localterm session in /Users/me/project detects
+# git state changed (commit, checkout, push, etc.). For a webhook, pipe into
+# curl inside the command — $DISCORD_WEBHOOK and other env vars are available.
+
+# Create an event automation that reacts to a custom shell notification
+curl -s -X POST "$BASE/automations" \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "on deploy-complete signal",
+    "trigger": { "kind": "event", "event": "notification" },
+    "cwd": "/Users/me/project",
+    "command": "echo \'Deploy cycle done\'",
+    "enabled": true,
+    "limit": { "kind": "forever" },
+    "closeOnFinish": true
+  }'
+# → 201 {"automation":{"id":"…","trigger":{"kind":"event","event":"notification"},…}}
+# Fires when any command in this directory does: printf '\e]9;deploy-complete\a'
+
+# Update any subset of fields (pass a `trigger` to change the schedule/watch/event)
 curl -s -X PATCH "$BASE/automations/<id>" \
   -H 'content-type: application/json' \
   -d '{"limit": {"kind": "count", "max": 20}}'
@@ -187,8 +240,10 @@ plus `runCount`, `lifecycle` (`active`|`finished`), and a back-compat
 |             | occurrences per automation, so real runs aren't evicted); never re-run |
 
 `completed`/`failed` are only reported for zsh and bash login shells; other shells
-stay at `running` until the tab closes. The automation-level `lifecycle:"finished"`
-means a `count` limit was reached — use `POST …/reset` to run it again.
+stay at `running` until the tab closes. The `trigger` field in each run record is
+`"schedule"`, `"manual"`, `"watch"`, or `"event"`. The automation-level
+`lifecycle:"finished"` means a `count` limit was reached — use `POST …/reset` to
+run it again.
 
 ### Error responses
 
@@ -212,6 +267,12 @@ an absolute path.
    toward a `limit`) and poll the list until the newest `runs[0].status` /
    `lastRun.status` becomes `completed` (or `failed` — then read the tab).
 6. Don't schedule destructive commands without explicit user confirmation.
+7. For git-related workflows ("notify on push", "run tests after commit"), prefer
+   `{kind:"event", event:"git-dirty"}` over a folder watch — it's session-scoped
+   (no false positives from background processes), fires only when you're
+   working in localterm, and carries git semantics instead of raw filesystem
+   noise. For custom event-driven workflows, use `{kind:"event",
+event:"notification"}` and have your scripts emit `OSC 9` as the signal.
 
 ## Other endpoints
 
