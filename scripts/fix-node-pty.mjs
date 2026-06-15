@@ -21,40 +21,80 @@ const candidates = [
   path.join(nodePtyDir, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper"),
 ];
 
-const clearQuarantineAndResign = (target) => {
-  if (process.platform !== "darwin") return;
+const isExecutable = (filePath) => {
   try {
-    const stat = statSync(target);
-    if (!(stat.mode & 0o111)) return;
+    return Boolean(statSync(filePath).mode & 0o111);
   } catch {
-    return;
+    return false;
   }
+};
+
+const hasQuarantine = (target) => {
+  if (process.platform !== "darwin") return false;
+  try {
+    execSync(`xattr -p com.apple.quarantine ${JSON.stringify(target)}`, {
+      timeout: 5_000,
+      stdio: "pipe",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const clearQuarantine = (target) => {
   try {
     execSync(`xattr -d com.apple.quarantine ${JSON.stringify(target)}`, {
       timeout: 5_000,
       stdio: "ignore",
     });
   } catch {
-    /* xattr not present or already cleared */
+    // xattr not present or already cleared
   }
+};
+
+const hasValidSignature = (target) => {
+  if (process.platform !== "darwin") return true;
+  try {
+    execSync(`codesign --verify ${JSON.stringify(target)}`, {
+      timeout: 10_000,
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const adHocSign = (target) => {
   try {
     execSync(`codesign --force --sign - ${JSON.stringify(target)}`, {
       timeout: 10_000,
       stdio: "ignore",
     });
   } catch {
-    /* codesign unavailable or binary already signed */
+    // codesign unavailable
   }
 };
 
 for (const candidate of candidates) {
   if (!existsSync(candidate)) continue;
-  try {
-    chmodSync(candidate, 0o755);
-  } catch (error) {
-    console.warn(
-      `[fix-node-pty] could not chmod ${candidate}: ${error instanceof Error ? error.message : error}`,
-    );
+
+  if (!isExecutable(candidate)) {
+    try {
+      chmodSync(candidate, 0o755);
+    } catch (error) {
+      console.warn(
+        `[fix-node-pty] could not chmod ${candidate}: ${error instanceof Error ? error.message : error}`,
+      );
+    }
   }
-  clearQuarantineAndResign(candidate);
+
+  if (hasQuarantine(candidate)) {
+    clearQuarantine(candidate);
+  }
+
+  if (!hasValidSignature(candidate)) {
+    adHocSign(candidate);
+  }
 }

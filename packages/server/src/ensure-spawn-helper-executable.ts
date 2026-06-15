@@ -1,5 +1,5 @@
-import { chmodSync, existsSync } from "node:fs";
-import { execFile } from "node:child_process";
+import { chmodSync, existsSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -13,11 +13,58 @@ const candidateSpawnHelperPaths = (nodePtyDir: string): string[] => [
   path.join(nodePtyDir, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper"),
 ];
 
-const clearQuarantineAndResign = (target: string): void => {
-  if (process.platform !== "darwin") return;
-  execFile("xattr", ["-d", "com.apple.quarantine", target], { timeout: 5_000 }, () => {
-    execFile("codesign", ["--force", "--sign", "-", target], { timeout: 10_000 }, () => {});
-  });
+const isExecutable = (filePath: string): boolean => {
+  try {
+    return Boolean(statSync(filePath).mode & 0o111);
+  } catch {
+    return false;
+  }
+};
+
+const hasQuarantine = (target: string): boolean => {
+  try {
+    execFileSync("xattr", ["-p", "com.apple.quarantine", target], {
+      timeout: 5_000,
+      stdio: "pipe",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const clearQuarantine = (target: string): void => {
+  try {
+    execFileSync("xattr", ["-d", "com.apple.quarantine", target], {
+      timeout: 5_000,
+      stdio: "ignore",
+    });
+  } catch {
+    // xattr not present or quarantine already cleared
+  }
+};
+
+const hasValidSignature = (target: string): boolean => {
+  try {
+    execFileSync("codesign", ["--verify", target], {
+      timeout: 10_000,
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const adHocSign = (target: string): void => {
+  try {
+    execFileSync("codesign", ["--force", "--sign", "-", target], {
+      timeout: 10_000,
+      stdio: "ignore",
+    });
+  } catch {
+    // codesign unavailable; the binary may still work if not quarantined
+  }
 };
 
 export const ensureSpawnHelperExecutable = (): void => {
@@ -32,11 +79,23 @@ export const ensureSpawnHelperExecutable = (): void => {
   }
   for (const candidate of candidateSpawnHelperPaths(nodePtyDir)) {
     if (!existsSync(candidate)) continue;
-    try {
-      chmodSync(candidate, SPAWN_HELPER_MODE);
-    } catch {
-      /* helper already executable, or filesystem refused chmod (e.g. read-only mount) */
+
+    if (!isExecutable(candidate)) {
+      try {
+        chmodSync(candidate, SPAWN_HELPER_MODE);
+      } catch {
+        // filesystem refused chmod (e.g. read-only mount)
+      }
     }
-    clearQuarantineAndResign(candidate);
+
+    if (process.platform !== "darwin") continue;
+
+    if (hasQuarantine(candidate)) {
+      clearQuarantine(candidate);
+    }
+
+    if (!hasValidSignature(candidate)) {
+      adHocSign(candidate);
+    }
   }
 };
