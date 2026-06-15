@@ -43,6 +43,9 @@ export const DIFF_VIEWER_INITIAL_LINE_LIMIT = 2000;
 export const DIFF_VIEWER_RENDER_CHUNK = 2000;
 export const DIFF_VIEW_MODE_STORAGE_KEY = "localterm:diff-view-mode";
 
+export const AUTOMATIONS_SORT_STORAGE_KEY = "localterm:automations-sort";
+export const AUTOMATIONS_SORT_DEFAULT = "last-run" as const;
+
 export const AUTOMATIONS_RELATIVE_TIME_REFRESH_MS = 30_000;
 export const AUTOMATIONS_MODAL_CLOSE_TRANSITION_MS = 150;
 // Most-recent runs shown in the cross-automation "Recent runs" feed.

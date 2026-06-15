@@ -7,8 +7,18 @@ import {
   type AutomationSessionEvent,
   type AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
-import { CalendarClock, ChevronDown, Pencil, Play, Plus, RotateCcw, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  CalendarClock,
+  ChevronDown,
+  Pencil,
+  Play,
+  Plus,
+  RotateCcw,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -25,8 +35,11 @@ import {
 import {
   AUTOMATIONS_MODAL_CLOSE_TRANSITION_MS,
   AUTOMATIONS_RELATIVE_TIME_REFRESH_MS,
+  AUTOMATIONS_SORT_DEFAULT,
+  AUTOMATIONS_SORT_STORAGE_KEY,
   RECENT_RUNS_LIMIT,
 } from "@/lib/constants";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
 import { createAutomation } from "@/utils/create-automation";
 import { deleteAutomation } from "@/utils/delete-automation";
@@ -66,6 +79,7 @@ interface AutomationsModalProps {
 
 type ModalTab = "automations" | "recent-runs";
 type FormMode = "view" | "create" | "edit";
+type AutomationsSort = "last-run" | "created" | "name";
 
 interface AutomationFormState {
   id: string | null;
@@ -437,6 +451,12 @@ export const AutomationsModal = ({
   const [saveError, setSaveError] = useState(false);
   const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
   const [runFilter, setRunFilter] = useState<"all" | "failed" | "skipped">("all");
+  const [sortBy, setSortBy] = useState<AutomationsSort>(
+    () =>
+      (localStorage.getItem(AUTOMATIONS_SORT_STORAGE_KEY) as AutomationsSort | null) ??
+      AUTOMATIONS_SORT_DEFAULT,
+  );
+  const [search, setSearch] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -466,6 +486,7 @@ export const AutomationsModal = ({
       setMode("view");
       setSaveError(false);
       setArmedDeleteId(null);
+      setSearch("");
       return;
     }
     setNowMs(Date.now());
@@ -488,6 +509,36 @@ export const AutomationsModal = ({
     () => automations?.find((automation) => automation.id === selectedId) ?? null,
     [automations, selectedId],
   );
+
+  const filteredAutomations = useMemo(() => {
+    if (!automations) return null;
+    const lower = search.toLowerCase();
+    const filtered = lower
+      ? automations.filter(
+          (automation) =>
+            automation.name.toLowerCase().includes(lower) ||
+            automation.command.toLowerCase().includes(lower),
+        )
+      : automations;
+    const sorted = [...filtered];
+    sorted.sort((a, b) => {
+      if (sortBy === "last-run") {
+        const aAt = a.lastRun?.at ?? 0;
+        const bAt = b.lastRun?.at ?? 0;
+        return bAt - aAt;
+      }
+      if (sortBy === "created") {
+        return b.createdAt - a.createdAt;
+      }
+      return a.name.localeCompare(b.name);
+    });
+    return sorted;
+  }, [automations, sortBy, search]);
+
+  const handleSortChange = useCallback((value: AutomationsSort) => {
+    setSortBy(value);
+    localStorage.setItem(AUTOMATIONS_SORT_STORAGE_KEY, value);
+  }, []);
 
   const closeForm = useCallback(() => {
     setMode("view");
@@ -708,78 +759,19 @@ export const AutomationsModal = ({
           />
         ) : (
           <div className="flex min-h-0 flex-1">
-            <div
-              role="listbox"
-              aria-label="automations"
-              className="w-64 shrink-0 overflow-y-auto overscroll-contain border-r border-border/40 p-1.5"
-            >
-              {automations === null ? (
-                <p className="py-4 text-center text-xs text-muted-foreground">Loading…</p>
-              ) : automations.length === 0 ? (
-                <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-                  No automations yet. Scheduled commands open a new tab when they run.
-                </p>
-              ) : (
-                automations.map((automation) => {
-                  const badge = automation.lastRun
-                    ? runStatusBadge(automation.lastRun.status, automation.lastRun.exitCode)
-                    : null;
-                  const isSelected = automation.id === selectedId;
-                  return (
-                    <button
-                      key={automation.id}
-                      type="button"
-                      role="option"
-                      aria-selected={isSelected}
-                      onClick={() => {
-                        setSelectedId(automation.id);
-                        setMode("view");
-                      }}
-                      className={cn(
-                        "flex w-full flex-col gap-0.5 rounded-sm px-2 py-1.5 text-left outline-none transition-colors",
-                        isSelected
-                          ? "bg-foreground/10 text-foreground"
-                          : "text-muted-foreground hover:bg-foreground/5",
-                      )}
-                    >
-                      <span className="flex items-center justify-between gap-2">
-                        <span
-                          className={cn(
-                            "min-w-0 truncate text-xs",
-                            !automation.enabled && "line-through opacity-60",
-                          )}
-                        >
-                          {automation.name}
-                        </span>
-                        {badge ? (
-                          <span className={cn("shrink-0 text-[10px]", badge.className)}>
-                            {badge.label}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/80">
-                        <span className="min-w-0 truncate">{triggerLabel(automation.trigger)}</span>
-                        <span className="shrink-0 tabular-nums">
-                          {automation.lifecycle === "finished"
-                            ? "finished"
-                            : automation.trigger.kind === "watch"
-                              ? automation.enabled
-                                ? "watching"
-                                : "paused"
-                              : automation.trigger.kind === "event"
-                                ? automation.enabled
-                                  ? "listening"
-                                  : "paused"
-                                : automation.nextRunAt !== null
-                                  ? formatRelativeTime(automation.nextRunAt, nowMs)
-                                  : "paused"}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
+            <AutomationSidebar
+              automations={filteredAutomations}
+              sortBy={sortBy}
+              search={search}
+              selectedId={selectedId}
+              nowMs={nowMs}
+              onSortChange={handleSortChange}
+              onSearchChange={setSearch}
+              onSelect={(id) => {
+                setSelectedId(id);
+                setMode("view");
+              }}
+            />
 
             <div className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
               {mode !== "view" ? (
@@ -1279,3 +1271,163 @@ const RecentRunsView = ({
     </div>
   </div>
 );
+
+const AUTOMATION_ROW_HEIGHT = 44;
+
+interface AutomationSidebarProps {
+  automations: AutomationWithNextRun[] | null;
+  sortBy: AutomationsSort;
+  search: string;
+  selectedId: string | null;
+  nowMs: number;
+  onSortChange: (value: AutomationsSort) => void;
+  onSearchChange: (value: string) => void;
+  onSelect: (id: string) => void;
+}
+
+const AutomationSidebar = ({
+  automations,
+  sortBy,
+  search,
+  selectedId,
+  nowMs,
+  onSortChange,
+  onSearchChange,
+  onSelect,
+}: AutomationSidebarProps) => {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: automations?.length ?? 0,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => AUTOMATION_ROW_HEIGHT,
+    overscan: 8,
+    getItemKey: (index) => automations![index].id,
+  });
+
+  return (
+    <div className="flex w-64 shrink-0 flex-col border-r border-border/40">
+      <div className="relative px-1.5 pt-1.5 pb-0.5">
+        <Search
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <input
+          type="text"
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Search…"
+          className="w-full rounded-sm border border-border/50 bg-transparent py-1 pl-6 pr-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-border"
+        />
+      </div>
+      <div className="flex items-center gap-1 px-2 pb-1">
+        {(["last-run", "created", "name"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => onSortChange(value)}
+            className={cn(
+              "rounded-sm px-1.5 py-0.5 text-[10px] transition-colors",
+              sortBy === value
+                ? "bg-foreground/10 text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {value === "last-run" ? "Last run" : value === "created" ? "Created" : "Name"}
+          </button>
+        ))}
+      </div>
+      <div
+        ref={listRef}
+        role="listbox"
+        aria-label="automations"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 pt-0"
+      >
+        {automations === null ? (
+          <p className="py-4 text-center text-xs text-muted-foreground">Loading…</p>
+        ) : automations.length === 0 ? (
+          <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+            {search
+              ? "No automations match your search."
+              : "No automations yet. Scheduled commands open a new tab when they run."}
+          </p>
+        ) : (
+          <div
+            style={{
+              height: `${virtualizer.getTotalSize()}px`,
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const automation = automations[virtualRow.index];
+              const badge = automation.lastRun
+                ? runStatusBadge(automation.lastRun.status, automation.lastRun.exitCode)
+                : null;
+              const isSelected = automation.id === selectedId;
+              return (
+                <button
+                  key={automation.id}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => onSelect(automation.id)}
+                  data-index={virtualRow.index}
+                  className={cn(
+                    "flex w-full flex-col gap-0.5 rounded-sm px-2 py-1.5 text-left outline-none transition-colors",
+                    isSelected
+                      ? "bg-foreground/10 text-foreground"
+                      : "text-muted-foreground hover:bg-foreground/5",
+                  )}
+                  style={
+                    {
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    } satisfies CSSProperties
+                  }
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span
+                      className={cn(
+                        "min-w-0 truncate text-xs",
+                        !automation.enabled && "line-through opacity-60",
+                      )}
+                    >
+                      {automation.name}
+                    </span>
+                    {badge ? (
+                      <span className={cn("shrink-0 text-[10px]", badge.className)}>
+                        {badge.label}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/80">
+                    <span className="min-w-0 truncate">{triggerLabel(automation.trigger)}</span>
+                    <span className="shrink-0 tabular-nums">
+                      {automation.lifecycle === "finished"
+                        ? "finished"
+                        : automation.trigger.kind === "watch"
+                          ? automation.enabled
+                            ? "watching"
+                            : "paused"
+                          : automation.trigger.kind === "event"
+                            ? automation.enabled
+                              ? "listening"
+                              : "paused"
+                            : automation.nextRunAt !== null
+                              ? formatRelativeTime(automation.nextRunAt, nowMs)
+                              : "paused"}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};

@@ -184,7 +184,14 @@ describe("SessionEventManager", () => {
   });
 
   it("supports each event type", () => {
-    const eventNames = ["git-dirty", "git-refs-change", "notification", "cwd", "foreground", "exit"] as const;
+    const eventNames = [
+      "git-dirty",
+      "git-refs-change",
+      "notification",
+      "cwd",
+      "foreground",
+      "exit",
+    ] as const;
     for (const eventName of eventNames) {
       const due: Automation[] = [];
       const automation = makeAutomation({ trigger: { kind: "event", event: eventName } });

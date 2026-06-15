@@ -190,7 +190,9 @@ describe("triggerLabel", () => {
       "When files change matching *.mov",
     );
     expect(triggerLabel({ kind: "event", event: "git-dirty" })).toBe("On Git changes detected");
-    expect(triggerLabel({ kind: "event", event: "git-refs-change" })).toBe("On Git commit/push detected");
+    expect(triggerLabel({ kind: "event", event: "git-refs-change" })).toBe(
+      "On Git commit/push detected",
+    );
     expect(triggerLabel({ kind: "event", event: "notification" })).toBe(
       "On Shell notification (OSC 9)",
     );

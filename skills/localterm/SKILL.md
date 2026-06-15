@@ -59,17 +59,17 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
     a previous one is still in-flight. Event triggers have no
     `cron`/`nextRunAt` (both `null`). The available events:
 
-    | event              | fires when                                                             |
-    | ------------------ | ---------------------------------------------------------------------- |
-    | `git-dirty`        | the shell's prompt hook detects the working tree may have changed      |
-    |                    | (commits, checkouts, stashes, edits, `git add`, etc.)                  |
-    | `git-refs-change`  | git HEAD actually moves (commit, push, checkout, reset) — no           |
-    |                    | prompt-cycle noise, only real ref changes detected via fs.watch        |
-    | `notification`     | a command emits OSC 9 (`printf '\e]9;message\a'`)                      |
-    |                    | in a session whose cwd matches — use your own scripts as event sources |
-    | `cwd`              | you `cd` into or out of the automation's directory                     |
-    | `foreground`       | the foreground process changes in a matching session (e.g. vim starts) |
-    | `exit`             | a shell session in a matching directory closes                         |
+    | event             | fires when                                                             |
+    | ----------------- | ---------------------------------------------------------------------- |
+    | `git-dirty`       | the shell's prompt hook detects the working tree may have changed      |
+    |                   | (commits, checkouts, stashes, edits, `git add`, etc.)                  |
+    | `git-refs-change` | git HEAD actually moves (commit, push, checkout, reset) — no           |
+    |                   | prompt-cycle noise, only real ref changes detected via fs.watch        |
+    | `notification`    | a command emits OSC 9 (`printf '\e]9;message\a'`)                      |
+    |                   | in a session whose cwd matches — use your own scripts as event sources |
+    | `cwd`             | you `cd` into or out of the automation's directory                     |
+    | `foreground`      | the foreground process changes in a matching session (e.g. vim starts) |
+    | `exit`            | a shell session in a matching directory closes                         |
 
     Use `git-refs-change` for "notify on push" workflows — it fires only when
     git HEAD actually moves (commit, push, checkout, reset), not on every
