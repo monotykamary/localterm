@@ -47,17 +47,17 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
   private throttleTimer: NodeJS.Timeout | null = null;
   private disposed = false;
   private gitDir: string | null = null;
-  private lastHeadSha: string | null = null;
+  private lastRefsSignature: string | null = null;
 
   start(cwd: string): void {
     this.stop();
 
-    this.lastHeadSha = null;
+    this.lastRefsSignature = null;
     const result = resolveGitDir(cwd);
     if (!result) return;
     const { gitDir, repoRoot } = result;
     this.gitDir = gitDir;
-    this.lastHeadSha = this.readHeadSha();
+    this.lastRefsSignature = this.readRefsSignature();
 
     const watch = (target: string, options?: fs.WatchOptions | BufferEncoding | null) => {
       try {
@@ -78,7 +78,7 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
 
     const refsDir = path.join(gitDir, "refs");
     try {
-      if (fs.statSync(refsDir).isDirectory()) watch(refsDir);
+      if (fs.statSync(refsDir).isDirectory()) watch(refsDir, { recursive: true });
     } catch {
       /* refs dir may not exist in a bare or unusual repo */
     }
@@ -118,23 +118,46 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
   }
 
   private emitRefsChangeIfNeeded(): void {
-    const current = this.readHeadSha();
-    if (current === null || current === this.lastHeadSha) return;
-    this.lastHeadSha = current;
+    const current = this.readRefsSignature();
+    if (current === null || current === this.lastRefsSignature) return;
+    this.lastRefsSignature = current;
     this.emit("git-refs-change");
   }
 
-  private readHeadSha(): string | null {
+  private readRefsSignature(): string | null {
     if (!this.gitDir) return null;
+    const refsDir = path.join(this.gitDir, "refs");
+    const parts: string[] = [];
+    const walk = (dir: string) => {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(fullPath);
+        } else {
+          try {
+            const sha = fs.readFileSync(fullPath, "utf8").trim();
+            const relPath = path.relative(refsDir, fullPath);
+            parts.push(`${relPath}=${sha}`);
+          } catch {
+            /* ref file deleted between readdir and read */
+          }
+        }
+      }
+    };
     try {
       const headContent = fs.readFileSync(path.join(this.gitDir, "HEAD"), "utf8").trim();
-      const match = /^ref:\s*(.+)$/.exec(headContent);
-      if (!match) return headContent.length >= 40 ? headContent : null;
-      const refPath = path.join(this.gitDir, match[1]);
-      const sha = fs.readFileSync(refPath, "utf8").trim();
-      return sha.length >= 40 ? sha : null;
+      parts.push(`HEAD=${headContent}`);
     } catch {
-      return null;
+      /* no HEAD yet */
     }
+    walk(refsDir);
+    parts.sort();
+    return parts.length > 0 ? parts.join(";") : null;
   }
 }
