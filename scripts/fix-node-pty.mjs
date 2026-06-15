@@ -19,6 +19,8 @@ try {
 const candidates = [
   path.join(nodePtyDir, "build", "Release", "spawn-helper"),
   path.join(nodePtyDir, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper"),
+  path.join(nodePtyDir, "build", "Release", "pty.node"),
+  path.join(nodePtyDir, "prebuilds", `${process.platform}-${process.arch}`, "pty.node"),
 ];
 
 const isExecutable = (filePath) => {

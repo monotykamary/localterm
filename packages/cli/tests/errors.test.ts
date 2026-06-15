@@ -89,8 +89,11 @@ describe("exitCodeForCliError", () => {
     expect(exitCodeForCliError(cliError.invalidHost("0.0.0.0"))).toBe(EXIT_USAGE_ERROR);
   });
 
-  it("maps idempotent / informational failures to EXIT_OK", () => {
-    expect(exitCodeForCliError(cliError.alreadyRunning(1, 3417))).toBe(EXIT_OK);
+  it("maps already-running to EXIT_FAILURE so launchd KeepAlive does not respawn", () => {
+    expect(exitCodeForCliError(cliError.alreadyRunning(1, 3417))).toBe(EXIT_FAILURE);
+  });
+
+  it("maps stale / informational PID edge cases to EXIT_OK", () => {
     expect(exitCodeForCliError(cliError.stalePortFile(1))).toBe(EXIT_OK);
     expect(exitCodeForCliError(cliError.pidNotOurs(1))).toBe(EXIT_OK);
   });

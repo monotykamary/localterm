@@ -270,6 +270,7 @@ export const exitCodeForCliError = (error: CliError): number => {
     case "invalid-host":
       return EXIT_USAGE_ERROR;
     case "already-running":
+      return EXIT_FAILURE;
     case "stale-port-file":
     case "pid-not-ours":
       return EXIT_OK;

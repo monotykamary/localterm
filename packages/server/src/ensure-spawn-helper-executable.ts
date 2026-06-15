@@ -13,6 +13,11 @@ const candidateSpawnHelperPaths = (nodePtyDir: string): string[] => [
   path.join(nodePtyDir, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper"),
 ];
 
+const candidateNativeAddonPaths = (nodePtyDir: string): string[] => [
+  path.join(nodePtyDir, "build", "Release", "pty.node"),
+  path.join(nodePtyDir, "prebuilds", `${process.platform}-${process.arch}`, "pty.node"),
+];
+
 const isExecutable = (filePath: string): boolean => {
   try {
     return Boolean(statSync(filePath).mode & 0o111);
@@ -77,7 +82,11 @@ export const ensureSpawnHelperExecutable = (): void => {
   } catch {
     return;
   }
-  for (const candidate of candidateSpawnHelperPaths(nodePtyDir)) {
+  const allCandidates = [
+    ...candidateSpawnHelperPaths(nodePtyDir),
+    ...candidateNativeAddonPaths(nodePtyDir),
+  ];
+  for (const candidate of allCandidates) {
     if (!existsSync(candidate)) continue;
 
     if (!isExecutable(candidate)) {
