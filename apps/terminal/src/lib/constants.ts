@@ -41,6 +41,8 @@ export const DIFF_VIEWER_CLOSE_TRANSITION_MS = 150;
 export const DIFF_VIEWER_INITIAL_LINE_LIMIT = 2000;
 // Lines revealed per frame as the diff renders progressively after first paint.
 export const DIFF_VIEWER_RENDER_CHUNK = 2000;
+export const SPLIT_DIFF_STACK_WIDTH_PX = 640;
+export const SIDEBAR_COLLAPSE_WIDTH_PX = 768;
 export const DIFF_VIEW_MODE_STORAGE_KEY = "localterm:diff-view-mode";
 
 export const AUTOMATIONS_SORT_STORAGE_KEY = "localterm:automations-sort";

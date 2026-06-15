@@ -4,13 +4,43 @@ import type {
   GitDiffFileListResponse,
   GitDiffFilePatch,
 } from "@monotykamary/localterm-server/protocol";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { DiffViewer } from "../../src/components/diff-viewer";
 
 vi.mock("../../src/utils/fetch-git-diff", () => ({
   fetchGitDiffFiles: vi.fn(),
   fetchGitDiffFilePatch: vi.fn(),
 }));
+
+class StubResizeObserver {
+  private callback: ResizeObserverCallback;
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+  }
+
+  observe(target: Element) {
+    this.callback(
+      [
+        {
+          target,
+          contentRect: { width: 1024 } as DOMRectReadOnly,
+          borderBoxSize: [] as ResizeObserverSize[],
+          contentBoxSize: [{ inlineSize: 1024, blockSize: 768 }] as ResizeObserverSize[],
+          devicePixelContentBoxSize: [] as ResizeObserverSize[],
+        } as unknown as ResizeObserverEntry,
+      ],
+      this as unknown as ResizeObserver,
+    );
+  }
+
+  unobserve() {}
+  disconnect() {}
+}
+
+beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", StubResizeObserver);
+});
 
 vi.mock("@tanstack/react-virtual", () => {
   const FILE_ROW_HEIGHT = 32;
@@ -145,6 +175,83 @@ describe("DiffViewer", () => {
 
     fireEvent.click(screen.getByRole("radio", { name: "unified" }));
     expect(screen.getAllByText("alpha")).toHaveLength(1);
+  });
+
+  it("stacks split rows vertically when the container is narrow", async () => {
+    class NarrowResizeObserver {
+      private callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element) {
+        this.callback(
+          [
+            {
+              target,
+              contentRect: { width: 400 } as DOMRectReadOnly,
+              borderBoxSize: [] as ResizeObserverSize[],
+              contentBoxSize: [{ inlineSize: 400, blockSize: 768 }] as ResizeObserverSize[],
+              devicePixelContentBoxSize: [] as ResizeObserverSize[],
+            } as unknown as ResizeObserverEntry,
+          ],
+          this as unknown as ResizeObserver,
+        );
+      }
+
+      unobserve() {}
+      disconnect() {}
+    }
+
+    vi.stubGlobal("ResizeObserver", NarrowResizeObserver);
+    mockHappyPath();
+    renderDiffViewer();
+    await screen.findByText("BETA");
+
+    fireEvent.click(screen.getByRole("radio", { name: "split" }));
+    // Compact mode: context lines render once like unified (stacked, not side-by-side).
+    expect(screen.getAllByText("alpha")).toHaveLength(1);
+    // Change lines are still shown.
+    expect(screen.getByText("beta")).toBeTruthy();
+    expect(screen.getByText("BETA")).toBeTruthy();
+  });
+
+  it("collapses the sidebar and shows a file picker popover on narrow screens", async () => {
+    class NarrowResizeObserver {
+      private callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element) {
+        this.callback(
+          [
+            {
+              target,
+              contentRect: { width: 600 } as DOMRectReadOnly,
+              borderBoxSize: [] as ResizeObserverSize[],
+              contentBoxSize: [{ inlineSize: 600, blockSize: 768 }] as ResizeObserverSize[],
+              devicePixelContentBoxSize: [] as ResizeObserverSize[],
+            } as unknown as ResizeObserverEntry,
+          ],
+          this as unknown as ResizeObserver,
+        );
+      }
+
+      unobserve() {}
+      disconnect() {}
+    }
+
+    vi.stubGlobal("ResizeObserver", NarrowResizeObserver);
+    mockHappyPath();
+    renderDiffViewer();
+    await screen.findByText("BETA");
+
+    // Sidebar is replaced by the file picker popover trigger.
+    expect(screen.queryByRole("listbox", { name: "changed files" })).toBeNull();
+    expect(screen.getByRole("button", { name: "select file" })).toBeTruthy();
   });
 
   it("closes on Escape", async () => {
