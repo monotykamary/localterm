@@ -54,6 +54,7 @@ import {
   SIDEBAR_COLLAPSE_WIDTH_PX,
   SPLIT_DIFF_STACK_WIDTH_PX,
 } from "@/lib/constants";
+import { computeHeaderLayout } from "@/utils/compute-header-layout";
 import { cn } from "@/lib/utils";
 import type { SplitDiffRow } from "@/utils/build-split-diff-rows";
 import { renderSyntaxTokens } from "@/utils/render-syntax-tokens";
@@ -1081,10 +1082,10 @@ const FileDiffPane = ({
 // "This branch has a GitHub PR" chip — color-coded by state and set apart from
 // the add/delete greens and reds so a detected PR is obvious at a glance. Links
 // to the PR when gh gave us a URL.
-const PrBadge = ({ pr }: { pr: GitBranchPr }) => {
+const PrBadge = ({ pr, hideTitle }: { pr: GitBranchPr; hideTitle: boolean }) => {
   const style = PR_STATE_STYLES[pr.state];
   const className = cn(
-    "inline-flex max-w-64 shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] transition-colors",
+    "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] transition-colors",
     style.badge,
   );
   const label = `PR #${pr.number} (${pr.state})${pr.title ? ` — ${pr.title}` : ""}`;
@@ -1095,7 +1096,7 @@ const PrBadge = ({ pr }: { pr: GitBranchPr }) => {
       {pr.state !== "open" ? (
         <span className="shrink-0 uppercase opacity-70">{pr.state}</span>
       ) : null}
-      {pr.title ? <span className="truncate opacity-80">{pr.title}</span> : null}
+      {!hideTitle && pr.title ? <span className="opacity-80">{pr.title}</span> : null}
     </>
   );
   return pr.url ? (
@@ -1138,8 +1139,10 @@ export const DiffViewer = ({
   const [viewMode, setViewMode] = useState<DiffViewMode>(() => loadStoredDiffViewMode());
   const [compact, setCompact] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [headerWidth, setHeaderWidth] = useState(0);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const contentRowRef = useRef<HTMLDivElement | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
   // Comparison mode is EPHEMERAL, not persisted: it defaults to working, and to
   // branch when the branch has a PR. `userPickedMode` (null = follow that
   // default) holds an explicit per-open toggle so the user can override; it's
@@ -1503,6 +1506,24 @@ export const DiffViewer = ({
     return () => observer.disconnect();
   }, [displayFileList]);
 
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const update = (width: number) => {
+      if (width === 0) return;
+      setHeaderWidth(width);
+    };
+    update(header.clientWidth);
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+        update(width);
+      }
+    });
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [mounted]);
+
   // An explicit toggle overrides the PR-derived default for the rest of this open
   // (cleared on close/reopen — the mode is intentionally not persisted).
   const handleCompareModeChange = useCallback((nextMode: GitDiffMode) => {
@@ -1580,13 +1601,30 @@ export const DiffViewer = ({
     onClose();
   }, [onSendToTerminal, annotationList, onClose]);
 
+  const isBranchMode = compareMode === "branch";
+  const pr = branchInfo?.pr ?? null;
+  const headerConfigIndexRef = useRef(0);
+
+  const headerLayout = useMemo(() => {
+    const result = computeHeaderLayout({
+      availableWidth: headerWidth,
+      pr,
+      isBranchMode,
+      selectedBranch: displayBase,
+      additions: totals.additions,
+      deletions: totals.deletions,
+      binaryCount: totals.binaries,
+      previousConfigIndex: headerConfigIndexRef.current,
+    });
+    headerConfigIndexRef.current = result.configIndex;
+    return result;
+  }, [headerWidth, pr, isBranchMode, displayBase, totals]);
+
   if (!mounted) return null;
 
   const isVisible = open && settled;
   const isRepo = (displayFileList?.isRepo ?? true) && (branchInfo?.isRepo ?? true);
   const isEmpty = displayFileList !== null && isRepo && files.length === 0;
-  const isBranchMode = compareMode === "branch";
-  const pr = branchInfo?.pr ?? null;
   // Branch metadata is leased but no plausible base branch exists (e.g. a
   // single-branch repo).
   const branchNoBase = isBranchMode && branchInfo !== null && displayBase === null;
@@ -1613,18 +1651,34 @@ export const DiffViewer = ({
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
       >
-        <header className="flex shrink-0 items-center gap-3 border-b border-border/40 px-4 py-2.5">
-          <h2 className="shrink-0 text-sm font-medium text-foreground">Changes</h2>
+        <header
+          ref={headerRef}
+          className={cn(
+            "flex shrink-0 items-center border-b border-border/40 py-2.5",
+            headerLayout.showTitle
+              ? "gap-3 px-4"
+              : headerLayout.headerPadding === 24
+                ? "gap-2 px-3"
+                : "gap-3 px-4",
+          )}
+        >
+          {headerLayout.showTitle ? (
+            <h2 className="shrink-0 text-sm font-medium text-foreground">Changes</h2>
+          ) : null}
           <div
             role="radiogroup"
             aria-label="diff comparison"
             className="flex shrink-0 items-center rounded-md border border-border/60 p-0.5"
           >
-            {(
-              [
-                ["working", "Working"],
-                ["branch", "Branch"],
-              ] as const
+            {(headerLayout.compareLabels === "full"
+              ? ([
+                  ["working", "Working"],
+                  ["branch", "Branch"],
+                ] as const)
+              : ([
+                  ["working", "W"],
+                  ["branch", "B"],
+                ] as const)
             ).map(([mode, label]) => (
               <button
                 key={mode}
@@ -1644,15 +1698,16 @@ export const DiffViewer = ({
             ))}
           </div>
           {isBranchMode ? (
-            <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
               <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
-              <span className="shrink-0">vs</span>
+              {headerLayout.showVs ? <span className="shrink-0">vs</span> : null}
               <select
                 aria-label="base branch"
                 value={displayBase ?? ""}
                 disabled={branchInfo === null}
                 onChange={(event) => setBaseOverride(event.target.value || null)}
-                className="max-w-48 truncate rounded-md border border-border/60 bg-background px-1.5 py-0.5 font-mono text-xs text-foreground outline-none focus-visible:border-ring disabled:opacity-50 [&>option]:bg-popover [&>option]:text-foreground"
+                style={{ width: headerLayout.selectWidthPx || undefined }}
+                className="shrink-0 rounded-md border border-border/60 bg-background px-1.5 py-0.5 font-mono text-xs text-foreground outline-none focus-visible:border-ring disabled:opacity-50 [&>option]:bg-popover [&>option]:text-foreground"
               >
                 {branchInfo === null ? (
                   <option value="">Loading…</option>
@@ -1668,13 +1723,11 @@ export const DiffViewer = ({
               </select>
             </div>
           ) : null}
-          {/* PR badge shows in both modes so even the working-tree diff signals
-              "this branch has a PR" (with its open/merged/closed status). */}
-          {pr ? <PrBadge pr={pr} /> : null}
+          {pr ? <PrBadge pr={pr} hideTitle={!headerLayout.prShowTitle} /> : null}
           <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
             <span className={ADDITIONS_CLASSES}>+{totals.additions.toLocaleString()}</span>{" "}
             <span className={DELETIONS_CLASSES}>−{totals.deletions.toLocaleString()}</span>
-            {totals.binaries > 0 ? (
+            {totals.binaries > 0 && headerLayout.showBinaryCount ? (
               <span className="text-muted-foreground/70"> · {totals.binaries} binary</span>
             ) : null}
           </span>
@@ -1695,13 +1748,14 @@ export const DiffViewer = ({
                   aria-checked={viewMode === mode}
                   onClick={() => handleViewModeChange(mode)}
                   className={cn(
-                    "rounded-sm px-2 py-0.5 text-xs capitalize transition-colors",
+                    "rounded-sm px-2 py-0.5 text-xs transition-colors",
+                    headerLayout.layoutLabels === "full" && "capitalize",
                     viewMode === mode
                       ? "bg-foreground/10 text-foreground"
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {mode}
+                  {headerLayout.layoutLabels === "full" ? mode : mode[0].toUpperCase()}
                 </button>
               ))}
             </div>

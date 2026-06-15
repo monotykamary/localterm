@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type {
   GitBranchInfo,
   GitDiffFileListResponse,
@@ -167,13 +167,13 @@ describe("DiffViewer", () => {
     renderDiffViewer();
     await screen.findByText("BETA");
 
-    const splitToggle = screen.getByRole("radio", { name: "split" });
+    const layoutGroup = screen.getByRole("radiogroup", { name: "diff layout" });
+    const [unifiedToggle, splitToggle] = within(layoutGroup).getAllByRole("radio");
     fireEvent.click(splitToggle);
     expect(splitToggle.getAttribute("aria-checked")).toBe("true");
-    // Context lines render on both sides in split view.
     expect(screen.getAllByText("alpha")).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole("radio", { name: "unified" }));
+    fireEvent.click(unifiedToggle);
     expect(screen.getAllByText("alpha")).toHaveLength(1);
   });
 
@@ -209,7 +209,9 @@ describe("DiffViewer", () => {
     renderDiffViewer();
     await screen.findByText("BETA");
 
-    fireEvent.click(screen.getByRole("radio", { name: "split" }));
+    const layoutGroup = screen.getByRole("radiogroup", { name: "diff layout" });
+    const splitToggle = within(layoutGroup).getAllByRole("radio")[1];
+    fireEvent.click(splitToggle);
     // Compact mode: context lines render once like unified (stacked, not side-by-side).
     expect(screen.getAllByText("alpha")).toHaveLength(1);
     // Change lines are still shown.
@@ -376,9 +378,11 @@ describe("DiffViewer", () => {
 
     // No manual toggle — the leased PR derives branch mode immediately.
     await vi.waitFor(() =>
-      expect(screen.getByRole("radio", { name: "Branch" }).getAttribute("aria-checked")).toBe(
-        "true",
-      ),
+      expect(
+        within(screen.getByRole("radiogroup", { name: "diff comparison" }))
+          .getAllByRole("radio")[1]
+          .getAttribute("aria-checked"),
+      ).toBe("true"),
     );
     // Base picker preselects the leased default; the PR is surfaced distinctly.
     const baseSelect = (await screen.findByLabelText("base branch")) as HTMLSelectElement;
@@ -418,7 +422,9 @@ describe("DiffViewer", () => {
 
     // Derived to branch; the user switches back to working.
     await screen.findByLabelText("base branch");
-    fireEvent.click(screen.getByRole("radio", { name: "Working" }));
+    fireEvent.click(
+      within(screen.getByRole("radiogroup", { name: "diff comparison" })).getAllByRole("radio")[0],
+    );
 
     // The base picker is branch-only, but the PR badge stays as an indicator.
     expect(screen.queryByLabelText("base branch")).toBeNull();
@@ -430,9 +436,11 @@ describe("DiffViewer", () => {
     renderDiffViewer({ branchInfo: { ...BRANCH_INFO, pr: null } });
     await screen.findByText("BETA");
 
-    expect(screen.getByRole("radio", { name: "Working" }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
+    expect(
+      within(screen.getByRole("radiogroup", { name: "diff comparison" }))
+        .getAllByRole("radio")[0]
+        .getAttribute("aria-checked"),
+    ).toBe("true");
     expect(screen.queryByText("#123")).toBeNull();
   });
 
@@ -536,7 +544,9 @@ describe("DiffViewer", () => {
     });
 
     // Switch to branch mode.
-    fireEvent.click(screen.getByRole("radio", { name: "Branch" }));
+    fireEvent.click(
+      within(screen.getByRole("radiogroup", { name: "diff comparison" })).getAllByRole("radio")[1],
+    );
 
     // The branch-mode patch should be fetched.
     await vi.waitFor(() => expect(patchModeSeen).toContain("branch"));

@@ -13,6 +13,7 @@
   "dependencies": {
     "@azurity/pure-nerd-font": "^3.0.5",
     "@base-ui/react": "^1.4.1",
+    "@chenglou/pretext": "^0.0.8",
     "@fontsource/geist-mono": "^5.2.7",
     "@monotykamary/localterm-server": "workspace:*",
     "@shikijs/engine-javascript": "^4.2.0",
