@@ -1,5 +1,13 @@
 # localterm
 
+## 1.41.4
+
+### Patch Changes
+
+- Fix flash of unhighlighted diff text during syntax tokenization
+- Updated dependencies
+  - @monotykamary/localterm-server@1.41.4
+
 ## 1.41.3
 
 ### Patch Changes

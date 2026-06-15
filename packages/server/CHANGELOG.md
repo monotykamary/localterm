@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.41.4
+
+### Patch Changes
+
+- Fix flash of unhighlighted diff text during syntax tokenization
+
 ## 1.41.3
 
 ### Patch Changes
