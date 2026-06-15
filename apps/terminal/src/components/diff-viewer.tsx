@@ -20,16 +20,20 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import type { VirtualItem } from "@tanstack/react-virtual";
 import {
   Fragment,
   memo,
   startTransition,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type RefObject,
 } from "react";
 import { Button } from "@/components/ui/button";
@@ -1049,7 +1053,7 @@ export const DiffViewer = ({
   const [pendingRange, setPendingRange] = useState<PendingAnnotationRange | null>(null);
   const dragCancelRef = useRef<(() => void) | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const fileListRef = useRef<HTMLDivElement | null>(null);
+  const fileListVirtualizerRef = useRef<FileListVirtualizerHandle | null>(null);
   // In-flight per-file patch fetches, so they can be aborted on close/refresh.
   const patchControllersRef = useRef<Map<string, AbortController>>(new Map());
   // Tracks the last-seen file metadata per path+mode so the patch-loading
@@ -1301,8 +1305,7 @@ export const DiffViewer = ({
         Math.max(0, (selectedIndex === -1 ? 0 : selectedIndex) + delta),
       );
       setSelectedPath(files[nextIndex].path);
-      const item = fileListRef.current?.children[nextIndex] as HTMLElement | undefined;
-      item?.scrollIntoView({ block: "nearest" });
+      fileListVirtualizerRef.current?.scrollToIndex(nextIndex, { align: "auto" });
     },
     [files, selectedIndex],
   );
@@ -1604,66 +1607,13 @@ export const DiffViewer = ({
           </div>
         ) : (
           <div className="flex min-h-0 flex-1">
-            <div
-              ref={fileListRef}
-              role="listbox"
-              aria-label="changed files"
-              className="w-72 shrink-0 overflow-y-auto overscroll-contain border-r border-border/40 p-1.5"
-            >
-              {files.map((file) => {
-                const status = STATUS_LABELS[file.status];
-                const { directory, basename } = splitFilePath(file.path);
-                const isSelected = file.path === selectedPath;
-                const commentCount = annotationCounts.get(file.path) ?? 0;
-                return (
-                  <button
-                    key={file.path}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    onClick={() => setSelectedPath(file.path)}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs outline-none transition-colors",
-                      isSelected
-                        ? "bg-foreground/10 text-foreground"
-                        : "text-muted-foreground hover:bg-foreground/5",
-                    )}
-                  >
-                    <span
-                      className={cn("w-3 shrink-0 font-mono font-semibold", status.className)}
-                      title={file.status}
-                    >
-                      {status.letter}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate font-mono" dir="rtl">
-                      <bdi>
-                        <span className="text-muted-foreground/60">{directory}</span>
-                        <span className={isSelected ? "text-foreground" : ""}>{basename}</span>
-                      </bdi>
-                    </span>
-                    {commentCount > 0 ? (
-                      <span
-                        className="flex shrink-0 items-center gap-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
-                        title={`${commentCount} pending comment${commentCount === 1 ? "" : "s"}`}
-                      >
-                        <MessageSquare className="size-2.5" aria-hidden="true" />
-                        {commentCount}
-                      </span>
-                    ) : null}
-                    {file.binary ? (
-                      <span className="shrink-0 rounded border border-border/40 px-1 font-mono text-[10px] text-muted-foreground/70">
-                        BIN
-                      </span>
-                    ) : (
-                      <span className="shrink-0 font-mono tabular-nums">
-                        <span className={ADDITIONS_CLASSES}>+{file.additions}</span>{" "}
-                        <span className={DELETIONS_CLASSES}>−{file.deletions}</span>
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+            <FileListSidebar
+              files={files}
+              selectedPath={selectedPath}
+              annotationCounts={annotationCounts}
+              onSelect={setSelectedPath}
+              virtualizerRef={fileListVirtualizerRef}
+            />
             <div className="flex min-w-0 flex-1 flex-col">
               {selectedFile ? (
                 <>
@@ -1730,6 +1680,131 @@ export const DiffViewer = ({
           </footer>
         ) : null}
       </div>
+    </div>
+  );
+};
+
+interface FileListVirtualizerHandle {
+  scrollToIndex: (
+    index: number,
+    options?: { align?: "start" | "center" | "end" | "auto"; behavior?: ScrollBehavior },
+  ) => void;
+}
+
+const FILE_ROW_HEIGHT = 32;
+
+interface FileListSidebarProps {
+  files: GitDiffFileMeta[];
+  selectedPath: string | null;
+  annotationCounts: Map<string, number>;
+  onSelect: (path: string) => void;
+  virtualizerRef: RefObject<FileListVirtualizerHandle | null>;
+}
+
+const FileListSidebar = ({
+  files,
+  selectedPath,
+  annotationCounts,
+  onSelect,
+  virtualizerRef,
+}: FileListSidebarProps) => {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: files.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => FILE_ROW_HEIGHT,
+    overscan: 12,
+    getItemKey: (index) => files[index].path,
+  });
+
+  useImperativeHandle(virtualizerRef, () => ({ scrollToIndex: virtualizer.scrollToIndex }), [
+    virtualizer,
+  ]);
+
+  return (
+    <div
+      ref={scrollRef}
+      role="listbox"
+      aria-label="changed files"
+      className="w-72 shrink-0 overflow-y-auto overscroll-contain border-r border-border/40 p-1.5"
+    >
+      {files.length === 0 ? (
+        <p className="py-4 text-center text-xs text-muted-foreground">No files changed.</p>
+      ) : (
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            width: "100%",
+            position: "relative",
+          }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
+            const file = files[virtualRow.index];
+            const status = STATUS_LABELS[file.status];
+            const { directory, basename } = splitFilePath(file.path);
+            const isSelected = file.path === selectedPath;
+            const commentCount = annotationCounts.get(file.path) ?? 0;
+            return (
+              <button
+                key={file.path}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => onSelect(file.path)}
+                data-index={virtualRow.index}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs outline-none transition-colors",
+                  isSelected
+                    ? "bg-foreground/10 text-foreground"
+                    : "text-muted-foreground hover:bg-foreground/5",
+                )}
+                style={
+                  {
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: `${virtualRow.size}px`,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  } satisfies CSSProperties
+                }
+              >
+                <span
+                  className={cn("w-3 shrink-0 font-mono font-semibold", status.className)}
+                  title={file.status}
+                >
+                  {status.letter}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-mono" dir="rtl">
+                  <bdi>
+                    <span className="text-muted-foreground/60">{directory}</span>
+                    <span className={isSelected ? "text-foreground" : ""}>{basename}</span>
+                  </bdi>
+                </span>
+                {commentCount > 0 ? (
+                  <span
+                    className="flex shrink-0 items-center gap-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
+                    title={`${commentCount} pending comment${commentCount === 1 ? "" : "s"}`}
+                  >
+                    <MessageSquare className="size-2.5" aria-hidden="true" />
+                    {commentCount}
+                  </span>
+                ) : null}
+                {file.binary ? (
+                  <span className="shrink-0 rounded border border-border/40 px-1 font-mono text-[10px] text-muted-foreground/70">
+                    BIN
+                  </span>
+                ) : (
+                  <span className="shrink-0 font-mono tabular-nums">
+                    <span className={ADDITIONS_CLASSES}>+{file.additions}</span>{" "}
+                    <span className={DELETIONS_CLASSES}>−{file.deletions}</span>
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
