@@ -1,5 +1,14 @@
 # localterm
 
+## 1.34.0
+
+### Minor Changes
+
+- Anchor line numbers and add horizontal scroll in the diff viewer
+
+  Both unified and split modes now use transform-based horizontal scrolling so line numbers stay fixed while the text content scrolls. Horizontal trackpad gestures and Shift+mouse wheel scroll both sides simultaneously in split mode, and scroll the text past anchored line numbers in unified mode.
+  - @monotykamary/localterm-server@1.34.0
+
 ## 1.33.0
 
 ### Patch Changes
@@ -7,7 +16,6 @@
 - Cache and prefetch syntax tokens in the diff viewer
 
   Tokenization results are cached by file path and content so revisiting a file renders highlighted code on the first paint with no flash. Patches now prefetch tokens on load, so neighbor files visited with j/k are also instant.
-
   - @monotykamary/localterm-server@1.33.0
 
 ## 1.32.0
