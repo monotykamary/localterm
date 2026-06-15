@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.35.1
+
+### Patch Changes
+
+- 0cc8ee0: Deduplicate `handleGitDirty` calls during git checkout event storms and clear `spawn-helper` quarantine
+
 ## 1.31.0
 
 ### Minor Changes
