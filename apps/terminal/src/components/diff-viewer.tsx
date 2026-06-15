@@ -341,13 +341,17 @@ interface LineCallbacks {
   onDragEnter?: (line: DiffLine) => void;
 }
 
+const GUTTER_BG_OVERRIDES: Record<string, string> = {
+  add: "linear-gradient(rgb(16 185 129 / 0.1), rgb(16 185 129 / 0.1))",
+  del: "linear-gradient(rgb(239 68 68 / 0.1), rgb(239 68 68 / 0.1))",
+};
+
 const UnifiedDiffLine = memo(
   ({
     line,
     annotateKey,
     highlighted,
     syntaxTokens,
-    scrollX,
     onAnnotate,
     onStartDrag,
     onDragEnter,
@@ -356,7 +360,6 @@ const UnifiedDiffLine = memo(
     annotateKey: string | null;
     highlighted: boolean;
     syntaxTokens: SyntaxLine | null;
-    scrollX: number;
   } & LineCallbacks) => (
     <div
       className={cn("group/line relative flex", lineBackgroundClasses(line.type))}
@@ -368,26 +371,30 @@ const UnifiedDiffLine = memo(
           onDragStart={() => onStartDrag(line)}
         />
       ) : null}
-      <span className={LINE_NUMBER_CELL_CLASSES}>{line.oldLine ?? ""}</span>
-      <span className={LINE_NUMBER_CELL_CLASSES}>{line.newLine ?? ""}</span>
-      <span
-        className={cn(
-          "w-5 shrink-0 select-none text-center",
-          line.type === "add" && ADDITIONS_CLASSES,
-          line.type === "del" && DELETIONS_CLASSES,
-        )}
+      <div
+        className="sticky left-0 z-10 flex shrink-0 bg-background"
+        style={
+          GUTTER_BG_OVERRIDES[line.type]
+            ? {
+                backgroundImage: GUTTER_BG_OVERRIDES[line.type],
+              }
+            : undefined
+        }
       >
-        {line.type === "add" ? "+" : line.type === "del" ? "-" : ""}
-      </span>
-      <span className="min-w-0 flex-1 overflow-hidden">
+        <span className={LINE_NUMBER_CELL_CLASSES}>{line.oldLine ?? ""}</span>
+        <span className={LINE_NUMBER_CELL_CLASSES}>{line.newLine ?? ""}</span>
         <span
-          data-split-text=""
           className={cn(
-            "inline-block whitespace-pre pr-4",
-            !syntaxTokens && lineTextClasses(line.type),
+            "w-5 shrink-0 select-none text-center",
+            line.type === "add" && ADDITIONS_CLASSES,
+            line.type === "del" && DELETIONS_CLASSES,
           )}
-          style={scrollX > 0 ? { transform: `translateX(-${scrollX}px)` } : undefined}
         >
+          {line.type === "add" ? "+" : line.type === "del" ? "-" : ""}
+        </span>
+      </div>
+      <span className="shrink-0 whitespace-pre pr-4">
+        <span className={cn(!syntaxTokens && lineTextClasses(line.type))}>
           {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
           {line.noNewline ? (
             <span
@@ -409,14 +416,12 @@ const SplitDiffCell = ({
   line,
   side,
   syntaxTokens,
-  scrollX,
   onAnnotate,
   onDragStart,
 }: {
   line: DiffLine | null;
   side: "left" | "right";
   syntaxTokens: SyntaxLine | null;
-  scrollX: number;
   onAnnotate?: () => void;
   onDragStart?: () => void;
 }) => {
@@ -445,7 +450,6 @@ const SplitDiffCell = ({
             "inline-block whitespace-pre pr-2",
             !syntaxTokens && lineTextClasses(line.type),
           )}
-          style={scrollX > 0 ? { transform: `translateX(-${scrollX}px)` } : undefined}
         >
           {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
         </span>
@@ -462,7 +466,6 @@ const SplitDiffRowView = memo(
     rightKey,
     rightHighlighted,
     tokenMap,
-    scrollX,
     onAnnotate,
     onStartDrag,
     onDragEnter,
@@ -473,7 +476,6 @@ const SplitDiffRowView = memo(
     rightKey: string | null;
     rightHighlighted: boolean;
     tokenMap: Map<DiffLine, SyntaxLine>;
-    scrollX: number;
   } & LineCallbacks) => {
     const left = row.left;
     const right = row.right;
@@ -487,7 +489,6 @@ const SplitDiffRowView = memo(
             line={left}
             side="left"
             syntaxTokens={left ? (tokenMap.get(left) ?? null) : null}
-            scrollX={scrollX}
             onAnnotate={leftKey !== null && onAnnotate ? () => onAnnotate(leftKey) : undefined}
             onDragStart={left && onStartDrag ? () => onStartDrag(left) : undefined}
           />
@@ -501,7 +502,6 @@ const SplitDiffRowView = memo(
             line={right}
             side="right"
             syntaxTokens={right ? (tokenMap.get(right) ?? null) : null}
-            scrollX={scrollX}
             onAnnotate={rightKey !== null && onAnnotate ? () => onAnnotate(rightKey) : undefined}
             onDragStart={right && onStartDrag ? () => onStartDrag(right) : undefined}
           />
@@ -514,7 +514,9 @@ const SplitDiffRowView = memo(
 SplitDiffRowView.displayName = "SplitDiffRowView";
 
 const HunkHeader = ({ header }: { header: string }) => (
-  <div className="select-none bg-muted/30 px-4 py-0.5 text-muted-foreground/60">{header}</div>
+  <div className="sticky left-0 select-none bg-muted/30 px-4 py-0.5 text-muted-foreground/60">
+    {header}
+  </div>
 );
 
 interface DiffChunkProps {
@@ -525,7 +527,6 @@ interface DiffChunkProps {
   annotations: Record<string, DiffAnnotation>;
   editingKey: string | null;
   pendingRange: PendingAnnotationRange | null;
-  scrollX: number;
   onOpenEditor: (key: string, range?: PendingAnnotationRange) => void;
   onSaveAnnotation: (annotation: DiffAnnotation) => void;
   onCancelEditor: () => void;
@@ -546,7 +547,6 @@ const DiffChunk = memo((props: DiffChunkProps) => {
     annotations,
     editingKey,
     pendingRange,
-    scrollX,
     onOpenEditor,
     onSaveAnnotation,
     onCancelEditor,
@@ -615,7 +615,6 @@ const DiffChunk = memo((props: DiffChunkProps) => {
                     state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
                   }
                   syntaxTokens={tokenMap.get(line) ?? null}
-                  scrollX={scrollX}
                   onAnnotate={onOpenEditor}
                   onStartDrag={onStartDrag}
                   onDragEnter={onDragEnter}
@@ -643,7 +642,6 @@ const DiffChunk = memo((props: DiffChunkProps) => {
                     rightState !== null && highlightedKeys.has(diffLineTargetKey(rightState.target))
                   }
                   tokenMap={tokenMap}
-                  scrollX={scrollX}
                   onAnnotate={onOpenEditor}
                   onStartDrag={onStartDrag}
                   onDragEnter={onDragEnter}
@@ -702,7 +700,7 @@ const FileDiffPane = ({
   const patch = payload.data?.patch ?? null;
   const [renderLimit, setRenderLimit] = useState(DIFF_VIEWER_INITIAL_LINE_LIMIT);
   const [drag, setDrag] = useState<DragSelection | null>(null);
-  const [scrollX, setScrollX] = useState(0);
+  const scrollXRef = useRef(0);
   const maxScrollXRef = useRef(0);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const hunks = useMemo(() => (patch ? parseUnifiedDiff(patch) : []), [patch]);
@@ -756,18 +754,18 @@ const FileDiffPane = ({
   }, [file.path, hunks]);
 
   useEffect(() => {
-    setScrollX(0);
+    if (viewMode !== "split") return;
+    scrollXRef.current = 0;
+    scrollContainerRef.current?.style.setProperty("--diff-scroll-x", "0px");
   }, [viewMode]);
 
-  useLayoutEffect(() => {
-    if (viewMode !== "unified" && viewMode !== "split") {
-      maxScrollXRef.current = 0;
-      return;
-    }
-    const measure = () => {
-      const container = scrollContainerRef.current;
-      if (!container) return;
-      const textElements = container.querySelectorAll("[data-split-text]");
+  const measureMaxScrollX = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    requestAnimationFrame(() => {
+      const currentContainer = scrollContainerRef.current;
+      if (!currentContainer) return;
+      const textElements = currentContainer.querySelectorAll("[data-split-text]");
       let maxOverflow = 0;
       textElements.forEach((element) => {
         const inner = element as HTMLElement;
@@ -776,17 +774,28 @@ const FileDiffPane = ({
         maxOverflow = Math.max(maxOverflow, inner.scrollWidth - outer.clientWidth);
       });
       maxScrollXRef.current = maxOverflow;
-    };
-    measure();
-    const observer = new MutationObserver(measure);
+      if (maxOverflow > 0 && scrollXRef.current > maxOverflow) {
+        scrollXRef.current = maxOverflow;
+        currentContainer.style.setProperty("--diff-scroll-x", `${maxOverflow}px`);
+      }
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (viewMode !== "split") {
+      maxScrollXRef.current = 0;
+      return;
+    }
+    measureMaxScrollX();
+    const observer = new MutationObserver(measureMaxScrollX);
     if (scrollContainerRef.current) {
       observer.observe(scrollContainerRef.current, { childList: true, subtree: true });
     }
     return () => observer.disconnect();
-  }, [viewMode]);
+  }, [viewMode, measureMaxScrollX]);
 
   useEffect(() => {
-    if (viewMode !== "unified" && viewMode !== "split") return;
+    if (viewMode !== "split") return;
     const container = scrollContainerRef.current;
     if (!container) return;
     const handleSplitWheel = (event: WheelEvent) => {
@@ -799,10 +808,8 @@ const FileDiffPane = ({
       const rawDelta = hasHorizontal ? event.deltaX : event.deltaY;
       const delta =
         event.deltaMode === 1 ? rawDelta * 20 : event.deltaMode === 2 ? rawDelta * 300 : rawDelta;
-      setScrollX((previous) => {
-        const next = previous + delta;
-        return Math.max(0, Math.min(next, maxScrollXRef.current));
-      });
+      scrollXRef.current = Math.max(0, Math.min(scrollXRef.current + delta, maxScrollXRef.current));
+      container.style.setProperty("--diff-scroll-x", `${scrollXRef.current}px`);
     };
     container.addEventListener("wheel", handleSplitWheel, { passive: false });
     return () => container.removeEventListener("wheel", handleSplitWheel);
@@ -940,7 +947,8 @@ const FileDiffPane = ({
   return (
     <div
       ref={scrollContainerRef}
-      className={cn("pb-4 font-mono text-xs leading-5", isDragging && "select-none")}
+      data-diff-scroll={viewMode === "split" ? "" : undefined}
+      className={cn("min-w-max pb-4 font-mono text-xs leading-5", isDragging && "select-none")}
     >
       {visibleChunks.map((chunk) => (
         <DiffChunk
@@ -952,7 +960,6 @@ const FileDiffPane = ({
           annotations={annotations}
           editingKey={editingKey}
           pendingRange={pendingRange}
-          scrollX={scrollX}
           onOpenEditor={onOpenEditor}
           onSaveAnnotation={onSaveAnnotation}
           onCancelEditor={onCancelEditor}

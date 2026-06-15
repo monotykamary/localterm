@@ -74,6 +74,10 @@ body {
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+[data-diff-scroll] [data-split-text] {
+  transform: translateX(calc(-1 * var(--diff-scroll-x, 0px)));
+}
+
 @keyframes spinner-line-fade {
   from {
     opacity: 1;
