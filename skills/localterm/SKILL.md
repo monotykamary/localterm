@@ -59,20 +59,26 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
     a previous one is still in-flight. Event triggers have no
     `cron`/`nextRunAt` (both `null`). The available events:
 
-    | event          | fires when                                                             |
-    | -------------- | ---------------------------------------------------------------------- |
-    | `git-dirty`    | the shell's prompt hook detects the working tree may have changed      |
-    |                | (commits, checkouts, stashes, edits, `git add`, etc.)                  |
-    | `notification` | a command emits OSC 9 (`printf '\e]9;message\a'`)                      |
-    |                | in a session whose cwd matches — use your own scripts as event sources |
-    | `cwd`          | you `cd` into or out of the automation's directory                     |
-    | `foreground`   | the foreground process changes in a matching session (e.g. vim starts) |
-    | `exit`         | a shell session in a matching directory closes                         |
+    | event              | fires when                                                             |
+    | ------------------ | ---------------------------------------------------------------------- |
+    | `git-dirty`        | the shell's prompt hook detects the working tree may have changed      |
+    |                    | (commits, checkouts, stashes, edits, `git add`, etc.)                  |
+    | `git-refs-change`  | git HEAD actually moves (commit, push, checkout, reset) — no           |
+    |                    | prompt-cycle noise, only real ref changes detected via fs.watch        |
+    | `notification`     | a command emits OSC 9 (`printf '\e]9;message\a'`)                      |
+    |                    | in a session whose cwd matches — use your own scripts as event sources |
+    | `cwd`              | you `cd` into or out of the automation's directory                     |
+    | `foreground`       | the foreground process changes in a matching session (e.g. vim starts) |
+    | `exit`             | a shell session in a matching directory closes                         |
 
-    The most common use case is `git-dirty`: create one event automation per
-    repo directory and it fires every time you do something git-related while
-    working in that repo inside localterm — no polling, no false positives
-    from background processes.
+    Use `git-refs-change` for "notify on push" workflows — it fires only when
+    git HEAD actually moves (commit, push, checkout, reset), not on every
+    prompt cycle like `git-dirty`. One automation covering a parent directory
+    (e.g. `~/VCS/working-remote/open-source`) will fire for any repo underneath
+    it whose HEAD changes while you have a localterm session open in that tree.
+    `git-dirty` is the lower-level "maybe recheck" signal (useful for UI diff
+    indicators); `git-refs-change` is the semantic "a ref moved" signal for
+    automations.
 
   A schedule trigger's `schedule` is a **structured schedule object** (preferred)
   or a bare 5-field cron string — a tagged union on `kind`:
@@ -173,12 +179,12 @@ curl -s -X POST "$BASE/automations" \
   }'
 # → 201 {"automation":{"id":"…","trigger":{"kind":"watch","recursive":false,"filter":"*.mov"},…}}
 
-# Create an event-triggered automation (fires on git changes in the directory)
+# Create an event-triggered automation (fires on git ref changes in the directory)
 curl -s -X POST "$BASE/automations" \
   -H 'content-type: application/json' \
   -d '{
     "name": "notify on push",
-    "trigger": { "kind": "event", "event": "git-dirty" },
+    "trigger": { "kind": "event", "event": "git-refs-change" },
     "cwd": "/Users/me/project",
     "command": "git log --oneline -1 HEAD",
     "enabled": true,
@@ -186,8 +192,9 @@ curl -s -X POST "$BASE/automations" \
   }'
 # → 201 {"automation":{"id":"…","cron":null,"nextRunAt":null,…}}
 # Runs the command whenever a localterm session in /Users/me/project detects
-# git state changed (commit, checkout, push, etc.). For a webhook, pipe into
-# curl inside the command — $DISCORD_WEBHOOK and other env vars are available.
+# that git HEAD moved (commit, push, checkout, reset). No prompt-cycle
+# noise — only real ref changes. For a webhook, pipe into curl inside the
+# command — $DISCORD_WEBHOOK and other env vars are available.
 
 # Create an event automation that reacts to a custom shell notification
 curl -s -X POST "$BASE/automations" \
@@ -268,11 +275,11 @@ an absolute path.
    `lastRun.status` becomes `completed` (or `failed` — then read the tab).
 6. Don't schedule destructive commands without explicit user confirmation.
 7. For git-related workflows ("notify on push", "run tests after commit"), prefer
-   `{kind:"event", event:"git-dirty"}` over a folder watch — it's session-scoped
-   (no false positives from background processes), fires only when you're
-   working in localterm, and carries git semantics instead of raw filesystem
-   noise. For custom event-driven workflows, use `{kind:"event",
-event:"notification"}` and have your scripts emit `OSC 9` as the signal.
+   `{kind:"event", event:"git-refs-change"}` — it fires only when git HEAD
+   actually moves, not on every prompt cycle. Use `git-dirty` only for UI-style
+   recheck patterns (e.g. refreshing a diff indicator). For custom event-driven
+   workflows, use `{kind:"event", event:"notification"}` and have your scripts
+   emit `OSC 9` as the signal.
 
 ## Other endpoints
 

@@ -859,6 +859,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           gitDiffWatcher.on("git-dirty", () => {
             void handleGitDirty();
           });
+          gitDiffWatcher.on("git-refs-change", () => {
+            if (!isAutomationSession) {
+              sessionEventManager.onSessionEvent("git-refs-change", newSession.lastEmittedCwd);
+            }
+          });
           gitDiffWatcher.start(newSession.cwd);
 
           // Automation-run sessions should not feed events into the session

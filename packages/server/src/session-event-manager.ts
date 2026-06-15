@@ -6,7 +6,7 @@ interface SessionEventManagerEvents {
   due: [automation: Automation];
 }
 
-type SessionEventName = "git-dirty" | "notification" | "cwd" | "foreground" | "exit";
+type SessionEventName = "git-dirty" | "git-refs-change" | "notification" | "cwd" | "foreground" | "exit";
 
 interface SessionEventEntry {
   debounceTimer: NodeJS.Timeout | null;

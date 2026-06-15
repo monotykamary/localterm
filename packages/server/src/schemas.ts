@@ -334,11 +334,12 @@ export const automationScheduleSchema = z.discriminatedUnion("kind", [
 // cron engine compiles it on the fly); a "watch" trigger fires when the
 // automation's cwd changes, observed via native fs.watch — event-driven, never
 // polled; an "event" trigger fires when a localterm session emits a named
-// event (git-dirty, notification, cwd, foreground, exit) whose cwd matches
+// event (git-dirty, git-refs-change, notification, cwd, foreground, exit) whose cwd matches
 // the automation's cwd or is inside it. `recursive` watches the whole subtree.
 // Only schedule triggers carry a cron / next-run.
 export const automationSessionEventSchema = z.enum([
   "git-dirty",
+  "git-refs-change",
   "notification",
   "cwd",
   "foreground",

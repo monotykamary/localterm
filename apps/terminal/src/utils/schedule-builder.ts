@@ -248,6 +248,7 @@ export interface TriggerFormState {
 
 export const SESSION_EVENT_LABELS: Record<AutomationSessionEvent, string> = {
   "git-dirty": "Git changes detected",
+  "git-refs-change": "Git commit/push detected",
   notification: "Shell notification (OSC 9)",
   cwd: "Directory changed",
   foreground: "Foreground process changed",
@@ -257,6 +258,8 @@ export const SESSION_EVENT_LABELS: Record<AutomationSessionEvent, string> = {
 export const SESSION_EVENT_DESCRIPTIONS: Record<AutomationSessionEvent, string> = {
   "git-dirty":
     "Fires on each prompt after the working tree changes — commits, checkouts, stashes, edits.",
+  "git-refs-change":
+    "Fires when git HEAD actually moves (commit, push, checkout, reset). No prompt-cycle noise — only real ref changes.",
   notification:
     "Fires when a shell command emits OSC 9 (printf '\e]9;message\a'). Use your own scripts as event sources.",
   cwd: "Fires when you cd into or out of the automation's directory.",
@@ -267,6 +270,7 @@ export const SESSION_EVENT_DESCRIPTIONS: Record<AutomationSessionEvent, string> 
 
 export const SESSION_EVENTS: AutomationSessionEvent[] = [
   "git-dirty",
+  "git-refs-change",
   "notification",
   "cwd",
   "foreground",

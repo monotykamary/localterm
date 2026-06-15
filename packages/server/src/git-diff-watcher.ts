@@ -39,19 +39,25 @@ const resolveGitDir = (cwd: string): GitDirResult | null => {
 
 interface GitDiffWatcherEvents {
   "git-dirty": [];
+  "git-refs-change": [];
 }
 
 export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
   private watchers: fs.FSWatcher[] = [];
   private throttleTimer: NodeJS.Timeout | null = null;
   private disposed = false;
+  private gitDir: string | null = null;
+  private lastHeadSha: string | null = null;
 
   start(cwd: string): void {
     this.stop();
 
+    this.lastHeadSha = null;
     const result = resolveGitDir(cwd);
     if (!result) return;
     const { gitDir, repoRoot } = result;
+    this.gitDir = gitDir;
+    this.lastHeadSha = this.readHeadSha();
 
     const watch = (target: string, options?: fs.WatchOptions | BufferEncoding | null) => {
       try {
@@ -101,10 +107,34 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
 
   private throttledEmit(): void {
     if (this.throttleTimer !== null) return;
-    if (!this.disposed) this.emit("git-dirty");
+    if (!this.disposed) {
+      this.emit("git-dirty");
+      this.emitRefsChangeIfNeeded();
+    }
     this.throttleTimer = setTimeout(() => {
       this.throttleTimer = null;
     }, GIT_DIRTY_THROTTLE_MS);
     this.throttleTimer.unref?.();
+  }
+
+  private emitRefsChangeIfNeeded(): void {
+    const current = this.readHeadSha();
+    if (current === null || current === this.lastHeadSha) return;
+    this.lastHeadSha = current;
+    this.emit("git-refs-change");
+  }
+
+  private readHeadSha(): string | null {
+    if (!this.gitDir) return null;
+    try {
+      const headContent = fs.readFileSync(path.join(this.gitDir, "HEAD"), "utf8").trim();
+      const match = /^ref:\s*(.+)$/.exec(headContent);
+      if (!match) return headContent.length >= 40 ? headContent : null;
+      const refPath = path.join(this.gitDir, match[1]);
+      const sha = fs.readFileSync(refPath, "utf8").trim();
+      return sha.length >= 40 ? sha : null;
+    } catch {
+      return null;
+    }
   }
 }
