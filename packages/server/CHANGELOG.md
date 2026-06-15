@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.41.7
+
+### Patch Changes
+
+- Fix launchd respawn loop causing syspolicyd CPU spins on macOS
+
 ## 1.41.4
 
 ### Patch Changes
