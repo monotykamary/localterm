@@ -948,7 +948,11 @@ const FileDiffPane = ({
     <div
       ref={scrollContainerRef}
       data-diff-scroll={viewMode === "split" ? "" : undefined}
-      className={cn("pb-4 font-mono text-xs leading-5", viewMode === "unified" && "min-w-max", isDragging && "select-none")}
+      className={cn(
+        "pb-4 font-mono text-xs leading-5",
+        viewMode === "unified" && "min-w-max",
+        isDragging && "select-none",
+      )}
     >
       {visibleChunks.map((chunk) => (
         <DiffChunk
