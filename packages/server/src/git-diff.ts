@@ -3,6 +3,7 @@ import path from "node:path";
 import { Octokit } from "@octokit/rest";
 import { openRepository } from "es-git";
 import { computePatchFromContents } from "./utils/compute-patch.js";
+import { memoBy } from "./utils/memo-by.js";
 import { resolveGithubToken } from "./utils/resolve-github-token.js";
 import {
   GIT_BINARY_SNIFF_BYTES,
@@ -885,8 +886,7 @@ interface GithubRemote {
 }
 
 const parseGithubRemotes = (r: OpenRepo): GithubRemote[] => {
-  const seen = new Set<string>();
-  const remotes: GithubRemote[] = [];
+  const raw: GithubRemote[] = [];
 
   try {
     for (const remoteName of r.repo.remoteNames()) {
@@ -896,11 +896,7 @@ const parseGithubRemotes = (r: OpenRepo): GithubRemote[] => {
         const match = /github\.com[/:]([^\s/]+)\/([^\s]+?)(?:\.git)?$/i.exec(url);
         if (!match) continue;
         const [, owner, repoName] = match;
-        const slug = `${owner}/${repoName}`;
-        const key = `${remoteName} ${slug}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        remotes.push({ name: remoteName, slug, owner });
+        raw.push({ name: remoteName, slug: `${owner}/${repoName}`, owner });
       } catch {
         continue;
       }
@@ -909,7 +905,7 @@ const parseGithubRemotes = (r: OpenRepo): GithubRemote[] => {
     // No remotes
   }
 
-  return remotes;
+  return memoBy(raw, (remote) => `${remote.name} ${remote.slug}`);
 };
 
 const detectPr = async (r: OpenRepo): Promise<GitBranchPr | null> => {
@@ -919,32 +915,27 @@ const detectPr = async (r: OpenRepo): Promise<GitBranchPr | null> => {
   if (remotes.length === 0) return null;
   const ownRemote = remotes.find((remote) => remote.name === "origin") ?? remotes[0];
   const ownOwner = ownRemote.owner.toLowerCase();
-  const slugs = [...new Set(remotes.map((remote) => remote.slug))];
+  const slugs = memoBy(remotes, (remote) => remote.slug).map((remote) => remote.slug);
 
   const results = await Promise.all(
     slugs.map((slug) => activePrFetcher.list(slug, `${ownOwner}:${currentBranch}`, "all", 30)),
   );
 
-  const seen = new Set<string>();
-  let fallback: ParsedPr | null = null;
-  for (const prs of results) {
-    for (const pr of prs) {
-      if (!pr.headOwner || pr.headOwner.toLowerCase() !== ownOwner) continue;
-      const key = pr.url ?? `#${pr.number}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (pr.state === "open") {
-        return {
-          number: pr.number,
-          title: pr.title,
-          baseRefName: pr.baseRefName,
-          url: pr.url,
-          state: pr.state,
-        };
-      }
-      fallback ??= pr;
-    }
+  const candidates = memoBy(
+    results.flat().filter((pr) => pr.headOwner && pr.headOwner.toLowerCase() === ownOwner),
+    (pr) => pr.url ?? `#${pr.number}`,
+  );
+  const openPr = candidates.find((pr) => pr.state === "open");
+  if (openPr) {
+    return {
+      number: openPr.number,
+      title: openPr.title,
+      baseRefName: openPr.baseRefName,
+      url: openPr.url,
+      state: openPr.state,
+    };
   }
+  const fallback = candidates[0];
   return fallback
     ? {
         number: fallback.number,
@@ -960,11 +951,7 @@ export const listGithubRemoteSlugs = async (cwd: string): Promise<string[]> => {
   const r = await openRepo(cwd);
   if (!r) return [];
   const remotes = parseGithubRemotes(r);
-  const slugs: string[] = [];
-  for (const remote of remotes) {
-    if (!slugs.includes(remote.slug)) slugs.push(remote.slug);
-  }
-  return slugs;
+  return memoBy(remotes, (remote) => remote.slug).map((remote) => remote.slug);
 };
 
 export const getGitBranchInfo = async (cwd: string): Promise<GitBranchInfo> => {

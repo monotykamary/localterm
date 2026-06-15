@@ -5,6 +5,7 @@ import {
 import { nextCronOccurrence, parseCronExpression } from "../cron-expression.js";
 import type { Automation } from "../types.js";
 import { compileScheduleAll } from "./compile-schedule.js";
+import { memoBy } from "./memo-by.js";
 
 // The most-recent missed scheduled occurrences (epoch-ms) in the downtime
 // window (lastAliveAt, now). Enumeration starts no earlier than a fixed
@@ -29,6 +30,7 @@ export const enumerateMissedOccurrences = (
       cursor = nextCronOccurrence(parsed, cursor);
     }
   }
-  const unique = [...new Set(collected)].sort((a, b) => a - b);
-  return unique.slice(-AUTOMATION_DOWNTIME_RECONCILE_CAP);
+  return memoBy(collected, (epoch) => epoch)
+    .sort((a, b) => a - b)
+    .slice(-AUTOMATION_DOWNTIME_RECONCILE_CAP);
 };

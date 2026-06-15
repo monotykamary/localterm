@@ -12,6 +12,7 @@
 
 import { parseCronExpression, type ParsedCronExpression } from "../cron-expression.js";
 import type { AutomationSchedule, AutomationTrigger, TriggerInput } from "../types.js";
+import { memoBy } from "./memo-by.js";
 
 const WEEKDAYS_CRON_DOW = "1-5";
 const WEEKENDS_CRON_DOW = "0,6";
@@ -21,7 +22,7 @@ const MONTH_FIELD_SIZE = 12;
 const HOUR_FIELD_SIZE = 24;
 
 const sortUnique = (values: readonly number[]): number[] =>
-  [...new Set(values)].sort((a, b) => a - b);
+  memoBy(values, (value) => value).sort((a, b) => a - b);
 
 export const compileScheduleAll = (schedule: AutomationSchedule): string[] => {
   switch (schedule.kind) {
@@ -33,15 +34,9 @@ export const compileScheduleAll = (schedule: AutomationSchedule): string[] => {
       const ordered = [...schedule.times].sort(
         (a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute),
       );
-      const seen = new Set<number>();
-      const crons: string[] = [];
-      for (const time of ordered) {
-        const key = time.hour * 60 + time.minute;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        crons.push(`${time.minute} ${time.hour} * * *`);
-      }
-      return crons;
+      return memoBy(ordered, (time) => time.hour * 60 + time.minute).map(
+        (time) => `${time.minute} ${time.hour} * * *`,
+      );
     }
     case "weekdaysPreset":
       return [

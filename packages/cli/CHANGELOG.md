@@ -1,5 +1,20 @@
 # localterm
 
+## 1.36.0
+
+### Minor Changes
+
+- Extract `memoBy` utility from inline dedup patterns
+
+  Replace scattered `Set`-based dedup loops and `[...new Set()]` spreads with a
+  single `memoBy(items, keyFn)` utility that keeps the first occurrence per key
+  — the same memo-table pattern as DataLoader's memoization layer.
+
+### Patch Changes
+
+- Updated dependencies
+  - @monotykamary/localterm-server@1.36.0
+
 ## 1.35.1
 
 ### Patch Changes

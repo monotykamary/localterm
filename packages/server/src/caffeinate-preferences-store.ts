@@ -7,6 +7,7 @@ import {
 } from "./constants.js";
 import { caffeinatePreferencesFileSchema } from "./schemas.js";
 import type { CaffeinateMode } from "./types.js";
+import { memoBy } from "./utils/memo-by.js";
 
 interface CaffeinatePreferences {
   mode: CaffeinateMode;
@@ -24,23 +25,14 @@ const DEFAULT_PREFERENCES: CaffeinatePreferences = {
   commands: [],
 };
 
-// Trim, drop empties, cap length, dedupe case-insensitively (keeping the first
+// Trim, drop empties, cap length, memo by lowercased form (keeping the first
 // spelling), and cap the count. The trigger match itself is case-insensitive,
 // so "Claude" and "claude" are the same trigger.
 const sanitizeCommands = (commands: readonly string[]): string[] => {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const raw of commands) {
-    const trimmed = raw.trim();
-    if (!trimmed) continue;
-    const capped = trimmed.slice(0, MAX_CAFFEINATE_COMMAND_LENGTH);
-    const key = capped.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(capped);
-    if (result.length >= MAX_CAFFEINATE_COMMANDS) break;
-  }
-  return result;
+  const capped = commands
+    .map((raw) => raw.trim().slice(0, MAX_CAFFEINATE_COMMAND_LENGTH))
+    .filter(Boolean);
+  return memoBy(capped, (command) => command.toLowerCase()).slice(0, MAX_CAFFEINATE_COMMANDS);
 };
 
 // Owns the persisted keep-awake preferences (mode + custom automatic-mode
