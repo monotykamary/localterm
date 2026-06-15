@@ -352,6 +352,7 @@ const UnifiedDiffLine = memo(
     annotateKey,
     highlighted,
     syntaxTokens,
+    highlightingPending,
     onAnnotate,
     onStartDrag,
     onDragEnter,
@@ -360,6 +361,7 @@ const UnifiedDiffLine = memo(
     annotateKey: string | null;
     highlighted: boolean;
     syntaxTokens: SyntaxLine | null;
+    highlightingPending: boolean;
   } & LineCallbacks) => (
     <div
       className={cn("group/line relative flex", lineBackgroundClasses(line.type))}
@@ -394,7 +396,13 @@ const UnifiedDiffLine = memo(
         </span>
       </div>
       <span className="shrink-0 whitespace-pre pr-4">
-        <span className={cn(!syntaxTokens && lineTextClasses(line.type))}>
+        <span
+          className={cn(
+            highlightingPending && !syntaxTokens
+              ? "invisible"
+              : !syntaxTokens && lineTextClasses(line.type),
+          )}
+        >
           {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
           {line.noNewline ? (
             <span
@@ -416,12 +424,14 @@ const SplitDiffCell = ({
   line,
   side,
   syntaxTokens,
+  highlightingPending,
   onAnnotate,
   onDragStart,
 }: {
   line: DiffLine | null;
   side: "left" | "right";
   syntaxTokens: SyntaxLine | null;
+  highlightingPending: boolean;
   onAnnotate?: () => void;
   onDragStart?: () => void;
 }) => {
@@ -448,7 +458,9 @@ const SplitDiffCell = ({
           data-split-text=""
           className={cn(
             "inline-block whitespace-pre pr-2",
-            !syntaxTokens && lineTextClasses(line.type),
+            highlightingPending && !syntaxTokens
+              ? "invisible"
+              : !syntaxTokens && lineTextClasses(line.type),
           )}
         >
           {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
@@ -466,6 +478,7 @@ const SplitDiffRowView = memo(
     rightKey,
     rightHighlighted,
     tokenMap,
+    highlightingPending,
     onAnnotate,
     onStartDrag,
     onDragEnter,
@@ -476,6 +489,7 @@ const SplitDiffRowView = memo(
     rightKey: string | null;
     rightHighlighted: boolean;
     tokenMap: Map<DiffLine, SyntaxLine>;
+    highlightingPending: boolean;
   } & LineCallbacks) => {
     const left = row.left;
     const right = row.right;
@@ -489,6 +503,7 @@ const SplitDiffRowView = memo(
             line={left}
             side="left"
             syntaxTokens={left ? (tokenMap.get(left) ?? null) : null}
+            highlightingPending={highlightingPending}
             onAnnotate={leftKey !== null && onAnnotate ? () => onAnnotate(leftKey) : undefined}
             onDragStart={left && onStartDrag ? () => onStartDrag(left) : undefined}
           />
@@ -502,6 +517,7 @@ const SplitDiffRowView = memo(
             line={right}
             side="right"
             syntaxTokens={right ? (tokenMap.get(right) ?? null) : null}
+            highlightingPending={highlightingPending}
             onAnnotate={rightKey !== null && onAnnotate ? () => onAnnotate(rightKey) : undefined}
             onDragStart={right && onStartDrag ? () => onStartDrag(right) : undefined}
           />
@@ -527,6 +543,7 @@ interface DiffChunkProps {
   annotations: Record<string, DiffAnnotation>;
   editingKey: string | null;
   pendingRange: PendingAnnotationRange | null;
+  highlightingPending: boolean;
   onOpenEditor: (key: string, range?: PendingAnnotationRange) => void;
   onSaveAnnotation: (annotation: DiffAnnotation) => void;
   onCancelEditor: () => void;
@@ -553,6 +570,7 @@ const DiffChunk = memo((props: DiffChunkProps) => {
     onDeleteAnnotation,
     onStartDrag,
     onDragEnter,
+    highlightingPending,
   } = props;
 
   const annotationStateFor = (line: DiffLine): LineAnnotationState | null => {
@@ -615,6 +633,7 @@ const DiffChunk = memo((props: DiffChunkProps) => {
                     state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
                   }
                   syntaxTokens={tokenMap.get(line) ?? null}
+                  highlightingPending={highlightingPending}
                   onAnnotate={onOpenEditor}
                   onStartDrag={onStartDrag}
                   onDragEnter={onDragEnter}
@@ -642,6 +661,7 @@ const DiffChunk = memo((props: DiffChunkProps) => {
                     rightState !== null && highlightedKeys.has(diffLineTargetKey(rightState.target))
                   }
                   tokenMap={tokenMap}
+                  highlightingPending={highlightingPending}
                   onAnnotate={onOpenEditor}
                   onStartDrag={onStartDrag}
                   onDragEnter={onDragEnter}
@@ -715,6 +735,8 @@ const FileDiffPane = ({
     const texts = allLines.map((line) => line.text);
     return getCachedTokens(file.path, texts);
   });
+
+  const highlightingPending = syntaxResult === undefined;
 
   const tokenMap = useMemo(() => {
     if (syntaxResult === undefined || syntaxResult === null) return new Map<DiffLine, SyntaxLine>();
@@ -964,6 +986,7 @@ const FileDiffPane = ({
           annotations={annotations}
           editingKey={editingKey}
           pendingRange={pendingRange}
+          highlightingPending={highlightingPending}
           onOpenEditor={onOpenEditor}
           onSaveAnnotation={onSaveAnnotation}
           onCancelEditor={onCancelEditor}
