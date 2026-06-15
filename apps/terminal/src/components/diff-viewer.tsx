@@ -16,6 +16,7 @@ import {
   MessageSquarePlus,
   Pencil,
   RefreshCw,
+  Search,
   Send,
   Trash2,
   X,
@@ -1708,13 +1709,18 @@ const FileListSidebar = ({
   onSelect,
   virtualizerRef,
 }: FileListSidebarProps) => {
+  const [search, setSearch] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const filteredFiles = useMemo(() => {
+    const lower = search.toLowerCase();
+    return lower ? files.filter((file) => file.path.toLowerCase().includes(lower)) : files;
+  }, [files, search]);
   const virtualizer = useVirtualizer({
-    count: files.length,
+    count: filteredFiles.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => FILE_ROW_HEIGHT,
     overscan: 12,
-    getItemKey: (index) => files[index].path,
+    getItemKey: (index) => filteredFiles[index].path,
   });
 
   useImperativeHandle(virtualizerRef, () => ({ scrollToIndex: virtualizer.scrollToIndex }), [
@@ -1722,89 +1728,108 @@ const FileListSidebar = ({
   ]);
 
   return (
-    <div
-      ref={scrollRef}
-      role="listbox"
-      aria-label="changed files"
-      className="w-72 shrink-0 overflow-y-auto overscroll-contain border-r border-border/40 p-1.5"
-    >
-      {files.length === 0 ? (
-        <p className="py-4 text-center text-xs text-muted-foreground">No files changed.</p>
-      ) : (
-        <div
-          style={{
-            height: `${virtualizer.getTotalSize()}px`,
-            width: "100%",
-            position: "relative",
-          }}
-        >
-          {virtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
-            const file = files[virtualRow.index];
-            const status = STATUS_LABELS[file.status];
-            const { directory, basename } = splitFilePath(file.path);
-            const isSelected = file.path === selectedPath;
-            const commentCount = annotationCounts.get(file.path) ?? 0;
-            return (
-              <button
-                key={file.path}
-                type="button"
-                role="option"
-                aria-selected={isSelected}
-                onClick={() => onSelect(file.path)}
-                data-index={virtualRow.index}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs outline-none transition-colors",
-                  isSelected
-                    ? "bg-foreground/10 text-foreground"
-                    : "text-muted-foreground hover:bg-foreground/5",
-                )}
-                style={
-                  {
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    height: `${virtualRow.size}px`,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  } satisfies CSSProperties
-                }
-              >
-                <span
-                  className={cn("w-3 shrink-0 font-mono font-semibold", status.className)}
-                  title={file.status}
+    <div className="flex w-72 shrink-0 flex-col border-r border-border/40">
+      <div className="relative px-1.5 pt-1.5 pb-0.5">
+        <Search
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <input
+          type="text"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search files…"
+          className="w-full rounded-sm border border-border/50 bg-transparent py-1 pl-6 pr-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-border"
+        />
+      </div>
+      <div
+        ref={scrollRef}
+        role="listbox"
+        aria-label="changed files"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 pt-0"
+      >
+        {files.length === 0 ? (
+          <p className="py-4 text-center text-xs text-muted-foreground">No files changed.</p>
+        ) : filteredFiles.length === 0 ? (
+          <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+            No files match your search.
+          </p>
+        ) : (
+          <div
+            style={{
+              height: `${virtualizer.getTotalSize()}px`,
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
+              const file = filteredFiles[virtualRow.index];
+              const status = STATUS_LABELS[file.status];
+              const { directory, basename } = splitFilePath(file.path);
+              const isSelected = file.path === selectedPath;
+              const commentCount = annotationCounts.get(file.path) ?? 0;
+              return (
+                <button
+                  key={file.path}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => onSelect(file.path)}
+                  data-index={virtualRow.index}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs outline-none transition-colors",
+                    isSelected
+                      ? "bg-foreground/10 text-foreground"
+                      : "text-muted-foreground hover:bg-foreground/5",
+                  )}
+                  style={
+                    {
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    } satisfies CSSProperties
+                  }
                 >
-                  {status.letter}
-                </span>
-                <span className="min-w-0 flex-1 truncate font-mono" dir="rtl">
-                  <bdi>
-                    <span className="text-muted-foreground/60">{directory}</span>
-                    <span className={isSelected ? "text-foreground" : ""}>{basename}</span>
-                  </bdi>
-                </span>
-                {commentCount > 0 ? (
                   <span
-                    className="flex shrink-0 items-center gap-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
-                    title={`${commentCount} pending comment${commentCount === 1 ? "" : "s"}`}
+                    className={cn("w-3 shrink-0 font-mono font-semibold", status.className)}
+                    title={file.status}
                   >
-                    <MessageSquare className="size-2.5" aria-hidden="true" />
-                    {commentCount}
+                    {status.letter}
                   </span>
-                ) : null}
-                {file.binary ? (
-                  <span className="shrink-0 rounded border border-border/40 px-1 font-mono text-[10px] text-muted-foreground/70">
-                    BIN
+                  <span className="min-w-0 flex-1 truncate font-mono" dir="rtl">
+                    <bdi>
+                      <span className="text-muted-foreground/60">{directory}</span>
+                      <span className={isSelected ? "text-foreground" : ""}>{basename}</span>
+                    </bdi>
                   </span>
-                ) : (
-                  <span className="shrink-0 font-mono tabular-nums">
-                    <span className={ADDITIONS_CLASSES}>+{file.additions}</span>{" "}
-                    <span className={DELETIONS_CLASSES}>−{file.deletions}</span>
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
+                  {commentCount > 0 ? (
+                    <span
+                      className="flex shrink-0 items-center gap-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
+                      title={`${commentCount} pending comment${commentCount === 1 ? "" : "s"}`}
+                    >
+                      <MessageSquare className="size-2.5" aria-hidden="true" />
+                      {commentCount}
+                    </span>
+                  ) : null}
+                  {file.binary ? (
+                    <span className="shrink-0 rounded border border-border/40 px-1 font-mono text-[10px] text-muted-foreground/70">
+                      BIN
+                    </span>
+                  ) : (
+                    <span className="shrink-0 font-mono tabular-nums">
+                      <span className={ADDITIONS_CLASSES}>+{file.additions}</span>{" "}
+                      <span className={DELETIONS_CLASSES}>−{file.deletions}</span>
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
