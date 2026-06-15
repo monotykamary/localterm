@@ -3,6 +3,30 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { AutomationsModal } from "../../src/components/automations-modal";
 
+vi.mock("@tanstack/react-virtual", () => {
+  const ROW_HEIGHT = 32;
+  return {
+    useVirtualizer: ({
+      count,
+      getItemKey,
+    }: {
+      count: number;
+      getItemKey: (index: number) => string;
+    }) => ({
+      getTotalSize: () => count * ROW_HEIGHT,
+      getVirtualItems: () =>
+        Array.from({ length: count }, (_, i) => ({
+          index: i,
+          start: i * ROW_HEIGHT,
+          size: ROW_HEIGHT,
+          key: getItemKey(i),
+        })),
+      scrollToIndex: () => {},
+      measure: () => {},
+    }),
+  };
+});
+
 // Base UI's Select (used by the schedule builder) observes its trigger size.
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class {

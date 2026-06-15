@@ -12,6 +12,30 @@ vi.mock("../../src/utils/fetch-git-diff", () => ({
   fetchGitDiffFilePatch: vi.fn(),
 }));
 
+vi.mock("@tanstack/react-virtual", () => {
+  const FILE_ROW_HEIGHT = 32;
+  return {
+    useVirtualizer: ({
+      count,
+      getItemKey,
+    }: {
+      count: number;
+      getItemKey: (index: number) => string;
+    }) => ({
+      getTotalSize: () => count * FILE_ROW_HEIGHT,
+      getVirtualItems: () =>
+        Array.from({ length: count }, (_, i) => ({
+          index: i,
+          start: i * FILE_ROW_HEIGHT,
+          size: FILE_ROW_HEIGHT,
+          key: getItemKey(i),
+        })),
+      scrollToIndex: () => {},
+      measure: () => {},
+    }),
+  };
+});
+
 import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "../../src/utils/fetch-git-diff";
 
 const filesMock = vi.mocked(fetchGitDiffFiles);

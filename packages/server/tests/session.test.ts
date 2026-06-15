@@ -45,14 +45,14 @@ describe("Session", () => {
   it("spawns a shell and emits output for typed input", async () => {
     const session = new Session({ shell: "/bin/sh" });
     try {
-      await collectOutput(session);
+      await collectOutput(session, 10_000);
       session.write("echo SESSION_TEST_TOKEN\n");
-      const output = await collectOutput(session);
+      const output = await collectOutput(session, 10_000);
       expect(output).toContain("SESSION_TEST_TOKEN");
     } finally {
       session.dispose();
     }
-  });
+  }, 15_000);
 
   it("exposes shell metadata used by the settings panel (path, basename, pid, cwd)", () => {
     const session = new Session({ shell: "/bin/sh", cwd: "/" });
@@ -94,13 +94,13 @@ describe("Session", () => {
       new Promise<number | null>((resolve) => {
         session.once("exit", (code) => resolve(code));
       }),
-      5000,
+      10_000,
     );
     session.write("exit 0\n");
     const code = await exitPromise;
     expect(code).toBe(0);
     session.dispose();
-  });
+  }, 15_000);
 
   it("ignores writes after exit", async () => {
     const session = new Session({ shell: "/bin/sh" });

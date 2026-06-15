@@ -451,11 +451,18 @@ export const AutomationsModal = ({
   const [saveError, setSaveError] = useState(false);
   const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
   const [runFilter, setRunFilter] = useState<"all" | "failed" | "skipped">("all");
-  const [sortBy, setSortBy] = useState<AutomationsSort>(
-    () =>
-      (localStorage.getItem(AUTOMATIONS_SORT_STORAGE_KEY) as AutomationsSort | null) ??
-      AUTOMATIONS_SORT_DEFAULT,
-  );
+  const loadSortFromStorage = (): AutomationsSort => {
+    try {
+      return (
+        (localStorage.getItem(AUTOMATIONS_SORT_STORAGE_KEY) as AutomationsSort | null) ??
+        AUTOMATIONS_SORT_DEFAULT
+      );
+    } catch {
+      return AUTOMATIONS_SORT_DEFAULT;
+    }
+  };
+
+  const [sortBy, setSortBy] = useState<AutomationsSort>(loadSortFromStorage);
   const [search, setSearch] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -537,7 +544,9 @@ export const AutomationsModal = ({
 
   const handleSortChange = useCallback((value: AutomationsSort) => {
     setSortBy(value);
-    localStorage.setItem(AUTOMATIONS_SORT_STORAGE_KEY, value);
+    try {
+      localStorage.setItem(AUTOMATIONS_SORT_STORAGE_KEY, value);
+    } catch {}
   }, []);
 
   const closeForm = useCallback(() => {
