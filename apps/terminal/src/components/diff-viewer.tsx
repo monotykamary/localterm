@@ -5,6 +5,7 @@ import type {
   GitDiffFileMeta,
   GitDiffFilePatch,
   GitDiffMode,
+  GitDiffSummary,
 } from "@monotykamary/localterm-server/protocol";
 import type { SyntaxLine } from "@/utils/syntax-highlight";
 import {
@@ -47,12 +48,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { SplitDiffRow } from "@/utils/build-split-diff-rows";
 import { renderSyntaxTokens } from "@/utils/render-syntax-tokens";
-import {
-  detectLangId,
-  getCachedTokens,
-  prefetchTokens,
-  tokenizeDiffLines,
-} from "@/utils/syntax-highlight";
+import { detectLangId, getCachedTokens, tokenizeDiffLines } from "@/utils/syntax-highlight";
 import {
   buildRenderChunks,
   renderChunkLength,
@@ -94,6 +90,10 @@ interface DiffViewerProps {
   // Ask the parent to re-fetch the leased branch info (wired to the refresh
   // button alongside re-fetching the diff).
   onRefreshBranchInfo?: () => void;
+  // Push a derived working-tree summary back to the parent so the ambient
+  // indicator stays in sync with the diff viewer's latest fetch instead of
+  // waiting on the (throttled) WebSocket push.
+  onDiffSummaryUpdate?: (summary: GitDiffSummary) => void;
 }
 
 // A multiline drag that just ended: the range the open annotation editor will
@@ -138,6 +138,28 @@ const RangeHighlight = () => (
     className="pointer-events-none absolute inset-0 border-l-2 border-primary/60 bg-primary/10"
   />
 );
+
+const deriveDiffSummary = (
+  fileList: GitDiffFileListResponse,
+  branch: string | null,
+): GitDiffSummary => {
+  let additions = 0;
+  let deletions = 0;
+  let binaries = 0;
+  for (const file of fileList.files) {
+    additions += file.additions;
+    deletions += file.deletions;
+    if (file.binary) binaries += 1;
+  }
+  return {
+    isRepo: fileList.isRepo,
+    files: fileList.files.length,
+    additions,
+    deletions,
+    binaries,
+    branch,
+  };
+};
 
 const STATUS_LABELS: Record<GitDiffFileMeta["status"], { letter: string; className: string }> = {
   modified: { letter: "M", className: "text-amber-400" },
@@ -989,6 +1011,7 @@ export const DiffViewer = ({
   onClose,
   onSendToTerminal,
   onRefreshBranchInfo,
+  onDiffSummaryUpdate,
 }: DiffViewerProps) => {
   const [mounted, setMounted] = useState(false);
   const [settled, setSettled] = useState(false);
@@ -1037,6 +1060,8 @@ export const DiffViewer = ({
   // Latest cache, read by loadPatch without making it depend on patchCache.
   const patchCacheRef = useRef(patchCache);
   patchCacheRef.current = patchCache;
+  const onDiffSummaryUpdateRef = useRef(onDiffSummaryUpdate);
+  onDiffSummaryUpdateRef.current = onDiffSummaryUpdate;
 
   useEffect(() => {
     if (open) {
@@ -1141,6 +1166,16 @@ export const DiffViewer = ({
     return () => controller.abort();
   }, [open, cwd, refreshCount, compareMode, baseOverride, abortPatchFetches]);
 
+  // Push working-tree summaries back to the ambient indicator so it stays in sync
+  // with the viewer's latest fetch instead of waiting on the throttled WebSocket push.
+  useEffect(() => {
+    if (workingFiles && onDiffSummaryUpdateRef.current) {
+      onDiffSummaryUpdateRef.current(
+        deriveDiffSummary(workingFiles, branchInfo?.currentBranch ?? null),
+      );
+    }
+  }, [workingFiles, branchInfo?.currentBranch]);
+
   // Invalidate cached patches when the comparison mode or base changes —
   // patches from one mode are wrong for another.
   useEffect(() => {
@@ -1178,7 +1213,7 @@ export const DiffViewer = ({
         { mode: compareMode, base: baseOverride },
         controller.signal,
       )
-        .then((data) => {
+        .then(async (data) => {
           if (controller.signal.aborted) return;
           patchControllersRef.current.delete(path);
           if (data?.patch) {
@@ -1187,7 +1222,7 @@ export const DiffViewer = ({
               const hunks = parseUnifiedDiff(data.patch);
               const allLines = hunks.flatMap((hunk) => hunk.lines);
               if (allLines.length > 0) {
-                prefetchTokens(
+                await tokenizeDiffLines(
                   path,
                   allLines.map((line) => line.text),
                   langId,
@@ -1195,6 +1230,7 @@ export const DiffViewer = ({
               }
             }
           }
+          if (controller.signal.aborted) return;
           setPatchCache((previous) => ({
             ...previous,
             [path]: data ? { state: "loaded", data } : { state: "error" },

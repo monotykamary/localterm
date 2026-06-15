@@ -2010,6 +2010,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         onClose={closeDiffViewer}
         onSendToTerminal={sendDiffReviewToTerminal}
         onRefreshBranchInfo={refreshBranchInfo}
+        onDiffSummaryUpdate={setGitDiffSummary}
       />
 
       <AutomationsModal
