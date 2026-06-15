@@ -813,14 +813,27 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           };
 
           const gitDiffWatcher = new GitDiffWatcher();
+          let gitDirtyInFlight = false;
+          let gitDirtyPending = false;
           const handleGitDirty = async () => {
             const cwd = newSession.lastEmittedCwd;
             if (!cwd) return;
+            if (gitDirtyInFlight) {
+              gitDirtyPending = true;
+              return;
+            }
+            gitDirtyInFlight = true;
             try {
               const summary = await getGitDiffSummary(cwd);
               safeSend(ws, { type: "git-diff-summary", summary });
             } catch {
               /* transient git failure; next dirty signal will retry */
+            } finally {
+              gitDirtyInFlight = false;
+              if (gitDirtyPending) {
+                gitDirtyPending = false;
+                void handleGitDirty();
+              }
             }
           };
 

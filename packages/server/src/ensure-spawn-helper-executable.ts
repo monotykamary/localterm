@@ -1,4 +1,5 @@
 import { chmodSync, existsSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -11,6 +12,13 @@ const candidateSpawnHelperPaths = (nodePtyDir: string): string[] => [
   path.join(nodePtyDir, "build", "Release", "spawn-helper"),
   path.join(nodePtyDir, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper"),
 ];
+
+const clearQuarantineAndResign = (target: string): void => {
+  if (process.platform !== "darwin") return;
+  execFile("xattr", ["-d", "com.apple.quarantine", target], { timeout: 5_000 }, () => {
+    execFile("codesign", ["--force", "--sign", "-", target], { timeout: 10_000 }, () => {});
+  });
+};
 
 export const ensureSpawnHelperExecutable = (): void => {
   if (alreadyEnsured) return;
@@ -29,5 +37,6 @@ export const ensureSpawnHelperExecutable = (): void => {
     } catch {
       /* helper already executable, or filesystem refused chmod (e.g. read-only mount) */
     }
+    clearQuarantineAndResign(candidate);
   }
 };
