@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.41.3
+
+### Patch Changes
+
+- b578aca: Make spawn-helper signing conditional to prevent syspolicyd CPU spike on every daemon start
+
 ## 1.36.0
 
 ### Minor Changes
