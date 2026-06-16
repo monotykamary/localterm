@@ -181,11 +181,13 @@ const ToggleChip = ({
   active,
   onToggle,
   ariaLabel,
+  className,
 }: {
   label: string;
   active: boolean;
   onToggle: () => void;
   ariaLabel: string;
+  className?: string;
 }) => (
   <button
     type="button"
@@ -197,6 +199,7 @@ const ToggleChip = ({
       active
         ? "border-primary/50 bg-foreground/10 text-foreground"
         : "border-border/60 text-muted-foreground hover:text-foreground",
+      className,
     )}
   >
     {label}
@@ -321,7 +324,15 @@ const ScheduleBuilder = ({
       )}
 
       {schedule.frequency === "monthly" && (
-        <div className="flex flex-wrap gap-1">
+        <div className="grid w-fit grid-cols-7 gap-1 justify-items-center">
+          {WEEKDAY_NAMES.map((name) => (
+            <div
+              key={name}
+              className="text-center text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60"
+            >
+              {name}
+            </div>
+          ))}
           {Array.from({ length: 31 }, (_, index) => index + 1).map((day) => (
             <ToggleChip
               key={day}
