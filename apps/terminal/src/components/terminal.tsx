@@ -466,13 +466,19 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     const initialFont = findTerminalFontById(initialFontIdRef.current);
     void awaitFontReady(initialFont).then(() => {
       if (disposed) return;
-      const liveTerminal = terminalRef.current;
-      if (liveTerminal) liveTerminal.clearTextureAtlas();
       const internals = terminal as unknown as {
         _core: { _charSizeService: { measure: () => void } };
       };
       internals._core._charSizeService.measure();
       fitToContainer();
+      try {
+        const webglAddon = new WebglAddon();
+        webglAddon.onContextLoss(() => webglAddon.dispose());
+        terminal.loadAddon(webglAddon);
+      } catch {
+        /* webgl unavailable; xterm falls back to dom renderer */
+      }
+      terminal.clearTextureAtlas();
     });
 
     const terminal = new XtermTerminal({
@@ -655,14 +661,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     }
     if (trackEl) {
       trackEl.addEventListener("pointerdown", handleTrackPointerDown);
-    }
-
-    try {
-      const webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => webglAddon.dispose());
-      terminal.loadAddon(webglAddon);
-    } catch {
-      /* webgl unavailable; xterm falls back to dom renderer */
     }
 
     const kittyPushDisposable = terminal.parser.registerCsiHandler(
