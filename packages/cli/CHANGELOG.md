@@ -1,5 +1,12 @@
 # localterm
 
+## 2.0.1
+
+### Patch Changes
+
+- 0371157: Arrange the monthly day-of-month selector in the automations schedule trigger into a 7-day calendar grid with weekday headers.
+  - @monotykamary/localterm-server@2.0.1
+
 ## 2.0.0
 
 ### Major Changes
