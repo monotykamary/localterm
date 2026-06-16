@@ -83,7 +83,7 @@ describe("AutomationsModal", () => {
 
   it("shows the empty state", async () => {
     renderModal([]);
-    expect(await screen.findByText(/no automations yet/i)).toBeDefined();
+    expect(await screen.findByText(/no automations/i)).toBeDefined();
   });
 
   it("lists an automation with a friendly schedule label and shows its detail", async () => {
@@ -128,7 +128,7 @@ describe("AutomationsModal", () => {
     renderModal([
       automation({ lastRun: { runId: "r", at: Date.now(), status: "failed", exitCode: 2 } }),
     ]);
-    expect(await screen.findByText("exit 2")).toBeDefined();
+    expect((await screen.findAllByText("exit 2")).length).toBeGreaterThan(0);
   });
 
   it("requires a second click to delete", async () => {

@@ -18,10 +18,19 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
@@ -35,12 +44,14 @@ import {
 import {
   AUTOMATIONS_MODAL_CLOSE_TRANSITION_MS,
   AUTOMATIONS_RELATIVE_TIME_REFRESH_MS,
+  AUTOMATIONS_SIDEBAR_COLLAPSE_WIDTH_PX,
   AUTOMATIONS_SORT_DEFAULT,
   AUTOMATIONS_SORT_STORAGE_KEY,
   RECENT_RUNS_LIMIT,
 } from "@/lib/constants";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
+import { computeAutomationsHeaderLayout } from "@/utils/compute-automations-header-layout";
 import { createAutomation } from "@/utils/create-automation";
 import { deleteAutomation } from "@/utils/delete-automation";
 import { fetchAutomations } from "@/utils/fetch-automations";
@@ -466,6 +477,11 @@ export const AutomationsModal = ({
   const [search, setSearch] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
+  const contentRowRef = useRef<HTMLDivElement | null>(null);
+  const [headerWidth, setHeaderWidth] = useState(0);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const headerConfigIndexRef = useRef(0);
 
   const refreshAutomations = useCallback(async () => {
     const fetched = await fetchAutomations();
@@ -573,6 +589,50 @@ export const AutomationsModal = ({
   useEffect(() => {
     if (open && settled) panelRef.current?.focus();
   }, [open, settled]);
+
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const update = (width: number) => {
+      if (width === 0) return;
+      setHeaderWidth(width);
+    };
+    update(header.offsetWidth);
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.borderBoxSize?.[0]?.inlineSize ?? header.offsetWidth;
+        update(width);
+      }
+    });
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [mounted]);
+
+  useLayoutEffect(() => {
+    const row = contentRowRef.current;
+    if (!row) return;
+    const update = (width: number) =>
+      setSidebarCollapsed(width < AUTOMATIONS_SIDEBAR_COLLAPSE_WIDTH_PX);
+    update(row.clientWidth);
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+        update(width);
+      }
+    });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [mounted, tab, mode]);
+
+  const headerLayout = useMemo(() => {
+    const result = computeAutomationsHeaderLayout({
+      availableWidth: headerWidth,
+      showCreateButton: tab === "automations" && mode === "view",
+      previousConfigIndex: headerConfigIndexRef.current,
+    });
+    headerConfigIndexRef.current = result.configIndex;
+    return result;
+  }, [headerWidth, tab, mode]);
 
   const openCreate = () => {
     setForm(emptyForm(defaultCwd));
@@ -703,15 +763,38 @@ export const AutomationsModal = ({
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
       >
-        <header className="flex shrink-0 items-center gap-3 border-b border-border/40 px-4 py-2.5">
-          <CalendarClock className="size-4 text-muted-foreground" aria-hidden="true" />
-          <h2 className="text-sm font-medium text-foreground">Automations</h2>
+        <header
+          ref={headerRef}
+          className={cn(
+            "flex shrink-0 items-center border-b border-border/40 py-2.5",
+            headerLayout.showTitle
+              ? "gap-3 px-4"
+              : headerLayout.headerPadding === 24
+                ? "gap-2 px-3"
+                : "gap-3 px-4",
+          )}
+        >
+          {headerLayout.showIcon ? (
+            <CalendarClock className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          ) : null}
+          {headerLayout.showTitle ? (
+            <h2 className="shrink-0 text-sm font-medium text-foreground">Automations</h2>
+          ) : null}
           <div
             role="tablist"
             aria-label="automations view"
-            className="ml-2 flex items-center rounded-md border border-border/60 p-0.5"
+            className="shrink-0 flex items-center rounded-md border border-border/60 p-0.5"
           >
-            {(["automations", "recent-runs"] as const).map((value) => (
+            {(headerLayout.tabLabels === "full"
+              ? ([
+                  ["automations", "Automations"],
+                  ["recent-runs", "Recent runs"],
+                ] as const)
+              : ([
+                  ["automations", "A"],
+                  ["recent-runs", "R"],
+                ] as const)
+            ).map(([value, label]) => (
               <button
                 key={value}
                 type="button"
@@ -725,11 +808,11 @@ export const AutomationsModal = ({
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {value === "automations" ? "Automations" : "Recent runs"}
+                {label}
               </button>
             ))}
           </div>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex shrink-0 items-center gap-1">
             {tab === "automations" && mode === "view" ? (
               <Button
                 variant="ghost"
@@ -767,52 +850,104 @@ export const AutomationsModal = ({
             }}
           />
         ) : (
-          <div className="flex min-h-0 flex-1">
-            <AutomationSidebar
-              automations={filteredAutomations}
-              sortBy={sortBy}
-              search={search}
-              selectedId={selectedId}
-              nowMs={nowMs}
-              onSortChange={handleSortChange}
-              onSearchChange={setSearch}
-              onSelect={(id) => {
-                setSelectedId(id);
-                setMode("view");
-              }}
-            />
-
-            <div className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
-              {mode !== "view" ? (
-                <AutomationForm
-                  form={form}
-                  onChange={setForm}
-                  onCancel={closeForm}
-                  onSave={() => void handleSave()}
-                  isSaving={isSaving}
-                  isValid={isFormValid}
-                  saveError={saveError}
-                  cronCaption={compiledCrons.join(", ")}
-                  scheduleValid={isScheduleValid}
-                  nextPreviewAt={nextPreviewAt}
-                  nowMs={nowMs}
-                />
-              ) : selected ? (
-                <AutomationDetail
-                  automation={selected}
-                  nowMs={nowMs}
-                  armedDelete={armedDeleteId === selected.id}
-                  onRunNow={() => void handleRunNow(selected)}
-                  onEdit={() => openEdit(selected)}
-                  onDelete={() => void handleDelete(selected)}
-                  onToggleEnabled={(enabled) => void handleToggleEnabled(selected, enabled)}
-                  onReset={() => void handleReset(selected)}
-                />
-              ) : (
-                <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                  Select an automation, or create one.
+          <div ref={contentRowRef} className="flex min-h-0 flex-1">
+            {!sidebarCollapsed ? (
+              <AutomationSidebar
+                automations={filteredAutomations}
+                sortBy={sortBy}
+                search={search}
+                selectedId={selectedId}
+                nowMs={nowMs}
+                onSortChange={handleSortChange}
+                onSearchChange={setSearch}
+                onSelect={(id) => {
+                  setSelectedId(id);
+                  setMode("view");
+                }}
+              />
+            ) : null}
+            <div className="flex min-w-0 flex-1 flex-col">
+              {sidebarCollapsed && mode === "view" ? (
+                <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-3 py-1.5 font-mono text-xs text-muted-foreground">
+                  <Popover>
+                    <PopoverTrigger
+                      className="flex items-center gap-1 rounded-sm border border-border/50 px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5"
+                      aria-label="select automation"
+                    >
+                      <span className="truncate">{selected?.name ?? "Select…"}</span>
+                      <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
+                    </PopoverTrigger>
+                    <PopoverContent align="start" side="bottom" className="w-72 p-0">
+                      <AutomationListPopover
+                        automations={filteredAutomations}
+                        selectedId={selectedId}
+                        nowMs={nowMs}
+                        onSelect={(id) => {
+                          setSelectedId(id);
+                          setMode("view");
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                    {(["last-run", "created", "name"] as const).map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => handleSortChange(value)}
+                          className={cn(
+                            "rounded-sm px-1.5 py-0.5 text-[10px] transition-colors",
+                            sortBy === value
+                              ? "bg-foreground/10 text-foreground"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {value === "last-run"
+                            ? "Last run"
+                            : value === "created"
+                              ? "Created"
+                              : "Name"}
+                        </button>
+                      ))}
+                  </div>
                 </div>
-              )}
+              ) : null}
+              <div className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+                {mode !== "view" ? (
+                  <AutomationForm
+                    form={form}
+                    onChange={setForm}
+                    onCancel={closeForm}
+                    onSave={() => void handleSave()}
+                    isSaving={isSaving}
+                    isValid={isFormValid}
+                    saveError={saveError}
+                    cronCaption={compiledCrons.join(", ")}
+                    scheduleValid={isScheduleValid}
+                    nextPreviewAt={nextPreviewAt}
+                    nowMs={nowMs}
+                  />
+                ) : selected ? (
+                  <AutomationDetail
+                    automation={selected}
+                    nowMs={nowMs}
+                    armedDelete={armedDeleteId === selected.id}
+                    onRunNow={() => void handleRunNow(selected)}
+                    onEdit={() => openEdit(selected)}
+                    onDelete={() => void handleDelete(selected)}
+                    onToggleEnabled={(enabled) => void handleToggleEnabled(selected, enabled)}
+                    onReset={() => void handleReset(selected)}
+                  />
+                ) : filteredAutomations !== null && filteredAutomations.length === 0 ? (
+                  <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                    No automations yet. Create one to get started.
+                  </div>
+                ) : (
+                  <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                    Select an automation, or create one.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -939,6 +1074,17 @@ const AutomationDetail = ({
               : `Runs forever (${automation.runCount} so far)`}
           </span>
         </div>
+        {automation.lastRun
+          ? (() => {
+              const badge = runStatusBadge(automation.lastRun.status, automation.lastRun.exitCode);
+              return (
+                <div className="flex flex-col gap-0.5">
+                  <span className={SECTION_LABEL_CLASSES}>Last run</span>
+                  <span className={cn("text-foreground/90", badge.className)}>{badge.label}</span>
+                </div>
+              );
+            })()
+          : null}
       </div>
 
       {finished ? (
@@ -1280,6 +1426,104 @@ const RecentRunsView = ({
     </div>
   </div>
 );
+
+interface AutomationListPopoverProps {
+  automations: AutomationWithNextRun[] | null;
+  selectedId: string | null;
+  nowMs: number;
+  onSelect: (id: string) => void;
+}
+
+const AutomationListPopover = ({
+  automations,
+  selectedId,
+  nowMs,
+  onSelect,
+}: AutomationListPopoverProps) => {
+  const [search, setSearch] = useState("");
+  const filtered = useMemo(() => {
+    if (!automations) return null;
+    const lower = search.toLowerCase();
+    return lower
+      ? automations.filter(
+          (automation) =>
+            automation.name.toLowerCase().includes(lower) ||
+            automation.command.toLowerCase().includes(lower),
+        )
+      : automations;
+  }, [automations, search]);
+
+  return (
+    <div className="flex max-h-72 flex-col">
+      <div className="border-b border-border/40 px-2 py-1.5">
+        <input
+          type="text"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search automations…"
+          autoFocus
+          className="w-full rounded-sm border border-border/50 bg-transparent py-0.5 px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-ring"
+        />
+      </div>
+      <div
+        className="overflow-y-auto overscroll-contain p-1"
+        role="listbox"
+        aria-label="automations"
+      >
+        {filtered === null ? (
+          <p className="px-2 py-3 text-center text-xs text-muted-foreground">Loading…</p>
+        ) : filtered.length === 0 ? (
+          <p className="px-2 py-3 text-center text-xs text-muted-foreground">
+            {search ? "No automations match your search." : "No automations yet."}
+          </p>
+        ) : (
+          filtered.map((automation) => {
+            const isSelected = automation.id === selectedId;
+            return (
+              <button
+                key={automation.id}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => onSelect(automation.id)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left outline-none transition-colors",
+                  isSelected
+                    ? "bg-foreground/10 text-foreground"
+                    : "text-muted-foreground hover:bg-foreground/5",
+                )}
+              >
+                <span
+                  className={cn(
+                    "min-w-0 truncate text-xs",
+                    !automation.enabled && "line-through opacity-60",
+                  )}
+                >
+                  {automation.name}
+                </span>
+                <span className="ml-auto shrink-0 text-[10px] tabular-nums">
+                  {automation.lifecycle === "finished"
+                    ? "finished"
+                    : automation.trigger.kind === "watch"
+                      ? automation.enabled
+                        ? "watching"
+                        : "paused"
+                      : automation.trigger.kind === "event"
+                        ? automation.enabled
+                          ? "listening"
+                          : "paused"
+                        : automation.nextRunAt !== null
+                          ? formatRelativeTime(automation.nextRunAt, nowMs)
+                          : "paused"}
+                </span>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+};
 
 const AUTOMATION_ROW_HEIGHT = 44;
 
