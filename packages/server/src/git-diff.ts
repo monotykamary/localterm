@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { Octokit } from "@octokit/rest";
 import { openRepository } from "es-git";
@@ -196,7 +197,7 @@ interface UntrackedFile {
   truncated: boolean;
 }
 
-const collectUntrackedFiles = (r: OpenRepo): UntrackedFile[] => {
+const collectUntrackedFiles = async (r: OpenRepo): Promise<UntrackedFile[]> => {
   const files: UntrackedFile[] = [];
   const statuses = r.repo.statuses();
   const entries = collectIterator<{
@@ -212,19 +213,22 @@ const collectUntrackedFiles = (r: OpenRepo): UntrackedFile[] => {
     const absolutePath = path.join(r.cwd, filePath);
 
     try {
-      const stat = fs.statSync(absolutePath);
+      const stat = await fsPromises.stat(absolutePath);
       if (!stat.isFile()) continue;
       const bytesToRead = Math.min(stat.size, GIT_MAX_UNTRACKED_FILE_BYTES);
       const buffer = Buffer.alloc(bytesToRead);
-      const handle = fs.openSync(absolutePath, "r");
-      fs.readSync(handle, buffer, 0, bytesToRead, 0);
-      fs.closeSync(handle);
-      const sniffEnd = Math.min(buffer.length, GIT_BINARY_SNIFF_BYTES);
-      const binary = buffer.subarray(0, sniffEnd).includes(0);
-      const truncated = stat.size > GIT_MAX_UNTRACKED_FILE_BYTES;
-      const content = binary ? null : truncated ? null : buffer.toString("utf8");
-      const lines = binary ? 0 : content ? countLines(content) : 0;
-      files.push({ path: filePath, binary, lines, content, truncated });
+      const handle = await fsPromises.open(absolutePath, "r");
+      try {
+        const { buffer: readBuffer } = await handle.read(buffer, 0, bytesToRead, 0);
+        const sniffEnd = Math.min(readBuffer.length, GIT_BINARY_SNIFF_BYTES);
+        const binary = readBuffer.subarray(0, sniffEnd).includes(0);
+        const truncated = stat.size > GIT_MAX_UNTRACKED_FILE_BYTES;
+        const content = binary ? null : truncated ? null : readBuffer.toString("utf8");
+        const lines = binary ? 0 : content ? countLines(content) : 0;
+        files.push({ path: filePath, binary, lines, content, truncated });
+      } finally {
+        await handle.close();
+      }
     } catch {
       continue;
     }
@@ -575,7 +579,7 @@ export const getGitDiffSummary = async (
       }
     }
 
-    const untracked = collectUntrackedFiles(r);
+    const untracked = await collectUntrackedFiles(r);
     for (const file of untracked) {
       fileCount++;
       if (file.binary) {
@@ -691,7 +695,7 @@ export const getGitDiff = async (
     };
   });
 
-  const untracked = collectUntrackedFiles(r);
+  const untracked = await collectUntrackedFiles(r);
   for (const file of untracked) {
     const patch = file.binary
       ? null
@@ -746,7 +750,7 @@ export const getGitDiffFiles = async (
     binary: entry.binary,
   }));
 
-  const untracked = collectUntrackedFiles(r);
+  const untracked = await collectUntrackedFiles(r);
   for (const file of untracked) {
     files.push({
       path: file.path,

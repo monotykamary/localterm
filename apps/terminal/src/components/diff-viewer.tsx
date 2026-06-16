@@ -1122,6 +1122,7 @@ export const DiffViewer = ({
   patchCacheRef.current = patchCache;
   const onDiffSummaryUpdateRef = useRef(onDiffSummaryUpdate);
   onDiffSummaryUpdateRef.current = onDiffSummaryUpdate;
+  const hasBeenOpenedRef = useRef(false);
 
   useEffect(() => {
     selectedPathRef.current = selectedPath;
@@ -1218,6 +1219,7 @@ export const DiffViewer = ({
       });
       return;
     }
+    hasBeenOpenedRef.current = true;
     const currentData = compareMode === "branch" ? branchFilesRef.current : workingFilesRef.current;
 
     if (currentData) {
@@ -1239,12 +1241,13 @@ export const DiffViewer = ({
   }, [open, cwd, refreshCount, compareMode, baseOverride, abortPatchFetches, refreshCurrentFiles]);
 
   // When the server signals the working tree may have changed, debounce and
-  // re-fetch the current mode's file list — even while the viewer is closed — so
-  // the file list is already current the next time the viewer opens. When open,
-  // we also mark the selected file's cached metadata stale so the prefetch queue
-  // force-reloads its patch, keeping the diff content in sync with the disk.
+  // re-fetch the current mode's file list so the file list stays current. While
+  // the viewer is closed we only prefetch if it has been opened before, avoiding
+  // a heavy diff calculation on terminal startup. When open, we also mark the
+  // selected file's cached metadata stale so the prefetch queue force-reloads
+  // its patch, keeping the diff content in sync with the disk.
   useEffect(() => {
-    if (!cwd || gitDirtyVersion === undefined) return;
+    if (!cwd || gitDirtyVersion === undefined || !hasBeenOpenedRef.current) return;
 
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
