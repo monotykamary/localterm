@@ -1,5 +1,16 @@
 # localterm
 
+## 2.0.0
+
+### Major Changes
+
+- 0de44bd: Replace the umbrella `git-refs-change` and internal `git-dirty` session events with granular namespace and operation events (such as `git-head-change`, `git-commit`, `git-checkout`, `git-merge`, etc.). Event-based automations now use an `events` array and fire when any selected event occurs. The automation form uses a new Notion-like multi-select search for picking events.
+
+### Patch Changes
+
+- Updated dependencies [0de44bd]
+  - @monotykamary/localterm-server@2.0.0
+
 ## 1.42.0
 
 ### Minor Changes
@@ -42,6 +53,7 @@
 - Use consistent padding on modal overlays
 
   Replace `p-4 sm:p-6` with a fixed `p-5` on the diff viewer and automations modal overlays so the modal width scales smoothly with the viewport. The previous responsive breakpoint made the panel slightly wider as the viewport shrank past 640px, causing a subtle layout jump after the sidebar collapsed.
+
   - @monotykamary/localterm-server@1.41.12
 
 ## 1.41.11
@@ -57,6 +69,7 @@
 ### Patch Changes
 
 - Fix diff viewer and automations modal bugs
+
   - Fix flash of missing sidebar on modal open (zero-width measurement guard + missing mounted dependency)
   - Fix forever-loading patches after refresh/close-reopen (PrefetchQueue.clear() no longer permanently bricks the queue)
   - Animate sidebar collapse/expand smoothly instead of abrupt layout jump
@@ -118,6 +131,7 @@
 - Anchor line numbers and add horizontal scroll in the diff viewer
 
   Both unified and split modes now use transform-based horizontal scrolling so line numbers stay fixed while the text content scrolls. Horizontal trackpad gestures and Shift+mouse wheel scroll both sides simultaneously in split mode, and scroll the text past anchored line numbers in unified mode.
+
   - @monotykamary/localterm-server@1.34.0
 
 ## 1.33.0
@@ -127,6 +141,7 @@
 - Cache and prefetch syntax tokens in the diff viewer
 
   Tokenization results are cached by file path and content so revisiting a file renders highlighted code on the first paint with no flash. Patches now prefetch tokens on load, so neighbor files visited with j/k are also instant.
+
   - @monotykamary/localterm-server@1.33.0
 
 ## 1.32.0
@@ -136,6 +151,7 @@
 - Add syntax highlighting to the diff viewer
 
   Diff lines are now tokenized with Shiki (JavaScript regex engine, `dark-plus` theme) and rendered with per-token color spans. Language is auto-detected from the file extension (TypeScript, Python, Rust, Go, CSS, JSON, and 25+ more). Unsupported languages fall back to plain text. Grammar modules are lazy-loaded — only the one needed is fetched when its diff is opened.
+
   - @monotykamary/localterm-server@1.32.0
 
 ## 1.31.0
@@ -278,6 +294,7 @@
 - d682087: fix: stop stale spinner/status lines when output contains non-Latin combining marks
 
   Claude Code measures text with `Bun.stringWidth`, which counts most non-Latin combining marks (Cyrillic, Hebrew points, Arabic harakat, Indic, CJK voicing, …) as a spacing column instead of zero-width. The terminal joined them onto the base, so any line containing one drifted Claude's relative-cursor math by a column and left stale lines behind — e.g. a frozen spinner frame — until a resize forced a full repaint. The width provider now mirrors `Bun.stringWidth` for those marks, but only in the normal screen buffer where Claude runs; full-screen TUIs (vim, less, tmux) in the alternate buffer keep correct combining-mark rendering.
+
   - @monotykamary/localterm-server@1.19.2
 
 ## 1.19.1
@@ -466,6 +483,7 @@
 ### Patch Changes
 
 - Fix security, CLI lifecycle, and frontend bugs from full codebase review
+
   - security: stripPort now treats `localhost:3417` correctly (was rejected with 403)
   - security: maxPayload capped at 256KB on WebSocket server
   - security: shell hook temp dirs use mode 0o700, rc files use mode 0o600
