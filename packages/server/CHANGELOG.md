@@ -1,5 +1,16 @@
 # localterm-server
 
+## 1.41.10
+
+### Patch Changes
+
+- Fix diff viewer and automations modal bugs
+
+  - Fix flash of missing sidebar on modal open (zero-width measurement guard + missing mounted dependency)
+  - Fix forever-loading patches after refresh/close-reopen (PrefetchQueue.clear() no longer permanently bricks the queue)
+  - Animate sidebar collapse/expand smoothly instead of abrupt layout jump
+  - Remove compact split-diff fallback mode — split mode now always renders true side-by-side with horizontal scroll
+
 ## 1.41.7
 
 ### Patch Changes

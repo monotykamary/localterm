@@ -83,7 +83,7 @@ describe("AutomationsModal", () => {
 
   it("shows the empty state", async () => {
     renderModal([]);
-    expect(await screen.findByText(/no automations/i)).toBeDefined();
+    expect(await screen.findByText(/Create one to get started/)).toBeDefined();
   });
 
   it("lists an automation with a friendly schedule label and shows its detail", async () => {

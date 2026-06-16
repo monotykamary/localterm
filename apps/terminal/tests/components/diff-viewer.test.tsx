@@ -177,7 +177,7 @@ describe("DiffViewer", () => {
     expect(screen.getAllByText("alpha")).toHaveLength(1);
   });
 
-  it("stacks split rows vertically when the container is narrow", async () => {
+  it("renders split mode side-by-side even on narrow containers", async () => {
     class NarrowResizeObserver {
       private callback: ResizeObserverCallback;
 
@@ -212,9 +212,8 @@ describe("DiffViewer", () => {
     const layoutGroup = screen.getByRole("radiogroup", { name: "diff layout" });
     const splitToggle = within(layoutGroup).getAllByRole("radio")[1];
     fireEvent.click(splitToggle);
-    // Compact mode: context lines render once like unified (stacked, not side-by-side).
-    expect(screen.getAllByText("alpha")).toHaveLength(1);
-    // Change lines are still shown.
+    // Split mode always renders side-by-side, even on narrow containers.
+    expect(screen.getAllByText("alpha")).toHaveLength(2);
     expect(screen.getByText("beta")).toBeTruthy();
     expect(screen.getByText("BETA")).toBeTruthy();
   });
@@ -251,8 +250,7 @@ describe("DiffViewer", () => {
     renderDiffViewer();
     await screen.findByText("BETA");
 
-    // Sidebar is replaced by the file picker popover trigger.
-    expect(screen.queryByRole("listbox", { name: "changed files" })).toBeNull();
+    // Sidebar is collapsed (width 0) and the file picker popover trigger is visible.
     expect(screen.getByRole("button", { name: "select file" })).toBeTruthy();
   });
 

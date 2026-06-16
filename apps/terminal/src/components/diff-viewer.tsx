@@ -53,8 +53,8 @@ import {
   DIFF_VIEWER_RENDER_CHUNK,
   PATCH_PREFETCH_CONCURRENCY,
   PATCH_PREFETCH_NEIGHBOR_RADIUS,
+  DIFF_VIEWER_SIDEBAR_WIDTH_PX,
   SIDEBAR_COLLAPSE_WIDTH_PX,
-  SPLIT_DIFF_STACK_WIDTH_PX,
 } from "@/lib/constants";
 import { computeHeaderLayout } from "@/utils/compute-header-layout";
 import { cn } from "@/lib/utils";
@@ -552,7 +552,6 @@ interface DiffChunkProps {
   editingKey: string | null;
   pendingRange: PendingAnnotationRange | null;
   highlightingPending: boolean;
-  compact: boolean;
   onOpenEditor: (key: string, range?: PendingAnnotationRange) => void;
   onSaveAnnotation: (annotation: DiffAnnotation) => void;
   onCancelEditor: () => void;
@@ -573,7 +572,6 @@ const DiffChunk = memo((props: DiffChunkProps) => {
     annotations,
     editingKey,
     pendingRange,
-    compact,
     onOpenEditor,
     onSaveAnnotation,
     onCancelEditor,
@@ -656,69 +654,6 @@ const DiffChunk = memo((props: DiffChunkProps) => {
             const left = row.left;
             const right = row.right;
 
-            if (compact) {
-              const isSharedLine = left !== null && left === right;
-              if (isSharedLine) {
-                const state = annotationStateFor(left);
-                return (
-                  <Fragment key={rowIndex}>
-                    <UnifiedDiffLine
-                      line={left}
-                      annotateKey={state ? state.key : null}
-                      highlighted={
-                        state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
-                      }
-                      syntaxTokens={tokenMap.get(left) ?? null}
-                      highlightingPending={highlightingPending}
-                      onAnnotate={onOpenEditor}
-                      onStartDrag={onStartDrag}
-                      onDragEnter={onDragEnter}
-                    />
-                    {renderAnnotation(state)}
-                  </Fragment>
-                );
-              }
-
-              const leftState = left ? annotationStateFor(left) : null;
-              const rightState = right ? annotationStateFor(right) : null;
-              return (
-                <Fragment key={rowIndex}>
-                  {left ? (
-                    <UnifiedDiffLine
-                      line={left}
-                      annotateKey={leftState ? leftState.key : null}
-                      highlighted={
-                        leftState !== null &&
-                        highlightedKeys.has(diffLineTargetKey(leftState.target))
-                      }
-                      syntaxTokens={tokenMap.get(left) ?? null}
-                      highlightingPending={highlightingPending}
-                      onAnnotate={onOpenEditor}
-                      onStartDrag={onStartDrag}
-                      onDragEnter={onDragEnter}
-                    />
-                  ) : null}
-                  {leftState ? renderAnnotation(leftState) : null}
-                  {right ? (
-                    <UnifiedDiffLine
-                      line={right}
-                      annotateKey={rightState ? rightState.key : null}
-                      highlighted={
-                        rightState !== null &&
-                        highlightedKeys.has(diffLineTargetKey(rightState.target))
-                      }
-                      syntaxTokens={tokenMap.get(right) ?? null}
-                      highlightingPending={highlightingPending}
-                      onAnnotate={onOpenEditor}
-                      onStartDrag={onStartDrag}
-                      onDragEnter={onDragEnter}
-                    />
-                  ) : null}
-                  {rightState ? renderAnnotation(rightState) : null}
-                </Fragment>
-              );
-            }
-
             const leftState = left ? annotationStateFor(left) : null;
             const rightState = right ? annotationStateFor(right) : null;
             const isSharedAnnotation = leftState !== null && leftState.key === rightState?.key;
@@ -761,7 +696,6 @@ interface FileDiffPaneProps {
   file: GitDiffFileMeta;
   payload: PatchEntry;
   viewMode: DiffViewMode;
-  compact: boolean;
   annotations: Record<string, DiffAnnotation>;
   editingKey: string | null;
   pendingRange: PendingAnnotationRange | null;
@@ -782,7 +716,6 @@ const FileDiffPane = ({
   file,
   payload,
   viewMode,
-  compact,
   annotations,
   editingKey,
   pendingRange,
@@ -880,7 +813,7 @@ const FileDiffPane = ({
   }, []);
 
   useLayoutEffect(() => {
-    if (viewMode !== "split" || compact) {
+    if (viewMode !== "split") {
       maxScrollXRef.current = 0;
       return;
     }
@@ -890,10 +823,10 @@ const FileDiffPane = ({
       observer.observe(scrollContainerRef.current, { childList: true, subtree: true });
     }
     return () => observer.disconnect();
-  }, [viewMode, compact, measureMaxScrollX]);
+  }, [viewMode, measureMaxScrollX]);
 
   useEffect(() => {
-    if (viewMode !== "split" || compact) return;
+    if (viewMode !== "split") return;
     const container = scrollContainerRef.current;
     if (!container) return;
     const handleSplitWheel = (event: WheelEvent) => {
@@ -911,7 +844,7 @@ const FileDiffPane = ({
     };
     container.addEventListener("wheel", handleSplitWheel, { passive: false });
     return () => container.removeEventListener("wheel", handleSplitWheel);
-  }, [viewMode, compact]);
+  }, [viewMode]);
 
   const renderChunks = useMemo(
     () => buildRenderChunks(hunks, viewMode, DIFF_VIEWER_RENDER_CHUNK),
@@ -1045,10 +978,10 @@ const FileDiffPane = ({
   return (
     <div
       ref={scrollContainerRef}
-      data-diff-scroll={viewMode === "split" && !compact ? "" : undefined}
+      data-diff-scroll={viewMode === "split" ? "" : undefined}
       className={cn(
         "pb-4 font-mono text-xs leading-5",
-        (viewMode === "unified" || compact) && "min-w-max",
+        viewMode === "unified" && "min-w-max",
         isDragging && "select-none",
       )}
     >
@@ -1063,7 +996,6 @@ const FileDiffPane = ({
           editingKey={editingKey}
           pendingRange={pendingRange}
           highlightingPending={highlightingPending}
-          compact={compact}
           onOpenEditor={onOpenEditor}
           onSaveAnnotation={onSaveAnnotation}
           onCancelEditor={onCancelEditor}
@@ -1140,7 +1072,6 @@ export const DiffViewer = ({
   const [patchCache, setPatchCache] = useState<Record<string, PatchEntry>>({});
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<DiffViewMode>(() => loadStoredDiffViewMode());
-  const [compact, setCompact] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [headerWidth, setHeaderWidth] = useState(0);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
@@ -1512,28 +1443,12 @@ export const DiffViewer = ({
   }, []);
 
   useLayoutEffect(() => {
-    if (viewMode !== "split") {
-      setCompact(false);
-      return;
-    }
-    const container = scrollAreaRef.current;
-    if (!container) return;
-    const updateCompact = (width: number) => setCompact(width < SPLIT_DIFF_STACK_WIDTH_PX);
-    updateCompact(container.clientWidth);
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const width = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
-        updateCompact(width);
-      }
-    });
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [viewMode, selectedPath]);
-
-  useLayoutEffect(() => {
     const row = contentRowRef.current;
     if (!row) return;
-    const update = (width: number) => setSidebarCollapsed(width < SIDEBAR_COLLAPSE_WIDTH_PX);
+    const update = (width: number) => {
+      if (width === 0) return;
+      setSidebarCollapsed(width < SIDEBAR_COLLAPSE_WIDTH_PX);
+    };
     update(row.clientWidth);
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -1543,7 +1458,7 @@ export const DiffViewer = ({
     });
     observer.observe(row);
     return () => observer.disconnect();
-  }, [displayFileList]);
+  }, [displayFileList, mounted]);
 
   useLayoutEffect(() => {
     const header = headerRef.current;
@@ -1846,20 +1761,54 @@ export const DiffViewer = ({
           </div>
         ) : (
           <div ref={contentRowRef} className="flex min-h-0 flex-1">
-            {!sidebarCollapsed ? (
-              <FileListSidebar
-                files={files}
-                selectedPath={selectedPath}
-                annotationCounts={annotationCounts}
-                onSelect={setSelectedPath}
-                virtualizerRef={fileListVirtualizerRef}
-              />
-            ) : null}
+            <div
+              style={{ width: sidebarCollapsed ? 0 : DIFF_VIEWER_SIDEBAR_WIDTH_PX }}
+              className="shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-snappy"
+            >
+              <div
+                style={{ width: DIFF_VIEWER_SIDEBAR_WIDTH_PX }}
+                className={cn(
+                  "border-r border-border/40 opacity-100 transition-opacity duration-200 ease-snappy",
+                  sidebarCollapsed && "opacity-0",
+                )}
+              >
+                <FileListSidebar
+                  files={files}
+                  selectedPath={selectedPath}
+                  annotationCounts={annotationCounts}
+                  onSelect={setSelectedPath}
+                  virtualizerRef={fileListVirtualizerRef}
+                />
+              </div>
+            </div>
             <div className="flex min-w-0 flex-1 flex-col">
               {selectedFile ? (
                 <>
                   <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-4 py-1.5 font-mono text-xs text-muted-foreground">
-                    {sidebarCollapsed ? (
+                    <span
+                      className={cn(
+                        "transition-opacity duration-200 ease-snappy",
+                        sidebarCollapsed ? "opacity-0 absolute pointer-events-none" : "opacity-100",
+                      )}
+                      aria-hidden={sidebarCollapsed}
+                    >
+                      {selectedFile.oldPath ? (
+                        <span className="truncate">
+                          {selectedFile.oldPath}
+                          <span className="text-muted-foreground/50"> → </span>
+                          <span className="text-foreground">{selectedFile.path}</span>
+                        </span>
+                      ) : (
+                        <span className="truncate text-foreground">{selectedFile.path}</span>
+                      )}
+                    </span>
+                    <span
+                      className={cn(
+                        "transition-opacity duration-200 ease-snappy",
+                        sidebarCollapsed ? "opacity-100" : "opacity-0 absolute pointer-events-none",
+                      )}
+                      aria-hidden={!sidebarCollapsed}
+                    >
                       <Popover>
                         <PopoverTrigger
                           className="flex items-center gap-1 rounded-sm border border-border/50 px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5"
@@ -1876,15 +1825,7 @@ export const DiffViewer = ({
                           />
                         </PopoverContent>
                       </Popover>
-                    ) : selectedFile.oldPath ? (
-                      <span className="truncate">
-                        {selectedFile.oldPath}
-                        <span className="text-muted-foreground/50"> → </span>
-                        <span className="text-foreground">{selectedFile.path}</span>
-                      </span>
-                    ) : (
-                      <span className="truncate text-foreground">{selectedFile.path}</span>
-                    )}
+                    </span>
                     {!selectedFile.binary ? (
                       <span className="ml-auto shrink-0 tabular-nums">
                         <span className={ADDITIONS_CLASSES}>+{selectedFile.additions}</span>{" "}
@@ -1901,7 +1842,6 @@ export const DiffViewer = ({
                       file={selectedFile}
                       payload={patchCache[selectedFile.path] ?? { state: "loading" }}
                       viewMode={viewMode}
-                      compact={compact}
                       annotations={annotations}
                       editingKey={editingKey}
                       pendingRange={pendingRange}
@@ -2073,7 +2013,7 @@ const FileListSidebar = ({
   ]);
 
   return (
-    <div className="flex w-72 shrink-0 flex-col border-r border-border/40">
+    <div className="flex flex-col">
       <div className="relative px-1.5 pt-1.5 pb-0.5">
         <Search
           className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3 text-muted-foreground"

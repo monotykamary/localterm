@@ -45,6 +45,7 @@ import {
   AUTOMATIONS_MODAL_CLOSE_TRANSITION_MS,
   AUTOMATIONS_RELATIVE_TIME_REFRESH_MS,
   AUTOMATIONS_SIDEBAR_COLLAPSE_WIDTH_PX,
+  AUTOMATIONS_SIDEBAR_WIDTH_PX,
   AUTOMATIONS_SORT_DEFAULT,
   AUTOMATIONS_SORT_STORAGE_KEY,
   RECENT_RUNS_LIMIT,
@@ -611,8 +612,10 @@ export const AutomationsModal = ({
   useLayoutEffect(() => {
     const row = contentRowRef.current;
     if (!row) return;
-    const update = (width: number) =>
+    const update = (width: number) => {
+      if (width === 0) return;
       setSidebarCollapsed(width < AUTOMATIONS_SIDEBAR_COLLAPSE_WIDTH_PX);
+    };
     update(row.clientWidth);
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -851,67 +854,80 @@ export const AutomationsModal = ({
           />
         ) : (
           <div ref={contentRowRef} className="flex min-h-0 flex-1">
-            {!sidebarCollapsed ? (
-              <AutomationSidebar
-                automations={filteredAutomations}
-                sortBy={sortBy}
-                search={search}
-                selectedId={selectedId}
-                nowMs={nowMs}
-                onSortChange={handleSortChange}
-                onSearchChange={setSearch}
-                onSelect={(id) => {
-                  setSelectedId(id);
-                  setMode("view");
-                }}
-              />
-            ) : null}
+            <div
+              style={{ width: sidebarCollapsed ? 0 : AUTOMATIONS_SIDEBAR_WIDTH_PX }}
+              className="shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-snappy"
+            >
+              <div
+                style={{ width: AUTOMATIONS_SIDEBAR_WIDTH_PX }}
+                className={cn(
+                  "border-r border-border/40 opacity-100 transition-opacity duration-200 ease-snappy",
+                  sidebarCollapsed && "opacity-0",
+                )}
+              >
+                <AutomationSidebar
+                  automations={filteredAutomations}
+                  sortBy={sortBy}
+                  search={search}
+                  selectedId={selectedId}
+                  nowMs={nowMs}
+                  onSortChange={handleSortChange}
+                  onSearchChange={setSearch}
+                  onSelect={(id) => {
+                    setSelectedId(id);
+                    setMode("view");
+                  }}
+                />
+              </div>
+            </div>
             <div className="flex min-w-0 flex-1 flex-col">
-              {sidebarCollapsed && mode === "view" ? (
-                <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-3 py-1.5 font-mono text-xs text-muted-foreground">
-                  <Popover>
-                    <PopoverTrigger
-                      className="flex items-center gap-1 rounded-sm border border-border/50 px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5"
-                      aria-label="select automation"
+              <div
+                className={cn(
+                  "flex shrink-0 items-center gap-2 border-b border-border/40 px-3 py-1.5 font-mono text-xs text-muted-foreground transition-opacity duration-200 ease-snappy",
+                  sidebarCollapsed && mode === "view"
+                    ? "opacity-100"
+                    : "opacity-0 absolute pointer-events-none",
+                )}
+                aria-hidden={!(sidebarCollapsed && mode === "view")}
+              >
+                <Popover>
+                  <PopoverTrigger
+                    className="flex items-center gap-1 rounded-sm border border-border/50 px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5"
+                    aria-label="select automation"
+                  >
+                    <span className="truncate">{selected?.name ?? "Select…"}</span>
+                    <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
+                  </PopoverTrigger>
+                  <PopoverContent align="start" side="bottom" className="w-72 p-0">
+                    <AutomationListPopover
+                      automations={filteredAutomations}
+                      selectedId={selectedId}
+                      nowMs={nowMs}
+                      onSelect={(id) => {
+                        setSelectedId(id);
+                        setMode("view");
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+                <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                  {(["last-run", "created", "name"] as const).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => handleSortChange(value)}
+                      className={cn(
+                        "rounded-sm px-1.5 py-0.5 text-[10px] transition-colors",
+                        sortBy === value
+                          ? "bg-foreground/10 text-foreground"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
                     >
-                      <span className="truncate">{selected?.name ?? "Select…"}</span>
-                      <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
-                    </PopoverTrigger>
-                    <PopoverContent align="start" side="bottom" className="w-72 p-0">
-                      <AutomationListPopover
-                        automations={filteredAutomations}
-                        selectedId={selectedId}
-                        nowMs={nowMs}
-                        onSelect={(id) => {
-                          setSelectedId(id);
-                          setMode("view");
-                        }}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <div className="ml-auto flex shrink-0 items-center gap-0.5">
-                    {(["last-run", "created", "name"] as const).map((value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => handleSortChange(value)}
-                        className={cn(
-                          "rounded-sm px-1.5 py-0.5 text-[10px] transition-colors",
-                          sortBy === value
-                            ? "bg-foreground/10 text-foreground"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {value === "last-run"
-                          ? "Last run"
-                          : value === "created"
-                            ? "Created"
-                            : "Name"}
-                      </button>
-                    ))}
-                  </div>
+                      {value === "last-run" ? "Last run" : value === "created" ? "Created" : "Name"}
+                    </button>
+                  ))}
                 </div>
-              ) : null}
+              </div>
               <div className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
                 {mode !== "view" ? (
                   <AutomationForm
@@ -1558,7 +1574,7 @@ const AutomationSidebar = ({
   });
 
   return (
-    <div className="flex w-64 shrink-0 flex-col border-r border-border/40">
+    <div className="flex flex-col">
       <div className="relative px-1.5 pt-1.5 pb-0.5">
         <Search
           className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3 text-muted-foreground"
