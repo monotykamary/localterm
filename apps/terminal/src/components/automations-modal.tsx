@@ -34,6 +34,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { EventTriggerSelector } from "@/components/event-trigger-selector";
 import { NumberStepper } from "@/components/number-stepper";
 import { SettingsSelect } from "@/components/settings-select";
 import {
@@ -103,7 +104,7 @@ interface AutomationFormState {
   schedule: ScheduleFormState;
   watchRecursive: boolean;
   watchFilter: string;
-  eventName: AutomationSessionEvent;
+  eventNames: AutomationSessionEvent[];
   limitMode: "forever" | "count";
   limitMax: number;
   closeOnFinish: boolean;
@@ -127,7 +128,7 @@ const emptyForm = (defaultCwd: string | null): AutomationFormState => ({
   schedule: defaultScheduleForm(),
   watchRecursive: true,
   watchFilter: "",
-  eventName: "git-dirty",
+  eventNames: ["git-commit"],
   limitMode: "forever",
   limitMax: DEFAULT_LIMIT_MAX,
   closeOnFinish: false,
@@ -145,7 +146,7 @@ const formForAutomation = (automation: AutomationWithNextRun): AutomationFormSta
     schedule: trigger.schedule,
     watchRecursive: trigger.watchRecursive,
     watchFilter: trigger.watchFilter,
-    eventName: trigger.eventName,
+    eventNames: trigger.eventNames,
     limitMode: automation.limit.kind === "count" ? "count" : "forever",
     limitMax: automation.limit.kind === "count" ? automation.limit.max : DEFAULT_LIMIT_MAX,
     closeOnFinish: automation.closeOnFinish,
@@ -1268,27 +1269,22 @@ const AutomationForm = ({
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            Event
-            <SettingsSelect
-              value={form.eventName}
-              items={SESSION_EVENTS.map((event) => ({
-                id: event,
-                label: SESSION_EVENT_LABELS[event],
-              }))}
-              ariaLabel="session event"
-              placeholder="Event"
-              onValueChange={(next) =>
-                onChange({ ...form, eventName: next as AutomationSessionEvent })
-              }
-            />
-          </label>
+          <span className="text-xs text-muted-foreground">Events</span>
+          <EventTriggerSelector
+            selected={form.eventNames}
+            options={SESSION_EVENTS}
+            labels={SESSION_EVENT_LABELS}
+            descriptions={SESSION_EVENT_DESCRIPTIONS}
+            onChange={(eventNames) => onChange({ ...form, eventNames })}
+          />
           <span className="text-[10px] text-muted-foreground">
-            {SESSION_EVENT_DESCRIPTIONS[form.eventName]}
+            {form.eventNames.length > 0
+              ? SESSION_EVENT_DESCRIPTIONS[form.eventNames[0]]
+              : "Select at least one event."}
           </span>
           <span className="text-[10px] text-muted-foreground">
-            Fires when any localterm session in this directory emits the event. Won't start a new
-            run while one is still going; counts toward the run limit.
+            Fires when any localterm session in this directory emits one of the selected events.
+            Won't start a new run while one is still going; counts toward the run limit.
           </span>
         </div>
       )}

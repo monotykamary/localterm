@@ -54,7 +54,11 @@ import {
   getGitDiffSummary,
   type GitDiffOptions,
 } from "./git-diff.js";
-import { GitDiffWatcher } from "./git-diff-watcher.js";
+import {
+  GitDiffWatcher,
+  GIT_DIFF_WATCHER_EVENT_NAMES,
+  type GitRefEventName,
+} from "./git-diff-watcher.js";
 import { HeartbeatStore } from "./heartbeat-store.js";
 import { parseCronExpression } from "./cron-expression.js";
 import {
@@ -860,11 +864,16 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           gitDiffWatcher.on("git-dirty", () => {
             void handleGitDirty();
           });
-          gitDiffWatcher.on("git-refs-change", () => {
-            if (!isAutomationSession) {
-              sessionEventManager.onSessionEvent("git-refs-change", newSession.lastEmittedCwd);
-            }
-          });
+          const gitAutomationEvents: GitRefEventName[] = GIT_DIFF_WATCHER_EVENT_NAMES.filter(
+            (eventName): eventName is GitRefEventName => eventName !== "git-dirty",
+          );
+          for (const eventName of gitAutomationEvents) {
+            gitDiffWatcher.on(eventName, () => {
+              if (!isAutomationSession) {
+                sessionEventManager.onSessionEvent(eventName, newSession.lastEmittedCwd);
+              }
+            });
+          }
           gitDiffWatcher.start(newSession.cwd);
 
           // Automation-run sessions should not feed events into the session

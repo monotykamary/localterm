@@ -37,27 +37,203 @@ const resolveGitDir = (cwd: string): GitDirResult | null => {
   return null;
 };
 
-interface GitDiffWatcherEvents {
-  "git-dirty": [];
-  "git-refs-change": [];
+export const GIT_DIFF_WATCHER_EVENT_NAMES = [
+  "git-dirty",
+  "git-head-change",
+  "git-branch-change",
+  "git-tag-change",
+  "git-remote-change",
+  "git-stash-change",
+  "git-commit",
+  "git-checkout",
+  "git-reset",
+  "git-merge",
+  "git-rebase",
+  "git-cherry-pick",
+  "git-fetch",
+  "git-stash",
+  "git-tag",
+] as const satisfies [string, ...string[]];
+
+export type GitDiffWatcherEventName = (typeof GIT_DIFF_WATCHER_EVENT_NAMES)[number];
+
+export type GitDiffWatcherEvents = {
+  [K in GitDiffWatcherEventName]: [];
+};
+
+export type GitRefEventName = Exclude<GitDiffWatcherEventName, "git-dirty">;
+
+export interface GitSpecialSnapshot {
+  fetchHead: string | null;
+  origHead: string | null;
+  mergeHead: string | null;
+  cherryPickHead: string | null;
+  rebaseMergeExists: boolean;
+  rebaseApplyExists: boolean;
 }
+
+export interface GitSnapshot {
+  head: string | null;
+  refs: Map<string, string>;
+  special: GitSpecialSnapshot;
+}
+
+const readFileString = (filePath: string): string | null => {
+  try {
+    return fs.readFileSync(filePath, "utf8").trim();
+  } catch {
+    return null;
+  }
+};
+
+const directoryExists = (dirPath: string): boolean => {
+  try {
+    return fs.statSync(dirPath).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+export const buildGitSnapshot = (gitDir: string): GitSnapshot | null => {
+  if (!directoryExists(gitDir)) return null;
+  const refsDir = path.join(gitDir, "refs");
+  const refs = new Map<string, string>();
+  const walk = (dir: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+      } else {
+        try {
+          const sha = fs.readFileSync(fullPath, "utf8").trim();
+          const relPath = path.relative(refsDir, fullPath);
+          refs.set(relPath, sha);
+        } catch {
+          /* ref file deleted between readdir and read */
+        }
+      }
+    }
+  };
+  walk(refsDir);
+
+  return {
+    head: readFileString(path.join(gitDir, "HEAD")),
+    refs,
+    special: {
+      fetchHead: readFileString(path.join(gitDir, "FETCH_HEAD")),
+      origHead: readFileString(path.join(gitDir, "ORIG_HEAD")),
+      mergeHead: readFileString(path.join(gitDir, "MERGE_HEAD")),
+      cherryPickHead: readFileString(path.join(gitDir, "CHERRY_PICK_HEAD")),
+      rebaseMergeExists: directoryExists(path.join(gitDir, "rebase-merge")),
+      rebaseApplyExists: directoryExists(path.join(gitDir, "rebase-apply")),
+    },
+  };
+};
+
+interface GitChanges {
+  head: boolean;
+  branch: boolean;
+  tag: boolean;
+  remote: boolean;
+  stash: boolean;
+  fetchHead: boolean;
+  origHead: boolean;
+  mergeHead: boolean;
+  cherryPickHead: boolean;
+  rebaseMerge: boolean;
+  rebaseApply: boolean;
+}
+
+const computeGitChanges = (previous: GitSnapshot, current: GitSnapshot): GitChanges => {
+  const namespaceChanged = (prefix: string): boolean => {
+    const previousKeys = [...previous.refs.keys()].filter((key) => key.startsWith(prefix));
+    const currentKeys = [...current.refs.keys()].filter((key) => key.startsWith(prefix));
+    if (previousKeys.length !== currentKeys.length) return true;
+    for (const key of previousKeys) {
+      if (previous.refs.get(key) !== current.refs.get(key)) return true;
+    }
+    return false;
+  };
+
+  const refChanged = (name: string): boolean => previous.refs.get(name) !== current.refs.get(name);
+  const specialChanged = (key: keyof GitSpecialSnapshot): boolean =>
+    previous.special[key] !== current.special[key];
+
+  return {
+    head: previous.head !== current.head,
+    branch: namespaceChanged("heads/"),
+    tag: namespaceChanged("tags/"),
+    remote: namespaceChanged("remotes/"),
+    stash: refChanged("stash"),
+    fetchHead: specialChanged("fetchHead"),
+    origHead: specialChanged("origHead"),
+    mergeHead: specialChanged("mergeHead"),
+    cherryPickHead: specialChanged("cherryPickHead"),
+    rebaseMerge: specialChanged("rebaseMergeExists"),
+    rebaseApply: specialChanged("rebaseApplyExists"),
+  };
+};
+
+export const classifyGitChanges = (
+  previous: GitSnapshot,
+  current: GitSnapshot,
+): GitRefEventName[] => {
+  const changes = computeGitChanges(previous, current);
+  const events: GitRefEventName[] = [];
+
+  if (changes.head) events.push("git-head-change");
+  if (changes.branch) events.push("git-branch-change");
+  if (changes.tag) events.push("git-tag-change");
+  if (changes.remote) events.push("git-remote-change");
+  if (changes.stash) events.push("git-stash-change");
+
+  const branchSpecialStateBefore =
+    previous.special.mergeHead ||
+    previous.special.cherryPickHead ||
+    previous.special.rebaseMergeExists ||
+    previous.special.rebaseApplyExists;
+
+  if (changes.branch) {
+    if (previous.special.mergeHead) events.push("git-merge");
+    else if (previous.special.cherryPickHead) events.push("git-cherry-pick");
+    else if (previous.special.rebaseMergeExists || previous.special.rebaseApplyExists)
+      events.push("git-rebase");
+    else if (changes.origHead && !branchSpecialStateBefore) events.push("git-reset");
+    else events.push("git-commit");
+  } else if (changes.remote || changes.fetchHead) {
+    events.push("git-fetch");
+  }
+
+  if (changes.tag) events.push("git-tag");
+  if (changes.stash) events.push("git-stash");
+  if (changes.head && !changes.branch) events.push("git-checkout");
+  if (changes.origHead && !changes.branch && !changes.head) events.push("git-reset");
+
+  return events;
+};
 
 export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
   private watchers: fs.FSWatcher[] = [];
   private throttleTimer: NodeJS.Timeout | null = null;
   private disposed = false;
   private gitDir: string | null = null;
-  private lastRefsSignature: string | null = null;
+  private lastSnapshot: GitSnapshot | null = null;
 
   start(cwd: string): void {
     this.stop();
 
-    this.lastRefsSignature = null;
+    this.lastSnapshot = null;
     const result = resolveGitDir(cwd);
     if (!result) return;
     const { gitDir, repoRoot } = result;
     this.gitDir = gitDir;
-    this.lastRefsSignature = this.readRefsSignature();
+    this.lastSnapshot = buildGitSnapshot(gitDir);
 
     const watch = (target: string, options?: fs.WatchOptions | BufferEncoding | null) => {
       try {
@@ -109,7 +285,7 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
     if (this.throttleTimer !== null) return;
     if (!this.disposed) {
       this.emit("git-dirty");
-      this.emitRefsChangeIfNeeded();
+      this.emitRefEventsIfNeeded();
     }
     this.throttleTimer = setTimeout(() => {
       this.throttleTimer = null;
@@ -117,47 +293,16 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
     this.throttleTimer.unref?.();
   }
 
-  private emitRefsChangeIfNeeded(): void {
-    const current = this.readRefsSignature();
-    if (current === null || current === this.lastRefsSignature) return;
-    this.lastRefsSignature = current;
-    this.emit("git-refs-change");
-  }
+  private emitRefEventsIfNeeded(): void {
+    if (!this.gitDir) return;
+    const current = buildGitSnapshot(this.gitDir);
+    const previous = this.lastSnapshot;
+    this.lastSnapshot = current;
+    if (!previous || !current) return;
 
-  private readRefsSignature(): string | null {
-    if (!this.gitDir) return null;
-    const refsDir = path.join(this.gitDir, "refs");
-    const parts: string[] = [];
-    const walk = (dir: string) => {
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        return;
-      }
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walk(fullPath);
-        } else {
-          try {
-            const sha = fs.readFileSync(fullPath, "utf8").trim();
-            const relPath = path.relative(refsDir, fullPath);
-            parts.push(`${relPath}=${sha}`);
-          } catch {
-            /* ref file deleted between readdir and read */
-          }
-        }
-      }
-    };
-    try {
-      const headContent = fs.readFileSync(path.join(this.gitDir, "HEAD"), "utf8").trim();
-      parts.push(`HEAD=${headContent}`);
-    } catch {
-      /* no HEAD yet */
+    const events = classifyGitChanges(previous, current);
+    for (const eventName of events) {
+      this.emit(eventName);
     }
-    walk(refsDir);
-    parts.sort();
-    return parts.length > 0 ? parts.join(";") : null;
   }
 }

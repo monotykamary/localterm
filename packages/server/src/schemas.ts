@@ -334,17 +334,34 @@ export const automationScheduleSchema = z.discriminatedUnion("kind", [
 // cron engine compiles it on the fly); a "watch" trigger fires when the
 // automation's cwd changes, observed via native fs.watch — event-driven, never
 // polled; an "event" trigger fires when a localterm session emits a named
-// event (git-dirty, git-refs-change, notification, cwd, foreground, exit) whose cwd matches
+// event (git-commit, git-checkout, notification, cwd, foreground, exit) whose cwd matches
 // the automation's cwd or is inside it. `recursive` watches the whole subtree.
 // Only schedule triggers carry a cron / next-run.
-export const automationSessionEventSchema = z.enum([
-  "git-dirty",
-  "git-refs-change",
+// Session events that can drive an event-triggered automation. These are the
+// user-selectable events; internal signals such as `git-dirty` are deliberately
+// excluded because they are too coarse for automation triggers.
+export const AUTOMATION_SESSION_EVENTS = [
+  "git-head-change",
+  "git-branch-change",
+  "git-tag-change",
+  "git-remote-change",
+  "git-stash-change",
+  "git-commit",
+  "git-checkout",
+  "git-reset",
+  "git-merge",
+  "git-rebase",
+  "git-cherry-pick",
+  "git-fetch",
+  "git-stash",
+  "git-tag",
   "notification",
   "cwd",
   "foreground",
   "exit",
-]);
+] as const satisfies [string, ...string[]];
+
+export const automationSessionEventSchema = z.enum(AUTOMATION_SESSION_EVENTS);
 
 export const automationTriggerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("schedule"), schedule: automationScheduleSchema }).strict(),
@@ -355,7 +372,12 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
       filter: z.string().min(1).max(MAX_AUTOMATION_WATCH_FILTER_LENGTH).optional(),
     })
     .strict(),
-  z.object({ kind: z.literal("event"), event: automationSessionEventSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("event"),
+      events: z.array(automationSessionEventSchema).min(1),
+    })
+    .strict(),
 ]);
 
 // Create/update accept either the structured schedule or a legacy bare cron
@@ -368,7 +390,7 @@ export const scheduleInputSchema = z.union([
 
 // Trigger as accepted on the wire: the schedule payload accepts the legacy bare
 // cron string too, `recursive` is optional (defaults true at the store), and
-// the event trigger accepts a session event name.
+// the event trigger accepts one or more session event names.
 export const triggerInputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("schedule"), schedule: scheduleInputSchema }).strict(),
   z
@@ -378,7 +400,12 @@ export const triggerInputSchema = z.discriminatedUnion("kind", [
       filter: z.string().min(1).max(MAX_AUTOMATION_WATCH_FILTER_LENGTH).optional(),
     })
     .strict(),
-  z.object({ kind: z.literal("event"), event: automationSessionEventSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("event"),
+      events: z.array(automationSessionEventSchema).min(1),
+    })
+    .strict(),
 ]);
 
 export const automationRunLimitSchema = z.discriminatedUnion("kind", [

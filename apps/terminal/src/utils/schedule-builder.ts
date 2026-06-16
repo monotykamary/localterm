@@ -243,12 +243,24 @@ export interface TriggerFormState {
   schedule: ScheduleFormState;
   watchRecursive: boolean;
   watchFilter: string;
-  eventName: AutomationSessionEvent;
+  eventNames: AutomationSessionEvent[];
 }
 
 export const SESSION_EVENT_LABELS: Record<AutomationSessionEvent, string> = {
-  "git-dirty": "Git changes detected",
-  "git-refs-change": "Git commit/push detected",
+  "git-head-change": "Git HEAD changed",
+  "git-branch-change": "Git branch moved",
+  "git-tag-change": "Git tag changed",
+  "git-remote-change": "Git remote refs changed",
+  "git-stash-change": "Git stash changed",
+  "git-commit": "Git commit detected",
+  "git-checkout": "Git checkout detected",
+  "git-reset": "Git reset detected",
+  "git-merge": "Git merge detected",
+  "git-rebase": "Git rebase detected",
+  "git-cherry-pick": "Git cherry-pick detected",
+  "git-fetch": "Git fetch detected",
+  "git-stash": "Git stash detected",
+  "git-tag": "Git tag detected",
   notification: "Shell notification (OSC 9)",
   cwd: "Directory changed",
   foreground: "Foreground process changed",
@@ -256,10 +268,24 @@ export const SESSION_EVENT_LABELS: Record<AutomationSessionEvent, string> = {
 };
 
 export const SESSION_EVENT_DESCRIPTIONS: Record<AutomationSessionEvent, string> = {
-  "git-dirty":
-    "Fires on each prompt after the working tree changes — commits, checkouts, stashes, edits.",
-  "git-refs-change":
-    "Fires when git HEAD actually moves (commit, push, checkout, reset). No prompt-cycle noise — only real ref changes.",
+  "git-head-change": "Fires when .git/HEAD moves (checkout, reset, merge).",
+  "git-branch-change": "Fires when a local branch ref moves (commit, merge, pull, reset).",
+  "git-tag-change": "Fires when a tag is created, updated, or deleted.",
+  "git-remote-change": "Fires when remote-tracking refs change (fetch, pull).",
+  "git-stash-change": "Fires when the stash ref changes.",
+  "git-commit":
+    "Fires when a local branch advances and no merge/rebase/reset state is detected. Best-effort detection.",
+  "git-checkout": "Fires when HEAD changes while no branch ref moves. Best-effort detection.",
+  "git-reset":
+    "Fires when HEAD or a branch ref moves and ORIG_HEAD appears. Best-effort detection.",
+  "git-merge": "Fires when a branch ref moves while MERGE_HEAD was present. Best-effort detection.",
+  "git-rebase":
+    "Fires when a branch ref moves while a rebase directory was present. Best-effort detection.",
+  "git-cherry-pick":
+    "Fires when a branch ref moves while CHERRY_PICK_HEAD was present. Best-effort detection.",
+  "git-fetch": "Fires when remote-tracking refs change. Best-effort detection.",
+  "git-stash": "Fires when the stash ref changes.",
+  "git-tag": "Fires when a tag ref changes.",
   notification:
     "Fires when a shell command emits OSC 9 (printf '\\e]9;message\\a'). Use your own scripts as event sources.",
   cwd: "Fires when you cd into or out of the automation's directory.",
@@ -268,14 +294,11 @@ export const SESSION_EVENT_DESCRIPTIONS: Record<AutomationSessionEvent, string> 
   exit: "Fires when a shell session in the directory closes.",
 };
 
-export const SESSION_EVENTS: AutomationSessionEvent[] = [
-  "git-dirty",
-  "git-refs-change",
-  "notification",
-  "cwd",
-  "foreground",
-  "exit",
-];
+export const SESSION_EVENTS: AutomationSessionEvent[] = Object.keys(
+  SESSION_EVENT_LABELS,
+) as AutomationSessionEvent[];
+
+const defaultEventNames = (): AutomationSessionEvent[] => ["git-commit"];
 
 export const buildTriggerFromForm = (form: TriggerFormState): AutomationTrigger =>
   form.triggerType === "watch"
@@ -285,7 +308,7 @@ export const buildTriggerFromForm = (form: TriggerFormState): AutomationTrigger 
         ...(form.watchFilter.trim() ? { filter: form.watchFilter.trim() } : {}),
       }
     : form.triggerType === "event"
-      ? { kind: "event", event: form.eventName }
+      ? { kind: "event", events: form.eventNames }
       : { kind: "schedule", schedule: buildScheduleFromForm(form.schedule) };
 
 // Map a stored trigger back onto the form fields so editing reopens on the
@@ -297,7 +320,7 @@ export const recognizeTriggerForm = (trigger: AutomationTrigger): TriggerFormSta
         schedule: defaultScheduleForm(),
         watchRecursive: trigger.recursive,
         watchFilter: trigger.filter ?? "",
-        eventName: "git-dirty",
+        eventNames: defaultEventNames(),
       }
     : trigger.kind === "event"
       ? {
@@ -305,20 +328,29 @@ export const recognizeTriggerForm = (trigger: AutomationTrigger): TriggerFormSta
           schedule: defaultScheduleForm(),
           watchRecursive: true,
           watchFilter: "",
-          eventName: trigger.event,
+          eventNames: trigger.events,
         }
       : {
           triggerType: "schedule",
           schedule: recognizeScheduleForm(trigger.schedule),
           watchRecursive: true,
           watchFilter: "",
-          eventName: "git-dirty",
+          eventNames: defaultEventNames(),
         };
+
+const eventTriggerLabel = (events: AutomationSessionEvent[]): string => {
+  if (events.length === 0) return "On no events";
+  if (events.length === 1) return `On ${SESSION_EVENT_LABELS[events[0]]}`;
+  if (events.length === 2) {
+    return `On ${SESSION_EVENT_LABELS[events[0]]} or ${SESSION_EVENT_LABELS[events[1]]}`;
+  }
+  return `On ${events.length} events`;
+};
 
 // A compact human-readable label for the list rows and detail header.
 export const triggerLabel = (trigger: AutomationTrigger): string =>
   trigger.kind === "watch"
     ? `When files change${trigger.filter ? ` matching ${trigger.filter}` : ""}${trigger.recursive ? " · subfolders" : ""}`
     : trigger.kind === "event"
-      ? `On ${SESSION_EVENT_LABELS[trigger.event]}`
+      ? eventTriggerLabel(trigger.events)
       : scheduleLabel(trigger.schedule);

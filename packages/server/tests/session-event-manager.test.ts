@@ -8,7 +8,7 @@ const POST_RUN_GRACE_MS = 200;
 const makeAutomation = (overrides: Partial<Automation> = {}): Automation => ({
   id: "e1",
   name: "on event",
-  trigger: { kind: "event", event: "git-dirty" },
+  trigger: { kind: "event", events: ["git-commit"] },
   cwd: "/virtual/e1",
   command: "true",
   enabled: true,
@@ -43,7 +43,7 @@ describe("SessionEventManager", () => {
     const automation = makeAutomation();
     const { manager, due } = setup(automation);
     manager.sync([automation]);
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     expect(due).toHaveLength(0);
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toEqual([automation]);
@@ -54,16 +54,16 @@ describe("SessionEventManager", () => {
     const automation = makeAutomation();
     const { manager, due } = setup(automation);
     manager.sync([automation]);
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(1);
     manager.dispose();
   });
 
-  it("ignores events that don't match the trigger event name", () => {
-    const automation = makeAutomation({ trigger: { kind: "event", event: "git-dirty" } });
+  it("ignores events that don't match any trigger event name", () => {
+    const automation = makeAutomation({ trigger: { kind: "event", events: ["git-commit"] } });
     const { manager, due } = setup(automation);
     manager.sync([automation]);
     manager.onSessionEvent("cwd", "/virtual/e1");
@@ -76,7 +76,7 @@ describe("SessionEventManager", () => {
     const automation = makeAutomation();
     const { manager, due } = setup(automation);
     manager.sync([automation]);
-    manager.onSessionEvent("git-dirty", "/different/path");
+    manager.onSessionEvent("git-commit", "/different/path");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(0);
     manager.dispose();
@@ -86,7 +86,7 @@ describe("SessionEventManager", () => {
     const automation = makeAutomation();
     const { manager, due } = setup(automation);
     manager.sync([automation]);
-    manager.onSessionEvent("git-dirty", "/virtual/e1/subproject");
+    manager.onSessionEvent("git-commit", "/virtual/e1/subproject");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(1);
     manager.dispose();
@@ -97,12 +97,12 @@ describe("SessionEventManager", () => {
     const { manager, due, state } = setup(automation);
     state.inFlight = true;
     manager.sync([automation]);
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(0);
 
     state.inFlight = false;
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(1);
     manager.dispose();
@@ -113,7 +113,7 @@ describe("SessionEventManager", () => {
     const { manager, due, state } = setup(automation);
     manager.sync([automation]);
     state.current = { ...automation, enabled: false };
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(0);
     manager.dispose();
@@ -128,7 +128,7 @@ describe("SessionEventManager", () => {
     state.current = disabled;
     manager.sync([disabled]);
 
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(0);
     manager.dispose();
@@ -156,23 +156,23 @@ describe("SessionEventManager", () => {
     manager.dispose();
   });
 
-  it("rebuilds the listener when the event name changes", () => {
-    const automation = makeAutomation({ trigger: { kind: "event", event: "git-dirty" } });
+  it("rebuilds the listener when the event set changes", () => {
+    const automation = makeAutomation({ trigger: { kind: "event", events: ["git-commit"] } });
     const { manager, due, state } = setup(automation);
     manager.sync([automation]);
 
-    // Fires for git-dirty.
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    // Fires for git-commit.
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(1);
 
-    // Switch the trigger event.
-    const changed = makeAutomation({ trigger: { kind: "event", event: "cwd" } });
+    // Switch the trigger events.
+    const changed = makeAutomation({ trigger: { kind: "event", events: ["cwd"] } });
     state.current = changed;
     manager.sync([changed]);
 
-    // git-dirty no longer matches.
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    // git-commit no longer matches.
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(1);
 
@@ -183,10 +183,25 @@ describe("SessionEventManager", () => {
     manager.dispose();
   });
 
+  it("fires when any selected event matches", () => {
+    const automation = makeAutomation({
+      trigger: { kind: "event", events: ["git-commit", "git-merge"] },
+    });
+    const { manager, due } = setup(automation);
+    manager.sync([automation]);
+
+    manager.onSessionEvent("git-merge", "/virtual/e1");
+    vi.advanceTimersByTime(DEBOUNCE_MS);
+    expect(due).toHaveLength(1);
+
+    manager.dispose();
+  });
+
   it("supports each event type", () => {
     const eventNames = [
-      "git-dirty",
-      "git-refs-change",
+      "git-commit",
+      "git-checkout",
+      "git-reset",
       "notification",
       "cwd",
       "foreground",
@@ -194,7 +209,7 @@ describe("SessionEventManager", () => {
     ] as const;
     for (const eventName of eventNames) {
       const due: Automation[] = [];
-      const automation = makeAutomation({ trigger: { kind: "event", event: eventName } });
+      const automation = makeAutomation({ trigger: { kind: "event", events: [eventName] } });
       const state = { current: automation as Automation | null, inFlight: false };
       const manager = new SessionEventManager({
         debounceMs: DEBOUNCE_MS,
@@ -218,18 +233,18 @@ describe("SessionEventManager", () => {
     const { manager, due } = setup(automation);
     manager.sync([automation]);
 
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(1);
 
     manager.notifyRunFinished("e1");
 
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(1);
 
     vi.advanceTimersByTime(POST_RUN_GRACE_MS);
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(2);
     manager.dispose();
@@ -245,12 +260,12 @@ describe("SessionEventManager", () => {
     manager.notifyRunFinished("e1");
     vi.advanceTimersByTime(POST_RUN_GRACE_MS - 10);
 
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(0);
 
     vi.advanceTimersByTime(20);
-    manager.onSessionEvent("git-dirty", "/virtual/e1");
+    manager.onSessionEvent("git-commit", "/virtual/e1");
     vi.advanceTimersByTime(DEBOUNCE_MS);
     expect(due).toHaveLength(1);
     manager.dispose();

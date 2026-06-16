@@ -187,14 +187,14 @@ describe("automations REST API", () => {
 
   it("creates an event automation with no cron or next run", async () => {
     const { status, body } = await request("POST", "", {
-      name: "on git dirty",
-      trigger: { kind: "event", event: "git-dirty" },
+      name: "on git commit",
+      trigger: { kind: "event", events: ["git-commit"] },
       cwd: os.tmpdir(),
-      command: "echo dirty",
+      command: "echo commit",
     });
     expect(status).toBe(201);
     const automation = automationWithNextRunSchema.parse(body.automation);
-    expect(automation.trigger).toEqual({ kind: "event", event: "git-dirty" });
+    expect(automation.trigger).toEqual({ kind: "event", events: ["git-commit"] });
     expect(automation.cron).toBeNull();
     expect(automation.nextRunAt).toBeNull();
   });
@@ -202,7 +202,15 @@ describe("automations REST API", () => {
   it("rejects an event trigger with an invalid event name", async () => {
     const { body } = await request("POST", "", {
       ...createInput(),
-      trigger: { kind: "event", event: "not-a-real-event" },
+      trigger: { kind: "event", events: ["not-a-real-event"] },
+    });
+    expect(body.error).toBe("invalid_body");
+  });
+
+  it("rejects an event trigger with an empty event list", async () => {
+    const { body } = await request("POST", "", {
+      ...createInput(),
+      trigger: { kind: "event", events: [] },
     });
     expect(body.error).toBe("invalid_body");
   });

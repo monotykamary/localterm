@@ -188,5 +188,5 @@ export const normalizeTriggerInput = (trigger: TriggerInput): AutomationTrigger 
         ...(trigger.filter ? { filter: trigger.filter } : {}),
       }
     : trigger.kind === "event"
-      ? { kind: "event", event: trigger.event }
+      ? { kind: "event", events: trigger.events }
       : { kind: "schedule", schedule: normalizeScheduleInput(trigger.schedule) };

@@ -119,7 +119,7 @@ const withTrigger = (overrides: Partial<TriggerFormState>): TriggerFormState => 
   schedule: defaultScheduleForm(),
   watchRecursive: true,
   watchFilter: "",
-  eventName: "git-dirty",
+  eventNames: ["git-commit"],
   ...overrides,
 });
 
@@ -151,10 +151,12 @@ describe("buildTriggerFromForm", () => {
     ).toEqual({ kind: "watch", recursive: true, filter: "*.mov" });
   });
 
-  it("builds an event trigger carrying the event name", () => {
+  it("builds an event trigger carrying the event names", () => {
     expect(
-      buildTriggerFromForm(withTrigger({ triggerType: "event", eventName: "notification" })),
-    ).toEqual({ kind: "event", event: "notification" });
+      buildTriggerFromForm(
+        withTrigger({ triggerType: "event", eventNames: ["notification", "cwd"] }),
+      ),
+    ).toEqual({ kind: "event", events: ["notification", "cwd"] });
   });
 });
 
@@ -164,9 +166,9 @@ describe("recognizeTriggerForm", () => {
     { kind: "watch", recursive: true },
     { kind: "watch", recursive: false },
     { kind: "watch", recursive: true, filter: "*.mov" },
-    { kind: "event", event: "git-dirty" },
-    { kind: "event", event: "git-refs-change" },
-    { kind: "event", event: "notification" },
+    { kind: "event", events: ["git-commit"] },
+    { kind: "event", events: ["git-merge", "git-commit"] },
+    { kind: "event", events: ["notification"] },
   ];
 
   it("round-trips every trigger through the form", () => {
@@ -189,11 +191,14 @@ describe("triggerLabel", () => {
     expect(triggerLabel({ kind: "watch", recursive: false, filter: "*.mov" })).toBe(
       "When files change matching *.mov",
     );
-    expect(triggerLabel({ kind: "event", event: "git-dirty" })).toBe("On Git changes detected");
-    expect(triggerLabel({ kind: "event", event: "git-refs-change" })).toBe(
-      "On Git commit/push detected",
+    expect(triggerLabel({ kind: "event", events: ["git-commit"] })).toBe("On Git commit detected");
+    expect(triggerLabel({ kind: "event", events: ["git-commit", "git-merge"] })).toBe(
+      "On Git commit detected or Git merge detected",
     );
-    expect(triggerLabel({ kind: "event", event: "notification" })).toBe(
+    expect(triggerLabel({ kind: "event", events: ["git-commit", "git-merge", "git-reset"] })).toBe(
+      "On 3 events",
+    );
+    expect(triggerLabel({ kind: "event", events: ["notification"] })).toBe(
       "On Shell notification (OSC 9)",
     );
   });

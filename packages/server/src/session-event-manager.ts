@@ -1,14 +1,27 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
-import type { Automation } from "./types.js";
+import type { Automation, AutomationSessionEvent } from "./types.js";
 
 interface SessionEventManagerEvents {
   due: [automation: Automation];
 }
 
-type SessionEventName =
+export type SessionEventName =
   | "git-dirty"
-  | "git-refs-change"
+  | "git-head-change"
+  | "git-branch-change"
+  | "git-tag-change"
+  | "git-remote-change"
+  | "git-stash-change"
+  | "git-commit"
+  | "git-checkout"
+  | "git-reset"
+  | "git-merge"
+  | "git-rebase"
+  | "git-cherry-pick"
+  | "git-fetch"
+  | "git-stash"
+  | "git-tag"
   | "notification"
   | "cwd"
   | "foreground"
@@ -22,7 +35,9 @@ interface SessionEventEntry {
 }
 
 const signatureOf = (automation: Automation): string =>
-  automation.trigger.kind === "event" ? `${automation.trigger.event}:${automation.cwd}` : "";
+  automation.trigger.kind === "event"
+    ? `${automation.trigger.events.join(",")}:${automation.cwd}`
+    : "";
 
 export class SessionEventManager extends EventEmitter<SessionEventManagerEvents> {
   private readonly entries = new Map<string, SessionEventEntry>();
@@ -63,7 +78,7 @@ export class SessionEventManager extends EventEmitter<SessionEventManagerEvents>
       if (entry.postRunGraceActive) continue;
       const automation = this.options.getAutomation(id);
       if (!automation || automation.trigger.kind !== "event") continue;
-      if (automation.trigger.event !== eventName) continue;
+      if (!automation.trigger.events.includes(eventName as AutomationSessionEvent)) continue;
       if (!isCwdMatch(automation.cwd, sessionCwd)) continue;
       if (entry.debounceTimer !== null) clearTimeout(entry.debounceTimer);
       entry.debounceTimer = setTimeout(() => {
