@@ -1713,15 +1713,17 @@ export const DiffViewer = ({
                 </button>
               ))}
             </div>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={handleRefresh}
-              aria-label="refresh diff"
-              className="hover:text-foreground"
-            >
-              <RefreshCw />
-            </Button>
+            {headerLayout.showRefresh ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={handleRefresh}
+                aria-label="refresh diff"
+                className="hover:text-foreground"
+              >
+                <RefreshCw />
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="icon-sm"

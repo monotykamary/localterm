@@ -55,18 +55,15 @@ const LAYOUT_FULL_WIDTH = radioGroupWidth(S.unified, S.split);
 const LAYOUT_ABBR_WIDTH = radioGroupWidth(S.u, S.s);
 
 const RIGHT_DIV_INTERNAL_GAP = GAP_1_PX;
-const RIGHT_DIV_WIDTH_FULL =
-  LAYOUT_FULL_WIDTH +
-  RIGHT_DIV_INTERNAL_GAP +
-  BUTTON_ICON_SM_PX +
-  RIGHT_DIV_INTERNAL_GAP +
-  BUTTON_ICON_SM_PX;
-const RIGHT_DIV_WIDTH_ABBR =
-  LAYOUT_ABBR_WIDTH +
-  RIGHT_DIV_INTERNAL_GAP +
-  BUTTON_ICON_SM_PX +
-  RIGHT_DIV_INTERNAL_GAP +
-  BUTTON_ICON_SM_PX;
+
+const rightDivWidth = (layoutLabels: "full" | "abbreviated", showRefresh: boolean): number => {
+  const layoutWidth = layoutLabels === "full" ? LAYOUT_FULL_WIDTH : LAYOUT_ABBR_WIDTH;
+  let width = layoutWidth + RIGHT_DIV_INTERNAL_GAP + BUTTON_ICON_SM_PX;
+  if (showRefresh) {
+    width += RIGHT_DIV_INTERNAL_GAP + BUTTON_ICON_SM_PX;
+  }
+  return width;
+};
 
 const badgeMinWidth = (prNumber: number, prState: string): number => {
   const prNumWidth = measureTextWidth(`#${prNumber}`, MONO_11PX);
@@ -113,6 +110,7 @@ export interface HeaderLayout {
   prShowTitle: boolean;
   layoutLabels: "full" | "abbreviated";
   showBinaryCount: boolean;
+  showRefresh: boolean;
   headerGap: number;
   headerPadding: number;
 }
@@ -133,9 +131,7 @@ export interface HeaderLayoutParams {
   previousConfigIndex?: number;
 }
 
-interface LayoutConfig extends HeaderLayout {}
-
-const LAYOUT_CONFIGS: LayoutConfig[] = [
+const LAYOUT_CONFIGS: HeaderLayout[] = [
   {
     showTitle: true,
     compareLabels: "full",
@@ -143,6 +139,7 @@ const LAYOUT_CONFIGS: LayoutConfig[] = [
     prShowTitle: true,
     layoutLabels: "full",
     showBinaryCount: true,
+    showRefresh: true,
     headerGap: GAP_3_PX,
     headerPadding: HEADER_PAD_FULL_PX,
   },
@@ -153,6 +150,7 @@ const LAYOUT_CONFIGS: LayoutConfig[] = [
     prShowTitle: true,
     layoutLabels: "abbreviated",
     showBinaryCount: true,
+    showRefresh: true,
     headerGap: GAP_3_PX,
     headerPadding: HEADER_PAD_FULL_PX,
   },
@@ -163,6 +161,7 @@ const LAYOUT_CONFIGS: LayoutConfig[] = [
     prShowTitle: false,
     layoutLabels: "abbreviated",
     showBinaryCount: true,
+    showRefresh: true,
     headerGap: GAP_3_PX,
     headerPadding: HEADER_PAD_FULL_PX,
   },
@@ -173,6 +172,7 @@ const LAYOUT_CONFIGS: LayoutConfig[] = [
     prShowTitle: false,
     layoutLabels: "abbreviated",
     showBinaryCount: true,
+    showRefresh: true,
     headerGap: GAP_3_PX,
     headerPadding: HEADER_PAD_FULL_PX,
   },
@@ -183,6 +183,7 @@ const LAYOUT_CONFIGS: LayoutConfig[] = [
     prShowTitle: false,
     layoutLabels: "abbreviated",
     showBinaryCount: false,
+    showRefresh: true,
     headerGap: GAP_2_PX,
     headerPadding: HEADER_PAD_FULL_PX,
   },
@@ -193,6 +194,18 @@ const LAYOUT_CONFIGS: LayoutConfig[] = [
     prShowTitle: false,
     layoutLabels: "abbreviated",
     showBinaryCount: false,
+    showRefresh: true,
+    headerGap: GAP_2_PX,
+    headerPadding: HEADER_PAD_COMPACT_PX,
+  },
+  {
+    showTitle: false,
+    compareLabels: "abbreviated",
+    showVs: false,
+    prShowTitle: false,
+    layoutLabels: "abbreviated",
+    showBinaryCount: false,
+    showRefresh: false,
     headerGap: GAP_2_PX,
     headerPadding: HEADER_PAD_COMPACT_PX,
   },
@@ -204,7 +217,7 @@ const LAYOUT_CONFIGS: LayoutConfig[] = [
 // as a single flex item, so header gap applies between left items and the
 // right div — not between the right div's internal children.
 const computeConfigWidth = (
-  config: LayoutConfig,
+  config: HeaderLayout,
   isBranchMode: boolean,
   branchMinWidth: number,
   branchFullWidth: number,
@@ -221,7 +234,7 @@ const computeConfigWidth = (
   if (isPr) leftElements.push(config.prShowTitle ? prFullWidth : prMinWidth);
   leftElements.push(config.showBinaryCount ? statFull : statMin);
 
-  const rightDiv = config.layoutLabels === "full" ? RIGHT_DIV_WIDTH_FULL : RIGHT_DIV_WIDTH_ABBR;
+  const rightDiv = rightDivWidth(config.layoutLabels, config.showRefresh);
 
   // left items + right div = (leftCount + 1) flex items → leftCount gaps
   const leftCount = leftElements.length;
