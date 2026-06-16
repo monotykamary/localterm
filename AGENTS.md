@@ -31,6 +31,8 @@ pnpm typecheck
 pnpm format
 ```
 
+`pnpm format` mutates files — always `git diff` afterward and include any formatting changes in the commit.
+
 ## Development instructions
 
 This is a pnpm monorepo with `apps/` (playgrounds, sites, extensions) and `packages/` (libraries, tools). No external services (databases, Docker, etc.) are required.
