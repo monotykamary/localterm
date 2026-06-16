@@ -1238,12 +1238,13 @@ export const DiffViewer = ({
     return () => controller.abort();
   }, [open, cwd, refreshCount, compareMode, baseOverride, abortPatchFetches, refreshCurrentFiles]);
 
-  // Realtime refresh: when the server signals the working tree may have changed
-  // while the viewer is open, debounce and re-fetch the current mode's file list.
-  // We mark the selected file's cached metadata stale so the prefetch queue
+  // When the server signals the working tree may have changed, debounce and
+  // re-fetch the current mode's file list — even while the viewer is closed — so
+  // the file list is already current the next time the viewer opens. When open,
+  // we also mark the selected file's cached metadata stale so the prefetch queue
   // force-reloads its patch, keeping the diff content in sync with the disk.
   useEffect(() => {
-    if (!open || !cwd || gitDirtyVersion === undefined) return;
+    if (!cwd || gitDirtyVersion === undefined) return;
 
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
@@ -1251,10 +1252,10 @@ export const DiffViewer = ({
         const response = await refreshCurrentFiles(controller.signal);
         if (controller.signal.aborted || !response) return;
         setHasError(false);
-        // Mark the selected file's patch metadata stale so the prefetch queue
-        // treats it as changed and force-reloads the patch in-band.
-        const stalePath = selectedPathRef.current;
-        if (stalePath) lastFileMetaRef.current.set(stalePath, "__git-dirty__");
+        if (open) {
+          const stalePath = selectedPathRef.current;
+          if (stalePath) lastFileMetaRef.current.set(stalePath, "__git-dirty__");
+        }
       })();
     }, DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS);
 
@@ -1262,7 +1263,7 @@ export const DiffViewer = ({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, cwd, gitDirtyVersion, compareMode, baseOverride, refreshCurrentFiles]);
+  }, [cwd, gitDirtyVersion, compareMode, baseOverride, open, refreshCurrentFiles]);
 
   // Push working-tree summaries back to the ambient indicator so it stays in sync
   // with the viewer's latest fetch instead of waiting on the throttled WebSocket push.
