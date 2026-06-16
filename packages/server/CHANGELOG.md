@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.42.0
+
+### Minor Changes
+
+- Refresh the diff viewer in realtime as working-tree changes happen in the background, and fix the lint scripts so they consistently enumerate source files.
+
 ## 1.41.15
 
 ### Patch Changes
