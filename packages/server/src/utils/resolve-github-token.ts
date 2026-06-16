@@ -20,7 +20,7 @@ const readKeychainToken = async (hostname: string): Promise<string | null> => {
         ["find-generic-password", "-s", service, "-g"],
         { timeout: 5_000 },
       );
-      const match = /\"acct\"<blob>=\"([^\"]+)\"/.exec(stdout);
+      const match = /"acct"<blob>="([^"]+)"/.exec(stdout);
       return match ? [match[1]] : [];
     } catch {
       return [];

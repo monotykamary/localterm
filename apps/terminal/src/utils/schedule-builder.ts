@@ -261,7 +261,7 @@ export const SESSION_EVENT_DESCRIPTIONS: Record<AutomationSessionEvent, string> 
   "git-refs-change":
     "Fires when git HEAD actually moves (commit, push, checkout, reset). No prompt-cycle noise — only real ref changes.",
   notification:
-    "Fires when a shell command emits OSC 9 (printf '\e]9;message\a'). Use your own scripts as event sources.",
+    "Fires when a shell command emits OSC 9 (printf '\\e]9;message\\a'). Use your own scripts as event sources.",
   cwd: "Fires when you cd into or out of the automation's directory.",
   foreground:
     "Fires when the foreground process changes (e.g. vim starts or stops) in the directory.",
