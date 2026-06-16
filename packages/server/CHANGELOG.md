@@ -1,5 +1,7 @@
 # localterm-server
 
+## 1.41.12
+
 ## 1.41.11
 
 ### Patch Changes
