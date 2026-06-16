@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.41.14
+
+### Patch Changes
+
+- 76a5de7: Fix launchd auto-start respawn loop that caused continuous syspolicyd activity on macOS. The launchd plist now runs the daemon directly in the foreground with crash-only KeepAlive, and the start command exits cleanly when another instance is already running under launchd.
+
 ## 1.41.13
 
 ### Patch Changes
