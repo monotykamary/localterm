@@ -1584,7 +1584,7 @@ export const DiffViewer = ({
   const branchNoBase = isBranchMode && branchInfo !== null && displayBase === null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-5">
       <div
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}

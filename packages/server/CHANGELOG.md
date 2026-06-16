@@ -11,7 +11,6 @@
 ### Patch Changes
 
 - Fix diff viewer and automations modal bugs
-
   - Fix flash of missing sidebar on modal open (zero-width measurement guard + missing mounted dependency)
   - Fix forever-loading patches after refresh/close-reopen (PrefetchQueue.clear() no longer permanently bricks the queue)
   - Animate sidebar collapse/expand smoothly instead of abrupt layout jump
