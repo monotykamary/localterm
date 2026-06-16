@@ -352,6 +352,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const caffeinateActiveTriggerRef = useRef<string | null>(null);
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
   const { summary: diffSummary, setGitDiffSummary } = useGitDiffSummary();
+  // Bumps every time the server pushes a git-diff-summary from a real git-dirty
+  // signal, giving the diff viewer a trigger for near-realtime updates.
+  const [gitDirtyVersion, setGitDirtyVersion] = useState(0);
   const hasDiff = diffSummary !== null && diffSummary.isRepo && diffSummary.files > 0;
   // Ambient branch/PR lease for the active cwd: drives the toolbar PR indicator
   // and is handed to the diff viewer so it opens in branch mode instantly.
@@ -1011,6 +1014,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           setGitDiffSummary(null);
         } else if (message.type === "git-diff-summary") {
           setGitDiffSummary(message.summary);
+          setGitDirtyVersion((version) => version + 1);
         } else if (message.type === "foreground") {
           const nowHasProcess = message.process !== null;
           onForegroundProcessChange?.(nowHasProcess);
@@ -2010,6 +2014,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         open={isDiffViewerOpen}
         cwd={liveCwd}
         branchInfo={branchInfo}
+        gitDirtyVersion={gitDirtyVersion}
         onClose={closeDiffViewer}
         onSendToTerminal={sendDiffReviewToTerminal}
         onRefreshBranchInfo={refreshBranchInfo}

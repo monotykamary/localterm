@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS } from "../../src/lib/constants";
 import type {
   GitBranchInfo,
   GitDiffFileListResponse,
@@ -587,5 +588,64 @@ describe("DiffViewer", () => {
 
     expect(await screen.findByText("line1")).toBeTruthy();
     expect(screen.queryByText("BETA")).toBeNull();
+  });
+
+  it("refreshes the file list in near-realtime when gitDirtyVersion bumps while open", async () => {
+    filesMock.mockImplementation(async () => ({ ...FILE_LIST, files: [...FILE_LIST.files] }));
+    patchMock.mockImplementation((_cwd, path) => Promise.resolve(PATCHES[path] ?? null));
+
+    const { rerender } = render(
+      <DiffViewer open cwd="/repo" branchInfo={null} onClose={() => {}} />,
+    );
+    await screen.findByText("BETA");
+
+    filesMock.mockClear();
+
+    rerender(
+      <DiffViewer open cwd="/repo" branchInfo={null} gitDirtyVersion={1} onClose={() => {}} />,
+    );
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS + 50),
+    );
+
+    await vi.waitFor(() => expect(filesMock).toHaveBeenCalledTimes(1));
+    expect(filesMock).toHaveBeenCalledWith(
+      "/repo",
+      expect.objectContaining({ mode: "working" }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("force-reloads the selected patch through the prefetch queue on a git-dirty signal", async () => {
+    filesMock.mockImplementation(async () => ({ ...FILE_LIST, files: [...FILE_LIST.files] }));
+    patchMock.mockImplementation((_cwd, path) => Promise.resolve(PATCHES[path] ?? null));
+
+    const { rerender } = render(
+      <DiffViewer open cwd="/repo" branchInfo={null} onClose={() => {}} />,
+    );
+    await screen.findByText("BETA");
+
+    filesMock.mockClear();
+    patchMock.mockClear();
+
+    rerender(
+      <DiffViewer open cwd="/repo" branchInfo={null} gitDirtyVersion={1} onClose={() => {}} />,
+    );
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS + 50),
+    );
+
+    await vi.waitFor(() => expect(filesMock).toHaveBeenCalledTimes(1));
+
+    // The file refresh marked the selected file's patch metadata stale, so
+    // the prefetch queue force-reloads it even though the metadata is identical.
+    await vi.waitFor(() => {
+      const appCalls = patchMock.mock.calls.filter(([, path]) => path === "src/app.ts");
+      expect(appCalls).toHaveLength(1);
+    });
+    const imageCalls = patchMock.mock.calls.filter(([, path]) => path === "image.png");
+    expect(imageCalls).toHaveLength(0);
   });
 });

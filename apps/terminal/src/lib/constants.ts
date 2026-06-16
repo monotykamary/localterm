@@ -34,6 +34,10 @@ export const FAVICON_DEAD_OPACITY = 0.35;
 export const COMMAND_PALETTE_CLOSE_TRANSITION_MS = 150;
 
 export const DIFF_VIEWER_CLOSE_TRANSITION_MS = 150;
+// Delay before reacting to a server git-dirty signal in the open diff viewer.
+// The server already throttles git-dirty at 100ms; this coalesces rapid edits
+// so we don't thrash the UI while still updating in near-realtime.
+export const DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS = 500;
 // Lines rendered on a file's first paint in the diff viewer. The rest stream in
 // progressively (DIFF_VIEWER_RENDER_CHUNK lines per animation frame) so a
 // generated-file diff paints its first screen instantly without locking up the

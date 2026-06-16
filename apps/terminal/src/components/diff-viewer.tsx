@@ -50,6 +50,7 @@ import {
 import {
   DIFF_VIEWER_CLOSE_TRANSITION_MS,
   DIFF_VIEWER_INITIAL_LINE_LIMIT,
+  DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS,
   DIFF_VIEWER_RENDER_CHUNK,
   PATCH_PREFETCH_CONCURRENCY,
   PATCH_PREFETCH_NEIGHBOR_RADIUS,
@@ -98,6 +99,9 @@ interface DiffViewerProps {
   // the viewer opens straight into branch mode when a PR exists — no gh wait.
   // Null while the lease is still loading or unavailable.
   branchInfo: GitBranchInfo | null;
+  // Bumps whenever the server emits a git-diff-summary from a real git-dirty
+  // signal. The viewer debounces and refreshes in near-realtime while open.
+  gitDirtyVersion?: number;
   onClose: () => void;
   onSendToTerminal?: (text: string) => void;
   // Ask the parent to re-fetch the leased branch info (wired to the refresh
@@ -1056,6 +1060,7 @@ export const DiffViewer = ({
   open,
   cwd,
   branchInfo,
+  gitDirtyVersion,
   onClose,
   onSendToTerminal,
   onRefreshBranchInfo,
@@ -1071,6 +1076,7 @@ export const DiffViewer = ({
   const [hasError, setHasError] = useState(false);
   const [patchCache, setPatchCache] = useState<Record<string, PatchEntry>>({});
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const selectedPathRef = useRef(selectedPath);
   const [viewMode, setViewMode] = useState<DiffViewMode>(() => loadStoredDiffViewMode());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [headerWidth, setHeaderWidth] = useState(0);
@@ -1116,6 +1122,10 @@ export const DiffViewer = ({
   patchCacheRef.current = patchCache;
   const onDiffSummaryUpdateRef = useRef(onDiffSummaryUpdate);
   onDiffSummaryUpdateRef.current = onDiffSummaryUpdate;
+
+  useEffect(() => {
+    selectedPathRef.current = selectedPath;
+  }, [selectedPath]);
 
   useEffect(() => {
     if (open) {
@@ -1174,6 +1184,22 @@ export const DiffViewer = ({
   const branchFilesRef = useRef(branchFiles);
   branchFilesRef.current = branchFiles;
 
+  // Refetch the current mode's file list and update the right per-mode state.
+  // Returns the fetched list so callers can decide whether to recover from errors
+  // or invalidate cached patch metadata.
+  const refreshCurrentFiles = useCallback(
+    async (signal: AbortSignal): Promise<GitDiffFileListResponse | null> => {
+      if (!cwd) return null;
+      const query = { mode: compareMode, base: baseOverride };
+      const response = await fetchGitDiffFiles(cwd, query, signal);
+      if (signal.aborted || !response) return null;
+      const setter = compareMode === "branch" ? setBranchFiles : setWorkingFiles;
+      setter(response);
+      return response;
+    },
+    [cwd, compareMode, baseOverride],
+  );
+
   // On-open revalidation: when the viewer opens with data already present, show
   // it immediately and silently refresh in the background. When data is missing
   // (first load on a fresh cwd, or explicit refresh), fetch with the center
@@ -1193,16 +1219,10 @@ export const DiffViewer = ({
       return;
     }
     const currentData = compareMode === "branch" ? branchFilesRef.current : workingFilesRef.current;
-    const setter = compareMode === "branch" ? setBranchFiles : setWorkingFiles;
-    const query = { mode: compareMode, base: baseOverride };
 
     if (currentData) {
       const controller = new AbortController();
-      void (async () => {
-        const response = await fetchGitDiffFiles(cwd, query, controller.signal);
-        if (controller.signal.aborted || !response) return;
-        setter(response);
-      })();
+      void refreshCurrentFiles(controller.signal);
       return () => controller.abort();
     }
 
@@ -1211,16 +1231,38 @@ export const DiffViewer = ({
     setPatchCache({});
     const controller = new AbortController();
     void (async () => {
-      const response = await fetchGitDiffFiles(cwd, query, controller.signal);
+      const response = await refreshCurrentFiles(controller.signal);
       if (controller.signal.aborted) return;
-      if (!response) {
-        setHasError(true);
-        return;
-      }
-      setter(response);
+      if (!response) setHasError(true);
     })();
     return () => controller.abort();
-  }, [open, cwd, refreshCount, compareMode, baseOverride, abortPatchFetches]);
+  }, [open, cwd, refreshCount, compareMode, baseOverride, abortPatchFetches, refreshCurrentFiles]);
+
+  // Realtime refresh: when the server signals the working tree may have changed
+  // while the viewer is open, debounce and re-fetch the current mode's file list.
+  // We mark the selected file's cached metadata stale so the prefetch queue
+  // force-reloads its patch, keeping the diff content in sync with the disk.
+  useEffect(() => {
+    if (!open || !cwd || gitDirtyVersion === undefined) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const response = await refreshCurrentFiles(controller.signal);
+        if (controller.signal.aborted || !response) return;
+        setHasError(false);
+        // Mark the selected file's patch metadata stale so the prefetch queue
+        // treats it as changed and force-reloads the patch in-band.
+        const stalePath = selectedPathRef.current;
+        if (stalePath) lastFileMetaRef.current.set(stalePath, "__git-dirty__");
+      })();
+    }, DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [open, cwd, gitDirtyVersion, compareMode, baseOverride, refreshCurrentFiles]);
 
   // Push working-tree summaries back to the ambient indicator so it stays in sync
   // with the viewer's latest fetch instead of waiting on the throttled WebSocket push.
