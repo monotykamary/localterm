@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.41.13
+
+### Patch Changes
+
+- 749cd31: Drop the refresh button from the diff viewer header at the narrowest disclosure breakpoint so the close button remains reachable.
+
 ## 1.41.12
 
 ## 1.41.11
