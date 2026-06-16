@@ -891,24 +891,24 @@ export const AutomationsModal = ({
                   </Popover>
                   <div className="ml-auto flex shrink-0 items-center gap-0.5">
                     {(["last-run", "created", "name"] as const).map((value) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => handleSortChange(value)}
-                          className={cn(
-                            "rounded-sm px-1.5 py-0.5 text-[10px] transition-colors",
-                            sortBy === value
-                              ? "bg-foreground/10 text-foreground"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          {value === "last-run"
-                            ? "Last run"
-                            : value === "created"
-                              ? "Created"
-                              : "Name"}
-                        </button>
-                      ))}
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => handleSortChange(value)}
+                        className={cn(
+                          "rounded-sm px-1.5 py-0.5 text-[10px] transition-colors",
+                          sortBy === value
+                            ? "bg-foreground/10 text-foreground"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {value === "last-run"
+                          ? "Last run"
+                          : value === "created"
+                            ? "Created"
+                            : "Name"}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ) : null}
