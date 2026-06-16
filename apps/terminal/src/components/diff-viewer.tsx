@@ -1552,10 +1552,10 @@ export const DiffViewer = ({
       if (width === 0) return;
       setHeaderWidth(width);
     };
-    update(header.clientWidth);
+    update(header.offsetWidth);
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        const width = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+        const width = entry.borderBoxSize?.[0]?.inlineSize ?? header.offsetWidth;
         update(width);
       }
     });
