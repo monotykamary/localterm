@@ -32,6 +32,11 @@ const VENDOR_TRANSFORMS = [
     to: `setDimensions(t){this._dimensions=t}};${RESOLVE_FG_COLOR_FUNCTION};var Fe=class{`,
   },
   {
+    name: "glyph atlas style-only cache key for alpha mask",
+    from: "w0=e.get(t,r,s,a),w0||(w0=this._drawToCache(t,r,s,a,o,n),e.set(t,r,s,a,w0))",
+    to: "w0=e.get(t,0,(s&134217728?1:0)|(r&67108864?2:0),a),w0||(w0=this._drawToCache(t,r,s,a,o,n),e.set(t,0,(s&134217728?1:0)|(r&67108864?2:0),a,w0))",
+  },
+  {
     name: "glyph fragment shader luma alpha",
     from: "outColor = vec4(v_color, texel.a);",
     to: "outColor = vec4(v_color, dot(texel.rgb, vec3(0.299, 0.587, 0.114)));",

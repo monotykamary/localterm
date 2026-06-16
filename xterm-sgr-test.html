@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>xterm SGR bold/italic test</title>
+    <link rel="stylesheet" href="./node_modules/.pnpm/node_modules/@xterm/xterm/css/xterm.css" />
+    <link
+      rel="stylesheet"
+      href="./node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/400.css"
+    />
+    <link
+      rel="stylesheet"
+      href="./node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/500.css"
+    />
+    <link
+      rel="stylesheet"
+      href="./node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/600.css"
+    />
+    <link
+      rel="stylesheet"
+      href="./node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/700.css"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100vw;
+        height: 100vh;
+        background: #101010;
+        color: #ffffff;
+        overflow: hidden;
+      }
+      #status {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        z-index: 10;
+        padding: 8px 12px;
+        background: rgba(0, 0, 0, 0.75);
+        border-radius: 6px;
+        font-size: 13px;
+        pointer-events: none;
+      }
+      #terminal {
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status">initializing…</div>
+    <div id="terminal"></div>
+    <script type="module">
+      let resolveSgrReady;
+      window.sgrReady = new Promise((resolve) => {
+        resolveSgrReady = resolve;
+      });
+      window.getSgrResult = () => ({});
+
+      (async () => {
+        try {
+          const params = new URLSearchParams(location.search);
+          const renderer = params.get("renderer") || "webgl";
+          const fontFamily =
+            params.get("fontFamily") ||
+            '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+
+          const statusEl = document.getElementById("status");
+          statusEl.textContent = `${renderer} renderer — loading modules…`;
+
+          let Terminal;
+          let WebglAddon;
+          let CanvasAddon;
+          try {
+            ({ Terminal } =
+              await import("./node_modules/.pnpm/node_modules/@xterm/xterm/lib/xterm.mjs"));
+          } catch (error) {
+            window.sgrResult = { error: `xterm import failed: ${error.message}` };
+            resolveSgrReady(window.sgrResult);
+            return;
+          }
+          try {
+            ({ WebglAddon } = await import("./xterm-bench-webgl.mjs"));
+          } catch (error) {
+            window.sgrResult = { error: `webgl addon import failed: ${error.message}` };
+            resolveSgrReady(window.sgrResult);
+            return;
+          }
+          try {
+            ({ CanvasAddon } =
+              await import("./node_modules/@xterm/addon-canvas/lib/xterm-addon-canvas.mjs"));
+          } catch (error) {
+            window.sgrResult = { error: `canvas addon import failed: ${error.message}` };
+            resolveSgrReady(window.sgrResult);
+            return;
+          }
+
+          statusEl.textContent = `${renderer} renderer — loading fonts…`;
+
+          const usedFontStrings = new Set();
+          const fontDescriptor = Object.getOwnPropertyDescriptor(
+            CanvasRenderingContext2D.prototype,
+            "font",
+          );
+          Object.defineProperty(CanvasRenderingContext2D.prototype, "font", {
+            set(value) {
+              usedFontStrings.add(value);
+              return fontDescriptor.set.call(this, value);
+            },
+            get() {
+              return fontDescriptor.get.call(this);
+            },
+          });
+
+          const terminal = new Terminal({
+            cols: Number(params.get("cols")) || 80,
+            rows: Number(params.get("rows")) || 10,
+            fontSize: Number(params.get("fontSize")) || 14,
+            fontFamily,
+            lineHeight: Number(params.get("lineHeight")) || 1.2,
+            letterSpacing: Number(params.get("letterSpacing")) || 0,
+            minimumContrastRatio: 1,
+            drawBoldTextInBrightColors: false,
+          });
+
+          const container = document.getElementById("terminal");
+          terminal.open(container);
+
+          if (renderer === "webgl") {
+            try {
+              const addon = new WebglAddon({ customGlyphs: true });
+              addon.onContextLoss(() => addon.dispose());
+              terminal.loadAddon(addon);
+            } catch (error) {
+              statusEl.textContent = `webgl failed: ${error.message}`;
+            }
+          } else if (renderer === "canvas") {
+            try {
+              terminal.loadAddon(new CanvasAddon());
+            } catch (error) {
+              statusEl.textContent = `canvas failed: ${error.message}`;
+            }
+          }
+
+          window.terminal = terminal;
+          window.getSgrResult = () => {
+            const fonts = Array.from(usedFontStrings);
+            const cells = [];
+            for (let rowIndex = 0; rowIndex < Math.min(2, terminal.rows); rowIndex += 1) {
+              const line = terminal.buffer.active.getLine(rowIndex);
+              if (!line) continue;
+              const rowCells = [];
+              for (let colIndex = 0; colIndex < Math.min(40, terminal.cols); colIndex += 1) {
+                const cell = line.getCell(colIndex);
+                if (!cell) continue;
+                rowCells.push({
+                  char: cell.getChars(),
+                  bold: cell.isBold(),
+                  italic: cell.isItalic(),
+                });
+              }
+              cells.push(rowCells);
+            }
+            return {
+              fonts,
+              hasBold: fonts.some((font) => /\b(700|bold)\b/i.test(font)),
+              hasItalic: fonts.some((font) => /\bitalic\b/i.test(font)),
+              cells,
+            };
+          };
+
+          await document.fonts.ready;
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+
+          terminal.write(
+            "Normal  \x1b[1mBold\x1b[0m  \x1b[3mItalic\x1b[0m  \x1b[1;3mBold+Italic\x1b[0m  Normal\r\n",
+          );
+          terminal.write(
+            "\x1b[38;5;1m\x1b[1mRed bold\x1b[0m  \x1b[38;5;4m\x1b[3mBlue italic\x1b[0m  \x1b[38;5;2m\x1b[1;3mGreen bold italic\x1b[0m\r\n",
+          );
+
+          setTimeout(() => {
+            statusEl.textContent = `${renderer} — ${fontFamily.replace(/"/g, "")}`;
+            const result = { marker: "from-timeout", ...window.getSgrResult() };
+            window.sgrResult = result;
+            resolveSgrReady(result);
+          }, 300);
+        } catch (error) {
+          window.sgrResult = { error: error.message, stack: error.stack };
+          resolveSgrReady(window.sgrResult);
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -296,6 +296,85 @@ async function runBenchmark(client, renderer, query) {
   }
 }
 
+async function runSgrTest(client, query) {
+  const { targetId } = await client.request("Target.createTarget", {
+    url: "about:blank",
+  });
+  const { sessionId } = await client.request("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
+
+  try {
+    await client.request("Runtime.enable", undefined, sessionId);
+    await client.request("Page.enable", undefined, sessionId);
+
+    const testUrl = new URL("http://x/xterm-sgr-test.html");
+    const renderer = query.get("renderer") || "webgl";
+    const fontFamily =
+      query.get("fontFamily") ||
+      '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    testUrl.searchParams.set("renderer", renderer);
+    testUrl.searchParams.set("fontFamily", fontFamily);
+    if (query.has("cols")) testUrl.searchParams.set("cols", query.get("cols"));
+    if (query.has("rows")) testUrl.searchParams.set("rows", query.get("rows"));
+    if (query.has("fontSize")) testUrl.searchParams.set("fontSize", query.get("fontSize"));
+    if (query.has("lineHeight")) testUrl.searchParams.set("lineHeight", query.get("lineHeight"));
+    const pageUrl = `http://127.0.0.1:${STATIC_PORT}/xterm-sgr-test.html${testUrl.search}`;
+
+    try {
+      const { windowId } = await client.request("Browser.getWindowForTarget", { targetId });
+      await client.request("Browser.setWindowBounds", {
+        windowId,
+        bounds: { windowState: "fullscreen" },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } catch {
+      // Fullscreen request may fail in headless; the page still uses the full viewport.
+    }
+
+    client.request("Page.navigate", { url: pageUrl }, sessionId).catch(() => {});
+
+    await new Promise((resolve) => {
+      const dispose = client.on(
+        "Page.loadEventFired",
+        () => {
+          dispose();
+          resolve();
+        },
+        sessionId,
+      );
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    let sgrValue = null;
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      const pollResult = await client.request(
+        "Runtime.evaluate",
+        {
+          expression:
+            "(typeof window.sgrResult !== 'undefined' && window.sgrResult !== null) ? window.sgrResult : null",
+          returnByValue: true,
+        },
+        sessionId,
+      );
+      sgrValue = pollResult.result.value;
+      if (sgrValue !== null) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    return {
+      renderer,
+      fontFamily,
+      url: pageUrl,
+      ...sgrValue,
+    };
+  } finally {
+    await client.request("Target.closeTarget", { targetId }).catch(() => {});
+  }
+}
+
 async function main() {
   const staticServer = await startStaticServer();
 
@@ -319,19 +398,13 @@ async function main() {
       await client.request("Browser.getVersion");
     } catch {
       connected = false;
-      console.log("CDP heartbeat failed, reconnecting...");
-      try {
-        client = await connectCdp(CDP_WS);
-        connected = true;
-        console.log("CDP reconnected");
-      } catch (error) {
-        console.error("CDP reconnect failed:", error.message);
-      }
+      console.log("CDP heartbeat failed");
     }
   }
   heartbeatTimer = setInterval(heartbeat, HEARTBEAT_MS);
 
   let running = false;
+  let sgrRunning = false;
   const controlServer = createHttpServer(async (request, response) => {
     const url = new URL(request.url, "http://x");
     const sendJson = (status, payload) => {
@@ -355,6 +428,25 @@ async function main() {
         sendJson(200, result);
       } catch (error) {
         sendJson(500, { error: error.message });
+      }
+      return;
+    }
+
+    if (url.pathname === "/run-sgr") {
+      if (sgrRunning) {
+        sendJson(423, { error: "sgr test already running" });
+        return;
+      }
+      sgrRunning = true;
+      try {
+        await connectPromise;
+        if (!connected || !client) throw new Error("CDP not connected");
+        const result = await runSgrTest(client, url.searchParams);
+        sendJson(200, result);
+      } catch (error) {
+        sendJson(500, { error: error.message });
+      } finally {
+        sgrRunning = false;
       }
       return;
     }
