@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>xterm renderer benchmark</title>
+    <link rel="stylesheet" href="./node_modules/.pnpm/node_modules/@xterm/xterm/css/xterm.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100vw;
+        height: 100vh;
+        background: #000;
+        color: #fff;
+        overflow: hidden;
+      }
+      #status {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        z-index: 10;
+        padding: 8px 12px;
+        background: rgba(0, 0, 0, 0.75);
+        border-radius: 6px;
+        font-size: 13px;
+        pointer-events: none;
+      }
+      #terminal {
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status">initializing…</div>
+    <div id="terminal"></div>
+    <script type="module">
+      import { Terminal } from "./node_modules/.pnpm/node_modules/@xterm/xterm/lib/xterm.mjs";
+      import { WebglAddon } from "./xterm-bench-webgl.mjs";
+      import { CanvasAddon } from "./node_modules/@xterm/addon-canvas/lib/xterm-addon-canvas.mjs";
+
+      const params = new URLSearchParams(location.search);
+      const renderer = params.get("renderer") || "webgl";
+      const fit = params.get("fit") !== "0";
+      let cols = Number(params.get("cols")) || 80;
+      let rows = Number(params.get("rows")) || 40;
+      const frames = Number(params.get("frames")) || 600;
+      const spriteChars = (params.get("chars") || "#@*+.,:;").split("");
+      const throttle = params.get("throttle") !== "0";
+      const colorCount = params.has("colors") ? Number(params.get("colors")) : 16;
+      const mode = params.get("mode") || "opentui";
+      const quantize = params.has("quantize") ? Number(params.get("quantize")) : 0;
+      const lineHeight = params.has("lineHeight") ? Number(params.get("lineHeight")) : 1.2;
+      const letterSpacing = params.has("letterSpacing") ? Number(params.get("letterSpacing")) : 0;
+
+      const terminal = new Terminal({
+        cols,
+        rows,
+        fontSize: 14,
+        fontFamily: '"Geist Mono", "SF Mono", Menlo, monospace',
+        lineHeight,
+        letterSpacing,
+        minimumContrastRatio: 1,
+        drawBoldTextInBrightColors: false,
+        cursorBlink: false,
+      });
+
+      const container = document.getElementById("terminal");
+      terminal.open(container);
+
+      if (renderer === "webgl") {
+        try {
+          const addon = new WebglAddon({ customGlyphs: true });
+          addon.onContextLoss(() => addon.dispose());
+          terminal.loadAddon(addon);
+        } catch {
+          statusEl.textContent = "webgl failed";
+        }
+      } else if (renderer === "canvas") {
+        try {
+          terminal.loadAddon(new CanvasAddon());
+        } catch {
+          statusEl.textContent = "canvas addon failed";
+        }
+      }
+
+      if (fit) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const screen = terminal.element.querySelector(".xterm-screen");
+        if (screen && screen.clientWidth > 0 && screen.clientHeight > 0) {
+          const cellWidth = screen.clientWidth / terminal.cols;
+          const cellHeight = screen.clientHeight / terminal.rows;
+          cols = Math.max(1, Math.floor(container.clientWidth / cellWidth));
+          rows = Math.max(1, Math.floor(container.clientHeight / cellHeight));
+          terminal.resize(cols, rows);
+        }
+      }
+
+      const statusEl = document.getElementById("status");
+      statusEl.textContent = `${renderer} renderer — ready`;
+
+      function buildRandomFrameBuilder() {
+        const palette = [];
+        const paletteSize = Math.max(0, colorCount);
+        if (paletteSize > 0) {
+          for (let paletteIndex = 0; paletteIndex < paletteSize; paletteIndex++) {
+            const colorIndex = Math.floor((paletteIndex / paletteSize) * 256);
+            palette.push(`38;5;${colorIndex}`);
+          }
+        }
+        return (frameIndex) => {
+          let frame = "";
+          for (let rowIndex = 0; rowIndex < rows; rowIndex++) {
+            for (let colIndex = 0; colIndex < cols; colIndex++) {
+              const charIndex =
+                (frameIndex * rows * cols + rowIndex * cols + colIndex) % spriteChars.length;
+              if (paletteSize > 0) {
+                const color = palette[Math.floor(Math.random() * paletteSize)];
+                frame += `\x1b[${color}m${spriteChars[charIndex]}`;
+              } else {
+                const red = Math.floor(Math.random() * 256);
+                const green = Math.floor(Math.random() * 256);
+                const blue = Math.floor(Math.random() * 256);
+                frame += `\x1b[38;2;${red};${green};${blue}m${spriteChars[charIndex]}`;
+              }
+            }
+            frame += "\r\n";
+          }
+          return frame;
+        };
+      }
+
+      function buildOpentuiFrameBuilder() {
+        const pixelWidth = cols * 2;
+        const pixelHeight = rows * 2;
+        const totalPixels = pixelWidth * pixelHeight;
+        const pixels = new Uint8ClampedArray(totalPixels * 4);
+        const blobs = [
+          { r: 0.9, g: 0.2, b: 0.5, radius: 0.35, speed: 1.7, phase: 0.3 },
+          { r: 0.2, g: 0.6, b: 0.9, radius: 0.45, speed: 1.2, phase: 0.7 },
+          { r: 0.9, g: 0.8, b: 0.2, radius: 0.4, speed: 1.5, phase: 0.5 },
+          { r: 0.1, g: 0.9, b: 0.6, radius: 0.3, speed: 2.0, phase: 0.2 },
+        ];
+        const quadrantChars = [
+          " ",
+          "▗",
+          "▖",
+          "▄",
+          "▝",
+          "▐",
+          "▞",
+          "▟",
+          "▘",
+          "▚",
+          "▌",
+          "▙",
+          "▀",
+          "▜",
+          "▛",
+          "█",
+        ];
+
+        const luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        const colorDistance = (a, b) => {
+          const dr = a[0] - b[0];
+          const dg = a[1] - b[1];
+          const db = a[2] - b[2];
+          return dr * dr + dg * dg + db * db;
+        };
+
+        return (frameIndex) => {
+          const time = frameIndex * 0.04;
+
+          for (let pixelIndex = 0; pixelIndex < totalPixels; pixelIndex++) {
+            const pixelX = pixelIndex % pixelWidth;
+            const pixelY = Math.floor(pixelIndex / pixelWidth);
+            const normalizedX = pixelX / pixelWidth;
+            const normalizedY = pixelY / pixelHeight;
+
+            let red = 0.05;
+            let green = 0.05;
+            let blue = 0.08;
+
+            for (const blob of blobs) {
+              const blobX = 0.5 + 0.35 * Math.cos(time * blob.speed + blob.phase * 10);
+              const blobY = 0.5 + 0.25 * Math.sin(time * blob.speed + blob.phase * 10);
+              const dx = normalizedX - blobX;
+              const dy = normalizedY - blobY;
+              const normalizedRadius = blob.radius * (0.8 + 0.2 * Math.sin(time * 2 + blob.speed));
+              const intensity = Math.max(0, 1 - Math.sqrt(dx * dx + dy * dy) / normalizedRadius);
+              const falloff = intensity * intensity;
+              red += blob.r * falloff;
+              green += blob.g * falloff;
+              blue += blob.b * falloff;
+            }
+
+            const base = pixelIndex * 4;
+            pixels[base] = Math.min(255, Math.floor(red * 255));
+            pixels[base + 1] = Math.min(255, Math.floor(green * 255));
+            pixels[base + 2] = Math.min(255, Math.floor(blue * 255));
+            pixels[base + 3] = 255;
+          }
+
+          let frame = "";
+          for (let rowIndex = 0; rowIndex < rows; rowIndex++) {
+            for (let colIndex = 0; colIndex < cols; colIndex++) {
+              const baseX = colIndex * 2;
+              const baseY = rowIndex * 2;
+              const topLeft = (baseY * pixelWidth + baseX) * 4;
+              const topRight = (baseY * pixelWidth + baseX + 1) * 4;
+              const bottomLeft = ((baseY + 1) * pixelWidth + baseX) * 4;
+              const bottomRight = ((baseY + 1) * pixelWidth + baseX + 1) * 4;
+
+              const pixelColors = [
+                [pixels[topLeft], pixels[topLeft + 1], pixels[topLeft + 2]],
+                [pixels[topRight], pixels[topRight + 1], pixels[topRight + 2]],
+                [pixels[bottomLeft], pixels[bottomLeft + 1], pixels[bottomLeft + 2]],
+                [pixels[bottomRight], pixels[bottomRight + 1], pixels[bottomRight + 2]],
+              ];
+
+              let maxDistance = -1;
+              let darkIndex = 0;
+              let lightIndex = 1;
+              for (let i = 0; i < 4; i++) {
+                for (let j = i + 1; j < 4; j++) {
+                  const distance = colorDistance(pixelColors[i], pixelColors[j]);
+                  if (distance > maxDistance) {
+                    maxDistance = distance;
+                    darkIndex = i;
+                    lightIndex = j;
+                  }
+                }
+              }
+
+              if (
+                luma(
+                  pixelColors[darkIndex][0],
+                  pixelColors[darkIndex][1],
+                  pixelColors[darkIndex][2],
+                ) >
+                luma(
+                  pixelColors[lightIndex][0],
+                  pixelColors[lightIndex][1],
+                  pixelColors[lightIndex][2],
+                )
+              ) {
+                const temp = darkIndex;
+                darkIndex = lightIndex;
+                lightIndex = temp;
+              }
+
+              let quadrantBits = 0;
+              const bitValues = [8, 4, 2, 1];
+              for (let i = 0; i < 4; i++) {
+                const darkDistance = colorDistance(pixelColors[i], pixelColors[darkIndex]);
+                const lightDistance = colorDistance(pixelColors[i], pixelColors[lightIndex]);
+                if (darkDistance <= lightDistance) {
+                  quadrantBits |= bitValues[i];
+                }
+              }
+
+              let fgColor = pixelColors[darkIndex];
+              let bgColor = pixelColors[lightIndex];
+              let charIndex = quadrantBits;
+
+              if (charIndex === 0) {
+                bgColor = [
+                  (pixelColors[0][0] + pixelColors[1][0] + pixelColors[2][0] + pixelColors[3][0]) >>
+                    2,
+                  (pixelColors[0][1] + pixelColors[1][1] + pixelColors[2][1] + pixelColors[3][1]) >>
+                    2,
+                  (pixelColors[0][2] + pixelColors[1][2] + pixelColors[2][2] + pixelColors[3][2]) >>
+                    2,
+                ];
+              } else if (charIndex === 15) {
+                fgColor = [
+                  (pixelColors[0][0] + pixelColors[1][0] + pixelColors[2][0] + pixelColors[3][0]) >>
+                    2,
+                  (pixelColors[0][1] + pixelColors[1][1] + pixelColors[2][1] + pixelColors[3][1]) >>
+                    2,
+                  (pixelColors[0][2] + pixelColors[1][2] + pixelColors[2][2] + pixelColors[3][2]) >>
+                    2,
+                ];
+              }
+
+              const char = quadrantChars[charIndex];
+              frame += `\x1b[38;2;${quantizeColor(fgColor[0])};${quantizeColor(fgColor[1])};${quantizeColor(
+                fgColor[2],
+              )}m\x1b[48;2;${quantizeColor(bgColor[0])};${quantizeColor(bgColor[1])};${quantizeColor(
+                bgColor[2],
+              )}m${char}`;
+            }
+            frame += "\r\n";
+          }
+          return frame;
+        };
+      }
+
+      function quantizeColor(channel) {
+        if (quantize <= 0 || quantize >= 256) return channel;
+        return Math.min(255, Math.round(channel / quantize) * quantize);
+      }
+
+      function buildLinesFrameBuilder() {
+        return () => {
+          let frame = "";
+          for (let rowIndex = 0; rowIndex < rows; rowIndex++) {
+            for (let colIndex = 0; colIndex < cols; colIndex++) {
+              const top = rowIndex === 0;
+              const bottom = rowIndex === rows - 1;
+              const left = colIndex === 0;
+              const right = colIndex === cols - 1;
+
+              let char = " ";
+              if (top && left) char = "┌";
+              else if (top && right) char = "┐";
+              else if (bottom && left) char = "└";
+              else if (bottom && right) char = "┘";
+              else if (top || bottom) char = "─";
+              else if (left || right) char = "│";
+
+              frame += char;
+            }
+            frame += "\r\n";
+          }
+          return frame;
+        };
+      }
+
+      const effectiveMode = mode === "glyph" ? "random" : mode;
+      const buildFrame =
+        effectiveMode === "opentui"
+          ? buildOpentuiFrameBuilder()
+          : effectiveMode === "lines"
+            ? buildLinesFrameBuilder()
+            : buildRandomFrameBuilder();
+
+      window.runXtermBenchmark = async function runXtermBenchmark() {
+        statusEl.textContent = `${renderer} renderer — running…`;
+        const renderTimestamps = [];
+        const disposer = terminal.onRender(() => {
+          renderTimestamps.push(performance.now());
+        });
+
+        const startTime = performance.now();
+        if (throttle) {
+          for (let frameIndex = 0; frameIndex < frames; frameIndex++) {
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+            const frame = buildFrame(frameIndex);
+            await new Promise((resolve) => terminal.write(frame, resolve));
+          }
+        } else {
+          for (let frameIndex = 0; frameIndex < frames; frameIndex++) {
+            const frame = buildFrame(frameIndex);
+            await new Promise((resolve) => terminal.write(frame, resolve));
+          }
+        }
+        const writeDone = performance.now();
+
+        const settleStart = performance.now();
+        const maxWait = 10000;
+        while (performance.now() - settleStart < maxWait) {
+          const beforeCount = renderTimestamps.length;
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          if (renderTimestamps.length === beforeCount) break;
+        }
+        const endTime = performance.now();
+        disposer.dispose();
+
+        const presentMs =
+          renderTimestamps.length > 1
+            ? renderTimestamps[renderTimestamps.length - 1] - renderTimestamps[0]
+            : 0;
+        const presentedFps = presentMs > 0 ? (renderTimestamps.length - 1) / (presentMs / 1000) : 0;
+        const wallFps = frames / ((endTime - startTime) / 1000);
+        const wallMsPerFrame = (endTime - startTime) / frames;
+
+        const result = {
+          renderer,
+          mode,
+          cols,
+          rows,
+          frames,
+          totalMs: endTime - startTime,
+          writeMs: writeDone - startTime,
+          renderCount: renderTimestamps.length,
+          framesDropped: frames - renderTimestamps.length,
+          presentedFps: Math.round(presentedFps * 100) / 100,
+          wallFps: Math.round(wallFps * 100) / 100,
+          wallMsPerFrame: Math.round(wallMsPerFrame * 100) / 100,
+        };
+        statusEl.textContent = `${renderer}: ${JSON.stringify(result)}`;
+        return result;
+      };
+
+      if (params.get("autorun") === "1") {
+        setTimeout(() => window.runXtermBenchmark(), 100);
+      }
+    </script>
+  </body>
+</html>

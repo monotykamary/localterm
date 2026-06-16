@@ -20,6 +20,7 @@
     "lint:fix": "node scripts/lint.mjs --fix",
     "format": "vp fmt",
     "format:check": "vp fmt --check",
+    "vendor:webgl": "node scripts/vendor-webgl-addon.mjs",
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck",
     "changeset": "changeset",
     "version": "changeset version",
@@ -29,6 +30,7 @@
     "@changesets/cli": "^2.30.0",
     "@types/node": "^25.5.0",
     "@voidzero-dev/vite-plus-core": "^0.1.12",
+    "@xterm/addon-canvas": "0.8.0-beta.48",
     "turbo": "^2.9.18",
     "typescript": "^5.9.3",
     "vite-plus": "^0.1.12"
