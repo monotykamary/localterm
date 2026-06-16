@@ -88,11 +88,13 @@ describe("CaffeinateManager", () => {
     recentOutputPids = [100];
     await manager.pollNow();
     expect(controller.active).toBe(true);
+    expect(manager.activeTrigger).toBe("claude");
 
     // Program exits → caffeinate releases.
     snapshot = [{ pid: 100, ppid: 1, command: "-zsh" }];
     await manager.pollNow();
     expect(controller.active).toBe(false);
+    expect(manager.activeTrigger).toBeNull();
     manager.dispose();
   });
 
@@ -126,6 +128,7 @@ describe("CaffeinateManager", () => {
     recentOutputPids = [100];
     await manager.pollNow();
     expect(controller.active).toBe(true);
+    expect(manager.activeTrigger).toBe("ollama");
     manager.dispose();
   });
 

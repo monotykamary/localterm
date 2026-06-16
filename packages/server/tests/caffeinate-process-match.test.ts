@@ -9,38 +9,50 @@ const triggers = new Set(["claude", "codex", "opencode", "pi"]);
 
 describe("commandMatchesTriggers", () => {
   it("matches a bare binary name", () => {
-    expect(commandMatchesTriggers("claude --foo", triggers)).toBe(true);
+    expect(commandMatchesTriggers("claude --foo", triggers)).toBe("claude");
   });
 
   it("matches a node-launched CLI by the script basename", () => {
-    expect(commandMatchesTriggers("node /opt/homebrew/bin/claude --resume", triggers)).toBe(true);
+    expect(commandMatchesTriggers("node /opt/homebrew/bin/claude --resume", triggers)).toBe(
+      "claude",
+    );
   });
 
   it("matches an absolute path to the binary", () => {
-    expect(commandMatchesTriggers("/usr/local/bin/codex", triggers)).toBe(true);
+    expect(commandMatchesTriggers("/usr/local/bin/codex", triggers)).toBe("codex");
   });
 
   it("is case-insensitive", () => {
-    expect(commandMatchesTriggers("CodeX", triggers)).toBe(true);
+    expect(commandMatchesTriggers("CodeX", triggers)).toBe("codex");
   });
 
-  it("does not match a short trigger as a substring of an unrelated path", () => {
+  it("matches a script launched by its .js shim", () => {
+    expect(commandMatchesTriggers("node /opt/homebrew/bin/codex.js --prompt hello", triggers)).toBe(
+      "codex",
+    );
+  });
+
+  it("matches a versioned binary by a parent directory segment", () => {
+    expect(commandMatchesTriggers("/opt/claude/versions/2.1.178", triggers)).toBe("claude");
+  });
+
+  it("does not match a trigger as a substring of a path segment", () => {
+    expect(commandMatchesTriggers("/opt/not-claude/bin/run", triggers)).toBeNull();
+    expect(commandMatchesTriggers("/opt/pinetry/bin/run", triggers)).toBeNull();
     // `pi` must match a whole token basename, not appear inside "raspi".
-    expect(commandMatchesTriggers("node /usr/bin/raspimon", triggers)).toBe(false);
+    expect(commandMatchesTriggers("node /usr/bin/raspimon", triggers)).toBeNull();
   });
 
   it("does not match an unrelated command", () => {
-    expect(commandMatchesTriggers("vim notes.md", triggers)).toBe(false);
+    expect(commandMatchesTriggers("vim notes.md", triggers)).toBeNull();
   });
 
   it("never matches with an empty trigger set", () => {
-    expect(commandMatchesTriggers("claude", new Set())).toBe(false);
+    expect(commandMatchesTriggers("claude", new Set())).toBeNull();
   });
 });
 
 describe("anySessionRunsTrigger", () => {
-  // shell(100) -> node(200) -> claude is the command of 200's child? Model the
-  // realistic case: the shell forks the program directly as a descendant.
   const snapshot: ProcessSnapshotEntry[] = [
     { pid: 100, ppid: 1, command: "-zsh" },
     { pid: 200, ppid: 100, command: "node /opt/homebrew/bin/claude" },
@@ -49,15 +61,15 @@ describe("anySessionRunsTrigger", () => {
   ];
 
   it("matches a descendant of a session shell", () => {
-    expect(anySessionRunsTrigger([100], snapshot, triggers)).toBe(true);
+    expect(anySessionRunsTrigger([100], snapshot, triggers)).toBe("claude");
   });
 
   it("ignores a matching process that is not under any session", () => {
-    expect(anySessionRunsTrigger([999], snapshot, triggers)).toBe(false);
+    expect(anySessionRunsTrigger([999], snapshot, triggers)).toBeNull();
   });
 
-  it("returns false with no sessions", () => {
-    expect(anySessionRunsTrigger([], snapshot, triggers)).toBe(false);
+  it("returns null with no sessions", () => {
+    expect(anySessionRunsTrigger([], snapshot, triggers)).toBeNull();
   });
 
   it("walks deeper descendants, not just direct children", () => {
@@ -66,12 +78,12 @@ describe("anySessionRunsTrigger", () => {
       { pid: 200, ppid: 100, command: "npm exec" },
       { pid: 300, ppid: 200, command: "node /usr/local/bin/opencode" },
     ];
-    expect(anySessionRunsTrigger([100], deep, triggers)).toBe(true);
+    expect(anySessionRunsTrigger([100], deep, triggers)).toBe("opencode");
   });
 
   it("does not match the session shell itself", () => {
     const shellOnly: ProcessSnapshotEntry[] = [{ pid: 100, ppid: 1, command: "claude" }];
     // pid 100 is the session root; its own command is never matched.
-    expect(anySessionRunsTrigger([100], shellOnly, triggers)).toBe(false);
+    expect(anySessionRunsTrigger([100], shellOnly, triggers)).toBeNull();
   });
 });

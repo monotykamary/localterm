@@ -325,6 +325,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     activityGate: caffeinateManager.activityGate,
     defaultCommands: [...caffeinateManager.defaultCommands],
     commands: caffeinateManager.commands,
+    activeTrigger: caffeinateManager.activeTrigger,
   });
 
   // The daemon owns the single keep-awake process, so its state is broadcast to

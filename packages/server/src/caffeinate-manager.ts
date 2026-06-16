@@ -61,6 +61,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
   readonly defaultCommands: readonly string[];
 
   private autoActive = false;
+  private autoTrigger: string | null = null;
   private pokeTimer: NodeJS.Timeout | null = null;
   private activityGateTimer: NodeJS.Timeout | null = null;
   private polling = false;
@@ -106,6 +107,10 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     return this.store.getActivityGate();
   }
 
+  get activeTrigger(): string | null {
+    return this.autoActive ? this.autoTrigger : null;
+  }
+
   setMode(mode: CaffeinateMode): void {
     if (this.disposed) return;
     this.store.setMode(mode);
@@ -113,6 +118,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     // automatic re-derives it from scratch rather than trusting a stale flag.
     if (mode !== "automatic") {
       this.autoActive = false;
+      this.autoTrigger = null;
       this.clearActivityGateTimer();
     }
     this.recompute();
@@ -233,10 +239,11 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     try {
       const pids = this.listSessionPids();
       let next = false;
+      let matchedTrigger: string | null = null;
       if (pids.length > 0) {
         const snapshot = await this.snapshotProcesses();
-        const triggering = anySessionRunsTrigger(pids, snapshot, this.triggerSet());
-        if (triggering) {
+        matchedTrigger = anySessionRunsTrigger(pids, snapshot, this.triggerSet());
+        if (matchedTrigger) {
           if (!this.activityGate) {
             next = true;
           } else if (this.checkRecentOutput) {
@@ -245,10 +252,13 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
         }
       }
       if (this.disposed || this.mode !== "automatic") return;
-      if (next !== this.autoActive) {
-        this.autoActive = next;
-        this.recompute();
+      const prevAutoActive = this.autoActive;
+      this.autoActive = next;
+      this.autoTrigger = next ? matchedTrigger : null;
+      if (next !== prevAutoActive) {
+        this.emit("change");
       }
+      this.recompute();
       // If the activity gate is on and caffeinate is active, ensure the
       // trailing-edge idle timer is armed. (It may have been cleared by
       // noteOutputActivity or by a mode/command change.)

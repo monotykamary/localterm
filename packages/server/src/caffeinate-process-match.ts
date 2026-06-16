@@ -8,19 +8,44 @@ export interface ProcessSnapshotEntry {
 
 export type SnapshotProcesses = () => Promise<ProcessSnapshotEntry[]>;
 
-// True when any whitespace-separated token of `command` has a basename equal
-// (case-insensitively) to a trigger. Token-basename matching is what lets
-// `node /opt/homebrew/bin/claude` count as `claude` while keeping short
-// triggers like `pi` from matching substrings of unrelated paths.
-export const commandMatchesTriggers = (command: string, triggers: ReadonlySet<string>): boolean => {
-  if (triggers.size === 0) return false;
+const SCRIPT_EXTENSION_RE = /\.(js|mjs|cjs|ts|tsx|jsx|py|sh|pl|rb)$/i;
+
+const firstMatchingTrigger = (raw: string, triggers: ReadonlySet<string>): string | null => {
+  const lowered = raw.toLowerCase();
+  if (triggers.has(lowered)) return lowered;
+  const stripped = lowered.replace(SCRIPT_EXTENSION_RE, "");
+  if (stripped !== lowered && stripped && triggers.has(stripped)) return stripped;
+  return null;
+};
+
+// True when any whitespace-separated token of `command` has a basename (or
+// any directory segment of its path) equal to a trigger. Matching strategy:
+//   1. basename exact
+//   2. basename with common script extension stripped  (`codex.js` -> `codex`)
+//   3. any full `/`-delimited path segment exact         (`claude/versions/2.1.178` -> `claude`)
+// Token-basename matching lets `node /opt/homebrew/bin/claude` count as
+// `claude` while keeping short triggers like `pi` from matching substrings of
+// unrelated paths. Path-segment matching catches real-world package layouts
+// where the binary basename is the resolved version number or a `.js` shim.
+export const commandMatchesTriggers = (
+  command: string,
+  triggers: ReadonlySet<string>,
+): string | null => {
+  if (triggers.size === 0) return null;
   for (const token of command.split(/\s+/)) {
     if (!token) continue;
     const slash = token.lastIndexOf("/");
-    const base = (slash === -1 ? token : token.slice(slash + 1)).toLowerCase();
-    if (base && triggers.has(base)) return true;
+    const base = slash === -1 ? token : token.slice(slash + 1);
+    const match = firstMatchingTrigger(base, triggers);
+    if (match) return match;
+    if (slash !== -1) {
+      for (const segment of token.slice(0, slash).split("/")) {
+        const segmentMatch = firstMatchingTrigger(segment, triggers);
+        if (segmentMatch) return segmentMatch;
+      }
+    }
   }
-  return false;
+  return null;
 };
 
 // Walk the process tree rooted at each session shell pid and report whether any
@@ -30,8 +55,8 @@ export const anySessionRunsTrigger = (
   sessionPids: readonly number[],
   snapshot: readonly ProcessSnapshotEntry[],
   triggers: ReadonlySet<string>,
-): boolean => {
-  if (sessionPids.length === 0 || triggers.size === 0) return false;
+): string | null => {
+  if (sessionPids.length === 0 || triggers.size === 0) return null;
   const childrenByParent = new Map<number, ProcessSnapshotEntry[]>();
   for (const entry of snapshot) {
     const list = childrenByParent.get(entry.ppid);
@@ -47,11 +72,12 @@ export const anySessionRunsTrigger = (
     for (const child of children) {
       if (visited.has(child.pid)) continue;
       visited.add(child.pid);
-      if (commandMatchesTriggers(child.command, triggers)) return true;
+      const matched = commandMatchesTriggers(child.command, triggers);
+      if (matched) return matched;
       queue.push(child.pid);
     }
   }
-  return false;
+  return null;
 };
 
 const PS_LINE = /^\s*(\d+)\s+(\d+)\s+(.*)$/;

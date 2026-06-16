@@ -1,5 +1,11 @@
 # localterm-server
 
+## 1.41.11
+
+### Patch Changes
+
+- Highlight the active keep-awake trigger in the overlay and improve automatic command detection for script shims and versioned binaries.
+
 ## 1.41.10
 
 ### Patch Changes

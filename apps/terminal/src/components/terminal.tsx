@@ -349,6 +349,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [caffeinateDefaultCommands, setCaffeinateDefaultCommands] = useState<string[]>([]);
   const [caffeinateCommands, setCaffeinateCommands] = useState<string[]>([]);
   const [caffeinateActivityGate, setCaffeinateActivityGate] = useState(true);
+  const caffeinateActiveTriggerRef = useRef<string | null>(null);
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
   const { summary: diffSummary, setGitDiffSummary } = useGitDiffSummary();
   const hasDiff = diffSummary !== null && diffSummary.isRepo && diffSummary.files > 0;
@@ -1004,6 +1005,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           setCaffeinateDefaultCommands(message.defaultCommands);
           setCaffeinateCommands(message.commands);
           setCaffeinateActivityGate(message.activityGate);
+          caffeinateActiveTriggerRef.current = message.activeTrigger;
         } else if (message.type === "cwd") {
           setLiveCwd(message.cwd);
           setGitDiffSummary(null);
@@ -1881,6 +1883,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                       activityGate={caffeinateActivityGate}
                       defaultCommands={caffeinateDefaultCommands}
                       commands={caffeinateCommands}
+                      activeTriggerRef={caffeinateActiveTriggerRef}
                       onModeChange={handleCaffeinateModeChange}
                       onCommandsChange={handleCaffeinateCommandsChange}
                       onActivityGateChange={handleCaffeinateActivityGateChange}

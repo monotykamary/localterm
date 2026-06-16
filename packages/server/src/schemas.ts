@@ -591,6 +591,7 @@ const caffeinateStateMessageSchema = z
     activityGate: z.boolean(),
     defaultCommands: z.array(z.string()),
     commands: z.array(z.string()),
+    activeTrigger: z.string().nullable(),
   })
   .strict();
 

@@ -216,6 +216,7 @@ describe("serverToClientMessageSchema", () => {
       activityGate: true,
       defaultCommands: ["claude", "codex"],
       commands: ["ollama"],
+      activeTrigger: "claude",
     });
     expect(result.success).toBe(true);
   });

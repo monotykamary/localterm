@@ -22,6 +22,7 @@ const caffeinateState = (overrides: Record<string, unknown> = {}) => ({
   activityGate: true,
   defaultCommands: [...CAFFEINATE_AUTO_DEFAULT_COMMANDS],
   commands: [],
+  activeTrigger: null,
   ...overrides,
 });
 

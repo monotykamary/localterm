@@ -1,5 +1,5 @@
 import { Coffee, Plus, X } from "lucide-react";
-import { useState, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent, type RefObject } from "react";
 import { SettingsSelect, type SettingsSelectItem } from "@/components/settings-select";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -20,6 +20,7 @@ interface KeepAwakeMenuProps {
   activityGate: boolean;
   defaultCommands: readonly string[];
   commands: readonly string[];
+  activeTriggerRef: RefObject<string | null>;
   onModeChange: (mode: CaffeinateMode) => void;
   onCommandsChange: (commands: string[]) => void;
   onActivityGateChange: (enabled: boolean) => void;
@@ -45,8 +46,10 @@ const MODE_DESCRIPTION: Record<CaffeinateMode, string> = {
 const isCaffeinateMode = (value: string | null): value is CaffeinateMode =>
   value === "off" || value === "on" || value === "automatic";
 
-const CHIP_CLASSES =
-  "inline-flex items-center rounded-full border border-border/60 bg-foreground/5 px-2 py-0.5 font-mono text-[11px] text-foreground/80";
+const CHIP_BASE_CLASSES =
+  "inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[11px] transition-colors duration-200";
+const CHIP_IDLE_CLASSES = "border-border/60 bg-foreground/5 text-foreground/80";
+const CHIP_ACTIVE_CLASSES = "border-foreground/25 text-background";
 
 export const KeepAwakeMenu = ({
   mode,
@@ -54,6 +57,7 @@ export const KeepAwakeMenu = ({
   activityGate,
   defaultCommands,
   commands,
+  activeTriggerRef,
   onModeChange,
   onCommandsChange,
   onActivityGateChange,
@@ -195,11 +199,24 @@ export const KeepAwakeMenu = ({
               <Field orientation="vertical" className="gap-1.5">
                 <FieldLabel className={SECTION_LABEL_CLASSES}>Detected automatically</FieldLabel>
                 <div className="flex flex-wrap gap-1">
-                  {defaultCommands.map((command) => (
-                    <span key={command} className={CHIP_CLASSES}>
-                      {command}
-                    </span>
-                  ))}
+                  {defaultCommands.map((command) => {
+                    const isActive =
+                      active &&
+                      activeTriggerRef.current !== null &&
+                      activeTriggerRef.current.toLowerCase() === command.toLowerCase();
+                    return (
+                      <span
+                        key={command}
+                        className={cn(
+                          CHIP_BASE_CLASSES,
+                          isActive ? CHIP_ACTIVE_CLASSES : CHIP_IDLE_CLASSES,
+                        )}
+                        style={isActive ? { backgroundColor: CAFFEINATE_ACCENT_COLOR } : undefined}
+                      >
+                        {command}
+                      </span>
+                    );
+                  })}
                 </div>
               </Field>
 
@@ -208,25 +225,40 @@ export const KeepAwakeMenu = ({
                 <FieldLabel className={SECTION_LABEL_CLASSES}>Your commands</FieldLabel>
                 {commands.length > 0 ? (
                   <div className="flex flex-col gap-1">
-                    {commands.map((command) => (
-                      <div
-                        key={command}
-                        className="flex items-center justify-between gap-2 rounded-sm bg-foreground/5 py-0.5 pr-0.5 pl-2"
-                      >
-                        <span className="min-w-0 truncate font-mono text-[11px] text-foreground/80">
-                          {command}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          aria-label={`remove ${command}`}
-                          className="hover:text-foreground"
-                          onClick={() => removeCommand(command)}
+                    {commands.map((command) => {
+                      const isActive =
+                        active &&
+                        activeTriggerRef.current !== null &&
+                        activeTriggerRef.current.toLowerCase() === command.toLowerCase();
+                      return (
+                        <div
+                          key={command}
+                          className={cn(
+                            "flex items-center justify-between gap-2 rounded-sm py-0.5 pr-0.5 pl-2 transition-colors duration-200",
+                            isActive ? "bg-foreground/10" : "bg-foreground/5",
+                          )}
                         >
-                          <X />
-                        </Button>
-                      </div>
-                    ))}
+                          <span
+                            className={cn(
+                              "min-w-0 truncate font-mono text-[11px] transition-colors duration-200",
+                              isActive ? "text-foreground" : "text-foreground/80",
+                            )}
+                            style={isActive ? { color: CAFFEINATE_ACCENT_COLOR } : undefined}
+                          >
+                            {command}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={`remove ${command}`}
+                            className="hover:text-foreground"
+                            onClick={() => removeCommand(command)}
+                          >
+                            <X />
+                          </Button>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-[11px] leading-snug text-muted-foreground">
