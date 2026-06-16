@@ -280,6 +280,22 @@ an absolute path.
    recheck patterns (e.g. refreshing a diff indicator). For custom event-driven
    workflows, use `{kind:"event", event:"notification"}` and have your scripts
    emit `OSC 9` as the signal.
+8. When the command is too complex for a readable one-liner (loops, multi-step
+   pipelines with temp files, heredocs, structured output payloads, etc.), write
+   a shell script in the automation's `cwd` and set `command` to `bash <name>.sh`.
+   This keeps the automation JSON legible and the logic version-controlled:
+   ```bash
+   # Instead of inlining a 200-char pipeline, write e.g. push-watch.sh in cwd:
+   curl -s -X POST "$BASE/automations" \
+     -H 'content-type: application/json' \
+     -d '{
+       "name": "push watcher",
+       "trigger": { "kind": "event", "event": "git-refs-change" },
+       "cwd": "/Users/me/open-source",
+       "command": "bash push-watch.sh",
+       "enabled": true
+     }'
+   ```
 
 ## Other endpoints
 
