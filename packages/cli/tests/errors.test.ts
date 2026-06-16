@@ -89,7 +89,7 @@ describe("exitCodeForCliError", () => {
     expect(exitCodeForCliError(cliError.invalidHost("0.0.0.0"))).toBe(EXIT_USAGE_ERROR);
   });
 
-  it("maps already-running to EXIT_FAILURE so launchd KeepAlive does not respawn", () => {
+  it("maps already-running to EXIT_FAILURE for interactive CLI feedback", () => {
     expect(exitCodeForCliError(cliError.alreadyRunning(1, 3417))).toBe(EXIT_FAILURE);
   });
 

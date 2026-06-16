@@ -2,12 +2,23 @@ import kleur from "kleur";
 import { STOP_MAX_WAIT_MS, STOP_POLL_INTERVAL_MS } from "../constants.js";
 import { cliError, exitCodeForCliError } from "../errors.js";
 import { clearPid, isAlive, readPid } from "../state.js";
+import { isLaunchdServiceLoaded } from "../utils/is-launchd-service-loaded.js";
+import { isRunningUnderLaunchd } from "../utils/is-running-under-launchd.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 import { sleep } from "../utils/sleep.js";
 import { verifyPidIsLocalterm } from "../utils/verify-pid-is-localterm.js";
 
 export const runStop = async (): Promise<void> => {
   const pid = readPid();
+
+  if (!isRunningUnderLaunchd() && (await isLaunchdServiceLoaded())) {
+    console.warn(
+      kleur.yellow(
+        "⚠ launchd auto-start is still enabled; run `localterm uninstall` to prevent automatic restart.",
+      ),
+    );
+  }
+
   if (!pid) {
     console.log(kleur.dim("localterm is not running."));
     return;

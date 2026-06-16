@@ -17,21 +17,9 @@ export interface InstallOptions {
   host: string;
 }
 
-const getLoginShell = (): string => {
-  try {
-    const userInfo = os.userInfo();
-    if (userInfo.shell) return userInfo.shell;
-  } catch {
-    // os.userInfo throws on systems without /etc/passwd entry for the uid
-  }
-  return process.env.SHELL || "/bin/zsh";
-};
-
 export const buildPlistContent = (options: InstallOptions): string => {
   const stateDirectory = getStateDirectory();
   const logPath = path.join(stateDirectory, "server.log");
-  const loginShell = getLoginShell();
-  const daemonCommand = `${process.execPath} ${cliEntry} start --port ${options.port} --host ${options.host}`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -41,15 +29,22 @@ export const buildPlistContent = (options: InstallOptions): string => {
     <string>${LAUNCHD_LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${loginShell}</string>
-        <string>-l</string>
-        <string>-c</string>
-        <string>${daemonCommand}</string>
+        <string>${process.execPath}</string>
+        <string>${cliEntry}</string>
+        <string>start</string>
+        <string>--port</string>
+        <string>${options.port}</string>
+        <string>--host</string>
+        <string>${options.host}</string>
+        <string>--foreground</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
     <key>StandardOutPath</key>
     <string>${logPath}</string>
     <key>StandardErrorPath</key>

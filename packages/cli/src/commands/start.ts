@@ -35,6 +35,7 @@ import {
   writePid,
 } from "../state.js";
 import { buildDaemonStartArgs } from "../utils/build-daemon-args.js";
+import { isRunningUnderLaunchd } from "../utils/is-running-under-launchd.js";
 import { pollForDaemonReady } from "../utils/poll-for-daemon-ready.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 import { runStartPreflight } from "../utils/run-start-preflight.js";
@@ -75,6 +76,9 @@ export const runStart = async (options: StartOptions): Promise<void> => {
 };
 
 const handlePreflightError = (preflightError: CliError): void => {
+  if (preflightError.kind === "already-running" && isRunningUnderLaunchd()) {
+    process.exit(EXIT_OK);
+  }
   reportCliError(preflightError);
   process.exit(exitCodeForCliError(preflightError));
 };
@@ -216,6 +220,8 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
       (caughtError.error.cause as NodeJS.ErrnoException).code === "EADDRINUSE";
     if (isEaddrInuse && isRestart) {
       server = await retryBindAfterOldDaemonExits(options, staticRoot);
+    } else if (isEaddrInuse && isRunningUnderLaunchd()) {
+      process.exit(EXIT_OK);
     } else if (isEaddrInuse) {
       await runStop();
       try {

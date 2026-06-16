@@ -8,18 +8,24 @@ describe("buildPlistContent", () => {
     expect(plist).toContain(`<string>${LAUNCHD_LABEL}</string>`);
   });
 
-  it("includes RunAtLoad and KeepAlive", () => {
+  it("includes RunAtLoad and crash-only KeepAlive", () => {
     const plist = buildPlistContent({ port: 3417, host: "127.0.0.1" });
     expect(plist).toContain("<key>RunAtLoad</key>");
     expect(plist).toContain("<key>KeepAlive</key>");
+    expect(plist).toContain("<key>SuccessfulExit</key>");
+    expect(plist).toContain("<false/>");
   });
 
-  it("invokes the daemon through a login shell", () => {
+  it("runs the daemon in the foreground", () => {
     const plist = buildPlistContent({ port: 3417, host: "127.0.0.1" });
-    expect(plist).toContain("<string>-l</string>");
-    expect(plist).toContain("<string>-c</string>");
-    expect(plist).toContain("--port 3417");
-    expect(plist).toContain("--host 127.0.0.1");
+    expect(plist).toContain("<string>start</string>");
+    expect(plist).toContain("<string>--port</string>");
+    expect(plist).toContain("<string>3417</string>");
+    expect(plist).toContain("<string>--host</string>");
+    expect(plist).toContain("<string>127.0.0.1</string>");
+    expect(plist).toContain("<string>--foreground</string>");
+    expect(plist).not.toContain("<string>-l</string>");
+    expect(plist).not.toContain("<string>-c</string>");
   });
 
   it("includes the node exec path in the daemon command", () => {
@@ -39,8 +45,8 @@ describe("buildPlistContent", () => {
 
   it("uses custom port and host when specified", () => {
     const plist = buildPlistContent({ port: 9999, host: "0.0.0.0" });
-    expect(plist).toContain("--port 9999");
-    expect(plist).toContain("--host 0.0.0.0");
+    expect(plist).toContain("<string>9999</string>");
+    expect(plist).toContain("<string>0.0.0.0</string>");
   });
 
   it("uses the server.log path for stdout and stderr", () => {
