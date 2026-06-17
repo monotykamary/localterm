@@ -1,4 +1,4 @@
 CHANGELOG.md
 **/CHANGELOG.md
 apps/terminal/vendor
-xterm-bench-webgl.mjs
+harness/xterm-bench-webgl.mjs

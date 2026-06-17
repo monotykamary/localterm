@@ -4,22 +4,22 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>xterm SGR bold/italic test</title>
-    <link rel="stylesheet" href="./node_modules/.pnpm/node_modules/@xterm/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="/node_modules/.pnpm/node_modules/@xterm/xterm/css/xterm.css" />
     <link
       rel="stylesheet"
-      href="./node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/400.css"
+      href="/node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/400.css"
     />
     <link
       rel="stylesheet"
-      href="./node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/500.css"
+      href="/node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/500.css"
     />
     <link
       rel="stylesheet"
-      href="./node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/600.css"
+      href="/node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/600.css"
     />
     <link
       rel="stylesheet"
-      href="./node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/700.css"
+      href="/node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono/700.css"
     />
     <style>
       html,
@@ -75,7 +75,7 @@
           let CanvasAddon;
           try {
             ({ Terminal } =
-              await import("./node_modules/.pnpm/node_modules/@xterm/xterm/lib/xterm.mjs"));
+              await import("/node_modules/.pnpm/node_modules/@xterm/xterm/lib/xterm.mjs"));
           } catch (error) {
             window.sgrResult = { error: `xterm import failed: ${error.message}` };
             resolveSgrReady(window.sgrResult);
@@ -90,7 +90,7 @@
           }
           try {
             ({ CanvasAddon } =
-              await import("./node_modules/@xterm/addon-canvas/lib/xterm-addon-canvas.mjs"));
+              await import("/node_modules/@xterm/addon-canvas/lib/xterm-addon-canvas.mjs"));
           } catch (error) {
             window.sgrResult = { error: `canvas addon import failed: ${error.message}` };
             resolveSgrReady(window.sgrResult);

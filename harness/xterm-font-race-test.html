@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>xterm font-readiness race test</title>
+    <link rel="stylesheet" href="/node_modules/.pnpm/node_modules/@xterm/xterm/css/xterm.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        color: #fff;
+        overflow: hidden;
+        font-family: ui-monospace, monospace;
+      }
+      #terminal {
+        width: 1024px;
+        height: 320px;
+      }
+      #status {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        z-index: 10;
+        padding: 6px 10px;
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 6px;
+        font-size: 12px;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status">initializing…</div>
+    <div id="terminal"></div>
+    <script type="module">
+      let resolveRaceReady;
+      window.raceReady = new Promise((resolve) => {
+        resolveRaceReady = resolve;
+      });
+      window.getRaceResult = () => ({});
+
+      const FAMILY_Q = '"Geist Mono"';
+      const FULL_FAMILY = `${FAMILY_Q}, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+      const FONT_BASE =
+        "/node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono";
+
+      const params = new URLSearchParams(location.search);
+      const scenario = params.get("scenario") || "awaitfont";
+      const heal = params.get("heal") !== "0";
+      const healMode = params.get("healMode") || "naive";
+
+      function injectWeightCss(weight) {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = `${FONT_BASE}/${weight}.css`;
+        document.head.appendChild(link);
+        return link;
+      }
+
+      function checkWeight(weight) {
+        try {
+          return document.fonts.check(`${weight} 14px ${FAMILY_Q}`, "M");
+        } catch {
+          return false;
+        }
+      }
+
+      // The REAL signal: whether a Geist Mono @font-face with status "loaded"
+      // exists. document.fonts.check() is a FALSE POSITIVE when no @font-face is
+      // declared (browser can render via fallback without fetching), so it cannot
+      // tell us whether the actual Geist Mono face is usable.
+      function geistFaces() {
+        const out = [];
+        for (const face of document.fonts) {
+          if (face.family.replace(/["']/g, "") === "Geist Mono") {
+            out.push({ weight: String(face.weight), style: face.style, status: face.status });
+          }
+        }
+        return out;
+      }
+      function isGeistLoaded(weight) {
+        return geistFaces().some(
+          (f) => String(f.weight) === String(weight) && f.status === "loaded",
+        );
+      }
+      function geistLoadedWeights() {
+        return geistFaces()
+          .filter((f) => f.status === "loaded")
+          .map((f) => Number(f.weight))
+          .sort((a, b) => a - b);
+      }
+
+      function loadedWeightsSnapshot() {
+        return geistLoadedWeights();
+      }
+
+      // Probe a glyph pair rendered with an exact font string. Bolder weight =>
+      // more lit pixels + higher luma. Used to map a rasterized glyph back to the
+      // weight Canvas actually resolved to (independent of what was requested).
+      const PROBE_W = 96;
+      const PROBE_H = 56;
+      const probeCanvas = document.createElement("canvas");
+      probeCanvas.width = PROBE_W;
+      probeCanvas.height = PROBE_H;
+      const probeCtx = probeCanvas.getContext("2d", { willReadFrequently: true });
+
+      function coverageForFontString(fontString, text = "Mm") {
+        probeCtx.clearRect(0, 0, PROBE_W, PROBE_H);
+        probeCtx.font = fontString;
+        probeCtx.textBaseline = "top";
+        probeCtx.fillStyle = "#ffffff";
+        probeCtx.fillText(text, 4, 6);
+        const { data } = probeCtx.getImageData(0, 0, PROBE_W, PROBE_H);
+        let lit = 0;
+        let lumaSum = 0;
+        for (let i = 3; i < data.length; i += 4) {
+          if (data[i] > 16) {
+            lit += 1;
+            lumaSum += data[i];
+          }
+        }
+        return { lit, lumaSum };
+      }
+
+      const coverageForWeight = (w) => coverageForFontString(`${w} 28px ${FAMILY_Q}`);
+      const coverageForNormal = () => coverageForFontString(`normal 28px ${FULL_FAMILY}`);
+
+      // Record every ctx.font assignment with the FontFaceSet state at that instant.
+      // The check() snapshot at raster time is the smoking gun: if a `normal` (400)
+      // glyph is drawn while check400 is false but check600 is true, Canvas resolved
+      // 400 -> 600 and baked a bolder glyph into the atlas under the regular key.
+      let currentPhase = "setup";
+      const fontSets = [];
+      const originalFontDescriptor = Object.getOwnPropertyDescriptor(
+        CanvasRenderingContext2D.prototype,
+        "font",
+      );
+      Object.defineProperty(CanvasRenderingContext2D.prototype, "font", {
+        set(value) {
+          if (typeof value === "string" && value.includes(FAMILY_Q)) {
+            fontSets.push({
+              phase: currentPhase,
+              font: value,
+              isRegular: !/\b(bold|700)\b/i.test(value),
+              t: performance.now(),
+              check400: checkWeight(400),
+              check500: checkWeight(500),
+              check600: checkWeight(600),
+              check700: checkWeight(700),
+            });
+          }
+          return originalFontDescriptor.set.call(this, value);
+        },
+        get() {
+          return originalFontDescriptor.get.call(this);
+        },
+      });
+
+      function atlasCanvas() {
+        return window.addon?._renderer?._charAtlas?.pages?.[0]?.canvas ?? null;
+      }
+
+      function atlasInkCoverage() {
+        const page = atlasCanvas();
+        if (!page) return null;
+        const w = page.width;
+        const h = page.height;
+        const tmp = document.createElement("canvas");
+        tmp.width = w;
+        tmp.height = h;
+        const ctx = tmp.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(page, 0, 0);
+        const { data } = ctx.getImageData(0, 0, w, h);
+        let lit = 0;
+        let lumaSum = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+          if (luma > 8) {
+            lit += 1;
+            lumaSum += luma;
+          }
+        }
+        return { lit, lumaSum, w, h };
+      }
+
+      const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+      const nextFrame = () =>
+        new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      (async () => {
+        const statusEl = document.getElementById("status");
+        try {
+          statusEl.textContent = `${scenario} — loading modules…`;
+          const [{ Terminal }, { WebglAddon }] = await Promise.all([
+            import("/node_modules/.pnpm/node_modules/@xterm/xterm/lib/xterm.mjs"),
+            import("./xterm-bench-webgl.mjs"),
+          ]);
+
+          const prompt =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\r\n" +
+            "regular \x1b[1mbold\x1b[0m \x1b[3mitalic\x1b[0m \x1b[1;3mboth\x1b[0m regular\r\n";
+
+          const references = {};
+
+          if (scenario === "awaitfont") {
+            // Mirrors the real app's awaitFontReady + clearTextureAtlas, with the
+            // @font-face CSS declared LATE (the reload cold-cache race: Vite's
+            // bundled font CSS parses after JS runs awaitFontReady).
+            //
+            // Declare ONLY 600 first and load it, so bold (700->600) text fetches
+            // the 600 face before 400 is available. This reproduces the SPECIFIC
+            // symptom: regular `normal` (400) text resolves to 600.
+            //
+            // Key CSS Font Loading fact this proves: document.fonts.load() resolves
+            // with an EMPTY array (no error) when no matching @font-face is parsed
+            // yet, so Promise.all fulfills with the face still unloaded. The app's
+            // clearTextureAtlas then runs on an unloaded face and re-poisons.
+            injectWeightCss(600);
+            {
+              const t600 = performance.now();
+              while (!isGeistLoaded(600) && performance.now() - t600 < 4000) {
+                try {
+                  await document.fonts.load(`600 30px ${FAMILY_Q}`);
+                } catch {}
+                await tick(25);
+              }
+            }
+            //
+            // Runs naive heal AND verified heal in the SAME page load so no
+            // scenario/healMode param forwarding is needed.
+            const terminal = new Terminal({
+              cols: 80,
+              rows: 6,
+              fontSize: 14,
+              fontFamily: FULL_FAMILY,
+              lineHeight: 1.2,
+              minimumContrastRatio: 1,
+              drawBoldTextInBrightColors: false,
+              cursorBlink: false,
+            });
+            window.terminal = terminal;
+            terminal.open(document.getElementById("terminal"));
+            const addon = new WebglAddon({ customGlyphs: true });
+            window.addon = addon;
+            addon.onContextLoss(() => addon.dispose());
+            terminal.loadAddon(addon);
+
+            currentPhase = "poison";
+            await nextFrame();
+            terminal.write(prompt);
+            await nextFrame();
+            await tick(80);
+            const poisonedAtlas = atlasInkCoverage();
+
+            // --- naive heal: EXACTLY awaitFontReady ---
+            // No @font-face declared yet => load() resolves empty => check400 false.
+            currentPhase = "naive-heal";
+            let naiveHealError = null;
+            const naiveTrace = {
+              loadedBeforeReady: loadedWeightsSnapshot(),
+              check400BeforeReady: checkWeight(400),
+              geistLoaded400BeforeReady: isGeistLoaded(400),
+            };
+            try {
+              await document.fonts.ready;
+              naiveTrace.loadedAfterReady = loadedWeightsSnapshot();
+              naiveTrace.check400AfterReady = checkWeight(400);
+              naiveTrace.geistLoaded400AfterReady = isGeistLoaded(400);
+              await Promise.all([
+                document.fonts.load(`16px ${FAMILY_Q}`),
+                document.fonts.load(`bold 16px ${FAMILY_Q}`),
+              ]);
+              naiveTrace.loadedAfterLoad = loadedWeightsSnapshot();
+              naiveTrace.check400AfterLoad = checkWeight(400);
+              naiveTrace.geistLoaded400AfterLoad = isGeistLoaded(400);
+            } catch (error) {
+              naiveHealError = String(error?.message || error);
+            }
+            const naiveStateAtClear = {
+              check400: checkWeight(400),
+              geistLoaded400: isGeistLoaded(400),
+              loaded: loadedWeightsSnapshot(),
+              healError: naiveHealError,
+              trace: naiveTrace,
+            };
+            terminal.clearTextureAtlas();
+            await nextFrame();
+            await tick(80);
+            const naiveHealedAtlas = atlasInkCoverage();
+
+            // --- verified heal: the proposed fix to awaitFontReady. Declare 400
+            // and poll the REAL FontFace status (isGeistLoaded) until it is truly
+            // usable BEFORE clearing. document.fonts.check() is NOT used here
+            // because it returns true (false positive) with no @font-face parsed.
+            // --- verified heal: the FIXED awaitFontReady path. Declare all 4
+            // weights (main.tsx now ships 400/500/600/700) and gate
+            // clearTextureAtlas on the REAL FontFace status of 400 and 700
+            // being "loaded". document.fonts.check() is NOT used because it
+            // returns true (false positive) with no @font-face parsed.
+            currentPhase = "verified-heal";
+            for (const w of [400, 500, 600, 700]) injectWeightCss(w);
+            const t0 = performance.now();
+            const awaitFace = async (weight, probe) => {
+              const deadline = performance.now() + 4000;
+              while (performance.now() < deadline) {
+                if (isGeistLoaded(weight)) return;
+                try {
+                  await document.fonts.load(probe);
+                } catch {
+                  return;
+                }
+                if (isGeistLoaded(weight)) return;
+                await tick(25);
+              }
+            };
+            await Promise.all([
+              awaitFace(400, `16px ${FAMILY_Q}`),
+              awaitFace(700, `bold 16px ${FAMILY_Q}`),
+            ]);
+            const verifiedStateAtClear = {
+              geistLoaded400: isGeistLoaded(400),
+              geistLoaded700: isGeistLoaded(700),
+              geistLoaded600: isGeistLoaded(600),
+              loaded: loadedWeightsSnapshot(),
+              pollMs: Math.round(performance.now() - t0),
+            };
+            terminal.clearTextureAtlas();
+            await nextFrame();
+            await tick(80);
+            const verifiedHealedAtlas = atlasInkCoverage();
+
+            for (const w of [400, 500, 600, 700]) references[w] = coverageForWeight(w);
+
+            const result = {
+              marker: "from-timeout",
+              scenario,
+              poisonedAtlas,
+              naiveHeal: {
+                stateAtClear: naiveStateAtClear,
+                atlasCoverage: naiveHealedAtlas,
+              },
+              verifiedHeal: {
+                stateAtClear: verifiedStateAtClear,
+                atlasCoverage: verifiedHealedAtlas,
+              },
+              references,
+            };
+            window.raceResult = result;
+            statusEl.textContent = `${scenario} done`;
+            resolveRaceReady(result);
+            return;
+          }
+
+          if (scenario === "force600") {
+            // Deterministic proof of the poisoning mechanism.
+            // Declare ONLY 600 first, force it to load, then write the prompt
+            // while 400 is still absent. CSS resolves `normal` (400) -> 600.
+            injectWeightCss(600);
+            await document.fonts.load(`600 30px ${FAMILY_Q}`);
+            await tick(50);
+            const stateBeforeWrite = {
+              loaded: loadedWeightsSnapshot(),
+              check400: checkWeight(400),
+              check600: checkWeight(600),
+            };
+
+            // Pure-Canvas proof (no xterm): a `normal` font string resolves to
+            // 600's coverage when only 600 is loaded.
+            const poisonedNormalProbe = coverageForNormal();
+
+            // Now run it through xterm's real atlas so the cache poisoning is
+            // proven end-to-end. Warmup rasters ASCII 33-125 at weight 400 =>
+            // every regular glyph baked at 600.
+            const terminal = new Terminal({
+              cols: 80,
+              rows: 6,
+              fontSize: 14,
+              fontFamily: FULL_FAMILY,
+              lineHeight: 1.2,
+              minimumContrastRatio: 1,
+              drawBoldTextInBrightColors: false,
+              cursorBlink: false,
+            });
+            window.terminal = terminal;
+            terminal.open(document.getElementById("terminal"));
+            const addon = new WebglAddon({ customGlyphs: true });
+            window.addon = addon;
+            addon.onContextLoss(() => addon.dispose());
+            terminal.loadAddon(addon);
+
+            currentPhase = "poison";
+            await nextFrame();
+            terminal.write(prompt);
+            await nextFrame();
+            await tick(80);
+
+            const poisonedAtlas = atlasInkCoverage();
+            const poisonedRegular = fontSets
+              .filter((f) => f.phase === "poison" && f.isRegular)
+              .slice(0, 1);
+
+            let healed = null;
+            if (heal) {
+              // Two heal strategies, switched by ?healMode=:
+              //  - naive   : inject 400 + fonts.load("normal …") + tick. Mirrors the
+              //               app's awaitFontReady. fonts.load resolves with an
+              //               empty array while the @font-face <link> has not parsed,
+              //               so clearTextureAtlas races the 400 load and re-poisons.
+              //  - verified: poll document.fonts.check() until the 400 face is truly
+              //               usable before clearing. This is the proposed fix.
+              injectWeightCss(400);
+              if (healMode === "verified") {
+                const t0 = performance.now();
+                while (!checkWeight(400) && performance.now() - t0 < 4000) {
+                  try {
+                    await document.fonts.load(`normal 30px ${FAMILY_Q}`);
+                  } catch {}
+                  await tick(25);
+                }
+              } else {
+                await document.fonts.load(`normal 30px ${FAMILY_Q}`);
+                await tick(50);
+              }
+              currentPhase = "heal";
+              const stateAtClear = {
+                healMode,
+                check400: checkWeight(400),
+                check600: checkWeight(600),
+                loaded: loadedWeightsSnapshot(),
+              };
+              terminal.clearTextureAtlas();
+              await nextFrame();
+              await tick(80);
+              const healedNormalProbe = coverageForNormal();
+              const healedAtlas = atlasInkCoverage();
+              const healedRegular = fontSets
+                .filter((f) => f.phase === "heal" && f.isRegular)
+                .slice(0, 1);
+              healed = {
+                normalProbe: healedNormalProbe,
+                atlasCoverage: healedAtlas,
+                firstRegularFontSet: healedRegular[0] ?? null,
+                stateAtClear,
+                stateAfterHeal: {
+                  loaded: loadedWeightsSnapshot(),
+                  check400: checkWeight(400),
+                  check600: checkWeight(600),
+                },
+              };
+            }
+
+            // References AFTER all declared weights are loaded + settled.
+            await document.fonts.ready;
+            await tick(50);
+            for (const w of [400, 500, 600, 700]) references[w] = coverageForWeight(w);
+
+            const result = {
+              marker: "from-timeout",
+              scenario,
+              heal,
+              stateBeforeWrite,
+              poisoned: {
+                normalProbe: poisonedNormalProbe,
+                atlasCoverage: poisonedAtlas,
+                firstRegularFontSet: poisonedRegular[0] ?? null,
+              },
+              healed,
+              references,
+              finalLoaded: loadedWeightsSnapshot(),
+            };
+            window.raceResult = result;
+            statusEl.textContent = `${scenario} done`;
+            resolveRaceReady(result);
+            return;
+          }
+
+          // scenario === "faithful": declare the app's real weights (400,500,600)
+          // and write the prompt as early as possible against a cold font cache.
+          // Reproduces the intermittent reload race (non-deterministic).
+          for (const w of params.get("weights")?.split(",") ?? ["400", "500", "600"]) {
+            injectWeightCss(w);
+          }
+          await tick(20);
+
+          const terminal = new Terminal({
+            cols: 80,
+            rows: 6,
+            fontSize: 14,
+            fontFamily: FULL_FAMILY,
+            lineHeight: 1.2,
+            minimumContrastRatio: 1,
+            drawBoldTextInBrightColors: false,
+            cursorBlink: false,
+          });
+          window.terminal = terminal;
+          terminal.open(document.getElementById("terminal"));
+          const addon = new WebglAddon({ customGlyphs: true });
+          window.addon = addon;
+          addon.onContextLoss(() => addon.dispose());
+          terminal.loadAddon(addon);
+
+          currentPhase = "poison";
+          await nextFrame();
+          const stateAtWrite = {
+            loaded: loadedWeightsSnapshot(),
+            check400: checkWeight(400),
+            check600: checkWeight(600),
+          };
+          terminal.write(prompt);
+          await nextFrame();
+          await tick(80);
+          const poisonedAtlas = atlasInkCoverage();
+          const poisonedNormalProbe = coverageForNormal();
+          const poisonedRegular = fontSets
+            .filter((f) => f.phase === "poison" && f.isRegular)
+            .slice(0, 1);
+
+          let healed = null;
+          if (heal) {
+            // Mirror awaitFontReady: outer try/catch swallows load failures so
+            // clearTextureAtlas runs even if a probe rejected.
+            currentPhase = "heal-await";
+            let healError = null;
+            try {
+              await document.fonts.ready;
+              await Promise.all([
+                document.fonts.load(`30px ${FAMILY_Q}`),
+                document.fonts.load(`bold 30px ${FAMILY_Q}`),
+              ]);
+            } catch (error) {
+              healError = String(error?.message || error);
+            }
+            currentPhase = "heal";
+            const stateAtClear = {
+              check400: checkWeight(400),
+              check600: checkWeight(600),
+              loaded: loadedWeightsSnapshot(),
+              healError,
+            };
+            terminal.clearTextureAtlas();
+            await nextFrame();
+            await tick(120);
+            healed = {
+              normalProbe: coverageForNormal(),
+              atlasCoverage: atlasInkCoverage(),
+              stateAtClear,
+              firstRegularFontSet:
+                fontSets.filter((f) => f.phase === "heal" && f.isRegular).slice(0, 1)[0] ?? null,
+            };
+          }
+
+          const poisonRegularSets = fontSets.filter((f) => f.phase === "poison" && f.isRegular);
+          const poisonedDiagnosis = {
+            regularRasterCount: poisonRegularSets.length,
+            anyCheck400False: poisonRegularSets.some((f) => !f.check400),
+            anyCheck400FalseAnd600True: poisonRegularSets.some((f) => !f.check400 && f.check600),
+            firstCheck400False: poisonRegularSets.find((f) => !f.check400) ?? null,
+          };
+
+          await document.fonts.ready;
+          await tick(50);
+          for (const w of [400, 500, 600, 700]) references[w] = coverageForWeight(w);
+
+          const result = {
+            marker: "from-timeout",
+            scenario,
+            heal,
+            stateAtWrite,
+            poisoned: {
+              normalProbe: poisonedNormalProbe,
+              atlasCoverage: poisonedAtlas,
+              firstRegularFontSet: poisonedRegular[0] ?? null,
+            },
+            poisonedDiagnosis,
+            healed,
+            references,
+            finalLoaded: loadedWeightsSnapshot(),
+          };
+          window.raceResult = result;
+          statusEl.textContent = `${scenario} done`;
+          resolveRaceReady(result);
+        } catch (error) {
+          window.raceResult = { error: error.message, stack: error.stack };
+          resolveRaceReady(window.raceResult);
+        }
+      })();
+    </script>
+  </body>
+</html>

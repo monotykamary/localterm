@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>xterm renderer benchmark</title>
-    <link rel="stylesheet" href="./node_modules/.pnpm/node_modules/@xterm/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="/node_modules/.pnpm/node_modules/@xterm/xterm/css/xterm.css" />
     <style>
       html,
       body {
@@ -37,9 +37,9 @@
     <div id="status">initializing…</div>
     <div id="terminal"></div>
     <script type="module">
-      import { Terminal } from "./node_modules/.pnpm/node_modules/@xterm/xterm/lib/xterm.mjs";
+      import { Terminal } from "/node_modules/.pnpm/node_modules/@xterm/xterm/lib/xterm.mjs";
       import { WebglAddon } from "./xterm-bench-webgl.mjs";
-      import { CanvasAddon } from "./node_modules/@xterm/addon-canvas/lib/xterm-addon-canvas.mjs";
+      import { CanvasAddon } from "/node_modules/@xterm/addon-canvas/lib/xterm-addon-canvas.mjs";
 
       const params = new URLSearchParams(location.search);
       const renderer = params.get("renderer") || "webgl";

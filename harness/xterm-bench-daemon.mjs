@@ -95,7 +95,7 @@ function startStaticServer() {
       const requestPath = new URL(request.url, "http://x").pathname;
       const filePath = resolve(
         REPO_ROOT,
-        requestPath === "/" ? "xterm-bench.html" : "." + requestPath,
+        requestPath === "/" ? "harness/xterm-bench.html" : "." + requestPath,
       );
       if (!filePath.startsWith(REPO_ROOT)) {
         response.writeHead(403).end("forbidden");
@@ -231,12 +231,12 @@ async function runBenchmark(client, renderer, query) {
     await client.request("Runtime.enable", undefined, sessionId);
     await client.request("Page.enable", undefined, sessionId);
 
-    const benchmarkUrl = new URL("http://x/xterm-bench.html");
+    const benchmarkUrl = new URL("http://x/harness/xterm-bench.html");
     benchmarkUrl.searchParams.set("renderer", renderer);
     for (const [key, value] of query) {
       if (key !== "renderer") benchmarkUrl.searchParams.set(key, value);
     }
-    const pageUrl = `http://127.0.0.1:${STATIC_PORT}/xterm-bench.html${benchmarkUrl.search}`;
+    const pageUrl = `http://127.0.0.1:${STATIC_PORT}/harness/xterm-bench.html${benchmarkUrl.search}`;
 
     try {
       const { windowId } = await client.request("Browser.getWindowForTarget", { targetId });
@@ -309,7 +309,7 @@ async function runSgrTest(client, query) {
     await client.request("Runtime.enable", undefined, sessionId);
     await client.request("Page.enable", undefined, sessionId);
 
-    const testUrl = new URL("http://x/xterm-sgr-test.html");
+    const testUrl = new URL("http://x/harness/xterm-sgr-test.html");
     const renderer = query.get("renderer") || "webgl";
     const fontFamily =
       query.get("fontFamily") ||
@@ -320,7 +320,7 @@ async function runSgrTest(client, query) {
     if (query.has("rows")) testUrl.searchParams.set("rows", query.get("rows"));
     if (query.has("fontSize")) testUrl.searchParams.set("fontSize", query.get("fontSize"));
     if (query.has("lineHeight")) testUrl.searchParams.set("lineHeight", query.get("lineHeight"));
-    const pageUrl = `http://127.0.0.1:${STATIC_PORT}/xterm-sgr-test.html${testUrl.search}`;
+    const pageUrl = `http://127.0.0.1:${STATIC_PORT}/harness/xterm-sgr-test.html${testUrl.search}`;
 
     try {
       const { windowId } = await client.request("Browser.getWindowForTarget", { targetId });
@@ -375,6 +375,131 @@ async function runSgrTest(client, query) {
   }
 }
 
+async function runRaceTest(client, query) {
+  const { targetId } = await client.request("Target.createTarget", {
+    url: "about:blank",
+    background: true,
+  });
+  const { sessionId } = await client.request("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
+
+  try {
+    await client.request("Runtime.enable", undefined, sessionId);
+    await client.request("Page.enable", undefined, sessionId);
+    await client.request("Network.enable", undefined, sessionId);
+    await client.request("Log.enable", undefined, sessionId).catch(() => {});
+
+    // Cold-load fonts on every run so the pre-ready write races the woff2 fetch
+    // deterministically instead of relying on warm cache.
+    if (query.get("cold") !== "0") {
+      await client.request("Network.clearBrowserCache", undefined, sessionId).catch(() => {});
+    }
+
+    const consoleEntries = [];
+    const disposeLog = client.on(
+      "Log.entryAdded",
+      (params) => {
+        const entry = params.entry;
+        consoleEntries.push({
+          level: entry.level,
+          text: entry.text,
+          url: entry.url,
+          lineNumber: entry.lineNumber,
+        });
+      },
+      sessionId,
+    );
+
+    const testUrl = new URL("http://x/harness/xterm-font-race-test.html");
+    const weights = query.get("weights") || "400,500,600";
+    testUrl.searchParams.set("weights", weights);
+    testUrl.searchParams.set("heal", query.get("heal") || "ready+load");
+    testUrl.searchParams.set("preReadyWrite", query.get("preReadyWrite") || "1");
+    const pageUrl = `http://127.0.0.1:${STATIC_PORT}/harness/xterm-font-race-test.html${testUrl.search}`;
+
+    client.request("Page.navigate", { url: pageUrl }, sessionId).catch(() => {});
+
+    await new Promise((resolve) => {
+      const dispose = client.on(
+        "Page.loadEventFired",
+        () => {
+          dispose();
+          resolve();
+        },
+        sessionId,
+      );
+      setTimeout(() => {
+        dispose();
+        resolve();
+      }, 5000);
+    });
+
+    let raceValue = null;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const pollResult = await client.request(
+        "Runtime.evaluate",
+        {
+          expression:
+            "(typeof window.raceResult !== 'undefined' && window.raceResult !== null) ? window.raceResult : null",
+          returnByValue: true,
+        },
+        sessionId,
+      );
+      raceValue = pollResult.result.value;
+      if (raceValue !== null) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+
+    if (raceValue === null) {
+      const { result } = await client.request(
+        "Runtime.evaluate",
+        {
+          expression:
+            "({ ready: typeof window.raceReady, hasTerminal: !!window.terminal, status: document.getElementById('status')?.textContent, body: document.body?.innerText?.slice(0, 200) })",
+          returnByValue: true,
+        },
+        sessionId,
+      );
+      disposeLog();
+      return {
+        weights,
+        url: pageUrl,
+        error: "raceResult never set within 30s",
+        pageState: result.value,
+        consoleEntries,
+      };
+    }
+
+    disposeLog();
+
+    if (query.get("screenshot") === "1") {
+      await client.request(
+        "Runtime.evaluate",
+        {
+          expression: "document.getElementById('status').style.display='none'",
+          returnByValue: true,
+        },
+        sessionId,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const { data } = await client.request("Page.captureScreenshot", { format: "png" }, sessionId);
+      const pixelMetrics = await computePixelMetrics(data);
+      return { weights, url: pageUrl, ...raceValue, consoleEntries, pixelMetrics };
+    }
+
+    return {
+      weights,
+      url: pageUrl,
+      ...raceValue,
+      consoleEntries,
+    };
+  } finally {
+    await client.request("Target.closeTarget", { targetId }).catch(() => {});
+  }
+}
+
 async function main() {
   const staticServer = await startStaticServer();
 
@@ -405,6 +530,8 @@ async function main() {
 
   let running = false;
   let sgrRunning = false;
+  let raceInFlight = 0;
+  const RACE_CONCURRENCY = Number(process.env.RACE_CONCURRENCY || 8);
   const controlServer = createHttpServer(async (request, response) => {
     const url = new URL(request.url, "http://x");
     const sendJson = (status, payload) => {
@@ -422,7 +549,7 @@ async function main() {
         await connectPromise;
         if (!connected || !client) throw new Error("CDP not connected");
         const pageUrl =
-          url.searchParams.get("url") || `http://127.0.0.1:${STATIC_PORT}/xterm-bench.html`;
+          url.searchParams.get("url") || `http://127.0.0.1:${STATIC_PORT}/harness/xterm-bench.html`;
         const filePath = url.searchParams.get("path") || "/tmp/xterm-bench.png";
         const result = await captureScreenshot(client, pageUrl, filePath);
         sendJson(200, result);
@@ -447,6 +574,25 @@ async function main() {
         sendJson(500, { error: error.message });
       } finally {
         sgrRunning = false;
+      }
+      return;
+    }
+
+    if (url.pathname === "/run-race") {
+      if (raceInFlight >= RACE_CONCURRENCY) {
+        sendJson(429, { error: "race concurrency limit reached", inFlight: raceInFlight });
+        return;
+      }
+      raceInFlight += 1;
+      try {
+        await connectPromise;
+        if (!connected || !client) throw new Error("CDP not connected");
+        const result = await runRaceTest(client, url.searchParams);
+        sendJson(200, result);
+      } catch (error) {
+        sendJson(500, { error: error.message });
+      } finally {
+        raceInFlight -= 1;
       }
       return;
     }
