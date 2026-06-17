@@ -649,4 +649,116 @@ describe("DiffViewer", () => {
     const imageCalls = patchMock.mock.calls.filter(([, path]) => path === "image.png");
     expect(imageCalls).toHaveLength(0);
   });
+
+  it("animates newly added diff lines during realtime updates", async () => {
+    const txtList: GitDiffFileListResponse = {
+      isRepo: true,
+      files: [
+        {
+          path: "file.txt",
+          oldPath: null,
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+          binary: false,
+        },
+      ],
+    };
+    const initialPatch: GitDiffFilePatch = {
+      patch: ["@@ -1,3 +1,3 @@", " alpha", "-beta", "+BETA", " gamma", ""].join("\n"),
+      patchOmitted: false,
+      binary: false,
+    };
+    filesMock.mockImplementation(async () => ({ ...txtList, files: [...txtList.files] }));
+    patchMock.mockResolvedValue(initialPatch);
+
+    const { rerender } = render(
+      <DiffViewer open cwd="/repo" branchInfo={null} onClose={() => {}} />,
+    );
+    const initialAddedLine = await screen.findByText("BETA");
+    expect(initialAddedLine.closest(".animate-diff-line-added")).toBeNull();
+
+    const updatedPatch: GitDiffFilePatch = {
+      patch: [
+        "@@ -1,3 +1,4 @@",
+        " alpha",
+        "-beta",
+        "+BETA",
+        "+newly added line",
+        " gamma",
+        "",
+      ].join("\n"),
+      patchOmitted: false,
+      binary: false,
+    };
+    patchMock.mockResolvedValue(updatedPatch);
+
+    rerender(
+      <DiffViewer open cwd="/repo" branchInfo={null} gitDirtyVersion={1} onClose={() => {}} />,
+    );
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS + 50),
+    );
+
+    const newLine = await screen.findByText("newly added line");
+    expect(newLine.closest(".animate-diff-line-added")).toBeTruthy();
+  });
+
+  it("animates newly added diff lines in split view during realtime updates", async () => {
+    const txtList: GitDiffFileListResponse = {
+      isRepo: true,
+      files: [
+        {
+          path: "file.txt",
+          oldPath: null,
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+          binary: false,
+        },
+      ],
+    };
+    const initialPatch: GitDiffFilePatch = {
+      patch: ["@@ -1,3 +1,3 @@", " alpha", "-beta", "+BETA", " gamma", ""].join("\n"),
+      patchOmitted: false,
+      binary: false,
+    };
+    filesMock.mockImplementation(async () => ({ ...txtList, files: [...txtList.files] }));
+    patchMock.mockResolvedValue(initialPatch);
+
+    const { rerender } = render(
+      <DiffViewer open cwd="/repo" branchInfo={null} onClose={() => {}} />,
+    );
+    await screen.findByText("BETA");
+
+    const layoutGroup = screen.getByRole("radiogroup", { name: "diff layout" });
+    fireEvent.click(within(layoutGroup).getAllByRole("radio")[1]);
+
+    const updatedPatch: GitDiffFilePatch = {
+      patch: [
+        "@@ -1,3 +1,4 @@",
+        " alpha",
+        "-beta",
+        "+BETA",
+        "+newly added line",
+        " gamma",
+        "",
+      ].join("\n"),
+      patchOmitted: false,
+      binary: false,
+    };
+    patchMock.mockResolvedValue(updatedPatch);
+
+    rerender(
+      <DiffViewer open cwd="/repo" branchInfo={null} gitDirtyVersion={1} onClose={() => {}} />,
+    );
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS + 50),
+    );
+
+    const newLine = await screen.findByText("newly added line");
+    expect(newLine.closest(".animate-diff-line-added")).toBeTruthy();
+  });
 });
