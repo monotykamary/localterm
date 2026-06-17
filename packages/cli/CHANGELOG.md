@@ -1,5 +1,16 @@
 # localterm
 
+## 2.2.0
+
+### Minor Changes
+
+- Animate newly added diff lines in realtime
+
+### Patch Changes
+
+- Updated dependencies
+  - @monotykamary/localterm-server@2.2.0
+
 ## 2.1.6
 
 ### Patch Changes

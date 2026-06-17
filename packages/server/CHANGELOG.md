@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.2.0
+
+### Minor Changes
+
+- Animate newly added diff lines in realtime
+
 ## 2.1.6
 
 ## 2.1.5
