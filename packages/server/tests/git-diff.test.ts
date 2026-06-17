@@ -81,6 +81,15 @@ const stagePath = (testRepo: TestRepo, filePath: string): void => {
   runGitSync(testRepo.dir, ["add", filePath]);
 };
 
+const getHeadSha = (dir: string): string => runGitSync(dir, ["rev-parse", "HEAD"]).trim();
+
+// Simulate a remote-tracking branch pointing at an arbitrary SHA, without
+// needing a second repo to fetch from. Lets a fixture model fork/upstream layout
+// (origin/main vs upstream/main at different commits) cheaply.
+const setRemoteRef = (dir: string, remote: string, branch: string, sha: string): void => {
+  runGitSync(dir, ["update-ref", `refs/remotes/${remote}/${branch}`, sha]);
+};
+
 const makeTempDir = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "localterm-git-test-"));
 
 describe("parseNumstatZ", () => {
@@ -543,6 +552,7 @@ describe("branch comparison mode", () => {
                 url: "https://github.com/them/repo/pull/42",
                 state: "open" as const,
                 headOwner: "me",
+                baseRepoFullName: "them/repo",
               },
             ];
           }
@@ -585,6 +595,103 @@ describe("branch comparison mode", () => {
       });
     } finally {
       fs.rmSync(plainDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("fork PR base resolution", () => {
+  // A fork PR targets the upstream repo's default branch, not the fork's own.
+  // The diff must therefore compare against upstream/<base>, otherwise commits
+  // that exist only on the fork's drifted default branch appear in (or vanish
+  // from) the PR diff and disagree with GitHub's Files changed.
+  //
+  // Fixture: base B0 (a.txt). origin/main advances with a drift commit D that
+  // adds drift.txt. feature branches off D (so it contains the drift) and adds
+  // feature.txt. upstream/main is planted at B0 (no drift). The PR base is
+  // them/repo:main -> upstream/main (B0). Diffing against upstream/main shows
+  // drift.txt (B0 lacked it); diffing against origin/main (D) would hide it.
+  let forkRepo: TestRepo;
+  let baseSha: string;
+  let driftSha: string;
+
+  beforeAll(async () => {
+    forkRepo = await initRepo(makeTempDir());
+    fs.writeFileSync(path.join(forkRepo.dir, "a.txt"), "a\n");
+    await commitAll(forkRepo, "base");
+    baseSha = getHeadSha(forkRepo.dir);
+
+    fs.writeFileSync(path.join(forkRepo.dir, "drift.txt"), "drift\n");
+    await commitAll(forkRepo, "drift");
+    driftSha = getHeadSha(forkRepo.dir);
+
+    createAndCheckoutBranch(forkRepo, "feature");
+    fs.writeFileSync(path.join(forkRepo.dir, "feature.txt"), "feature\n");
+    await commitAll(forkRepo, "feature work");
+
+    addRemote(forkRepo, "origin", "git@github.com:me/fork.git");
+    addRemote(forkRepo, "upstream", "https://github.com/them/repo.git");
+    setRemoteRef(forkRepo.dir, "origin", "main", driftSha);
+    setRemoteRef(forkRepo.dir, "upstream", "main", baseSha);
+
+    setPrFetcher({
+      list: async (slug, head, _state, _perPage) => {
+        if (slug === "them/repo" && head === "me:feature") {
+          return [
+            {
+              number: 7,
+              title: "Fork PR",
+              baseRefName: "main",
+              url: "https://github.com/them/repo/pull/7",
+              state: "open" as const,
+              headOwner: "me",
+              baseRepoFullName: "them/repo",
+            },
+          ];
+        }
+        return [];
+      },
+    });
+  });
+
+  afterAll(() => {
+    fs.rmSync(forkRepo.dir, { recursive: true, force: true });
+    setPrFetcher({ list: async () => [] });
+  });
+
+  it("compares a fork PR branch against upstream, not origin", async () => {
+    // Warm the per-(cwd, branch) PR cache the way the client does (it fires
+    // getGitBranchPr in parallel, then opens branch mode once pr resolves).
+    const pr = await getGitBranchPr(forkRepo.dir);
+    expect(pr).not.toBeNull();
+    expect(pr?.baseRefName).toBe("main");
+
+    const list = await getGitDiffFiles(forkRepo.dir, { mode: "branch" });
+    const paths = new Set(list.files.map((file) => file.path));
+    // drift.txt proves the base resolved to upstream/main (B0 lacked it); origin
+    // (driftSha) already has it, so it would be absent from an origin-based diff.
+    expect(paths.has("drift.txt")).toBe(true);
+    expect(paths.has("feature.txt")).toBe(true);
+    expect(paths.has("a.txt")).toBe(false);
+  });
+
+  it("does not regress when no PR is detected (falls back to repo default)", async () => {
+    setPrFetcher({ list: async () => [] });
+    const freshRepo = await initRepo(makeTempDir());
+    try {
+      fs.writeFileSync(path.join(freshRepo.dir, "a.txt"), "a\n");
+      await commitAll(freshRepo, "base");
+      const baseSha = getHeadSha(freshRepo.dir);
+      addRemote(freshRepo, "origin", "git@github.com:me/repo.git");
+      setRemoteRef(freshRepo.dir, "origin", "main", baseSha);
+      createAndCheckoutBranch(freshRepo, "feature");
+      fs.writeFileSync(path.join(freshRepo.dir, "b.txt"), "b\n");
+      await commitAll(freshRepo, "work");
+      // No PR cache (getGitBranchPr returns null) -> resolveDefaultBase kicks in.
+      expect(await getGitBranchPr(freshRepo.dir)).toBeNull();
+      const list = await getGitDiffFiles(freshRepo.dir, { mode: "branch" });
+      expect(new Set(list.files.map((file) => file.path)).has("b.txt")).toBe(true);
+    } finally {
+      fs.rmSync(freshRepo.dir, { recursive: true, force: true });
     }
   });
 });

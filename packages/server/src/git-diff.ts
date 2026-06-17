@@ -14,6 +14,7 @@ import {
   GIT_MAX_TOTAL_PATCH_BYTES,
   GIT_MAX_UNTRACKED_FILE_BYTES,
   GIT_MAX_UNTRACKED_FILES,
+  GIT_PR_CACHE_TTL_MS,
 } from "./constants.js";
 import type {
   GitBaseSource,
@@ -99,6 +100,42 @@ export const invalidateGitDiffCache = (cwd: string): void => {
   diffCacheByCwd.delete(cwd);
 };
 
+// PR detection cache, keyed by (cwd, branch). The client's `getGitBranchPr` call
+// (fired in parallel with `getGitBranchInfo` on viewer open) populates this, so
+// by the time `branchInfo?.pr` is truthy client-side and the viewer opens into
+// branch mode, the server cache is warm — and `resolveEffectiveBaseRef` can
+// read the PR's base repo without a GitHub round-trip on the diff path (which is
+// local-only by design). The branch is part of the key, so switching branches
+// misses and the next `getGitBranchPr` refetches; a TTL backstops a stale entry.
+interface PrCache {
+  pr: ParsedPr | null;
+  builtAt: number;
+}
+
+const prCacheByCwd = new Map<string, Map<string, PrCache>>();
+
+const readPrCache = (cwd: string, branch: string): ParsedPr | null | undefined => {
+  const byBranch = prCacheByCwd.get(cwd);
+  if (!byBranch) return undefined;
+  const entry = byBranch.get(branch);
+  if (!entry) return undefined;
+  if (Date.now() - entry.builtAt > GIT_PR_CACHE_TTL_MS) {
+    byBranch.delete(branch);
+    if (byBranch.size === 0) prCacheByCwd.delete(cwd);
+    return undefined;
+  }
+  return entry.pr;
+};
+
+const writePrCache = (cwd: string, branch: string, pr: ParsedPr | null): void => {
+  let byBranch = prCacheByCwd.get(cwd);
+  if (!byBranch) {
+    byBranch = new Map();
+    prCacheByCwd.set(cwd, byBranch);
+  }
+  byBranch.set(branch, { pr, builtAt: Date.now() });
+};
+
 const runGitText = async (cwd: string, args: string[]): Promise<string> => {
   const result = await runGit(cwd, args);
   return result.stdout.toString("utf8");
@@ -169,6 +206,24 @@ const resolveEffectiveBaseRef = async (
 
   let baseRef = options.base?.trim() || null;
   if (baseRef && !(await verifyRef(cwd, baseRef))) baseRef = null;
+  // No explicit user override: a fork PR compares against its upstream base
+  // (the PR's base repo's default branch), not the fork's own default. The PR is
+  // read from the per-(cwd, branch) cache populated by getGitBranchPr — no GitHub
+  // round-trip here — so the diff stays local and the cache's branch key means a
+  // branch switch naturally misses. Cold cache (PR not yet resolved) degrades to
+  // the repo default; self-corrects once getGitBranchPr lands and the viewer
+  // re-leases the diff.
+  if (!baseRef) {
+    const currentBranch = await getCurrentBranch(cwd);
+    if (currentBranch) {
+      const cachedPr = readPrCache(cwd, currentBranch);
+      if (cachedPr) {
+        const remotes = await parseGithubRemotes(cwd);
+        const prBase = await resolvePrBaseRef(cwd, cachedPr, remotes);
+        if (prBase) baseRef = prBase.ref;
+      }
+    }
+  }
   if (!baseRef) baseRef = (await resolveDefaultBase(cwd))?.ref ?? null;
   if (!baseRef) return null;
 
@@ -716,7 +771,14 @@ const getGitDiffFilePatchFromWorkingTree = async (
   }
 };
 
-type ParsedPr = GitBranchPr & { headOwner: string | null };
+// ParsedPr carries the PR's base repo full name alongside the wire fields so
+// the diff path can map the PR base to a local remote WITHOUT re-fetching (the
+// GitHub round-trip already happened in getGitBranchPr). headOwner is the same
+// kind of internal-only field; neither leaks to GitBranchPr on the wire.
+type ParsedPr = GitBranchPr & {
+  headOwner: string | null;
+  baseRepoFullName: string | null;
+};
 
 const normalizeOctokitPrState = (state: string, mergedAt: string | null): GitBranchPrState => {
   if (mergedAt !== null) return "merged";
@@ -751,6 +813,7 @@ const defaultPrFetcher: PrFetcher = {
         url: pr.html_url ?? null,
         state: normalizeOctokitPrState(pr.state, pr.merged_at),
         headOwner: pr.head?.repo?.owner?.login ?? null,
+        baseRepoFullName: pr.base?.repo?.full_name ?? null,
       }));
     } catch {
       return [];
@@ -791,7 +854,21 @@ const parseGithubRemotes = async (cwd: string): Promise<GithubRemote[]> => {
   return memoBy(raw, (remote) => `${remote.name} ${remote.slug}`);
 };
 
-const detectPr = async (cwd: string): Promise<GitBranchPr | null> => {
+// The wire type strips the internal-only fields (headOwner, baseRepoFullName)
+// so they never reach the client.
+const toWirePr = (pr: ParsedPr): GitBranchPr => ({
+  number: pr.number,
+  title: pr.title,
+  baseRefName: pr.baseRefName,
+  url: pr.url,
+  state: pr.state,
+});
+
+// detectPr returns the full ParsedPr (headOwner + baseRepoFullName retained)
+// and caches it per (cwd, branch) so the diff path can resolve a fork PR's
+// upstream base without a second GitHub round-trip. getGitBranchPr maps to the
+// wire type; resolveEffectiveBaseRef reads the cache directly.
+const detectPr = async (cwd: string): Promise<ParsedPr | null> => {
   const currentBranch = await getCurrentBranch(cwd);
   if (!currentBranch) return null;
   const remotes = await parseGithubRemotes(cwd);
@@ -809,25 +886,27 @@ const detectPr = async (cwd: string): Promise<GitBranchPr | null> => {
     (pr) => pr.url ?? `#${pr.number}`,
   );
   const openPr = candidates.find((pr) => pr.state === "open");
-  if (openPr) {
-    return {
-      number: openPr.number,
-      title: openPr.title,
-      baseRefName: openPr.baseRefName,
-      url: openPr.url,
-      state: openPr.state,
-    };
-  }
-  const fallback = candidates[0];
-  return fallback
-    ? {
-        number: fallback.number,
-        title: fallback.title,
-        baseRefName: fallback.baseRefName,
-        url: fallback.url,
-        state: fallback.state,
-      }
-    : null;
+  const chosen = openPr ?? candidates[0] ?? null;
+  writePrCache(cwd, currentBranch, chosen);
+  return chosen;
+};
+
+// Map a detected PR's base repo to a local remote, returning the remote-tracking
+// ref to diff against. A fork PR targets the upstream repo (e.g. them/repo);
+// `git diff` against `upstream/<baseRefName>` then shows only the branch's own
+// changes, not drift between the fork's default branch and upstream. Falls back
+// to null when the base repo isn't a configured remote (upstream never added) or
+// the ref isn't fetched locally — the caller degrades to the repo default.
+const resolvePrBaseRef = async (
+  cwd: string,
+  pr: ParsedPr,
+  remotes: GithubRemote[],
+): Promise<RefInfo | null> => {
+  if (!pr.baseRepoFullName || !pr.baseRefName) return null;
+  const remote = remotes.find((candidate) => candidate.slug === pr.baseRepoFullName);
+  if (!remote) return null;
+  const candidate = `${remote.name}/${pr.baseRefName}`;
+  return (await verifyRef(cwd, candidate)) ? { ref: candidate, source: "pr" } : null;
 };
 
 const listBranchesByRecency = async (cwd: string): Promise<string[]> => {
@@ -883,5 +962,6 @@ export const getGitBranchInfo = async (cwd: string): Promise<GitBranchInfo> => {
 
 export const getGitBranchPr = async (cwd: string): Promise<GitBranchPr | null> => {
   if (!(await isGitRepo(cwd))) return null;
-  return detectPr(cwd);
+  const detected = await detectPr(cwd);
+  return detected ? toWirePr(detected) : null;
 };

@@ -158,6 +158,12 @@ export const GIT_DIRTY_THROTTLE_MS = 100;
 // Invalidated on a git-dirty signal; this TTL is the backstop for a missed
 // invalidation so a stale tree can't be served indefinitely.
 export const GIT_CACHE_TTL_MS = 5_000;
+// How long a detected PR stays cached per (cwd, branch). PR state changes on
+// remote events (push/merge/retarget), not on local working-tree edits, so this
+// is deliberately longer than the diff cache TTL and is NOT invalidated by the
+// git-dirty signal. The branch is part of the cache key, so switching branches
+// naturally misses and refetches.
+export const GIT_PR_CACHE_TTL_MS = 60_000;
 
 // "Branch" diff mode compares the working tree against a base branch (via
 // merge-base). The GitHub REST API is consulted to discover the current branch's
