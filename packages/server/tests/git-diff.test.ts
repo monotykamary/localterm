@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createSignature, initRepository, openRepository } from "es-git";
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { spawnSync } from "node:child_process";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import {
   buildUntrackedPatch,
   getGitBranchInfo,
@@ -18,72 +18,67 @@ import {
   splitPatchByFile,
 } from "../src/git-diff.js";
 
-const TEST_SIG = createSignature("test", "test@example.com");
+// These tests drive real `git` subprocesses (init/commit/diff on tmp repos) and
+// the git-diff module shells out on every cold cache miss. That's fast in
+// isolation but contended under `pnpm test`'s full parallel run (chromium
+// boots alongside), so grant the same headroom the other I/O-heavy suites use.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
+const GIT_ENV = {
+  ...process.env,
+  GIT_AUTHOR_NAME: "test",
+  GIT_AUTHOR_EMAIL: "test@example.com",
+  GIT_COMMITTER_NAME: "test",
+  GIT_COMMITTER_EMAIL: "test@example.com",
+  GIT_PAGER: "",
+  GIT_TERMINAL_PROMPT: "0",
+};
+
+const runGitSync = (cwd: string, args: string[]): string => {
+  const result = spawnSync("git", args, {
+    cwd,
+    env: GIT_ENV,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    throw new Error(`git ${args.join(" ")} (in ${cwd}) failed: ${result.stderr ?? result.stdout}`);
+  }
+  return result.stdout ?? "";
+};
 
 interface TestRepo {
   dir: string;
-  repo: Awaited<ReturnType<typeof openRepository>>;
 }
 
 const initRepo = async (dir: string): Promise<TestRepo> => {
-  const repo = await initRepository(dir, { initialHead: "refs/heads/main" });
-  return { dir, repo };
+  runGitSync(dir, ["init", "-b", "main"]);
+  return { dir };
 };
 
 const commitAll = async (testRepo: TestRepo, message: string): Promise<void> => {
-  const idx = testRepo.repo.index();
-  idx.addAll(["*"]);
-  idx.write();
-  const treeId = idx.writeTree();
-  const tree = testRepo.repo.getTree(treeId);
-  const parents: string[] = [];
-  try {
-    const head = testRepo.repo.head();
-    const target = head.target();
-    if (target) parents.push(target);
-  } catch {
-    // Unborn branch — no parent commit yet
-  }
-  testRepo.repo.commit(tree, message, {
-    updateRef: "HEAD",
-    author: TEST_SIG,
-    committer: TEST_SIG,
-    parents,
-  });
+  runGitSync(testRepo.dir, ["add", "-A"]);
+  runGitSync(testRepo.dir, ["commit", "-m", message]);
 };
 
 const stageRename = (testRepo: TestRepo, oldFilePath: string, newFilePath: string): void => {
-  fs.renameSync(path.join(testRepo.dir, oldFilePath), path.join(testRepo.dir, newFilePath));
-  const idx = testRepo.repo.index();
-  idx.removePath(oldFilePath);
-  idx.addPath(newFilePath);
-  idx.write();
+  runGitSync(testRepo.dir, ["mv", oldFilePath, newFilePath]);
 };
 
 const checkoutBranch = (testRepo: TestRepo, branchName: string): void => {
-  testRepo.repo.setHead(`refs/heads/${branchName}`);
-  testRepo.repo.checkoutHead({ force: true });
+  runGitSync(testRepo.dir, ["checkout", branchName]);
 };
 
 const createAndCheckoutBranch = (testRepo: TestRepo, branchName: string): void => {
-  const head = testRepo.repo.head();
-  const target = head.target();
-  if (!target) throw new Error("No HEAD target to branch from");
-  const commit = testRepo.repo.findCommit(target);
-  if (!commit) throw new Error("No commit found for HEAD target");
-  testRepo.repo.createBranch(branchName, commit);
-  testRepo.repo.setHead(`refs/heads/${branchName}`);
-  testRepo.repo.checkoutHead({ force: true });
+  runGitSync(testRepo.dir, ["checkout", "-b", branchName]);
 };
 
 const addRemote = (testRepo: TestRepo, name: string, url: string): void => {
-  testRepo.repo.createRemote(name, url);
+  runGitSync(testRepo.dir, ["remote", "add", name, url]);
 };
 
 const stagePath = (testRepo: TestRepo, filePath: string): void => {
-  const idx = testRepo.repo.index();
-  idx.addPath(filePath);
-  idx.write();
+  runGitSync(testRepo.dir, ["add", filePath]);
 };
 
 const makeTempDir = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "localterm-git-test-"));

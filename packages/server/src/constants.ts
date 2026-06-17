@@ -169,6 +169,10 @@ export const GIT_MAX_REF_LENGTH = 255;
 // Cap the branch list returned for the base-branch picker so a repo with
 // thousands of remote refs can't bloat the response.
 export const GIT_MAX_BRANCHES = 500;
+// Safety ceiling on a single git subprocess: kills a hung invocation (a
+// pathological repo, or git blocked on something GIT_TERMINAL_PROMPT=0 didn't
+// suppress) so the daemon's event loop can't be held indefinitely.
+export const GIT_SPAWN_TIMEOUT_MS = 30_000;
 
 export const HTTP_STATUS_CREATED = 201;
 
