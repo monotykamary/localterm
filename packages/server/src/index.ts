@@ -53,6 +53,7 @@ import {
   getGitDiffFilePatch,
   getGitDiffFiles,
   getGitDiffSummary,
+  invalidateGitDiffCache,
   type GitDiffOptions,
 } from "./git-diff.js";
 import {
@@ -858,6 +859,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             }
             gitDirtyInFlight = true;
             try {
+              // The working tree changed, so any cached full-diff pass for
+              // this cwd is stale — drop it before re-reading the summary so
+              // the viewer's next per-file fetch rebuilds against the new tree.
+              invalidateGitDiffCache(cwd);
               const summary = await getGitDiffSummary(cwd);
               safeSend(ws, { type: "git-diff-summary", summary });
             } catch {

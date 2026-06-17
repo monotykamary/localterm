@@ -151,6 +151,13 @@ export const GIT_BINARY_SNIFF_BYTES = 8000;
 export const GIT_MAX_PATCH_BYTES_PER_FILE = 1 * 1024 * 1024;
 export const GIT_MAX_TOTAL_PATCH_BYTES = 10 * 1024 * 1024;
 export const GIT_DIRTY_THROTTLE_MS = 100;
+// The diff viewer opens into branch mode when a PR exists, then its prefetch
+// queue asks for ~every file's patch. The full diff pass (one tree diff + a
+// jsdiff per file) is cached per (cwd, mode, base) so those per-file requests
+// are O(1) map lookups instead of each re-running the whole pass (O(files²)).
+// Invalidated on a git-dirty signal; this TTL is the backstop for a missed
+// invalidation so a stale tree can't be served indefinitely.
+export const GIT_CACHE_TTL_MS = 5_000;
 
 // "Branch" diff mode compares the working tree against a base branch (via
 // merge-base). The GitHub REST API is consulted to discover the current branch's
