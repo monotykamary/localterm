@@ -382,7 +382,7 @@ const UnifiedDiffLine = memo(
     highlightingPending: boolean;
   } & LineCallbacks) => (
     <div
-      className={cn("group/line relative flex", lineBackgroundClasses(line.type))}
+      className="group/line relative flex"
       onPointerEnter={onDragEnter ? () => onDragEnter(line) : undefined}
     >
       {annotateKey !== null && onAnnotate && onStartDrag ? (
@@ -413,10 +413,11 @@ const UnifiedDiffLine = memo(
           {line.type === "add" ? "+" : line.type === "del" ? "-" : ""}
         </span>
       </div>
-      <span
+      <div
         className={cn(
-          "shrink-0 whitespace-pre pr-4",
-          isNewlyAdded && "inline-block animate-diff-line-added",
+          "min-w-0 flex-1",
+          lineBackgroundClasses(line.type),
+          isNewlyAdded && "animate-diff-line-added",
         )}
         style={
           isNewlyAdded
@@ -424,24 +425,26 @@ const UnifiedDiffLine = memo(
             : undefined
         }
       >
-        <span
-          className={cn(
-            highlightingPending && !syntaxTokens
-              ? "invisible"
-              : !syntaxTokens && lineTextClasses(line.type),
-          )}
-        >
-          {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
-          {line.noNewline ? (
-            <span
-              className="select-none text-muted-foreground/50"
-              title="No newline at end of file"
-            >
-              {" ⊘"}
-            </span>
-          ) : null}
+        <span className="shrink-0 whitespace-pre pr-4">
+          <span
+            className={cn(
+              highlightingPending && !syntaxTokens
+                ? "invisible"
+                : !syntaxTokens && lineTextClasses(line.type),
+            )}
+          >
+            {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
+            {line.noNewline ? (
+              <span
+                className="select-none text-muted-foreground/50"
+                title="No newline at end of file"
+              >
+                {" ⊘"}
+              </span>
+            ) : null}
+          </span>
         </span>
-      </span>
+      </div>
       {highlighted ? <RangeHighlight /> : null}
     </div>
   ),

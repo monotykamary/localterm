@@ -117,20 +117,29 @@ body {
 }
 
 @keyframes diff-line-added {
-  from {
+  0% {
     opacity: 0;
-    transform: translateX(12px);
+    transform: scaleY(0.92) scaleX(0.98) translateY(4px);
+    filter: brightness(1.3) saturate(1.2);
   }
-  to {
+  55% {
     opacity: 1;
-    transform: translateX(0);
+    transform: scaleY(1.03) scaleX(1.01) translateY(-1px);
+    filter: brightness(1.1) saturate(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleY(1) scaleX(1) translateY(0);
+    filter: brightness(1) saturate(1);
   }
 }
 
 .animate-diff-line-added {
   animation-name: diff-line-added;
-  animation-timing-function: var(--ease-snappy);
+  animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
   animation-fill-mode: forwards;
+  transform-origin: center left;
+  will-change: transform, opacity, filter;
 }
 
 :root {
