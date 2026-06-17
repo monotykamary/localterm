@@ -18,6 +18,7 @@ import type {
   createAutomationInputSchema,
   gitBaseSourceSchema,
   gitBranchInfoSchema,
+  gitBranchPrLeaseSchema,
   gitBranchPrSchema,
   gitBranchPrStateSchema,
   gitDiffFileListResponseSchema,
@@ -80,6 +81,7 @@ export type GitBaseSource = z.infer<typeof gitBaseSourceSchema>;
 export type GitBranchPrState = z.infer<typeof gitBranchPrStateSchema>;
 export type GitBranchPr = z.infer<typeof gitBranchPrSchema>;
 export type GitBranchInfo = z.infer<typeof gitBranchInfoSchema>;
+export type GitBranchPrLease = z.infer<typeof gitBranchPrLeaseSchema>;
 export type GitDiffSummary = z.infer<typeof gitDiffSummarySchema>;
 export type GitDiffFileMeta = z.infer<typeof gitDiffFileMetaSchema>;
 export type GitDiffFileListResponse = z.infer<typeof gitDiffFileListResponseSchema>;

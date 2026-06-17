@@ -5,10 +5,10 @@ import { Octokit } from "@octokit/rest";
 import { openRepository } from "es-git";
 import { computePatchFromContents } from "./utils/compute-patch.js";
 import { memoBy } from "./utils/memo-by.js";
+import { reconcileFileStats } from "./utils/reconcile-file-stats.js";
 import { resolveGithubToken } from "./utils/resolve-github-token.js";
 import {
   GIT_BINARY_SNIFF_BYTES,
-  GIT_BRANCH_INFO_PR_TIMEOUT_MS,
   GIT_MAX_BRANCHES,
   GIT_MAX_PATCH_BYTES_PER_FILE,
   GIT_MAX_TOTAL_PATCH_BYTES,
@@ -385,38 +385,7 @@ const collectDeltaMeta = (
   }
 
   // Verify totals match and redistribute remainder if needed
-  let computedAdds = 0;
-  let computedDels = 0;
-  for (const d of result) {
-    if (!d.binary) {
-      computedAdds += d.additions;
-      computedDels += d.deletions;
-    }
-  }
-  const addDelta = totalInsertions - computedAdds;
-  const delDelta = totalDeletions - computedDels;
-  if (addDelta !== 0 || delDelta !== 0) {
-    const sorted = result.filter((d) => !d.binary);
-    let remainingAdd = addDelta;
-    let remainingDel = delDelta;
-    for (const d of sorted) {
-      if (remainingAdd > 0) {
-        d.additions += 1;
-        remainingAdd -= 1;
-      } else if (remainingAdd < 0) {
-        d.additions -= 1;
-        remainingAdd += 1;
-      }
-      if (remainingDel > 0) {
-        d.deletions += 1;
-        remainingDel -= 1;
-      } else if (remainingDel < 0) {
-        d.deletions -= 1;
-        remainingDel += 1;
-      }
-      if (remainingAdd === 0 && remainingDel === 0) break;
-    }
-  }
+  reconcileFileStats(result, totalInsertions, totalDeletions);
 
   return result;
 };
@@ -972,13 +941,10 @@ export const getGitBranchInfo = async (cwd: string): Promise<GitBranchInfo> => {
     };
   }
 
+  // Pure-local: branch refs + default base only. The PR lease is resolved
+  // separately by getGitBranchPr so the toolbar paints without waiting on the
+  // GitHub REST API.
   const currentBranch = getCurrentBranch(r);
-  const pr = await Promise.race([
-    detectPr(r),
-    new Promise<GitBranchPr | null>((resolve) =>
-      setTimeout(() => resolve(null), GIT_BRANCH_INFO_PR_TIMEOUT_MS),
-    ),
-  ]);
   const defaultBase = resolveDefaultBase(r);
 
   const branchEntries = collectIterator<{ name: string; type: string }>(r.repo.branches());
@@ -1005,6 +971,17 @@ export const getGitBranchInfo = async (cwd: string): Promise<GitBranchInfo> => {
     defaultBase: defaultBase?.ref ?? null,
     defaultBaseSource: defaultBase?.source ?? null,
     branches: branchData.map((b) => b.name),
-    pr,
+    pr: null,
   };
+};
+
+// Resolves the PR the current branch maps to via the GitHub REST API. Bounded by
+// Octokit's own timeout and a try/catch in the default fetcher (returns []), so
+// it degrades to null on a missing token, network failure, or no PR. Served from
+// /api/git/branches/pr so the fast branch lease (/api/git/branches) never waits
+// on the network.
+export const getGitBranchPr = async (cwd: string): Promise<GitBranchPr | null> => {
+  const r = await openRepo(cwd);
+  if (!r) return null;
+  return detectPr(r);
 };

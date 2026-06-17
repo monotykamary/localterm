@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import {
   buildUntrackedPatch,
   getGitBranchInfo,
+  getGitBranchPr,
   listGithubRemoteSlugs,
   getGitDiff,
   getGitDiffFilePatch,
@@ -555,15 +556,17 @@ describe("branch comparison mode", () => {
       });
       try {
         const info = await getGitBranchInfo(forkRepo.dir);
-        expect(info.pr).not.toBeNull();
-        expect(info.pr).toEqual({
+        expect(info.pr).toBeNull();
+        const detected = await getGitBranchPr(forkRepo.dir);
+        expect(detected).not.toBeNull();
+        expect(detected).toEqual({
           number: 42,
           title: "Test PR",
           baseRefName: "main",
           url: "https://github.com/them/repo/pull/42",
           state: "open",
         });
-        expect(info.pr).not.toHaveProperty("headOwner");
+        expect(detected).not.toHaveProperty("headOwner");
       } finally {
         setPrFetcher({
           list: async () => [],

@@ -1,8 +1,10 @@
 import {
   gitBranchInfoSchema,
+  gitBranchPrLeaseSchema,
   gitDiffFileListResponseSchema,
   gitDiffFilePatchSchema,
   type GitBranchInfo,
+  type GitBranchPr,
   type GitDiffFileListResponse,
   type GitDiffFilePatch,
   type GitDiffMode,
@@ -11,6 +13,7 @@ import {
 const GIT_DIFF_FILES_ENDPOINT = "/api/git/diff/files";
 const GIT_DIFF_FILE_ENDPOINT = "/api/git/diff/file";
 const GIT_BRANCHES_ENDPOINT = "/api/git/branches";
+const GIT_BRANCH_PR_ENDPOINT = "/api/git/branches/pr";
 
 const buildEndpointUrl = (endpoint: string, params: Record<string, string>): string => {
   const url = new URL(endpoint, window.location.href);
@@ -75,8 +78,10 @@ export const fetchGitDiffFilePatch = async (
   }
 };
 
-// Base-branch picker data (candidate refs, default base, detected PR). Fetched
-// once when the viewer needs branch mode — never polled.
+// Base-branch picker data (candidate refs, default base). Fetched once when the
+// viewer needs branch mode — never polled. The PR is fetched separately by
+// fetchGitBranchPr and merged into the lease on the client, so this never blocks
+// on gh.
 export const fetchGitBranches = async (
   cwd: string,
   signal?: AbortSignal,
@@ -86,6 +91,23 @@ export const fetchGitBranches = async (
     if (!response.ok) return null;
     const parsed = gitBranchInfoSchema.safeParse(await response.json());
     return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+};
+
+// The PR the current branch maps to (null when none / gh is unavailable). Fired
+// alongside fetchGitBranches and merged into the lease once it resolves, so the
+// toolbar paints instantly and the PR indicator lands when gh responds.
+export const fetchGitBranchPr = async (
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<GitBranchPr | null> => {
+  try {
+    const response = await fetch(buildEndpointUrl(GIT_BRANCH_PR_ENDPOINT, { cwd }), { signal });
+    if (!response.ok) return null;
+    const parsed = gitBranchPrLeaseSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data.pr : null;
   } catch {
     return null;
   }

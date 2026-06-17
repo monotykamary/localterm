@@ -232,6 +232,8 @@ export const gitBaseSourceSchema = z.enum(["pr", "remoteHead", "fallback"]);
 // Everything the base-branch picker needs: the candidate refs, the preselected
 // default (a concrete, existing ref), and the detected PR. defaultBase is null
 // when no plausible base could be found (e.g. a brand-new repo with one branch).
+// `pr` is always null from /api/git/branches (the fast local lease); the client
+// fills it from the separate /api/git/branches/pr lease (see gitBranchPrLeaseSchema).
 export const gitBranchInfoSchema = z
   .object({
     isRepo: z.boolean(),
@@ -239,6 +241,16 @@ export const gitBranchInfoSchema = z
     defaultBase: z.string().min(1).nullable(),
     defaultBaseSource: gitBaseSourceSchema.nullable(),
     branches: z.array(z.string().min(1)),
+    pr: gitBranchPrSchema.nullable(),
+  })
+  .strict();
+
+// The PR lease: just the detected PR for the current branch (null when none /
+// gh is missing / unauthenticated / the GitHub call fails). Served by the
+// dedicated /api/git/branches/pr endpoint so it never blocks the fast branch
+// lease; the client merges `pr` into its branch-info lease.
+export const gitBranchPrLeaseSchema = z
+  .object({
     pr: gitBranchPrSchema.nullable(),
   })
   .strict();

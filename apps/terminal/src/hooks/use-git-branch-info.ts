@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import type { GitBranchInfo } from "@monotykamary/localterm-server/protocol";
-import { fetchGitBranches } from "@/utils/fetch-git-diff";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { GitBranchInfo, GitBranchPr } from "@monotykamary/localterm-server/protocol";
+import { fetchGitBranchPr, fetchGitBranches } from "@/utils/fetch-git-diff";
 
 /**
  * Ambient branch/PR metadata for the active session's cwd — the "reusable
@@ -9,23 +9,34 @@ import { fetchGitBranches } from "@/utils/fetch-git-diff";
  *
  * Drives the toolbar PR indicator and is handed to the diff viewer so it can
  * open straight into branch mode without waiting on `gh`.
+ *
+ * The branch refs / default base are pure-local and resolve instantly, so the
+ * toolbar paints right away. The PR hits the GitHub REST API and is fired in
+ * parallel from a separate lease; `pr` is merged into the returned branch info
+ * once it resolves, so the indicator lands without blocking the toolbar.
  */
 export const useGitBranchInfo = (
   cwd: string | null,
 ): { branchInfo: GitBranchInfo | null; refresh: () => void } => {
-  const [branchInfo, setBranchInfo] = useState<GitBranchInfo | null>(null);
+  const [branchData, setBranchData] = useState<GitBranchInfo | null>(null);
+  const [pr, setPr] = useState<GitBranchPr | null>(null);
   const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
-    setBranchInfo(null);
+    setBranchData(null);
+    setPr(null);
     if (!cwd) return;
     const controller = new AbortController();
     void fetchGitBranches(cwd, controller.signal).then((info) => {
-      if (!controller.signal.aborted && info) setBranchInfo(info);
+      if (!controller.signal.aborted && info) setBranchData({ ...info, pr: null });
+    });
+    void fetchGitBranchPr(cwd, controller.signal).then((resolved) => {
+      if (!controller.signal.aborted) setPr(resolved);
     });
     return () => controller.abort();
   }, [cwd, nonce]);
 
   const refresh = useCallback(() => setNonce((value) => value + 1), []);
+  const branchInfo = useMemo(() => (branchData ? { ...branchData, pr } : null), [branchData, pr]);
   return { branchInfo, refresh };
 };

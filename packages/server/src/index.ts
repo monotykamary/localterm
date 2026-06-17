@@ -48,6 +48,7 @@ import { FolderWatchManager } from "./folder-watch-manager.js";
 import { SessionEventManager } from "./session-event-manager.js";
 import {
   getGitBranchInfo,
+  getGitBranchPr,
   getGitDiff,
   getGitDiffFilePatch,
   getGitDiffFiles,
@@ -525,6 +526,15 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const cwd = resolveCwdQuery(context.req.query("cwd"));
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
     return context.json(await getGitBranchInfo(cwd));
+  });
+
+  // The PR lease for the current branch. Served separately from /git/branches so
+  // the toolbar never blocks on the GitHub REST API; the client merges `pr` into
+  // its branch-info lease once it resolves.
+  api.get("/git/branches/pr", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json({ pr: await getGitBranchPr(cwd) });
   });
 
   const readJsonBody = async (context: { req: { json: () => Promise<unknown> } }) => {
