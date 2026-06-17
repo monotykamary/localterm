@@ -1,6 +1,6 @@
 ## General Rules
 
-- MUST: Use @antfu/ni. Use `ni` to install, `nr SCRIPT_NAME` to run. `nun` to uninstall.
+- MUST: Use pnpm directly. Use `pnpm install` to install, `pnpm run <script>` (or `pnpm <script>` for the well-known scripts) to run, `pnpm remove` to uninstall.
 - MUST: Use TypeScript interfaces over types.
   - Carve-out: discriminated unions, conditional types, mapped types, and `z.infer<...>` aliases must use `type` (TypeScript does not allow `interface X = A | B`). Object shapes still use `interface`.
 - MUST: Keep all types in the global scope.
@@ -49,10 +49,6 @@ This is a pnpm monorepo with `apps/` (playgrounds, sites, extensions) and `packa
 
 See root `package.json` scripts for the full list. Quick reference:
 
-- **Install**: `ni` (or `pnpm install`)
-- **Build**: `nr build` (or `pnpm build`)
-- **Dev watch**: `nr dev` (or `pnpm dev`)
-- **Test**: `pnpm test`
-- **Lint**: `pnpm lint`
-- **Typecheck**: `pnpm typecheck`
-- **Format**: `pnpm format`
+- **Install**: `pnpm install`
+- **Build**: `pnpm build`
+- **Dev watch**: `pnpm dev`
