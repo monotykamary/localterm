@@ -16,6 +16,7 @@ import {
   MAX_INPUT_BYTES,
   MAX_NOTIFICATION_LENGTH,
   MAX_OUTPUT_BYTES,
+  MAX_PR_CREATED_URL_LENGTH,
   MAX_ROWS,
   MAX_TITLE_LENGTH,
 } from "./constants.js";
@@ -139,6 +140,16 @@ const notificationMessageSchema = z
   .object({
     type: z.literal("notification"),
     body: z.string().min(1).max(MAX_NOTIFICATION_LENGTH),
+  })
+  .strict();
+
+// A PR was created (URL captured by the injected `gh` wrapper, or scanned from
+// the PTY stream when an agent created it silently). Lets the client inline-set
+// the ambient PR overlay without a `gh pr list` round-trip.
+const prCreatedMessageSchema = z
+  .object({
+    type: z.literal("pr-created"),
+    url: z.string().min(1).max(MAX_PR_CREATED_URL_LENGTH),
   })
   .strict();
 
@@ -659,6 +670,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   cwdMessageSchema,
   foregroundMessageSchema,
   notificationMessageSchema,
+  prCreatedMessageSchema,
   gitDiffSummaryMessageSchema,
   automationsMessageSchema,
   caffeinateStateMessageSchema,

@@ -68,6 +68,23 @@ export const TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS = 1500;
 export const TOOLTIP_DELAY_MS = 300;
 export const TOOLTIP_SIDE_OFFSET_PX = 8;
 
+// Ambient PR overlay warm-up. The lease never re-fires on a remote-only change
+// (gh pr create pushes a ref but keeps the same local branch), so without these
+// the overlay stays missing after pi creates a PR.
+// Foreground-exit debounce for the silent-agent fallback: an agent that creates
+// a PR typically runs several git/gh commands in sequence before exiting, and
+// this collapses the trailing foreground->null burst into one re-lease.
+export const GIT_PR_RELEASE_DEBOUNCE_MS = 1500;
+// Window after an inline-set PR (gh-wrapper URL or stream-scanned URL) during
+// which the foreground-exit fallback skips its re-lease — the inline path
+// already caught the creation, so a redundant `gh pr list` subprocess is waste.
+export const GIT_PR_INLINE_FRESH_MS = 5000;
+// Foreground process names whose exit back to the shell re-leases the ambient
+// PR. pi hides its gh/API calls as detached children, so its foreground->null
+// transition is the only deterministic signal an agent finished; gh/git cover
+// the human-typed cases the inline paths might miss.
+export const GIT_PR_RELEASE_FOREGROUND_NAMES: readonly string[] = ["pi", "gh", "git"];
+
 export const NUMBER_STEPPER_SCRUB_PIXELS_PER_STEP = 5;
 
 export const ENTER_KEY_CODE = 13;
