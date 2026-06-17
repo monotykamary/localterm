@@ -82,6 +82,7 @@ const BRANCH_INFO: GitBranchInfo = {
     number: 123,
     title: "Add diff modes",
     baseRefName: "main",
+    baseRef: "origin/main",
     url: "https://example.test/pr/123",
     state: "open",
   },

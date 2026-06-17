@@ -537,9 +537,14 @@ describe("branch comparison mode", () => {
     try {
       fs.writeFileSync(path.join(forkRepo.dir, "file.txt"), "content\n");
       await commitAll(forkRepo, "initial");
+      const baseSha = getHeadSha(forkRepo.dir);
       createAndCheckoutBranch(forkRepo, "feature");
       addRemote(forkRepo, "origin", "git@github.com:me/fork.git");
       addRemote(forkRepo, "upstream", "https://github.com/them/repo.git");
+      // Plant upstream/main locally so detectPr resolves baseRef without a
+      // network fetch against the fake remote URL, and so the assertion can
+      // validate the resolved base.
+      setRemoteRef(forkRepo.dir, "upstream", "main", baseSha);
 
       setPrFetcher({
         list: async (slug, head, _state, _perPage) => {
@@ -568,10 +573,12 @@ describe("branch comparison mode", () => {
           number: 42,
           title: "Test PR",
           baseRefName: "main",
+          baseRef: "upstream/main",
           url: "https://github.com/them/repo/pull/42",
           state: "open",
         });
         expect(detected).not.toHaveProperty("headOwner");
+        expect(detected).not.toHaveProperty("baseRepoFullName");
       } finally {
         setPrFetcher({
           list: async () => [],
@@ -692,6 +699,57 @@ describe("fork PR base resolution", () => {
       expect(new Set(list.files.map((file) => file.path)).has("b.txt")).toBe(true);
     } finally {
       fs.rmSync(freshRepo.dir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves a same-repo PR base to the same remote (origin), not upstream", async () => {
+    // A PR whose base repo IS the origin repo (a normal, non-fork PR) must keep
+    // the comparison on origin — only fork PRs reroute to upstream. The picker
+    // and diff would otherwise jump a same-repo PR onto an unrelated upstream ref.
+    const repo = await initRepo(makeTempDir());
+    try {
+      fs.writeFileSync(path.join(repo.dir, "a.txt"), "a\n");
+      await commitAll(repo, "base");
+      const baseSha = getHeadSha(repo.dir);
+      createAndCheckoutBranch(repo, "feature");
+      fs.writeFileSync(path.join(repo.dir, "feature.txt"), "f\n");
+      await commitAll(repo, "feature work");
+      // origin is the same repo the PR targets; an `upstream` remote is also
+      // configured (mimicking a repo that happens to have upstream too) to prove
+      // the same-repo PR does NOT reroute to it.
+      addRemote(repo, "origin", "git@github.com:me/repo.git");
+      addRemote(repo, "upstream", "https://github.com/them/parent.git");
+      setRemoteRef(repo.dir, "origin", "main", baseSha);
+      setRemoteRef(repo.dir, "upstream", "main", getHeadSha(repo.dir));
+      // baseRepoFullName matches origin's slug -> same-repo PR.
+      setPrFetcher({
+        list: async (slug, head) =>
+          slug === "me/repo" && head === "me:feature"
+            ? [
+                {
+                  number: 11,
+                  title: "Same-repo PR",
+                  baseRefName: "main",
+                  url: "https://github.com/me/repo/pull/11",
+                  state: "open" as const,
+                  headOwner: "me",
+                  baseRepoFullName: "me/repo",
+                },
+              ]
+            : [],
+      });
+      const detected = await getGitBranchPr(repo.dir);
+      expect(detected).not.toBeNull();
+      // baseRef stays on origin (the same remote), not upstream.
+      expect(detected?.baseRef).toBe("origin/main");
+      const paths = new Set(
+        (await getGitDiffFiles(repo.dir, { mode: "branch" })).files.map((file) => file.path),
+      );
+      expect(paths.has("feature.txt")).toBe(true);
+      // feature branched off base (a.txt only), so a.txt is not a change.
+      expect(paths.has("a.txt")).toBe(false);
+    } finally {
+      fs.rmSync(repo.dir, { recursive: true, force: true });
     }
   });
 

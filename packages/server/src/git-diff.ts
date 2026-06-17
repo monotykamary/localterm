@@ -229,11 +229,9 @@ const resolveEffectiveBaseRef = async (
         await detectPrDeduped(cwd);
         cachedPr = readPrCache(cwd, currentBranch);
       }
-      if (cachedPr) {
-        const remotes = await parseGithubRemotes(cwd);
-        const prBase = await resolvePrBaseRef(cwd, cachedPr, remotes);
-        if (prBase) baseRef = prBase.ref;
-      }
+      // detectPr resolved (and fetched, if needed) the base ref alongside the
+      // GitHub call, so the diff path reads it warm — no remote resolution here.
+      if (cachedPr?.baseRef) baseRef = cachedPr.baseRef;
     }
   }
   if (!baseRef) baseRef = (await resolveDefaultBase(cwd))?.ref ?? null;
@@ -783,10 +781,23 @@ const getGitDiffFilePatchFromWorkingTree = async (
   }
 };
 
-// ParsedPr carries the PR's base repo full name alongside the wire fields so
-// the diff path can map the PR base to a local remote WITHOUT re-fetching (the
-// GitHub round-trip already happened in getGitBranchPr). headOwner is the same
-// kind of internal-only field; neither leaks to GitBranchPr on the wire.
+// PrApiData is the raw shape the GitHub API returns — PR fields plus the
+// internal owner/repo hints. It does NOT carry a resolved base ref (the API
+// can't know which local remote a repo maps to); detectPr resolves that.
+interface PrApiData {
+  number: number;
+  title: string;
+  baseRefName: string;
+  url: string | null;
+  state: GitBranchPrState;
+  headOwner: string | null;
+  baseRepoFullName: string | null;
+}
+
+// ParsedPr is the wire type + the internal owner/repo hints. baseRef (a wire
+// field) is the server-resolved comparison ref, computed once in detectPr so
+// neither the diff path nor the client re-resolves it. headOwner and
+// baseRepoFullName stay internal — toWirePr strips them.
 type ParsedPr = GitBranchPr & {
   headOwner: string | null;
   baseRepoFullName: string | null;
@@ -799,7 +810,7 @@ const normalizeOctokitPrState = (state: string, mergedAt: string | null): GitBra
 };
 
 export interface PrFetcher {
-  list(slug: string, head: string, state: string, perPage: number): Promise<ParsedPr[]>;
+  list(slug: string, head: string, state: string, perPage: number): Promise<PrApiData[]>;
 }
 
 const defaultPrFetcher: PrFetcher = {
@@ -872,6 +883,7 @@ const toWirePr = (pr: ParsedPr): GitBranchPr => ({
   number: pr.number,
   title: pr.title,
   baseRefName: pr.baseRefName,
+  baseRef: pr.baseRef,
   url: pr.url,
   state: pr.state,
 });
@@ -898,7 +910,24 @@ const detectPr = async (cwd: string): Promise<ParsedPr | null> => {
     (pr) => pr.url ?? `#${pr.number}`,
   );
   const openPr = candidates.find((pr) => pr.state === "open");
-  const chosen = openPr ?? candidates[0] ?? null;
+  const chosenApi = openPr ?? candidates[0] ?? null;
+  // Resolve the comparison ref once here (mapping the PR's base repo to a local
+  // remote, fetching the upstream branch when it isn't local yet) so the diff
+  // path and the UI picker both read cachedPr.baseRef without re-resolving. A
+  // fork PR resolves to <upstream>/<baseRefName>; a same-repo PR (base repo is
+  // origin) to <origin>/<baseRefName> — automatic from the remote-slug match.
+  const chosen: ParsedPr | null = chosenApi
+    ? {
+        number: chosenApi.number,
+        title: chosenApi.title,
+        baseRefName: chosenApi.baseRefName,
+        url: chosenApi.url,
+        state: chosenApi.state,
+        baseRef: (await resolvePrBaseRef(cwd, chosenApi, remotes))?.ref ?? null,
+        headOwner: chosenApi.headOwner,
+        baseRepoFullName: chosenApi.baseRepoFullName,
+      }
+    : null;
   writePrCache(cwd, currentBranch, chosen);
   return chosen;
 };
@@ -921,7 +950,7 @@ const detectPrDeduped = async (cwd: string): Promise<ParsedPr | null> => {
 
 const resolvePrBaseRef = async (
   cwd: string,
-  pr: ParsedPr,
+  pr: Pick<ParsedPr, "baseRepoFullName" | "baseRefName">,
   remotes: GithubRemote[],
 ): Promise<RefInfo | null> => {
   if (!pr.baseRepoFullName || !pr.baseRefName) return null;

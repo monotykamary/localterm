@@ -1094,12 +1094,16 @@ export const DiffViewer = ({
   const [refreshCount, setRefreshCount] = useState(0);
 
   const compareMode: GitDiffMode = userPickedMode ?? (branchInfo?.pr ? "branch" : "working");
-  // Base ref shown in the picker. The DIFF fetch, however, only sends an explicit
-  // base when the user overrode one — otherwise it sends none and the server
-  // resolves a local default instantly, so the branch diff never waits on the
-  // (slower, gh-backed) branch metadata.
+  // Base ref shown in the picker. Prefers the PR's resolved base (a fork PR's
+  // upstream ref, a same-repo PR's origin ref) over the repo default so the
+  // picker matches the comparison the server actually runs. The DIFF fetch,
+  // however, only sends an explicit base when the user overrode one — otherwise
+  // it sends none and the server resolves from the same PR cache, so the branch
+  // diff never waits on the (slower, gh-backed) branch metadata.
   const displayBase =
-    compareMode === "branch" ? (baseOverride ?? branchInfo?.defaultBase ?? null) : null;
+    compareMode === "branch"
+      ? (baseOverride ?? branchInfo?.pr?.baseRef ?? branchInfo?.defaultBase ?? null)
+      : null;
   // Pending review annotations survive close/reopen until they are sent.
   const [annotations, setAnnotations] = useState<Record<string, DiffAnnotation>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);

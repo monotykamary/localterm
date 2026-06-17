@@ -220,6 +220,13 @@ export const gitBranchPrSchema = z
     number: z.number().int().positive(),
     title: z.string(),
     baseRefName: z.string().min(1),
+    // Server-resolved comparison ref — the PR's base branch mapped to a local
+    // remote-tracking ref. A same-repo PR resolves to <origin>/<baseRefName>; a
+    // fork PR to <upstream>/<baseRefName> (the repo the PR actually targets), so
+    // the UI picker and the diff agree on the base. Null when the base repo
+    // isn't a configured remote or its ref couldn't be fetched — callers fall
+    // back to the repo default.
+    baseRef: z.string().min(1).nullable(),
     url: z.string().min(1).nullable(),
     state: gitBranchPrStateSchema,
   })
