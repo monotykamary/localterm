@@ -1,5 +1,12 @@
 # localterm
 
+## 2.1.5
+
+### Patch Changes
+
+- f3c8035: Make diff viewer and automations modal sidebars span the full modal height.
+  - @monotykamary/localterm-server@2.1.5
+
 ## 2.1.4
 
 ### Patch Changes
