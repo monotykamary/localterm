@@ -104,3 +104,5 @@ export const NERD_FONT_ENABLED_STORAGE_KEY = "localterm:nerd-font-enabled";
 export const NERD_FONT_SYMBOLS_FAMILY = "Symbols Nerd Font";
 export const NERD_FONT_STYLESHEET_ID = "localterm-nerd-font";
 export const FONT_LOAD_PROBE_PX = 16;
+export const FONT_FACE_LOAD_TIMEOUT_MS = 3000;
+export const FONT_FACE_LOAD_POLL_MS = 25;
