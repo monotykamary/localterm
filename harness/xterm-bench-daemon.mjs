@@ -413,10 +413,10 @@ async function runRaceTest(client, query) {
     );
 
     const testUrl = new URL("http://x/harness/xterm-font-race-test.html");
-    const weights = query.get("weights") || "400,500,600";
-    testUrl.searchParams.set("weights", weights);
-    testUrl.searchParams.set("heal", query.get("heal") || "ready+load");
-    testUrl.searchParams.set("preReadyWrite", query.get("preReadyWrite") || "1");
+    testUrl.searchParams.set("scenario", query.get("scenario") || "appfaithful");
+    if (query.has("mode")) testUrl.searchParams.set("mode", query.get("mode"));
+    if (query.has("screenshot")) testUrl.searchParams.set("screenshot", query.get("screenshot"));
+    if (query.has("weight")) testUrl.searchParams.set("weight", query.get("weight"));
     const pageUrl = `http://127.0.0.1:${STATIC_PORT}/harness/xterm-font-race-test.html${testUrl.search}`;
 
     client.request("Page.navigate", { url: pageUrl }, sessionId).catch(() => {});
@@ -464,7 +464,6 @@ async function runRaceTest(client, query) {
       );
       disposeLog();
       return {
-        weights,
         url: pageUrl,
         error: "raceResult never set within 30s",
         pageState: result.value,
@@ -485,12 +484,15 @@ async function runRaceTest(client, query) {
       );
       await new Promise((resolve) => setTimeout(resolve, 150));
       const { data } = await client.request("Page.captureScreenshot", { format: "png" }, sessionId);
+      const screenshotPath = `/tmp/appfaithful-${targetId}.png`;
+      try {
+        await writeFile(screenshotPath, Buffer.from(data, "base64"));
+      } catch {}
       const pixelMetrics = await computePixelMetrics(data);
-      return { weights, url: pageUrl, ...raceValue, consoleEntries, pixelMetrics };
+      return { url: pageUrl, screenshotPath, ...raceValue, consoleEntries, pixelMetrics };
     }
 
     return {
-      weights,
       url: pageUrl,
       ...raceValue,
       consoleEntries,

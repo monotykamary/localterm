@@ -47,7 +47,7 @@
         "/node_modules/.pnpm/@fontsource+geist-mono@5.2.7/node_modules/@fontsource/geist-mono";
 
       const params = new URLSearchParams(location.search);
-      const scenario = params.get("scenario") || "awaitfont";
+      const scenario = params.get("scenario") || "appfaithful";
       const heal = params.get("heal") !== "0";
       const healMode = params.get("healMode") || "naive";
 
@@ -149,6 +149,9 @@
               check500: checkWeight(500),
               check600: checkWeight(600),
               check700: checkWeight(700),
+              g400: isGeistLoaded(400),
+              g600: isGeistLoaded(600),
+              g700: isGeistLoaded(700),
             });
           }
           return originalFontDescriptor.set.call(this, value);
@@ -349,6 +352,305 @@
             };
             window.raceResult = result;
             statusEl.textContent = `${scenario} done`;
+            resolveRaceReady(result);
+            return;
+          }
+
+          if (scenario === "appfaithful") {
+            const appfaithfulMode = params.get("mode") || "poison";
+            if (appfaithfulMode === "fix") {
+              // EXACT mirror of the fixed app (Option 1): declare Geist Mono CSS
+              // upfront, open the terminal on the DOM renderer, write the prompt
+              // as early PTY output, then awaitFontReady (polls the REAL
+              // FontFace.status until 400 and 700 are loaded), THEN attach the
+              // vendored WebGL addon. Its warmup bakes ASCII at loaded Geist
+              // Mono 400 — no system-fallback poison.
+              for (const w of [400, 500, 600, 700]) injectWeightCss(w);
+              const terminal = new Terminal({
+                cols: 80,
+                rows: 6,
+                fontSize: 14,
+                fontFamily: FULL_FAMILY,
+                lineHeight: 1.2,
+                minimumContrastRatio: 1,
+                drawBoldTextInBrightColors: false,
+                cursorBlink: false,
+              });
+              window.terminal = terminal;
+              terminal.open(document.getElementById("terminal"));
+              await nextFrame();
+              terminal.write(prompt);
+              const PROBE_PX = 16;
+              const awaitFace = async (weight, probe) => {
+                const deadline = performance.now() + 3000;
+                while (performance.now() < deadline) {
+                  if (isGeistLoaded(weight)) return;
+                  try {
+                    await document.fonts.load(probe);
+                  } catch {
+                    return;
+                  }
+                  if (isGeistLoaded(weight)) return;
+                  await tick(25);
+                }
+              };
+              const healT0 = performance.now();
+              await document.fonts.ready;
+              await Promise.all([
+                document.fonts.load(`${PROBE_PX}px ${FAMILY_Q}`),
+                document.fonts.load(`bold ${PROBE_PX}px ${FAMILY_Q}`),
+              ]);
+              await awaitFace(400, `${PROBE_PX}px ${FAMILY_Q}`);
+              await awaitFace(700, `bold ${PROBE_PX}px ${FAMILY_Q}`);
+              const healMs = Math.round(performance.now() - healT0);
+              const attachState = { loaded: geistLoadedWeights() };
+              const addon = new WebglAddon({ customGlyphs: true });
+              window.addon = addon;
+              addon.onContextLoss(() => addon.dispose());
+              terminal.loadAddon(addon);
+              await nextFrame();
+              await tick(150);
+              const atlasCoverage = atlasInkCoverage();
+              const firstRegularRaster = fontSets.find((f) => f.isRegular) ?? null;
+              for (const w of [400, 500, 600, 700]) references[w] = coverageForWeight(w);
+              references.fallback = coverageForFontString(
+                `normal 28px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`,
+              );
+              const result = {
+                marker: "from-timeout",
+                scenario,
+                mode: appfaithfulMode,
+                attachState,
+                atlasCoverage,
+                firstRegularRaster,
+                healMs,
+                references,
+                finalLoaded: geistLoadedWeights(),
+              };
+              window.raceResult = result;
+              statusEl.textContent = "appfaithful/fix done";
+              resolveRaceReady(result);
+              return;
+            }
+            // Faithful mirror of terminal.tsx mount effect with the FIXED
+            // awaitFontReady. Deterministically poisons the atlas by attaching the
+            // vendored webgl addon BEFORE any Geist Mono @font-face is declared
+            // (the cold-reload worst case: the bundled fontsource CSS hasn't
+            // fetched the woff2 yet). warmup then bakes ASCII at the system
+            // fallback (ui-monospace/SF Mono), which reads as a bolder/different
+            // face than Geist Mono. awaitFontReady (fixed: polls the real
+            // FontFace.status until "loaded") then clears the atlas.
+            // To make the poison DETERMINISTIC (the cold race is intermittent),
+            // fonts are only declared AFTER the poisoned measurement.
+            const terminal = new Terminal({
+              cols: 80,
+              rows: 6,
+              fontSize: 14,
+              fontFamily: FULL_FAMILY,
+              lineHeight: 1.2,
+              minimumContrastRatio: 1,
+              drawBoldTextInBrightColors: false,
+              cursorBlink: false,
+            });
+            window.terminal = terminal;
+            terminal.open(document.getElementById("terminal"));
+            const addon = new WebglAddon({ customGlyphs: true });
+            window.addon = addon;
+            addon.onContextLoss(() => addon.dispose());
+            terminal.loadAddon(addon);
+
+            const faceStateAtAttach = { loaded: geistLoadedWeights() };
+
+            // Now declare the real weights (mirrors main.tsx's bundled
+            // @fontsource imports — just delayed here to guarantee the poison).
+            for (const w of [400, 500, 600, 700]) injectWeightCss(w);
+
+            // Mirror L467: void awaitFontReady(initialFont).then(clearTextureAtlas).
+            // Fixed awaitFontReady: poll the REAL FontFace.status until 400 AND
+            // 700 are truly loaded before resolving. document.fonts.check() is a
+            // false positive with no @font-face; only FontFace.status==="loaded"
+            // is reliable. document.fonts.load() resolves empty when no @font-face
+            // is parsed yet, and document.fonts.ready settles immediately when
+            // nothing is loading — both traps fixed by the status poll.
+            const PROBE_PX = 16;
+            const awaitFace = async (weight, probe) => {
+              const t0 = performance.now();
+              while (performance.now() - t0 < 3000) {
+                if (isGeistLoaded(weight)) return false;
+                try {
+                  await document.fonts.load(probe);
+                } catch {
+                  return true;
+                }
+                if (isGeistLoaded(weight)) return false;
+                await tick(25);
+              }
+              return true;
+            };
+            const healT0 = performance.now();
+            let healTimedOut = false;
+            let preClear = null;
+            let clearProbe = null;
+            let postClear = null;
+            let postFullRebuild = null;
+            let postClearFirstRaster = null;
+            const healPromise = (async () => {
+              try {
+                await document.fonts.ready;
+                await Promise.all([
+                  document.fonts.load(`${PROBE_PX}px ${FAMILY_Q}`),
+                  document.fonts.load(`bold ${PROBE_PX}px ${FAMILY_Q}`),
+                ]);
+                healTimedOut = await awaitFace(400, `${PROBE_PX}px ${FAMILY_Q}`);
+                if (!healTimedOut)
+                  healTimedOut = await awaitFace(700, `bold ${PROBE_PX}px ${FAMILY_Q}`);
+              } catch {}
+              // L470: clearTextureAtlas on resolve. Instrument whether it
+              // actually clears the atlas canvas + cache map (the guard only
+              // clears when the write cursor has advanced past origin).
+              preClear = atlasInkCoverage();
+              const charAtlas = window.addon?._renderer?._charAtlas;
+              const page0 = charAtlas?._pages?.[0];
+              const map = charAtlas?._cacheMap;
+              clearProbe = {
+                cursor: page0 ? { x: page0.currentRow?.x, y: page0.currentRow?.y } : null,
+                mapSize: map?.size ?? null,
+                didWarmUp: charAtlas?._didWarmUp ?? null,
+              };
+              terminal.clearTextureAtlas();
+              await nextFrame();
+              await tick(150);
+              postClear = atlasInkCoverage();
+              const postClearRasters = fontSets.filter((f) => f.isRegular);
+              postClearFirstRaster = postClearRasters[postClearRasters.length - 1] ?? null;
+              // Candidate FIX: full atlas rebuild (dispose + recreate the
+              // webgl addon) — the path the real app takes via resize /
+              // font-swap. After awaitFontReady, 400+700 are loaded, so the
+              // rebuilt atlas's warmup bakes ASCII at the real Geist Mono 400.
+              try {
+                const oldAddon = window.addon;
+                oldAddon?.dispose();
+                const freshAddon = new WebglAddon({ customGlyphs: true });
+                freshAddon.onContextLoss(() => freshAddon.dispose());
+                terminal.loadAddon(freshAddon);
+                window.addon = freshAddon;
+              } catch {}
+              await nextFrame();
+              await tick(150);
+              postFullRebuild = atlasInkCoverage();
+            })();
+
+            // Mirror early PTY output (WS connects after the effect; output
+            // arrives shortly after). Write the prompt right after attach.
+            await nextFrame();
+            currentPhase = "poison";
+            terminal.write(prompt);
+            await nextFrame();
+            await tick(60);
+            const poisonedAtlas = atlasInkCoverage();
+            // First regular-text glyph rasterset: the FontFace load state at the
+            // instant warmup/the prompt baked. If g400=false and g600=true,
+            // Canvas resolved `normal` (400) -> 600 and baked a heavier glyph.
+            const firstRegularRaster = fontSets.find((f) => f.isRegular) ?? null;
+
+            await healPromise;
+            const healedState = {
+              geistLoaded400: isGeistLoaded(400),
+              geistLoaded700: isGeistLoaded(700),
+              loaded: geistLoadedWeights(),
+              healMs: Math.round(performance.now() - healT0),
+              timedOut: healTimedOut,
+              clearProbe,
+              preClearLit: preClear?.lit ?? null,
+              postClearLit: postClear?.lit ?? null,
+              postRebuildLit: postFullRebuild?.lit ?? null,
+            };
+
+            for (const w of [400, 500, 600, 700]) references[w] = coverageForWeight(w);
+            // System-fallback coverage: what the atlas bakes when NO Geist Mono
+            // face is loaded (the family list falls back to ui-monospace/SF Mono).
+            references.fallback = coverageForFontString(
+              `normal 28px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`,
+            );
+
+            const result = {
+              marker: "from-timeout",
+              scenario,
+              faceStateAtAttach,
+              poisoned: { atlasCoverage: poisonedAtlas, firstRegularRaster },
+              healed: {
+                stateAtClear: healedState,
+                atlasCoverage: postClear,
+                fullRebuildCoverage: postFullRebuild,
+                postClearFirstRaster,
+              },
+              references,
+              finalLoaded: geistLoadedWeights(),
+            };
+            window.raceResult = result;
+            statusEl.textContent = `${scenario} done`;
+            resolveRaceReady(result);
+            return;
+          }
+
+          if (scenario === "calibrate") {
+            // Ground-truth calibration: bake the atlas through xterm's OWN webgl
+            // pipeline at a single FORCED known weight, so the resulting whole-
+            // atlas coverage number is the real xterm signature of that weight
+            // (not the separate probe-canvas per-glyph references). Comparing the
+            // app/fix atlas number to A400 vs A600 classifies what the fix
+            // actually baked. Uses a fresh document.fonts per run (new CDP target)
+            // so injecting ONLY one weight forces Canvas to resolve `normal`
+            // (400) -> that sole loaded weight.
+            const forcedWeight = Number(params.get("weight") || "400");
+            injectWeightCss(forcedWeight);
+            const t0 = performance.now();
+            while (!isGeistLoaded(forcedWeight) && performance.now() - t0 < 4000) {
+              try {
+                await document.fonts.load(`${forcedWeight} 30px ${FAMILY_Q}`);
+              } catch {}
+              await tick(25);
+            }
+            const loadedBeforeAttach = geistLoadedWeights();
+            const terminal = new Terminal({
+              cols: 80,
+              rows: 6,
+              fontSize: 14,
+              fontFamily: FULL_FAMILY,
+              lineHeight: 1.2,
+              minimumContrastRatio: 1,
+              drawBoldTextInBrightColors: false,
+              cursorBlink: false,
+            });
+            window.terminal = terminal;
+            terminal.open(document.getElementById("terminal"));
+            const addon = new WebglAddon({ customGlyphs: true });
+            window.addon = addon;
+            addon.onContextLoss(() => addon.dispose());
+            terminal.loadAddon(addon);
+            await nextFrame();
+            currentPhase = "calibrate";
+            terminal.write(prompt);
+            await nextFrame();
+            await tick(150);
+            const atlasCoverage = atlasInkCoverage();
+            const firstRegularRaster = fontSets.find((f) => f.isRegular) ?? null;
+            for (const w of [400, 500, 600, 700]) references[w] = coverageForWeight(w);
+            references.fallback = coverageForFontString(
+              `normal 28px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`,
+            );
+            const result = {
+              marker: "from-timeout",
+              scenario,
+              forcedWeight,
+              loadedBeforeAttach,
+              atlasCoverage,
+              firstRegularRaster,
+              references,
+              finalLoaded: geistLoadedWeights(),
+            };
+            window.raceResult = result;
+            statusEl.textContent = `calibrate/${forcedWeight} done`;
             resolveRaceReady(result);
             return;
           }
