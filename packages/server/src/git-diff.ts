@@ -303,27 +303,147 @@ export const parseNameStatusZ = (raw: string): Map<string, GitDiffFileStatus> =>
   return statuses;
 };
 
+// Undo git's C-style path quoting (paths with spaces/special chars get wrapped
+// in "..." with \-escapes; core.quotepath=false leaves only those, not non-ASCII).
+const unquoteGitPath = (raw: string): string => {
+  if (raw.length < 2 || raw[0] !== '"' || raw[raw.length - 1] !== '"') return raw;
+  let out = "";
+  let index = 1;
+  const end = raw.length - 1;
+  while (index < end) {
+    const char = raw[index];
+    if (char === "\\" && index + 1 < end) {
+      const next = raw[index + 1];
+      if (next === "n") {
+        out += "\n";
+        index += 2;
+      } else if (next === "t") {
+        out += "\t";
+        index += 2;
+      } else if (next === '"') {
+        out += '"';
+        index += 2;
+      } else if (next === "\\") {
+        out += "\\";
+        index += 2;
+      } else if (next >= "0" && next <= "7" && index + 3 < end) {
+        out += String.fromCharCode(Number.parseInt(raw.slice(index + 1, index + 4), 8));
+        index += 4;
+      } else {
+        out += char;
+        index += 1;
+      }
+    } else {
+      out += char;
+      index += 1;
+    }
+  }
+  return out;
+};
+
+// Strip the `+++ ` / `--- ` prefix and the `b/` / `a/` namespace, unquoting if
+// git wrapped the path. `/dev/null` (a deletion's +++ side) yields null so the
+// caller can fall back to the --- side.
+const pathFromLine = (line: string, prefix: string): string | null => {
+  if (!line.startsWith(prefix)) return null;
+  let rest = line.slice(prefix.length);
+  if (rest === "/dev/null") return null;
+  rest = unquoteGitPath(rest);
+  // git appends a literal tab after an unquoted path in ---/+++ lines when the
+  // path contains a space, to keep it from running into hunk content; the
+  // closing quote already disambiguates quoted paths, so this only affects
+  // the unquoted branch. Numstat/name-status never carry that tab, so strip it
+  // or the path keys won't line up.
+  if (rest.endsWith("\t")) rest = rest.slice(0, -1);
+  if (rest.startsWith("b/")) return rest.slice(2);
+  if (rest.startsWith("a/")) return rest.slice(2);
+  return rest;
+};
+
+// Pull the new-side path out of one `diff --git` chunk: prefer `+++ b/<path>`
+// (added/modified/rename target), fall back to `--- a/<path>` for deletions
+// (whose +++ is /dev/null), then to `rename to <path>` for a pure rename with
+// no content change (which has no ---/+++ lines at all).
+const extractPatchPath = (chunk: string): string | null => {
+  const lines = chunk.split("\n");
+  for (const line of lines) {
+    if (line.startsWith("+++ ")) {
+      const fromNew = pathFromLine(line, "+++ ");
+      if (fromNew !== null) return fromNew;
+      for (const fallback of lines) {
+        if (fallback.startsWith("--- ")) {
+          const fromOld = pathFromLine(fallback, "--- ");
+          if (fromOld !== null) return fromOld;
+        }
+      }
+      return null;
+    }
+  }
+  for (const line of lines) {
+    if (line.startsWith("rename to ")) return unquoteGitPath(line.slice("rename to ".length));
+  }
+  return null;
+};
+
+// Index `git diff --patch` output by path. A single path can map to several
+// `diff --git` blocks (a symlink re-added as a regular file emits a deletion +
+// an addition for one path), so those are concatenated back into one patch.
+const indexPatchesByPath = (raw: string): Map<string, string> => {
+  const chunksByPath = new Map<string, string[]>();
+  for (const chunk of splitPatchByFile(raw)) {
+    const patchPath = extractPatchPath(chunk);
+    if (patchPath === null) continue;
+    let chunks = chunksByPath.get(patchPath);
+    if (!chunks) {
+      chunks = [];
+      chunksByPath.set(patchPath, chunks);
+    }
+    chunks.push(chunk);
+  }
+  const result = new Map<string, string>();
+  for (const [patchPath, chunks] of chunksByPath) {
+    result.set(patchPath, chunks.join(""));
+  }
+  return result;
+};
+
 // One full diff pass for `(cwd)` against `baseRef`. Three parallel `git diff`
 // invocations (numstat for counts+binary, name-status for the status letter +
-// rename old path, patch for the body) walk the same sorted diff queue, so
-// numstat[i]/name-status.key(patch-path)/patch[i] all describe the same file
-// positionally. Untracked files are folded in from `ls-files` with synthesized
-// patches (git's own diff never lists untracked files).
+// rename old path, patch for the body) walk the same diff queue. numstat and
+// name-status are NUL-delimited and unambiguous; they're the source of truth
+// for the file list. The patch output is keyed by path rather than paired
+// positionally, because a single numstat entry can span several `diff --git`
+// blocks (a symlink is deleted as mode 120000 and re-added as a regular file:
+// git emits that as a deletion + an addition sharing one path, so there's no
+// 1:1 with numstat entries). Untracked files are folded in from `ls-files`
+// with synthesized patches (git's own diff never lists untracked files).
 const buildDiffCache = async (cwd: string, baseRef: string): Promise<DiffCache | null> => {
   const [numstatRes, nameStatusRes, patchRes] = await Promise.all([
-    runGit(cwd, ["diff", DIFF_RENAME_FLAG, "--numstat", "-z", baseRef]),
-    runGit(cwd, ["diff", DIFF_RENAME_FLAG, "--name-status", "-z", baseRef]),
-    runGit(cwd, ["diff", DIFF_RENAME_FLAG, "--patch", baseRef]),
+    runGit(cwd, [
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      DIFF_RENAME_FLAG,
+      "--numstat",
+      "-z",
+      baseRef,
+    ]),
+    runGit(cwd, [
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      DIFF_RENAME_FLAG,
+      "--name-status",
+      "-z",
+      baseRef,
+    ]),
+    runGit(cwd, ["-c", "core.quotepath=false", "diff", DIFF_RENAME_FLAG, "--patch", baseRef]),
   ]);
   if (numstatRes.exitCode !== 0 || patchRes.exitCode !== 0) return null;
 
   const numstat = parseNumstatZ(numstatRes.stdout.toString("utf8"));
   const statuses = parseNameStatusZ(nameStatusRes.stdout.toString("utf8"));
-  const patches = splitPatchByFile(patchRes.stdout.toString("utf8"));
-  // numstat and --patch share the diff queue's order; if they ever disagree
-  // (a git version quirk on some edge diff) we can't trust positional pairing,
-  // so degrade: stats stay correct, patches read as omitted.
-  const patchesAligned = patches.length === numstat.length;
+  const patchesByPath = indexPatchesByPath(patchRes.stdout.toString("utf8"));
   const untracked = await collectUntrackedFiles(cwd);
 
   const fileMeta: GitDiffFileMeta[] = [];
@@ -347,7 +467,7 @@ const buildDiffCache = async (cwd: string, baseRef: string): Promise<DiffCache |
     if (entry.binary) {
       binaries += 1;
     } else {
-      const rawPatch = patchesAligned ? (patches[index] ?? null) : null;
+      const rawPatch = patchesByPath.get(entry.path) ?? null;
       if (
         rawPatch === null ||
         rawPatch.length > GIT_MAX_PATCH_BYTES_PER_FILE ||
@@ -461,7 +581,15 @@ export const getGitDiffSummary = async (
 
     // Summary is pushed on every git-dirty signal, so it stays on the cheap
     // numstat-only path (no patch) unless a cache is already warm.
-    const numstatRes = await runGit(cwd, ["diff", DIFF_RENAME_FLAG, "--numstat", "-z", baseRef]);
+    const numstatRes = await runGit(cwd, [
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      DIFF_RENAME_FLAG,
+      "--numstat",
+      "-z",
+      baseRef,
+    ]);
     if (numstatRes.exitCode !== 0) return { ...EMPTY_SUMMARY, isRepo: true };
 
     let additions = 0;
