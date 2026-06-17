@@ -73,18 +73,6 @@ export const MAX_FOREGROUND_LENGTH = 256;
 export const MAX_TITLE_LENGTH = 4 * 1024;
 export const MAX_NOTIFICATION_LENGTH = 1024;
 export const MAX_PENDING_PARSE_BYTES = 4096;
-// Cap on the URL carried by the pr-created OSC / WS message. A real GitHub PR
-// URL is well under this; the cap only guards against a runaway payload.
-export const MAX_PR_CREATED_URL_LENGTH = 2048;
-// Sliding window of recent PTY output scanned for a freshly-printed PR URL
-// (the agent-echo path). Large enough to survive a TUI redraw that reprints the
-// URL across chunks, small enough that a `gh pr list` burst of many distinct
-// URLs reads as multi-distinct and is suppressed.
-export const PR_URL_SCAN_BUFFER_BYTES = 4096;
-// Trailing-edge settle for the PR-URL stream scan: resets on every output
-// chunk that may carry a github.com URL and fires only once output goes quiet,
-// so a multi-URL listing burst collapses before a verdict is reached.
-export const PR_URL_SETTLE_MS = 150;
 export const MAX_COLS = 1000;
 export const MAX_ROWS = 1000;
 export const MAX_CONCURRENT_SESSIONS = 64;

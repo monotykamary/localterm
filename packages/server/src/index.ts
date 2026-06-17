@@ -924,9 +924,6 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               sessionEventManager.onSessionEvent("notification", newSession.lastEmittedCwd);
             }
           });
-          newSession.on("pr-created", (url: string) => {
-            safeSend(ws, { type: "pr-created", url });
-          });
           newSession.on("exit", (code: number | null) => {
             onExit(code);
             if (!isAutomationSession && newSession.lastEmittedCwd) {

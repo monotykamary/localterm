@@ -59,8 +59,6 @@ import {
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
   ENTER_KEY_CODE,
   FALLBACK_TERMINAL_BACKGROUND_HEX,
-  GIT_PR_RELEASE_DEBOUNCE_MS,
-  GIT_PR_RELEASE_FOREGROUND_NAMES,
   TERMINAL_FONT_SIZE_STEP_PX,
   FAVICON_RUNNING_DEBOUNCE_MS,
   FAVICON_READY_DEBOUNCE_MS,
@@ -362,12 +360,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const hasDiff = diffSummary !== null && diffSummary.isRepo && diffSummary.files > 0;
   // Ambient branch/PR lease for the active cwd: drives the toolbar PR indicator
   // and is handed to the diff viewer so it opens in branch mode instantly.
-  const {
-    branchInfo,
-    refresh: refreshBranchInfo,
-    notePrCreated,
-    refreshUnlessFresh,
-  } = useGitBranchInfo(liveCwd);
+  const { branchInfo, refresh: refreshBranchInfo } = useGitBranchInfo(liveCwd);
   const branchPr = branchInfo?.pr ?? null;
   // Either indicator (working-changes count or PR) keeps the toolbar "peeking":
   // the indicator stays visible while the action buttons collapse behind it and
@@ -382,17 +375,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     if (!branchInfo || !summaryBranch) return;
     if (summaryBranch !== branchInfo.currentBranch) refreshBranchInfo();
   }, [summaryBranch, branchInfo, refreshBranchInfo]);
-
-  // Layer C reads the latest inline-set / re-lease callbacks from inside the
-  // once-created WebSocket closure; refs keep them current without reconnecting.
-  const notePrCreatedRef = useRef(notePrCreated);
-  const refreshUnlessFreshRef = useRef(refreshUnlessFresh);
-  const prRefreshTimerRef = useRef<number | null>(null);
-  const lastForegroundProcessRef = useRef<string | null>(null);
-  useEffect(() => {
-    notePrCreatedRef.current = notePrCreated;
-    refreshUnlessFreshRef.current = refreshUnlessFresh;
-  });
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1035,8 +1017,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         } else if (message.type === "git-diff-summary") {
           setGitDiffSummary(message.summary);
           setGitDirtyVersion((version) => (version ?? 0) + 1);
-        } else if (message.type === "pr-created") {
-          notePrCreatedRef.current?.(message.url);
         } else if (message.type === "foreground") {
           const nowHasProcess = message.process !== null;
           onForegroundProcessChange?.(nowHasProcess);
@@ -1049,30 +1029,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
             setTabFaviconState("ready", faviconBadge);
           }
           hasForegroundProcess = nowHasProcess;
-          const priorForeground = lastForegroundProcessRef.current;
-          lastForegroundProcessRef.current = message.process;
-          // Layer C: when a PR-creating program drops back to the shell, re-lease
-          // the ambient PR after a short debounce, unless an inline set (gh wrapper
-          // URL / scanned URL) already landed (then it skips the redundant
-          // subprocess). A new foreground starting cancels the pending timer — a
-          // fresh burst is underway, so we defer until its trailing exit.
-          if (message.process === null) {
-            if (
-              priorForeground !== null &&
-              GIT_PR_RELEASE_FOREGROUND_NAMES.includes(priorForeground)
-            ) {
-              if (prRefreshTimerRef.current !== null) {
-                window.clearTimeout(prRefreshTimerRef.current);
-              }
-              prRefreshTimerRef.current = window.setTimeout(() => {
-                prRefreshTimerRef.current = null;
-                refreshUnlessFreshRef.current?.();
-              }, GIT_PR_RELEASE_DEBOUNCE_MS);
-            }
-          } else if (prRefreshTimerRef.current !== null) {
-            window.clearTimeout(prRefreshTimerRef.current);
-            prRefreshTimerRef.current = null;
-          }
         } else if (message.type === "notification") {
           if ("Notification" in window && Notification.permission === "granted") {
             new Notification(message.body);
@@ -1165,10 +1121,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       clearResizeScrollRestore();
-      if (prRefreshTimerRef.current !== null) {
-        window.clearTimeout(prRefreshTimerRef.current);
-        prRefreshTimerRef.current = null;
-      }
       resetFavicon();
       document.removeEventListener("visibilitychange", onVisibilityChange);
       observer.disconnect();

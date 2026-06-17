@@ -244,48 +244,4 @@ describe("Session", () => {
     expect(session.isPaused).toBe(false);
     expect(() => session.resume()).not.toThrow();
   });
-
-  it("emits a pr-created event when the gh wrapper prints the pr-created OSC", async () => {
-    const session = new Session({ shell: "/bin/sh" });
-    try {
-      const events: string[] = [];
-      session.on("pr-created", (url) => events.push(url));
-      await collectOutput(session);
-      session.write("printf '\\033]7777;pr-created;https://github.com/foo/bar/pull/123\\007'\n");
-      await vi.waitFor(() => {
-        expect(events).toContain("https://github.com/foo/bar/pull/123");
-      });
-    } finally {
-      session.dispose();
-    }
-  });
-
-  it("emits a pr-created event when a single PR URL is echoed to the stream", async () => {
-    const session = new Session({ shell: "/bin/sh" });
-    try {
-      const events: string[] = [];
-      session.on("pr-created", (url) => events.push(url));
-      await collectOutput(session);
-      session.write("echo 'https://github.com/foo/bar/pull/456'\n");
-      await vi.waitFor(() => {
-        expect(events).toContain("https://github.com/foo/bar/pull/456");
-      });
-    } finally {
-      session.dispose();
-    }
-  });
-
-  it("suppresses a multi-URL listing burst (gh pr list / git log merge commits)", async () => {
-    const session = new Session({ shell: "/bin/sh" });
-    try {
-      const events: string[] = [];
-      session.on("pr-created", (url) => events.push(url));
-      await collectOutput(session);
-      session.write("echo 'https://github.com/foo/bar/pull/1 https://github.com/foo/bar/pull/2'\n");
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      expect(events).toEqual([]);
-    } finally {
-      session.dispose();
-    }
-  });
 });

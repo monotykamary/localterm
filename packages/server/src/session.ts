@@ -11,8 +11,6 @@ import {
   LOCALTERM_VALUE,
   MAX_NOTIFICATION_LENGTH,
   MAX_PENDING_PARSE_BYTES,
-  PR_URL_SCAN_BUFFER_BYTES,
-  PR_URL_SETTLE_MS,
   PTY_ENV_DENYLIST,
   TERM_TYPE,
 } from "./constants.js";
@@ -30,9 +28,7 @@ import { parseOsc7FromChunk } from "./utils/parse-osc7.js";
 import { parseOscAutomationExitFromChunk } from "./utils/parse-osc-automation-exit.js";
 import { parseOscDirtyFromChunk } from "./utils/parse-osc-dirty.js";
 import { parseOscNotificationsFromChunk } from "./utils/parse-osc-notification.js";
-import { parseOscPrCreatedFromChunk } from "./utils/parse-osc-pr-created.js";
 import { parseOscTitleFromChunk } from "./utils/parse-osc-title.js";
-import { scanPrUrls } from "./utils/scan-pr-url.js";
 
 interface SessionEvents {
   output: [data: string];
@@ -42,7 +38,6 @@ interface SessionEvents {
   foreground: [process: string | null];
   notification: [body: string];
   "git-dirty": [];
-  "pr-created": [url: string];
   "automation-exit": [code: number];
 }
 
@@ -67,9 +62,6 @@ export class Session extends EventEmitter<SessionEvents> {
   private foregroundPollTimer: NodeJS.Timeout | null = null;
   private readonly reportInitialCommandExit: boolean;
   private hasEmittedAutomationExit = false;
-  private lastEmittedPrCreatedUrl: string | null = null;
-  private prScanBuffer = "";
-  private prScanSettleTimer: NodeJS.Timeout | null = null;
 
   constructor(input: SpawnPtyInput) {
     super();
@@ -250,10 +242,6 @@ export class Session extends EventEmitter<SessionEvents> {
       clearInterval(this.foregroundPollTimer);
       this.foregroundPollTimer = null;
     }
-    if (this.prScanSettleTimer !== null) {
-      clearTimeout(this.prScanSettleTimer);
-      this.prScanSettleTimer = null;
-    }
     this.cleanUpHookFiles();
     this.removeAllListeners();
   }
@@ -309,39 +297,6 @@ export class Session extends EventEmitter<SessionEvents> {
       this.emit("git-dirty");
     }
 
-    // A freshly-created PR. The injected `gh` wrapper (layer A) emits an OSC
-    // carrying the URL on `gh pr create` success; the stream scanner (layer B)
-    // catches a URL an agent printed without going through the wrapper. Both
-    // funnel here so the client can inline-set the overlay with no round-trip.
-    const prCreatedFromOsc = parseOscPrCreatedFromChunk(combined);
-    if (prCreatedFromOsc && prCreatedFromOsc !== this.lastEmittedPrCreatedUrl) {
-      this.lastEmittedPrCreatedUrl = prCreatedFromOsc;
-      this.emit("pr-created", prCreatedFromOsc);
-    }
-
-    // Layer B: a TUI agent (e.g. pi) spawns `gh` itself and echoes the URL into
-    // the primary buffer (pi never enters the alternate screen, so the bytes
-    // survive). Scan a sliding window, but only once output has settled: a
-    // listing (`gh pr list --json`, a merge-commit-heavy `git log`) prints many
-    // URLs across chunks, and the trailing-edge settle coalesces the burst so
-    // only a window that has settled with exactly one distinct URL is treated
-    // as a creation signal. A same-chunk `gh pr create` still settles to one.
-    this.prScanBuffer = (this.prScanBuffer + data).slice(-PR_URL_SCAN_BUFFER_BYTES);
-    if (this.prScanBuffer.includes("github.com")) {
-      if (this.prScanSettleTimer !== null) clearTimeout(this.prScanSettleTimer);
-      this.prScanSettleTimer = setTimeout(() => {
-        this.prScanSettleTimer = null;
-        if (this.exited) return;
-        const distinctUrls = scanPrUrls(this.prScanBuffer);
-        const candidate = distinctUrls.length === 1 ? distinctUrls[0] : null;
-        if (candidate && candidate !== this.lastEmittedPrCreatedUrl) {
-          this.lastEmittedPrCreatedUrl = candidate;
-          this.emit("pr-created", candidate);
-        }
-      }, PR_URL_SETTLE_MS);
-      this.prScanSettleTimer.unref?.();
-    }
-
     if (this.reportInitialCommandExit && !this.hasEmittedAutomationExit) {
       const automationExitCode = parseOscAutomationExitFromChunk(combined);
       if (automationExitCode !== null) {
@@ -388,7 +343,6 @@ export class Session extends EventEmitter<SessionEvents> {
           "chpwd_functions=(${chpwd_functions[@]} __localterm_osc7_chpwd)",
           "__localterm_osc7_chpwd",
           "__localterm_git_dirty() { printf '\\e]7777;git-dirty\\a'; }",
-          ...this.ghWrapperFunctionLines(),
           "precmd_functions=(${precmd_functions[@]} __localterm_git_dirty)",
           ...(this.reportInitialCommandExit
             ? [
@@ -414,7 +368,6 @@ export class Session extends EventEmitter<SessionEvents> {
           "source ~/.bashrc 2>/dev/null",
           hookScript,
           'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt;__localterm_git_dirty"',
-          ...this.ghWrapperFunctionLines(),
           "__localterm_osc7_prompt",
           "__localterm_git_dirty() { printf '\\e]7777;git-dirty\\a'; }",
           ...(this.reportInitialCommandExit
@@ -437,25 +390,6 @@ export class Session extends EventEmitter<SessionEvents> {
   // finishes — that's the only cycle where $? is the command's exit status.
   // The hook must run FIRST in the prompt chain (prepended), otherwise the
   // osc7/git-dirty hooks' printf would have already reset $? to 0.
-  // Wraps `gh pr create` so a freshly-created PR warms the ambient overlay the
-  // moment the CLI returns. Only the create subcommand has its stdout captured
-  // (where gh prints the URL on success; prompts live on stderr and stay
-  // interactive), and on exit 0 the URL rides a `pr-created` OSC out to the
-  // client, which inline-sets the overlay — no `gh pr list` round-trip. Every
-  // other `gh` invocation passes straight through. `unalias` clears a user `gh`
-  // alias so this function takes precedence (a user `gh` function from their rc
-  // is overridden by this later definition). The OSC format is built from JS
-  // unicode escapes so printf embeds the raw control bytes without strewing
-  // shell-level backslash escapes through the rcfile.
-  private ghWrapperFunctionLines(): string[] {
-    const oscFormat = "\u001b]7777;pr-created;%s\u0007";
-    return [
-      "unalias gh 2>/dev/null",
-      `__localterm_pr_url_from() { printf '%s' "$1" | grep -oE 'https://github.com/[^ ]+/pull/[0-9]+' | head -n1; }`,
-      `gh() { if [ "$1" = pr ] && [ "$2" = create ]; then local __localterm_gh_out __localterm_gh_rc __localterm_gh_url; __localterm_gh_out=$(command gh "$@"); __localterm_gh_rc=$?; printf '%s' "$__localterm_gh_out"; if [ "$__localterm_gh_rc" -eq 0 ]; then __localterm_gh_url=$(__localterm_pr_url_from "$__localterm_gh_out"); if [ -n "$__localterm_gh_url" ]; then printf '${oscFormat}' "$__localterm_gh_url"; fi; fi; return "$__localterm_gh_rc"; fi; command gh "$@"; }`,
-    ];
-  }
-
   private automationExitHookFunctionLines(functionName: string): string[] {
     return [
       "__localterm_automation_prompt_count=0",
