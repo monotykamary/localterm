@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.2.1
+
+### Patch Changes
+
+- 1d346bc: Fix realtime diff animation placement for deleted lines, handle add/remove/add-back edge cases, and add unit tests for the transition logic.
+
 ## 2.2.0
 
 ### Minor Changes
