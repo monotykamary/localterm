@@ -1,5 +1,29 @@
 # localterm
 
+## 2.1.2
+
+### Patch Changes
+
+- Compare a fork PR branch against its upstream base, not the fork's origin.
+
+  A fork's `origin` is the fork itself, so the diff viewer was comparing a PR
+  branch against the fork's own default branch (`origin/main`) instead of the
+  upstream repo the PR actually targets. When the fork's default had drifted from
+  upstream (commits not yet synced), those drift commits were mishandled in the PR
+  diff — disagreeing with GitHub's Files changed and showing the wrong changes.
+
+  The PR's base is now resolved through the base repo: `detectPr` captures the
+  PR's `base.repo.full_name` and caches the PR per `(cwd, branch)`; branch-mode
+  base resolution reads that cache (no GitHub round-trip on the diff path — the
+  client's existing `getGitBranchPr` call populates it in parallel, and the
+  viewer only opens branch mode once `branchInfo.pr` is truthy, so the cache is
+  warm) and maps the base repo to its local remote (`upstream/main`) via
+  `git remote -v`. Falls back to the repo default when there's no PR, no matching
+  remote (upstream never added), or the ref isn't fetched locally.
+
+- Updated dependencies
+  - @monotykamary/localterm-server@2.1.2
+
 ## 2.1.1
 
 ### Patch Changes
