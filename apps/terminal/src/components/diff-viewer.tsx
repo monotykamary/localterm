@@ -36,6 +36,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { Button } from "@/components/ui/button";
@@ -361,18 +362,11 @@ interface LineCallbacks {
   onDragEnter?: (line: DiffLine) => void;
 }
 
-const GUTTER_BG_OVERRIDES: Record<string, string> = {
-  add: "linear-gradient(rgb(16 185 129 / 0.1), rgb(16 185 129 / 0.1))",
-  del: "linear-gradient(rgb(239 68 68 / 0.1), rgb(239 68 68 / 0.1))",
-};
-
 const UnifiedDiffLine = memo(
   ({
     line,
     annotateKey,
     highlighted,
-    isNewlyAdded,
-    isExiting,
     syntaxTokens,
     highlightingPending,
     onAnnotate,
@@ -382,8 +376,6 @@ const UnifiedDiffLine = memo(
     line: DiffLine;
     annotateKey: string | null;
     highlighted: boolean;
-    isNewlyAdded: boolean;
-    isExiting: boolean;
     syntaxTokens: SyntaxLine | null;
     highlightingPending: boolean;
   } & LineCallbacks) => (
@@ -397,16 +389,7 @@ const UnifiedDiffLine = memo(
           onDragStart={() => onStartDrag(line)}
         />
       ) : null}
-      <div
-        className="sticky left-0 z-10 flex shrink-0 bg-background"
-        style={
-          GUTTER_BG_OVERRIDES[line.type]
-            ? {
-                backgroundImage: GUTTER_BG_OVERRIDES[line.type],
-              }
-            : undefined
-        }
-      >
+      <div className="sticky left-0 z-10 flex shrink-0 bg-background">
         <span className={LINE_NUMBER_CELL_CLASSES}>{line.oldLine ?? ""}</span>
         <span className={LINE_NUMBER_CELL_CLASSES}>{line.newLine ?? ""}</span>
         <span
@@ -419,21 +402,7 @@ const UnifiedDiffLine = memo(
           {line.type === "add" ? "+" : line.type === "del" ? "-" : ""}
         </span>
       </div>
-      <div
-        className={cn(
-          "min-w-0 flex-1",
-          lineBackgroundClasses(line.type),
-          isNewlyAdded && "animate-diff-line-added",
-          isExiting && "animate-diff-line-removed",
-        )}
-        style={
-          isNewlyAdded
-            ? { animationDuration: `${DIFF_VIEWER_ADDED_LINE_ANIMATION_MS}ms` }
-            : isExiting
-              ? { animationDuration: `${DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS}ms` }
-              : undefined
-        }
-      >
+      <div className={cn("min-w-0 flex-1", lineBackgroundClasses(line.type))}>
         <span className="shrink-0 whitespace-pre pr-4">
           <span
             className={cn(
@@ -494,12 +463,12 @@ const SplitDiffCell = ({
       {onAnnotate && onDragStart ? (
         <AnnotateLineButton onClick={onAnnotate} onDragStart={onDragStart} />
       ) : null}
-      <span className={cn(LINE_NUMBER_CELL_CLASSES, lineBackgroundClasses(effectiveType))}>
+      <span className={LINE_NUMBER_CELL_CLASSES}>
         {side === "left" ? (line.oldLine ?? "") : (line.newLine ?? "")}
       </span>
       <span
         className={cn(
-          "min-w-0 flex-1 overflow-hidden",
+          "min-w-0 flex-1 overflow-hidden block",
           lineBackgroundClasses(effectiveType),
           isNewlyAdded && "animate-diff-line-added",
           isExiting && "animate-diff-line-removed",
@@ -512,16 +481,18 @@ const SplitDiffCell = ({
               : undefined
         }
       >
-        <span
-          data-split-text=""
-          className={cn(
-            "inline-block whitespace-pre pr-2",
-            highlightingPending && !syntaxTokens
-              ? "invisible"
-              : !syntaxTokens && lineTextClasses(line.type),
-          )}
-        >
-          {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
+        <span className="block min-h-0 overflow-hidden">
+          <span
+            data-split-text=""
+            className={cn(
+              "inline-block whitespace-pre pr-2",
+              highlightingPending && !syntaxTokens
+                ? "invisible"
+                : !syntaxTokens && lineTextClasses(line.type),
+            )}
+          >
+            {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
+          </span>
         </span>
       </span>
     </>
@@ -694,28 +665,74 @@ const DiffChunk = memo((props: DiffChunkProps) => {
     <div>
       {chunk.header !== null ? <HunkHeader header={chunk.header} /> : null}
       {chunk.mode === "unified"
-        ? chunk.lines.map((line, lineIndex) => {
-            const state = annotationStateFor(line);
-            return (
-              <Fragment key={lineIndex}>
-                <UnifiedDiffLine
-                  line={line}
-                  annotateKey={state ? state.key : null}
-                  highlighted={
-                    state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
+        ? (() => {
+            type AnimatedGroup = { kind: "add" | "remove"; content: ReactNode[] };
+            const result: ReactNode[] = [];
+            let animatedGroup: AnimatedGroup | null = null;
+            const flushAnimatedGroup = () => {
+              if (!animatedGroup) return;
+              result.push(
+                <div
+                  key={`anim-${result.length}`}
+                  className={
+                    animatedGroup.kind === "add"
+                      ? "animate-diff-line-added"
+                      : "animate-diff-line-removed"
                   }
-                  isNewlyAdded={line.type === "add" && newlyAddedKeys.has(addedLineKey(line))}
-                  isExiting={exitingKeys.has(lineKey(line))}
-                  syntaxTokens={tokenMap.get(line) ?? null}
-                  highlightingPending={highlightingPending}
-                  onAnnotate={onOpenEditor}
-                  onStartDrag={onStartDrag}
-                  onDragEnter={onDragEnter}
-                />
-                {renderAnnotation(state)}
-              </Fragment>
-            );
-          })
+                  style={{
+                    animationDuration: `${
+                      animatedGroup.kind === "add"
+                        ? DIFF_VIEWER_ADDED_LINE_ANIMATION_MS
+                        : DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS
+                    }ms`,
+                  }}
+                >
+                  <div className="min-h-0 overflow-hidden">{animatedGroup.content}</div>
+                </div>,
+              );
+              animatedGroup = null;
+            };
+            const renderLineNode = (line: DiffLine, key: string) => {
+              const state = annotationStateFor(line);
+              return (
+                <Fragment key={key}>
+                  <UnifiedDiffLine
+                    line={line}
+                    annotateKey={state ? state.key : null}
+                    highlighted={
+                      state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
+                    }
+                    syntaxTokens={tokenMap.get(line) ?? null}
+                    highlightingPending={highlightingPending}
+                    onAnnotate={onOpenEditor}
+                    onStartDrag={onStartDrag}
+                    onDragEnter={onDragEnter}
+                  />
+                  {renderAnnotation(state)}
+                </Fragment>
+              );
+            };
+            for (const [lineIndex, line] of chunk.lines.entries()) {
+              let kind: "normal" | "add" | "remove" = "normal";
+              if (line.type === "add" && newlyAddedKeys.has(addedLineKey(line))) {
+                kind = "add";
+              } else if (exitingKeys.has(lineKey(line))) {
+                kind = "remove";
+              }
+              if (kind === "normal") {
+                flushAnimatedGroup();
+                result.push(renderLineNode(line, `line-${lineIndex}`));
+                continue;
+              }
+              if (!animatedGroup || animatedGroup.kind !== kind) {
+                flushAnimatedGroup();
+                animatedGroup = { kind, content: [] };
+              }
+              animatedGroup.content.push(renderLineNode(line, `anim-line-${lineIndex}`));
+            }
+            flushAnimatedGroup();
+            return result;
+          })()
         : chunk.rows.map((row, rowIndex) => {
             const left = row.left;
             const right = row.right;
