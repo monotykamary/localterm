@@ -55,11 +55,13 @@ export const PATCH_PREFETCH_NEIGHBOR_RADIUS = 5;
 
 export const AUTOMATIONS_SORT_STORAGE_KEY = "localterm:automations-sort";
 export const AUTOMATIONS_SORT_DEFAULT = "last-run" as const;
-
 export const AUTOMATIONS_RELATIVE_TIME_REFRESH_MS = 30_000;
 export const AUTOMATIONS_MODAL_CLOSE_TRANSITION_MS = 150;
 // Most-recent runs shown in the cross-automation "Recent runs" feed.
 export const RECENT_RUNS_LIMIT = 50;
+
+export const WORKTREES_MODAL_CLOSE_TRANSITION_MS = 150;
+export const WORKTREES_LIST_ROW_HEIGHT_PX = 56;
 
 export const TOOLBAR_HIDE_DELAY_MS = 200;
 export const TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS = 1500;

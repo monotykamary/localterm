@@ -17,6 +17,7 @@ import {
   Coffee,
   Copy,
   FileDiff,
+  FolderGit2,
   GitPullRequest,
   MonitorCog,
   Plus,
@@ -50,8 +51,11 @@ import { CommandPalette, type CommandItem } from "@/components/command-palette";
 import { DiffViewer } from "@/components/diff-viewer";
 import { KeepAwakeMenu, type CaffeinateMode } from "@/components/keep-awake-menu";
 import { SettingsMenu } from "@/components/settings-menu";
+import { WorktreesButton } from "@/components/worktrees-menu";
+import { WorktreesModal } from "@/components/worktrees-modal";
 import { useGitBranchInfo } from "@/hooks/use-git-branch-info";
 import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
+import { createGitWorktree } from "@/utils/fetch-git-worktrees";
 import {
   COPY_FEEDBACK_MS,
   DEAD_SESSION_TITLE_PREFIX,
@@ -119,6 +123,8 @@ import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
 import { isDiffViewerShortcut } from "@/utils/is-diff-viewer-shortcut";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
+import { isWorktreesCreateShortcut } from "@/utils/is-worktrees-create-shortcut";
+import { isWorktreesShortcut } from "@/utils/is-worktrees-shortcut";
 import { removeRunQueryParam, RUN_QUERY_PARAM } from "@/utils/remove-run-query-param";
 import {
   loadStoredTerminalCursorBlink,
@@ -281,16 +287,27 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [isKeepAwakePopoverOpen, setIsKeepAwakePopoverOpen] = useState(false);
   const [automations, setAutomations] = useState<AutomationWithNextRun[] | null>(null);
   const toggleAutomationsRef = useRef<(() => void) | null>(null);
+  const [isWorktreesOpen, setIsWorktreesOpen] = useState(false);
+  const [worktreeCreateError, setWorktreeCreateError] = useState<string | null>(null);
+  const openWorktreesRef = useRef<(() => void) | null>(null);
+  const toggleWorktreesRef = useRef<(() => void) | null>(null);
+  const createWorktreeRef = useRef<((openAfter: boolean) => Promise<boolean>) | null>(null);
   const setCaffeinateModeRef = useRef<((mode: CaffeinateMode) => void) | null>(null);
   const setCaffeinateCommandsRef = useRef<((commands: string[]) => void) | null>(null);
   const setCaffeinateActivityGateRef = useRef<((enabled: boolean) => void) | null>(null);
   const toolbarHoverTimeoutRef = useRef<number | null>(null);
   const isSettingsPopoverOpenRef = useRef(false);
   const isAutomationsOpenRef = useRef(false);
+  const isWorktreesOpenRef = useRef(false);
   const isToolbarVisible =
-    isToolbarHovered || isSettingsPopoverOpen || isAutomationsOpen || isKeepAwakePopoverOpen;
+    isToolbarHovered ||
+    isSettingsPopoverOpen ||
+    isAutomationsOpen ||
+    isKeepAwakePopoverOpen ||
+    isWorktreesOpen;
   isSettingsPopoverOpenRef.current = isSettingsPopoverOpen;
   isAutomationsOpenRef.current = isAutomationsOpen;
+  isWorktreesOpenRef.current = isWorktreesOpen;
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultState>({
     resultIndex: -1,
@@ -796,6 +813,20 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         if (event.type === "keydown") {
           event.preventDefault();
           openDiffViewerRef.current?.();
+        }
+        return false;
+      }
+      if (isWorktreesCreateShortcut(event, isMac)) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          void createWorktreeRef.current?.(true);
+        }
+        return false;
+      }
+      if (isWorktreesShortcut(event, isMac)) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          toggleWorktreesRef.current?.();
         }
         return false;
       }
@@ -1412,6 +1443,61 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   }, [handleAutomationsOpenChange]);
   toggleAutomationsRef.current = toggleAutomations;
 
+  const handleWorktreesOpenChange = useCallback((open: boolean) => {
+    setIsWorktreesOpen(open);
+    if (open) {
+      setIsCommandPaletteOpen(false);
+      setWorktreeCreateError(null);
+      return;
+    }
+    if (toolbarHoverTimeoutRef.current !== null) {
+      window.clearTimeout(toolbarHoverTimeoutRef.current);
+    }
+    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
+      toolbarHoverTimeoutRef.current = null;
+      setIsToolbarHovered(false);
+    }, TOOLBAR_HIDE_DELAY_MS);
+    refocusTerminalRef.current?.();
+  }, []);
+
+  const openWorktrees = useCallback(() => {
+    setIsWorktreesOpen(true);
+    setIsCommandPaletteOpen(false);
+  }, []);
+  openWorktreesRef.current = openWorktrees;
+
+  const toggleWorktrees = useCallback(() => {
+    handleWorktreesOpenChange(!isWorktreesOpenRef.current);
+  }, [handleWorktreesOpenChange]);
+  toggleWorktreesRef.current = toggleWorktrees;
+
+  const openShellAt = useCallback((shellCwd: string) => {
+    window.open(buildNewTabUrl(shellCwd), "_blank", "noopener,noreferrer");
+  }, []);
+
+  // Create a worktree on a fresh branch from HEAD, then (when openAfter) open a
+  // new PTY tab at it and switch over. Failures surface by opening the worktrees
+  // modal with the message shown in its footer, regardless of entry point. The
+  // modal `+` button calls this with openAfter=false (create + refresh the
+  // list, no tab switch); the command palette and ⌘/Ctrl+Shift+B call it with
+  // openAfter=true.
+  const createWorktree = useCallback(
+    async (openAfter: boolean): Promise<boolean> => {
+      if (!liveCwd) return false;
+      const result = await createGitWorktree(liveCwd);
+      if (!result.ok) {
+        setWorktreeCreateError(result.message);
+        setIsWorktreesOpen(true);
+        return false;
+      }
+      setWorktreeCreateError(null);
+      if (openAfter) openShellAt(result.result.path);
+      return true;
+    },
+    [liveCwd, openShellAt],
+  );
+  createWorktreeRef.current = createWorktree;
+
   const toggleCommandPalette = useCallback(() => {
     setIsCommandPaletteOpen((previous) => !previous);
   }, []);
@@ -1589,6 +1675,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       setIsCommandPaletteOpen(false);
       setIsDiffViewerOpen(false);
       setIsAutomationsOpen(false);
+      setIsWorktreesOpen(false);
     }
   }, [isModalOpen, onModalOpenChange]);
   const matchLabel =
@@ -1624,6 +1711,24 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         shortcut: `${togglePrefix}J`,
         icon: <CalendarClock className="size-3.5" />,
         action: () => handleAutomationsOpenChange(true),
+      },
+      {
+        id: "worktrees",
+        label: "Git worktrees",
+        category: "Actions",
+        shortcut: `${togglePrefix}B`,
+        icon: <FolderGit2 className="size-3.5" />,
+        action: () => handleWorktreesOpenChange(true),
+      },
+      {
+        id: "worktrees-create",
+        label: "Create git worktree",
+        category: "Actions",
+        shortcut: `${togglePrefix}Shift+B`,
+        icon: <Plus className="size-3.5" />,
+        action: () => {
+          void createWorktree(true);
+        },
       },
       {
         id: "new-shell",
@@ -1882,6 +1987,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                     onOpen={() => handleAutomationsOpenChange(true)}
                     isMac={isMac}
                   />
+                  <WorktreesButton onOpen={() => handleWorktreesOpenChange(true)} isMac={isMac} />
                   {caffeinateSupported ? (
                     <KeepAwakeMenu
                       mode={caffeinateMode}
@@ -2030,6 +2136,17 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         onAutomationsLoaded={setAutomations}
         defaultCwd={liveCwd}
         isMac={isMac}
+      />
+
+      <WorktreesModal
+        open={isWorktreesOpen}
+        cwd={liveCwd}
+        isMac={isMac}
+        createError={worktreeCreateError}
+        onCreate={createWorktree}
+        onDismissCreateError={() => setWorktreeCreateError(null)}
+        onClose={() => handleWorktreesOpenChange(false)}
+        onOpenShell={openShellAt}
       />
 
       <AlertDialog open={isModalOpen}>

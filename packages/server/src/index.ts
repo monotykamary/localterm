@@ -63,6 +63,7 @@ import {
 } from "./git-diff-watcher.js";
 import { HeartbeatStore } from "./heartbeat-store.js";
 import { parseCronExpression } from "./cron-expression.js";
+import { createGitWorktree, listGitWorktrees, removeGitWorktree } from "./git-worktrees.js";
 import {
   clientToServerMessageSchema,
   createAutomationInputSchema,
@@ -545,6 +546,67 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       return undefined;
     }
   };
+
+  // Resolve a worktree path (create target / remove target). Relative paths are
+  // anchored to the caller's cwd so the client can pass a project-relative name;
+  // absolute paths pass through. No traversal/containment check — the daemon
+  // already hands out unrestricted shells, so creating a worktree elsewhere is
+  // not an escalation.
+  const resolveWorktreePath = (cwd: string, rawPath: string | undefined): string | null => {
+    if (!rawPath) return null;
+    const trimmed = rawPath.trim();
+    if (!trimmed) return null;
+    return path.resolve(cwd, trimmed);
+  };
+
+  const worktreeErrorMessage = (error: unknown): string =>
+    error instanceof Error ? error.message : "git operation failed";
+
+  // Every worktree sharing the caller's repo. `git worktree list` returns the
+  // whole linked set from any worktree, so this single read is the complete
+  // project view — no store, no per-worktree tracking.
+  api.get("/git/worktrees", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    try {
+      return context.json(await listGitWorktrees(cwd));
+    } catch (error) {
+      return context.json(
+        { error: "git_failed", message: worktreeErrorMessage(error) },
+        HTTP_STATUS_BAD_REQUEST,
+      );
+    }
+  });
+
+  api.post("/git/worktrees", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    try {
+      const result = await createGitWorktree(cwd);
+      return context.json(result, HTTP_STATUS_CREATED);
+    } catch (error) {
+      return context.json(
+        { error: "git_failed", message: worktreeErrorMessage(error) },
+        HTTP_STATUS_BAD_REQUEST,
+      );
+    }
+  });
+
+  api.delete("/git/worktrees", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    const targetPath = resolveWorktreePath(cwd, context.req.query("path"));
+    if (!targetPath) return context.json({ error: "invalid_path" }, HTTP_STATUS_BAD_REQUEST);
+    try {
+      await removeGitWorktree(cwd, targetPath);
+      return context.json({ ok: true });
+    } catch (error) {
+      return context.json(
+        { error: "git_failed", message: worktreeErrorMessage(error) },
+        HTTP_STATUS_BAD_REQUEST,
+      );
+    }
+  });
 
   // A trigger is valid iff a schedule trigger compiles to ≥1 parseable cron;
   // watch and event triggers are always valid (their cwd is validated

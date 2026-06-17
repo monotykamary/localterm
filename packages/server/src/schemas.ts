@@ -262,6 +262,54 @@ export const gitBranchPrLeaseSchema = z
   })
   .strict();
 
+// One entry from `git worktree list --porcelain`. `path` is the worktree root
+// (absolute, as git prints it) — kept absolute so the client can pass it back
+// for actions (open a shell there, remove it). `displayPath` is the same path
+// tildified against the daemon's home, for display only (the browser can't
+// resolve home itself). `branch` is the short ref checked out there (null when
+// detached). `head` is the commit sha (null before the first commit).
+// `isCurrent` marks the worktree the caller's cwd lives in. `isMain` marks the
+// repository's primary worktree (the one holding the common .git dir) — it is
+// never removable, so the client hides its delete action and the server guards
+// removal. `isLocked` / `isPrunable` mirror git's own markers (a locked
+// worktree is exempt from auto-pruning; prunable means git thinks it can be
+// cleaned up).
+export const gitWorktreeSchema = z
+  .object({
+    path: z.string().min(1),
+    displayPath: z.string().min(1),
+    branch: z.string().min(1).nullable(),
+    head: z.string().nullable(),
+    isCurrent: z.boolean(),
+    isMain: z.boolean(),
+    isLocked: z.boolean(),
+    isPrunable: z.boolean(),
+  })
+  .strict();
+
+// All worktrees sharing the caller's repo. `git worktree list` run from any
+// worktree of a repo returns the whole linked set, so this single read is the
+// complete project view — no store, no per-worktree tracking. `displayBaseDir`
+// is the tildified dir under which auto-created worktrees land
+// (~/.localterm/worktrees/<project>), shown by the create form so the user
+// knows where the next worktree will go before creating it.
+export const gitWorktreeListResponseSchema = z
+  .object({
+    isRepo: z.boolean(),
+    worktrees: z.array(gitWorktreeSchema),
+    displayBaseDir: z.string().nullable(),
+  })
+  .strict();
+
+// A completed create: the resolved absolute worktree path and the branch now
+// checked out there. Returned so the client can open or select it directly.
+export const gitWorktreeResultSchema = z
+  .object({
+    path: z.string().min(1),
+    branch: z.string().min(1),
+  })
+  .strict();
+
 // ----------------------------------------------------------------------------
 // Automations (file format v3).
 //
