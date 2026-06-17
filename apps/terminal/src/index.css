@@ -131,7 +131,7 @@ body {
   display: grid;
   animation-name: diff-line-added;
   animation-timing-function: cubic-bezier(0.7, 0, 1, 1);
-  animation-fill-mode: forwards;
+  animation-fill-mode: both;
   will-change: grid-template-rows, opacity;
 }
 
@@ -150,7 +150,7 @@ body {
   display: grid;
   animation-name: diff-line-removed;
   animation-timing-function: cubic-bezier(0, 0, 0.4, 1);
-  animation-fill-mode: forwards;
+  animation-fill-mode: both;
   will-change: grid-template-rows, opacity;
 }
 

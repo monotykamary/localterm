@@ -50,7 +50,9 @@ import {
 } from "@/lib/animation-classes";
 import {
   DIFF_VIEWER_ADDED_LINE_ANIMATION_MS,
+  DIFF_VIEWER_ANIMATION_SEQUENCE_GAP_MS,
   DIFF_VIEWER_CLOSE_TRANSITION_MS,
+  DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS,
   DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS,
   DIFF_VIEWER_INITIAL_LINE_LIMIT,
   DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS,
@@ -434,6 +436,7 @@ const SplitDiffCell = ({
   side,
   isNewlyAdded,
   isExiting,
+  hasExitingLines,
   syntaxTokens,
   highlightingPending,
   onAnnotate,
@@ -443,6 +446,7 @@ const SplitDiffCell = ({
   side: "left" | "right";
   isNewlyAdded: boolean;
   isExiting: boolean;
+  hasExitingLines: boolean;
   syntaxTokens: SyntaxLine | null;
   highlightingPending: boolean;
   onAnnotate?: () => void;
@@ -458,6 +462,21 @@ const SplitDiffCell = ({
   }
   const effectiveType =
     line.type === "context" ? "context" : side === "left" ? "del" : ("add" as const);
+  const isAnimating = isNewlyAdded || isExiting;
+  const animationStyle = isAnimating
+    ? {
+        animationDuration: `${isNewlyAdded ? DIFF_VIEWER_ADDED_LINE_ANIMATION_MS : DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS}ms`,
+        ...(hasExitingLines && {
+          animationDelay: `${
+            isNewlyAdded
+              ? DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS +
+                DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS +
+                DIFF_VIEWER_ANIMATION_SEQUENCE_GAP_MS
+              : DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS
+          }ms`,
+        }),
+      }
+    : undefined;
   return (
     <>
       {onAnnotate && onDragStart ? (
@@ -473,13 +492,7 @@ const SplitDiffCell = ({
           isNewlyAdded && "animate-diff-line-added",
           isExiting && "animate-diff-line-removed",
         )}
-        style={
-          isNewlyAdded
-            ? { animationDuration: `${DIFF_VIEWER_ADDED_LINE_ANIMATION_MS}ms` }
-            : isExiting
-              ? { animationDuration: `${DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS}ms` }
-              : undefined
-        }
+        style={animationStyle}
       >
         <span className="block min-h-0 overflow-hidden">
           <span
@@ -509,6 +522,7 @@ const SplitDiffRowView = memo(
     rightNewlyAdded,
     leftIsExiting,
     rightIsExiting,
+    hasExitingLines,
     tokenMap,
     highlightingPending,
     onAnnotate,
@@ -523,6 +537,7 @@ const SplitDiffRowView = memo(
     rightNewlyAdded: boolean;
     leftIsExiting: boolean;
     rightIsExiting: boolean;
+    hasExitingLines: boolean;
     tokenMap: Map<DiffLine, SyntaxLine>;
     highlightingPending: boolean;
   } & LineCallbacks) => {
@@ -539,6 +554,7 @@ const SplitDiffRowView = memo(
             side="left"
             isNewlyAdded={false}
             isExiting={leftIsExiting}
+            hasExitingLines={hasExitingLines}
             syntaxTokens={left ? (tokenMap.get(left) ?? null) : null}
             highlightingPending={highlightingPending}
             onAnnotate={leftKey !== null && onAnnotate ? () => onAnnotate(leftKey) : undefined}
@@ -555,6 +571,7 @@ const SplitDiffRowView = memo(
             side="right"
             isNewlyAdded={rightNewlyAdded}
             isExiting={rightIsExiting}
+            hasExitingLines={hasExitingLines}
             syntaxTokens={right ? (tokenMap.get(right) ?? null) : null}
             highlightingPending={highlightingPending}
             onAnnotate={rightKey !== null && onAnnotate ? () => onAnnotate(rightKey) : undefined}
@@ -581,6 +598,7 @@ interface DiffChunkProps {
   highlightedKeys: ReadonlySet<string>;
   newlyAddedKeys: ReadonlySet<string>;
   exitingKeys: ReadonlySet<string>;
+  hasExitingLines: boolean;
   annotations: Record<string, DiffAnnotation>;
   editingKey: string | null;
   pendingRange: PendingAnnotationRange | null;
@@ -604,6 +622,7 @@ const DiffChunk = memo((props: DiffChunkProps) => {
     highlightedKeys,
     newlyAddedKeys,
     exitingKeys,
+    hasExitingLines,
     annotations,
     editingKey,
     pendingRange,
@@ -671,6 +690,13 @@ const DiffChunk = memo((props: DiffChunkProps) => {
             let animatedGroup: AnimatedGroup | null = null;
             const flushAnimatedGroup = () => {
               if (!animatedGroup) return;
+              const animationDelay = hasExitingLines
+                ? animatedGroup.kind === "add"
+                  ? DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS +
+                    DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS +
+                    DIFF_VIEWER_ANIMATION_SEQUENCE_GAP_MS
+                  : DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS
+                : undefined;
               result.push(
                 <div
                   key={`anim-${result.length}`}
@@ -685,6 +711,7 @@ const DiffChunk = memo((props: DiffChunkProps) => {
                         ? DIFF_VIEWER_ADDED_LINE_ANIMATION_MS
                         : DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS
                     }ms`,
+                    ...(animationDelay !== undefined && { animationDelay: `${animationDelay}ms` }),
                   }}
                 >
                   <div className="min-h-0 overflow-hidden">{animatedGroup.content}</div>
@@ -759,6 +786,7 @@ const DiffChunk = memo((props: DiffChunkProps) => {
                   }
                   leftIsExiting={left !== null && exitingKeys.has(lineKey(left))}
                   rightIsExiting={right !== null && exitingKeys.has(lineKey(right))}
+                  hasExitingLines={hasExitingLines}
                   tokenMap={tokenMap}
                   highlightingPending={highlightingPending}
                   onAnnotate={onOpenEditor}
@@ -933,10 +961,24 @@ const FileDiffPane = ({
       return;
     }
 
+    const newExitingKeys = new Set<string>();
+    if (hadPreviousPatch) {
+      for (const line of previousFlatLines) {
+        const key = lineKey(line);
+        if (!currentKeys.has(key)) newExitingKeys.add(key);
+      }
+    }
+    const hasExiting = exitingLines.length > 0 || newExitingKeys.size > 0;
+
     setNewlyAddedKeys(freshAddKeys);
+    const addedDelay = hasExiting
+      ? DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS +
+        DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS +
+        DIFF_VIEWER_ANIMATION_SEQUENCE_GAP_MS
+      : 0;
     const timer = window.setTimeout(() => {
       setNewlyAddedKeys(new Set());
-    }, DIFF_VIEWER_ADDED_LINE_ANIMATION_MS);
+    }, addedDelay + DIFF_VIEWER_ADDED_LINE_ANIMATION_MS);
     return () => window.clearTimeout(timer);
   }, [patch, hunks]);
 
@@ -1200,6 +1242,7 @@ const FileDiffPane = ({
           highlightedKeys={highlightedKeys}
           newlyAddedKeys={newlyAddedKeys}
           exitingKeys={exitingKeys}
+          hasExitingLines={exitingKeys.size > 0}
           annotations={annotations}
           editingKey={editingKey}
           pendingRange={pendingRange}
