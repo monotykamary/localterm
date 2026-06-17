@@ -151,6 +151,11 @@ export const GIT_BINARY_SNIFF_BYTES = 8000;
 export const GIT_MAX_PATCH_BYTES_PER_FILE = 1 * 1024 * 1024;
 export const GIT_MAX_TOTAL_PATCH_BYTES = 10 * 1024 * 1024;
 export const GIT_DIRTY_THROTTLE_MS = 100;
+// PR detection in /api/git/branches hits the GitHub REST API and can wait
+// multiple seconds on a slow network. The toolbar only needs branch/default-base
+// data to render; the PR indicator is optional and can resolve later, so cap
+// this at a short window and degrade to null on timeout.
+export const GIT_BRANCH_INFO_PR_TIMEOUT_MS = 150;
 
 // "Branch" diff mode compares the working tree against a base branch (via
 // merge-base). The GitHub REST API is consulted to discover the current branch's

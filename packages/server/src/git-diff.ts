@@ -8,6 +8,7 @@ import { memoBy } from "./utils/memo-by.js";
 import { resolveGithubToken } from "./utils/resolve-github-token.js";
 import {
   GIT_BINARY_SNIFF_BYTES,
+  GIT_BRANCH_INFO_PR_TIMEOUT_MS,
   GIT_MAX_BRANCHES,
   GIT_MAX_PATCH_BYTES_PER_FILE,
   GIT_MAX_TOTAL_PATCH_BYTES,
@@ -972,7 +973,12 @@ export const getGitBranchInfo = async (cwd: string): Promise<GitBranchInfo> => {
   }
 
   const currentBranch = getCurrentBranch(r);
-  const pr = await detectPr(r);
+  const pr = await Promise.race([
+    detectPr(r),
+    new Promise<GitBranchPr | null>((resolve) =>
+      setTimeout(() => resolve(null), GIT_BRANCH_INFO_PR_TIMEOUT_MS),
+    ),
+  ]);
   const defaultBase = resolveDefaultBase(r);
 
   const branchEntries = collectIterator<{ name: string; type: string }>(r.repo.branches());
