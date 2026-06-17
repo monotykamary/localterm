@@ -89,6 +89,9 @@ import {
   type DiffAnnotation,
 } from "@/utils/format-review-prompt";
 import { parseUnifiedDiff, type DiffHunk, type DiffLine } from "@/utils/parse-unified-diff";
+import { buildDisplayHunks } from "@/utils/build-display-hunks";
+import { computeDiffTransition, type ExitingLine } from "@/utils/diff-transition";
+import { addedLineKey, lineKey } from "@/utils/diff-line-identifiers";
 import {
   loadStoredDiffViewMode,
   storeDiffViewMode,
@@ -209,12 +212,6 @@ const lineBackgroundClasses = (type: DiffLine["type"]): string => {
 
 const lineTextClasses = (type: DiffLine["type"]): string =>
   type === "context" ? "text-muted-foreground" : "text-foreground/90";
-
-const addedLineKey = (line: DiffLine): string =>
-  `${line.newLine}:${line.text}:${line.noNewline ? 1 : 0}`;
-
-const lineKey = (line: DiffLine): string =>
-  `${line.type}:${line.oldLine ?? "-"}:${line.newLine ?? "-"}:${line.text}:${line.noNewline ? 1 : 0}`;
 
 const AnnotateLineButton = ({
   onClick,
@@ -892,15 +889,9 @@ const FileDiffPane = ({
     };
   }, [file.path, hunks]);
 
-  interface ExitingLine {
-    key: string;
-    line: DiffLine;
-    addedAt: number;
-  }
-
   const [newlyAddedKeys, setNewlyAddedKeys] = useState<ReadonlySet<string>>(new Set());
   const [exitingLines, setExitingLines] = useState<ExitingLine[]>([]);
-  const seenAddLineKeysRef = useRef<Set<string>>(new Set());
+  const seenAddLineKeysRef = useRef<ReadonlySet<string>>(new Set());
   const previousPatchRef = useRef<string | null>(null);
   const previousFlatLinesRef = useRef<DiffLine[]>([]);
 
@@ -915,19 +906,15 @@ const FileDiffPane = ({
     }
 
     const currentFlatLines = hunks.flatMap((hunk) => hunk.lines);
-    const currentKeys = new Set(currentFlatLines.map(lineKey));
-
-    const currentAddKeys = new Set<string>();
-    const freshAddKeys = new Set<string>();
-    for (const line of currentFlatLines) {
-      if (line.type !== "add") continue;
-      const key = addedLineKey(line);
-      currentAddKeys.add(key);
-      if (!seenAddLineKeysRef.current.has(key)) freshAddKeys.add(key);
-    }
-
     const previousFlatLines = previousFlatLinesRef.current;
-    const hadPreviousPatch = previousPatchRef.current !== null;
+    const transition = computeDiffTransition({
+      previousLines: previousFlatLines,
+      currentLines: currentFlatLines,
+      previousAddKeys: seenAddLineKeysRef.current,
+    });
+    const { currentAddKeys, currentKeys, freshAddKeys, hadPreviousPatch, newExitingLines } =
+      transition;
+
     previousPatchRef.current = patch;
     previousFlatLinesRef.current = currentFlatLines;
     seenAddLineKeysRef.current = currentAddKeys;
@@ -936,11 +923,8 @@ const FileDiffPane = ({
       setExitingLines((previous) => {
         const existingKeys = new Set(previous.map((entry) => entry.key));
         const next = previous.filter((entry) => !currentKeys.has(entry.key));
-        for (const line of previousFlatLines) {
-          const key = lineKey(line);
-          if (!currentKeys.has(key) && !existingKeys.has(key)) {
-            next.push({ key, line, addedAt: Date.now() });
-          }
+        for (const entry of newExitingLines) {
+          if (!existingKeys.has(entry.key)) next.push(entry);
         }
         return next;
       });
@@ -951,15 +935,7 @@ const FileDiffPane = ({
       return;
     }
 
-    const newExitingKeys = new Set<string>();
-    if (hadPreviousPatch) {
-      for (const line of previousFlatLines) {
-        const key = lineKey(line);
-        if (!currentKeys.has(key)) newExitingKeys.add(key);
-      }
-    }
-    const hasExiting = exitingLines.length > 0 || newExitingKeys.size > 0;
-
+    const hasExiting = exitingLines.length > 0 || newExitingLines.length > 0;
     setNewlyAddedKeys(freshAddKeys);
     const addedDelay = hasExiting ? DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS : 0;
     const timer = window.setTimeout(() => {
@@ -1042,45 +1018,10 @@ const FileDiffPane = ({
     return () => container.removeEventListener("wheel", handleSplitWheel);
   }, [viewMode]);
 
-  const displayHunks = useMemo<DiffHunk[]>(() => {
-    if (exitingLines.length === 0) return hunks;
-    const linePosition = (line: DiffLine) => line.newLine ?? line.oldLine ?? Infinity;
-    const sorted = exitingLines.slice().sort((a, b) => {
-      const aPosition = linePosition(a.line);
-      const bPosition = linePosition(b.line);
-      if (aPosition !== bPosition) return aPosition - bPosition;
-      const aOld = a.line.oldLine ?? -1;
-      const bOld = b.line.oldLine ?? -1;
-      if (aOld !== bOld) return aOld - bOld;
-      return (a.line.newLine ?? -1) - (b.line.newLine ?? -1);
-    });
-    const result: DiffHunk[] = [];
-    let exitIndex = 0;
-    for (const hunk of hunks) {
-      const lines: DiffLine[] = [];
-      for (const line of hunk.lines) {
-        while (
-          exitIndex < sorted.length &&
-          linePosition(sorted[exitIndex].line) <= linePosition(line)
-        ) {
-          lines.push(sorted[exitIndex].line);
-          exitIndex += 1;
-        }
-        lines.push(line);
-      }
-      result.push({ ...hunk, lines });
-    }
-    if (exitIndex < sorted.length) {
-      const lastHunk = result[result.length - 1];
-      const tailLines = sorted.slice(exitIndex).map((entry) => entry.line);
-      if (lastHunk) {
-        lastHunk.lines.push(...tailLines);
-      } else {
-        result.push({ header: "", lines: tailLines });
-      }
-    }
-    return result;
-  }, [hunks, exitingLines]);
+  const displayHunks = useMemo<DiffHunk[]>(
+    () => buildDisplayHunks(hunks, exitingLines),
+    [hunks, exitingLines],
+  );
 
   const exitingKeys = useMemo(
     () => new Set(exitingLines.map((entry) => entry.key)),
