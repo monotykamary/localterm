@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.2.2
+
+### Patch Changes
+
+- Warm diff viewer prefetch on open for branch mode and pre-open git-dirty.
+
 ## 2.2.1
 
 ### Patch Changes
