@@ -1,5 +1,18 @@
 # localterm
 
+## 2.1.6
+
+### Patch Changes
+
+- Move the alpha-mask `@xterm/addon-webgl` bundle from a hand-vendored minified
+  copy to a `pnpm patchedDependencies` patch. No user-facing behavior change —
+  the patched addon is byte-identical to the previously vendored bundle, and the
+  alpha-mask WebGL renderer (per-quad vertex color + luma-as-alpha fragment
+  shader + style-only glyph cache key) already shipped in 2.1.5. This release
+  makes the patch pnpm-validated at install time so future `@xterm/addon-webgl`
+  upgrades fail loudly instead of silently rotting.
+  - @monotykamary/localterm-server@2.1.6
+
 ## 2.1.5
 
 ### Patch Changes
