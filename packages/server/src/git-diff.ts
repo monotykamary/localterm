@@ -114,6 +114,11 @@ interface PrCache {
 
 const prCacheByCwd = new Map<string, Map<string, PrCache>>();
 
+// In-flight detectPr dedup, keyed by (cwd, branch), so the diff path's cold-cache
+// resolution and the client's concurrent getGitBranchPr share a single GitHub
+// round-trip instead of racing into two. Cleared on settle.
+const inflightDetectPr = new Map<string, Promise<ParsedPr | null>>();
+
 const readPrCache = (cwd: string, branch: string): ParsedPr | null | undefined => {
   const byBranch = prCacheByCwd.get(cwd);
   if (!byBranch) return undefined;
@@ -209,14 +214,21 @@ const resolveEffectiveBaseRef = async (
   // No explicit user override: a fork PR compares against its upstream base
   // (the PR's base repo's default branch), not the fork's own default. The PR is
   // read from the per-(cwd, branch) cache populated by getGitBranchPr — no GitHub
-  // round-trip here — so the diff stays local and the cache's branch key means a
-  // branch switch naturally misses. Cold cache (PR not yet resolved) degrades to
-  // the repo default; self-corrects once getGitBranchPr lands and the viewer
-  // re-leases the diff.
+  // round-trip in the warm case, so the diff stays local and the cache's branch
+  // key means a branch switch naturally misses. A cold cache (the viewer opened
+  // branch mode before getGitBranchPr landed, or a refresh raced it) resolves the
+  // PR inline via detectPrDeduped — which shares any in-flight getGitBranchPr
+  // call — rather than silently falling back to the fork's origin, which would
+  // mismatch the PR's base. A cached null (known no-PR) skips; so does a PR whose
+  // base resolves no usable ref; both degrade to the repo default below.
   if (!baseRef) {
     const currentBranch = await getCurrentBranch(cwd);
     if (currentBranch) {
-      const cachedPr = readPrCache(cwd, currentBranch);
+      let cachedPr = readPrCache(cwd, currentBranch);
+      if (cachedPr === undefined) {
+        await detectPrDeduped(cwd);
+        cachedPr = readPrCache(cwd, currentBranch);
+      }
       if (cachedPr) {
         const remotes = await parseGithubRemotes(cwd);
         const prBase = await resolvePrBaseRef(cwd, cachedPr, remotes);
@@ -891,21 +903,50 @@ const detectPr = async (cwd: string): Promise<ParsedPr | null> => {
   return chosen;
 };
 
-// Map a detected PR's base repo to a local remote, returning the remote-tracking
-// ref to diff against. A fork PR targets the upstream repo (e.g. them/repo);
-// `git diff` against `upstream/<baseRefName>` then shows only the branch's own
-// changes, not drift between the fork's default branch and upstream. Falls back
-// to null when the base repo isn't a configured remote (upstream never added) or
-// the ref isn't fetched locally — the caller degrades to the repo default.
+// detectPr with per-(cwd, branch) in-flight dedup. Used by both getGitBranchPr
+// (the client lease) and the diff path's cold-cache fallback so they never
+// double-hit the GitHub API when they race.
+const detectPrDeduped = async (cwd: string): Promise<ParsedPr | null> => {
+  const currentBranch = await getCurrentBranch(cwd);
+  if (!currentBranch) return null;
+  const key = `${cwd}\0${currentBranch}`;
+  const inflight = inflightDetectPr.get(key);
+  if (inflight) return inflight;
+  const pending = detectPr(cwd).finally(() => {
+    inflightDetectPr.delete(key);
+  });
+  inflightDetectPr.set(key, pending);
+  return pending;
+};
+
 const resolvePrBaseRef = async (
   cwd: string,
   pr: ParsedPr,
   remotes: GithubRemote[],
 ): Promise<RefInfo | null> => {
   if (!pr.baseRepoFullName || !pr.baseRefName) return null;
-  const remote = remotes.find((candidate) => candidate.slug === pr.baseRepoFullName);
+  const baseRepo = pr.baseRepoFullName.toLowerCase();
+  const remote = remotes.find((candidate) => candidate.slug.toLowerCase() === baseRepo);
   if (!remote) return null;
   const candidate = `${remote.name}/${pr.baseRefName}`;
+  if (await verifyRef(cwd, candidate)) return { ref: candidate, source: "pr" };
+  // Remote configured but its tracking ref isn't local — the common fork state:
+  // `upstream` added but never fetched, since the server only reads existing
+  // refs and never fetches on its own. Fetch just that one branch so the fork PR
+  // can diff against the upstream base instead of falling back to the fork's own
+  // (possibly drifted) default. Bounded by GIT_SPAWN_TIMEOUT_MS and
+  // GIT_TERMINAL_PROMPT=0, so a dead/slow/unauthenticated upstream degrades to the
+  // repo default below. Explicit refspec so the tracking ref is created/updated
+  // regardless of the remote's fetch refspec config (a bare `git fetch <remote>
+  // <branch>` only reliably writes FETCH_HEAD on older git).
+  await runGit(cwd, [
+    "fetch",
+    "--no-tags",
+    "--no-recurse-submodules",
+    "--",
+    remote.name,
+    `${pr.baseRefName}:refs/remotes/${remote.name}/${pr.baseRefName}`,
+  ]);
   return (await verifyRef(cwd, candidate)) ? { ref: candidate, source: "pr" } : null;
 };
 
@@ -962,6 +1003,6 @@ export const getGitBranchInfo = async (cwd: string): Promise<GitBranchInfo> => {
 
 export const getGitBranchPr = async (cwd: string): Promise<GitBranchPr | null> => {
   if (!(await isGitRepo(cwd))) return null;
-  const detected = await detectPr(cwd);
+  const detected = await detectPrDeduped(cwd);
   return detected ? toWirePr(detected) : null;
 };

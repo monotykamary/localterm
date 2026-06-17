@@ -694,4 +694,101 @@ describe("fork PR base resolution", () => {
       fs.rmSync(freshRepo.dir, { recursive: true, force: true });
     }
   });
+
+  it("matches the upstream remote case-insensitively", async () => {
+    // GitHub repo names are case-insensitive; a remote URL stored with different
+    // casing than the API's canonical full_name must still match, else a fork PR
+    // would miss its upstream remote and silently fall back to origin.
+    const repo = await initRepo(makeTempDir());
+    try {
+      fs.writeFileSync(path.join(repo.dir, "a.txt"), "a\n");
+      await commitAll(repo, "base");
+      const baseRefSha = getHeadSha(repo.dir);
+      fs.writeFileSync(path.join(repo.dir, "drift.txt"), "drift\n");
+      await commitAll(repo, "drift");
+      const driftSha = getHeadSha(repo.dir);
+      createAndCheckoutBranch(repo, "feature");
+      fs.writeFileSync(path.join(repo.dir, "feature.txt"), "feature\n");
+      await commitAll(repo, "feature work");
+      addRemote(repo, "origin", "git@github.com:me/fork.git");
+      // upstream URL uses uppercase owner/repo; the PR's baseRepoFullName is the
+      // lowercase canonical form.
+      addRemote(repo, "upstream", "https://github.com/Them/Repo.git");
+      setRemoteRef(repo.dir, "origin", "main", driftSha);
+      setRemoteRef(repo.dir, "upstream", "main", baseRefSha);
+      setPrFetcher({
+        list: async (slug, head) =>
+          slug.toLowerCase() === "them/repo" && head === "me:feature"
+            ? [
+                {
+                  number: 9,
+                  title: "PR",
+                  baseRefName: "main",
+                  url: "https://github.com/them/repo/pull/9",
+                  state: "open" as const,
+                  headOwner: "me",
+                  baseRepoFullName: "them/repo",
+                },
+              ]
+            : [],
+      });
+      expect(await getGitBranchPr(repo.dir)).not.toBeNull();
+      const paths = new Set(
+        (await getGitDiffFiles(repo.dir, { mode: "branch" })).files.map((file) => file.path),
+      );
+      expect(paths.has("drift.txt")).toBe(true);
+      expect(paths.has("feature.txt")).toBe(true);
+    } finally {
+      fs.rmSync(repo.dir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves the upstream base on a cold PR cache (branch mode opened before the PR fetch landed)", async () => {
+    // The client normally gates branch mode on branchInfo.pr, which warms the
+    // server cache via getGitBranchPr. But a user can pick branch mode (or hit
+    // refresh) before that lands — a cold cache must resolve the PR inline instead
+    // of silently falling back to the fork's own drifted default.
+    const repo = await initRepo(makeTempDir());
+    try {
+      fs.writeFileSync(path.join(repo.dir, "a.txt"), "a\n");
+      await commitAll(repo, "base");
+      const baseRefSha = getHeadSha(repo.dir);
+      fs.writeFileSync(path.join(repo.dir, "drift.txt"), "drift\n");
+      await commitAll(repo, "drift");
+      const driftSha = getHeadSha(repo.dir);
+      createAndCheckoutBranch(repo, "feature");
+      fs.writeFileSync(path.join(repo.dir, "feature.txt"), "feature\n");
+      await commitAll(repo, "feature work");
+      addRemote(repo, "origin", "git@github.com:me/fork.git");
+      addRemote(repo, "upstream", "https://github.com/them/repo.git");
+      setRemoteRef(repo.dir, "origin", "main", driftSha);
+      setRemoteRef(repo.dir, "upstream", "main", baseRefSha);
+      setPrFetcher({
+        list: async (slug, head) =>
+          slug === "them/repo" && head === "me:feature"
+            ? [
+                {
+                  number: 10,
+                  title: "PR",
+                  baseRefName: "main",
+                  url: "https://github.com/them/repo/pull/10",
+                  state: "open" as const,
+                  headOwner: "me",
+                  baseRepoFullName: "them/repo",
+                },
+              ]
+            : [],
+      });
+      // Deliberately not pre-warming via getGitBranchPr — the cache is cold.
+      const paths = new Set(
+        (await getGitDiffFiles(repo.dir, { mode: "branch" })).files.map((file) => file.path),
+      );
+      expect(paths.has("drift.txt")).toBe(true);
+      expect(paths.has("feature.txt")).toBe(true);
+      // And the inline resolution populated the cache for the next open.
+      expect(await getGitBranchPr(repo.dir)).not.toBeNull();
+    } finally {
+      fs.rmSync(repo.dir, { recursive: true, force: true });
+    }
+  });
 });
