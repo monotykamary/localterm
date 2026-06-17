@@ -116,44 +116,6 @@ body {
   animation-delay: -0.875s;
 }
 
-@keyframes diff-line-added {
-  0% {
-    grid-template-rows: 0fr;
-    opacity: 0;
-  }
-  100% {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-}
-
-.animate-diff-line-added {
-  display: grid;
-  animation-name: diff-line-added;
-  animation-timing-function: cubic-bezier(0.7, 0, 1, 1);
-  animation-fill-mode: both;
-  will-change: grid-template-rows, opacity;
-}
-
-@keyframes diff-line-removed {
-  0% {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-  100% {
-    grid-template-rows: 0fr;
-    opacity: 0;
-  }
-}
-
-.animate-diff-line-removed {
-  display: grid;
-  animation-name: diff-line-removed;
-  animation-timing-function: cubic-bezier(0, 0, 0.4, 1);
-  animation-fill-mode: both;
-  will-change: grid-template-rows, opacity;
-}
-
 :root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);

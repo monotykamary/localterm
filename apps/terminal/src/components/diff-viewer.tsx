@@ -36,7 +36,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
   type RefObject,
 } from "react";
 import { Button } from "@/components/ui/button";
@@ -49,9 +48,7 @@ import {
   MODAL_PANEL_CLASSES,
 } from "@/lib/animation-classes";
 import {
-  DIFF_VIEWER_ADDED_LINE_ANIMATION_MS,
   DIFF_VIEWER_CLOSE_TRANSITION_MS,
-  DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS,
   DIFF_VIEWER_INITIAL_LINE_LIMIT,
   DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS,
   DIFF_VIEWER_RENDER_CHUNK,
@@ -88,10 +85,7 @@ import {
   formatReviewPrompt,
   type DiffAnnotation,
 } from "@/utils/format-review-prompt";
-import { parseUnifiedDiff, type DiffHunk, type DiffLine } from "@/utils/parse-unified-diff";
-import { buildDisplayHunks } from "@/utils/build-display-hunks";
-import { computeDiffTransition, type ExitingLine } from "@/utils/diff-transition";
-import { addedLineKey, lineKey } from "@/utils/diff-line-identifiers";
+import { parseUnifiedDiff, type DiffLine } from "@/utils/parse-unified-diff";
 import {
   loadStoredDiffViewMode,
   storeDiffViewMode,
@@ -359,6 +353,11 @@ interface LineCallbacks {
   onDragEnter?: (line: DiffLine) => void;
 }
 
+const GUTTER_BG_OVERRIDES: Record<string, string> = {
+  add: "linear-gradient(rgb(16 185 129 / 0.1), rgb(16 185 129 / 0.1))",
+  del: "linear-gradient(rgb(239 68 68 / 0.1), rgb(239 68 68 / 0.1))",
+};
+
 const UnifiedDiffLine = memo(
   ({
     line,
@@ -377,7 +376,7 @@ const UnifiedDiffLine = memo(
     highlightingPending: boolean;
   } & LineCallbacks) => (
     <div
-      className="group/line relative flex"
+      className={cn("group/line relative flex", lineBackgroundClasses(line.type))}
       onPointerEnter={onDragEnter ? () => onDragEnter(line) : undefined}
     >
       {annotateKey !== null && onAnnotate && onStartDrag ? (
@@ -386,7 +385,16 @@ const UnifiedDiffLine = memo(
           onDragStart={() => onStartDrag(line)}
         />
       ) : null}
-      <div className="sticky left-0 z-10 flex shrink-0 bg-background">
+      <div
+        className="sticky left-0 z-10 flex shrink-0 bg-background"
+        style={
+          GUTTER_BG_OVERRIDES[line.type]
+            ? {
+                backgroundImage: GUTTER_BG_OVERRIDES[line.type],
+              }
+            : undefined
+        }
+      >
         <span className={LINE_NUMBER_CELL_CLASSES}>{line.oldLine ?? ""}</span>
         <span className={LINE_NUMBER_CELL_CLASSES}>{line.newLine ?? ""}</span>
         <span
@@ -399,27 +407,25 @@ const UnifiedDiffLine = memo(
           {line.type === "add" ? "+" : line.type === "del" ? "-" : ""}
         </span>
       </div>
-      <div className={cn("min-w-0 flex-1", lineBackgroundClasses(line.type))}>
-        <span className="shrink-0 whitespace-pre pr-4">
-          <span
-            className={cn(
-              highlightingPending && !syntaxTokens
-                ? "invisible"
-                : !syntaxTokens && lineTextClasses(line.type),
-            )}
-          >
-            {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
-            {line.noNewline ? (
-              <span
-                className="select-none text-muted-foreground/50"
-                title="No newline at end of file"
-              >
-                {" ⊘"}
-              </span>
-            ) : null}
-          </span>
+      <span className="shrink-0 whitespace-pre pr-4">
+        <span
+          className={cn(
+            highlightingPending && !syntaxTokens
+              ? "invisible"
+              : !syntaxTokens && lineTextClasses(line.type),
+          )}
+        >
+          {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
+          {line.noNewline ? (
+            <span
+              className="select-none text-muted-foreground/50"
+              title="No newline at end of file"
+            >
+              {" ⊘"}
+            </span>
+          ) : null}
         </span>
-      </div>
+      </span>
       {highlighted ? <RangeHighlight /> : null}
     </div>
   ),
@@ -429,9 +435,6 @@ UnifiedDiffLine.displayName = "UnifiedDiffLine";
 const SplitDiffCell = ({
   line,
   side,
-  isNewlyAdded,
-  isExiting,
-  hasExitingLines,
   syntaxTokens,
   highlightingPending,
   onAnnotate,
@@ -439,9 +442,6 @@ const SplitDiffCell = ({
 }: {
   line: DiffLine | null;
   side: "left" | "right";
-  isNewlyAdded: boolean;
-  isExiting: boolean;
-  hasExitingLines: boolean;
   syntaxTokens: SyntaxLine | null;
   highlightingPending: boolean;
   onAnnotate?: () => void;
@@ -457,45 +457,25 @@ const SplitDiffCell = ({
   }
   const effectiveType =
     line.type === "context" ? "context" : side === "left" ? "del" : ("add" as const);
-  const isAnimating = isNewlyAdded || isExiting;
-  const animationStyle = isAnimating
-    ? {
-        animationDuration: `${isNewlyAdded ? DIFF_VIEWER_ADDED_LINE_ANIMATION_MS : DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS}ms`,
-        ...(hasExitingLines &&
-          isNewlyAdded && {
-            animationDelay: `${DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS}ms`,
-          }),
-      }
-    : undefined;
   return (
     <>
       {onAnnotate && onDragStart ? (
         <AnnotateLineButton onClick={onAnnotate} onDragStart={onDragStart} />
       ) : null}
-      <span className={LINE_NUMBER_CELL_CLASSES}>
+      <span className={cn(LINE_NUMBER_CELL_CLASSES, lineBackgroundClasses(effectiveType))}>
         {side === "left" ? (line.oldLine ?? "") : (line.newLine ?? "")}
       </span>
-      <span
-        className={cn(
-          "min-w-0 flex-1 overflow-hidden block",
-          lineBackgroundClasses(effectiveType),
-          isNewlyAdded && "animate-diff-line-added",
-          isExiting && "animate-diff-line-removed",
-        )}
-        style={animationStyle}
-      >
-        <span className="block min-h-0 overflow-hidden">
-          <span
-            data-split-text=""
-            className={cn(
-              "inline-block whitespace-pre pr-2",
-              highlightingPending && !syntaxTokens
-                ? "invisible"
-                : !syntaxTokens && lineTextClasses(line.type),
-            )}
-          >
-            {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
-          </span>
+      <span className={cn("min-w-0 flex-1 overflow-hidden", lineBackgroundClasses(effectiveType))}>
+        <span
+          data-split-text=""
+          className={cn(
+            "inline-block whitespace-pre pr-2",
+            highlightingPending && !syntaxTokens
+              ? "invisible"
+              : !syntaxTokens && lineTextClasses(line.type),
+          )}
+        >
+          {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
         </span>
       </span>
     </>
@@ -509,10 +489,6 @@ const SplitDiffRowView = memo(
     leftHighlighted,
     rightKey,
     rightHighlighted,
-    rightNewlyAdded,
-    leftIsExiting,
-    rightIsExiting,
-    hasExitingLines,
     tokenMap,
     highlightingPending,
     onAnnotate,
@@ -524,10 +500,6 @@ const SplitDiffRowView = memo(
     leftHighlighted: boolean;
     rightKey: string | null;
     rightHighlighted: boolean;
-    rightNewlyAdded: boolean;
-    leftIsExiting: boolean;
-    rightIsExiting: boolean;
-    hasExitingLines: boolean;
     tokenMap: Map<DiffLine, SyntaxLine>;
     highlightingPending: boolean;
   } & LineCallbacks) => {
@@ -542,9 +514,6 @@ const SplitDiffRowView = memo(
           <SplitDiffCell
             line={left}
             side="left"
-            isNewlyAdded={false}
-            isExiting={leftIsExiting}
-            hasExitingLines={hasExitingLines}
             syntaxTokens={left ? (tokenMap.get(left) ?? null) : null}
             highlightingPending={highlightingPending}
             onAnnotate={leftKey !== null && onAnnotate ? () => onAnnotate(leftKey) : undefined}
@@ -559,9 +528,6 @@ const SplitDiffRowView = memo(
           <SplitDiffCell
             line={right}
             side="right"
-            isNewlyAdded={rightNewlyAdded}
-            isExiting={rightIsExiting}
-            hasExitingLines={hasExitingLines}
             syntaxTokens={right ? (tokenMap.get(right) ?? null) : null}
             highlightingPending={highlightingPending}
             onAnnotate={rightKey !== null && onAnnotate ? () => onAnnotate(rightKey) : undefined}
@@ -586,9 +552,6 @@ interface DiffChunkProps {
   filePath: string;
   tokenMap: Map<DiffLine, SyntaxLine>;
   highlightedKeys: ReadonlySet<string>;
-  newlyAddedKeys: ReadonlySet<string>;
-  exitingKeys: ReadonlySet<string>;
-  hasExitingLines: boolean;
   annotations: Record<string, DiffAnnotation>;
   editingKey: string | null;
   pendingRange: PendingAnnotationRange | null;
@@ -610,9 +573,6 @@ const DiffChunk = memo((props: DiffChunkProps) => {
     filePath,
     tokenMap,
     highlightedKeys,
-    newlyAddedKeys,
-    exitingKeys,
-    hasExitingLines,
     annotations,
     editingKey,
     pendingRange,
@@ -674,79 +634,26 @@ const DiffChunk = memo((props: DiffChunkProps) => {
     <div>
       {chunk.header !== null ? <HunkHeader header={chunk.header} /> : null}
       {chunk.mode === "unified"
-        ? (() => {
-            type AnimatedGroup = { kind: "add" | "remove"; content: ReactNode[] };
-            const result: ReactNode[] = [];
-            let animatedGroup: AnimatedGroup | null = null;
-            const flushAnimatedGroup = () => {
-              if (!animatedGroup) return;
-              const animationDelay =
-                hasExitingLines && animatedGroup.kind === "add"
-                  ? DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS
-                  : undefined;
-              result.push(
-                <div
-                  key={`anim-${result.length}`}
-                  className={
-                    animatedGroup.kind === "add"
-                      ? "animate-diff-line-added"
-                      : "animate-diff-line-removed"
+        ? chunk.lines.map((line, lineIndex) => {
+            const state = annotationStateFor(line);
+            return (
+              <Fragment key={lineIndex}>
+                <UnifiedDiffLine
+                  line={line}
+                  annotateKey={state ? state.key : null}
+                  highlighted={
+                    state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
                   }
-                  style={{
-                    animationDuration: `${
-                      animatedGroup.kind === "add"
-                        ? DIFF_VIEWER_ADDED_LINE_ANIMATION_MS
-                        : DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS
-                    }ms`,
-                    ...(animationDelay !== undefined && { animationDelay: `${animationDelay}ms` }),
-                  }}
-                >
-                  <div className="min-h-0 overflow-hidden">{animatedGroup.content}</div>
-                </div>,
-              );
-              animatedGroup = null;
-            };
-            const renderLineNode = (line: DiffLine, key: string) => {
-              const state = annotationStateFor(line);
-              return (
-                <Fragment key={key}>
-                  <UnifiedDiffLine
-                    line={line}
-                    annotateKey={state ? state.key : null}
-                    highlighted={
-                      state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
-                    }
-                    syntaxTokens={tokenMap.get(line) ?? null}
-                    highlightingPending={highlightingPending}
-                    onAnnotate={onOpenEditor}
-                    onStartDrag={onStartDrag}
-                    onDragEnter={onDragEnter}
-                  />
-                  {renderAnnotation(state)}
-                </Fragment>
-              );
-            };
-            for (const [lineIndex, line] of chunk.lines.entries()) {
-              let kind: "normal" | "add" | "remove" = "normal";
-              if (line.type === "add" && newlyAddedKeys.has(addedLineKey(line))) {
-                kind = "add";
-              } else if (exitingKeys.has(lineKey(line))) {
-                kind = "remove";
-              }
-              if (kind === "normal") {
-                flushAnimatedGroup();
-                result.push(renderLineNode(line, `line-${lineIndex}`));
-                continue;
-              }
-              if (!animatedGroup || animatedGroup.kind !== kind) {
-                flushAnimatedGroup();
-                animatedGroup = { kind, content: [] };
-              }
-              animatedGroup.content.push(renderLineNode(line, `anim-line-${lineIndex}`));
-            }
-            flushAnimatedGroup();
-            return result;
-          })()
+                  syntaxTokens={tokenMap.get(line) ?? null}
+                  highlightingPending={highlightingPending}
+                  onAnnotate={onOpenEditor}
+                  onStartDrag={onStartDrag}
+                  onDragEnter={onDragEnter}
+                />
+                {renderAnnotation(state)}
+              </Fragment>
+            );
+          })
         : chunk.rows.map((row, rowIndex) => {
             const left = row.left;
             const right = row.right;
@@ -766,14 +673,6 @@ const DiffChunk = memo((props: DiffChunkProps) => {
                   rightHighlighted={
                     rightState !== null && highlightedKeys.has(diffLineTargetKey(rightState.target))
                   }
-                  rightNewlyAdded={
-                    right !== null &&
-                    right.type === "add" &&
-                    newlyAddedKeys.has(addedLineKey(right))
-                  }
-                  leftIsExiting={left !== null && exitingKeys.has(lineKey(left))}
-                  rightIsExiting={right !== null && exitingKeys.has(lineKey(right))}
-                  hasExitingLines={hasExitingLines}
                   tokenMap={tokenMap}
                   highlightingPending={highlightingPending}
                   onAnnotate={onOpenEditor}
@@ -889,73 +788,6 @@ const FileDiffPane = ({
     };
   }, [file.path, hunks]);
 
-  const [newlyAddedKeys, setNewlyAddedKeys] = useState<ReadonlySet<string>>(new Set());
-  const [exitingLines, setExitingLines] = useState<ExitingLine[]>([]);
-  const seenAddLineKeysRef = useRef<ReadonlySet<string>>(new Set());
-  const previousPatchRef = useRef<string | null>(null);
-  const previousFlatLinesRef = useRef<DiffLine[]>([]);
-
-  useLayoutEffect(() => {
-    if (!patch) {
-      previousPatchRef.current = null;
-      seenAddLineKeysRef.current = new Set();
-      previousFlatLinesRef.current = [];
-      setNewlyAddedKeys(new Set());
-      setExitingLines([]);
-      return;
-    }
-
-    const currentFlatLines = hunks.flatMap((hunk) => hunk.lines);
-    const previousFlatLines = previousFlatLinesRef.current;
-    const transition = computeDiffTransition({
-      previousLines: previousFlatLines,
-      currentLines: currentFlatLines,
-      previousAddKeys: seenAddLineKeysRef.current,
-    });
-    const { currentAddKeys, currentKeys, freshAddKeys, hadPreviousPatch, newExitingLines } =
-      transition;
-
-    previousPatchRef.current = patch;
-    previousFlatLinesRef.current = currentFlatLines;
-    seenAddLineKeysRef.current = currentAddKeys;
-
-    if (hadPreviousPatch) {
-      setExitingLines((previous) => {
-        const existingKeys = new Set(previous.map((entry) => entry.key));
-        const next = previous.filter((entry) => !currentKeys.has(entry.key));
-        for (const entry of newExitingLines) {
-          if (!existingKeys.has(entry.key)) next.push(entry);
-        }
-        return next;
-      });
-    }
-
-    if (!hadPreviousPatch || freshAddKeys.size === 0) {
-      if (newlyAddedKeys.size > 0) setNewlyAddedKeys(new Set());
-      return;
-    }
-
-    const hasExiting = exitingLines.length > 0 || newExitingLines.length > 0;
-    setNewlyAddedKeys(freshAddKeys);
-    const addedDelay = hasExiting ? DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS : 0;
-    const timer = window.setTimeout(() => {
-      setNewlyAddedKeys(new Set());
-    }, addedDelay + DIFF_VIEWER_ADDED_LINE_ANIMATION_MS);
-    return () => window.clearTimeout(timer);
-  }, [patch, hunks]);
-
-  useEffect(() => {
-    if (exitingLines.length === 0) return;
-    const interval = window.setInterval(() => {
-      const cutoff = Date.now() - DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS;
-      setExitingLines((previous) => {
-        const next = previous.filter((entry) => entry.addedAt > cutoff);
-        return next.length === previous.length ? previous : next;
-      });
-    }, 100);
-    return () => window.clearInterval(interval);
-  }, [exitingLines.length]);
-
   useEffect(() => {
     if (viewMode !== "split") return;
     scrollXRef.current = 0;
@@ -1018,19 +850,9 @@ const FileDiffPane = ({
     return () => container.removeEventListener("wheel", handleSplitWheel);
   }, [viewMode]);
 
-  const displayHunks = useMemo<DiffHunk[]>(
-    () => buildDisplayHunks(hunks, exitingLines),
-    [hunks, exitingLines],
-  );
-
-  const exitingKeys = useMemo(
-    () => new Set(exitingLines.map((entry) => entry.key)),
-    [exitingLines],
-  );
-
   const renderChunks = useMemo(
-    () => buildRenderChunks(displayHunks, viewMode, DIFF_VIEWER_RENDER_CHUNK),
-    [displayHunks, viewMode],
+    () => buildRenderChunks(hunks, viewMode, DIFF_VIEWER_RENDER_CHUNK),
+    [hunks, viewMode],
   );
   const totalRenderRows = useMemo(
     () => renderChunks.reduce((total, chunk) => total + renderChunkLength(chunk), 0),
@@ -1174,9 +996,6 @@ const FileDiffPane = ({
           filePath={file.path}
           tokenMap={tokenMap}
           highlightedKeys={highlightedKeys}
-          newlyAddedKeys={newlyAddedKeys}
-          exitingKeys={exitingKeys}
-          hasExitingLines={exitingKeys.size > 0}
           annotations={annotations}
           editingKey={editingKey}
           pendingRange={pendingRange}
