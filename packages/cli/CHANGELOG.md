@@ -1,5 +1,17 @@
 # localterm
 
+## 2.0.3
+
+### Patch Changes
+
+- Revert the FontFace.status polling added to awaitFontReady in 2.0.2. CDP
+  instrumentation of the running app proved the WebGL glyph atlas bakes at
+  weight 400 with the Geist Mono face already loaded, so the font-readiness
+  race this targeted was never the cause of the cold-reload boldening (which
+  originates downstream in the alpha-mask render path). Keep the
+  @fontsource/geist-mono/700.css import so bold text resolves to 700.
+  - @monotykamary/localterm-server@2.0.3
+
 ## 2.0.2
 
 ### Patch Changes
