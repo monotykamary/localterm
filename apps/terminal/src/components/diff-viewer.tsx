@@ -50,9 +50,7 @@ import {
 } from "@/lib/animation-classes";
 import {
   DIFF_VIEWER_ADDED_LINE_ANIMATION_MS,
-  DIFF_VIEWER_ANIMATION_SEQUENCE_GAP_MS,
   DIFF_VIEWER_CLOSE_TRANSITION_MS,
-  DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS,
   DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS,
   DIFF_VIEWER_INITIAL_LINE_LIMIT,
   DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS,
@@ -466,15 +464,10 @@ const SplitDiffCell = ({
   const animationStyle = isAnimating
     ? {
         animationDuration: `${isNewlyAdded ? DIFF_VIEWER_ADDED_LINE_ANIMATION_MS : DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS}ms`,
-        ...(hasExitingLines && {
-          animationDelay: `${
-            isNewlyAdded
-              ? DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS +
-                DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS +
-                DIFF_VIEWER_ANIMATION_SEQUENCE_GAP_MS
-              : DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS
-          }ms`,
-        }),
+        ...(hasExitingLines &&
+          isNewlyAdded && {
+            animationDelay: `${DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS}ms`,
+          }),
       }
     : undefined;
   return (
@@ -690,13 +683,10 @@ const DiffChunk = memo((props: DiffChunkProps) => {
             let animatedGroup: AnimatedGroup | null = null;
             const flushAnimatedGroup = () => {
               if (!animatedGroup) return;
-              const animationDelay = hasExitingLines
-                ? animatedGroup.kind === "add"
-                  ? DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS +
-                    DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS +
-                    DIFF_VIEWER_ANIMATION_SEQUENCE_GAP_MS
-                  : DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS
-                : undefined;
+              const animationDelay =
+                hasExitingLines && animatedGroup.kind === "add"
+                  ? DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS
+                  : undefined;
               result.push(
                 <div
                   key={`anim-${result.length}`}
@@ -971,11 +961,7 @@ const FileDiffPane = ({
     const hasExiting = exitingLines.length > 0 || newExitingKeys.size > 0;
 
     setNewlyAddedKeys(freshAddKeys);
-    const addedDelay = hasExiting
-      ? DIFF_VIEWER_INITIAL_ANIMATION_DELAY_MS +
-        DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS +
-        DIFF_VIEWER_ANIMATION_SEQUENCE_GAP_MS
-      : 0;
+    const addedDelay = hasExiting ? DIFF_VIEWER_REMOVED_LINE_ANIMATION_MS : 0;
     const timer = window.setTimeout(() => {
       setNewlyAddedKeys(new Set());
     }, addedDelay + DIFF_VIEWER_ADDED_LINE_ANIMATION_MS);
