@@ -1,5 +1,13 @@
 # localterm
 
+## 2.2.3
+
+### Patch Changes
+
+- Remove realtime diff viewer line animations
+- Updated dependencies
+  - @monotykamary/localterm-server@2.2.3
+
 ## 2.2.2
 
 ### Patch Changes

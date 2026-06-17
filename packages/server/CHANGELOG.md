@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.2.3
+
+### Patch Changes
+
+- Remove realtime diff viewer line animations
+
 ## 2.2.2
 
 ### Patch Changes
