@@ -1307,7 +1307,6 @@ export const DiffViewer = ({
   patchCacheRef.current = patchCache;
   const onDiffSummaryUpdateRef = useRef(onDiffSummaryUpdate);
   onDiffSummaryUpdateRef.current = onDiffSummaryUpdate;
-  const hasBeenOpenedRef = useRef(false);
 
   useEffect(() => {
     selectedPathRef.current = selectedPath;
@@ -1348,19 +1347,23 @@ export const DiffViewer = ({
     abortPatchFetches();
   }, [cwd, abortPatchFetches]);
 
-  // Pre-fetch both file lists on cwd change. Runs while the viewer is closed so
-  // data is ready on open. Branch fetch is chained after working (sequential) to
-  // keep peak concurrent git processes low (~2-3 at a time, not 6+).
+  // Pre-fetch both file lists on cwd change, in parallel. Runs while the viewer
+  // is closed so data is ready on open; each list sets state as it resolves, so
+  // whichever mode compareMode lands on once branchInfo resolves paints without
+  // waiting on the other. Parallel is safe: the server caches each (cwd, mode,
+  // base) diff pass, so the two builds are independent git processes and the
+  // patch prefetch that follows reads from cache without spawning more.
   useEffect(() => {
     if (!cwd) return;
     const controller = new AbortController();
+    const signal = controller.signal;
     void (async () => {
-      const working = await fetchGitDiffFiles(cwd, { mode: "working" }, controller.signal);
-      if (controller.signal.aborted || !working) return;
-      setWorkingFiles(working);
-      const branch = await fetchGitDiffFiles(cwd, { mode: "branch" }, controller.signal);
-      if (controller.signal.aborted || !branch) return;
-      setBranchFiles(branch);
+      const working = await fetchGitDiffFiles(cwd, { mode: "working" }, signal);
+      if (!signal.aborted && working) setWorkingFiles(working);
+    })();
+    void (async () => {
+      const branch = await fetchGitDiffFiles(cwd, { mode: "branch" }, signal);
+      if (!signal.aborted && branch) setBranchFiles(branch);
     })();
     return () => controller.abort();
   }, [cwd]);
@@ -1404,7 +1407,6 @@ export const DiffViewer = ({
       });
       return;
     }
-    hasBeenOpenedRef.current = true;
     const currentData = compareMode === "branch" ? branchFilesRef.current : workingFilesRef.current;
 
     if (currentData) {
@@ -1426,13 +1428,18 @@ export const DiffViewer = ({
   }, [open, cwd, refreshCount, compareMode, baseOverride, abortPatchFetches, refreshCurrentFiles]);
 
   // When the server signals the working tree may have changed, debounce and
-  // re-fetch the current mode's file list so the file list stays current. While
-  // the viewer is closed we only prefetch if it has been opened before, avoiding
-  // a heavy diff calculation on terminal startup. When open, we also mark the
-  // selected file's cached metadata stale so the prefetch queue force-reloads
-  // its patch, keeping the diff content in sync with the disk.
+  // re-fetch the current mode's file list so opening lands on current, pre-cached
+  // data — even before the viewer has ever been opened. The gate skips only when
+  // the current mode's list hasn't loaded yet: that first load is owned by the
+  // cwd-change effect, so acting on the startup git-dirty signal (which merely
+  // duplicates it) would run a redundant heavy diff at terminal startup. When
+  // open, we also mark the selected file's cached metadata stale so the prefetch
+  // queue force-reloads its patch, keeping the diff content in sync with the disk.
   useEffect(() => {
-    if (!cwd || gitDirtyVersion === undefined || !hasBeenOpenedRef.current) return;
+    if (!cwd || gitDirtyVersion === undefined) return;
+    const currentFilesLoaded = (compareMode === "branch" ? branchFilesRef : workingFilesRef)
+      .current;
+    if (!currentFilesLoaded) return;
 
     const controller = new AbortController();
     const timer = window.setTimeout(() => {

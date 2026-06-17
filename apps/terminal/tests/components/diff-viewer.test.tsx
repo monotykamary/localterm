@@ -431,6 +431,88 @@ describe("DiffViewer", () => {
     expect(screen.getByText("#123")).toBeTruthy();
   });
 
+  it("prefetches branch-mode patches before the viewer opens when a PR is leased", async () => {
+    // Regression: compareMode defaults to branch when branchInfo has a PR, but
+    // the cwd-change effect fetched the working list first and the branch list
+    // only after. The unified prefetch targets compareMode's list, so it sat
+    // idle until the branch list arrived and opening in that window hit the
+    // on-demand path ("Loading diff…"). Both lists now fetch in parallel, so
+    // branch patches warm before open.
+    filesMock.mockResolvedValue(FILE_LIST);
+    patchMock.mockImplementation((_cwd, path) => Promise.resolve(PATCHES[path] ?? null));
+
+    const { rerender } = render(
+      <DiffViewer open={false} cwd="/repo" branchInfo={BRANCH_INFO} onClose={() => {}} />,
+    );
+
+    await vi.waitFor(() =>
+      expect(patchMock).toHaveBeenCalledWith(
+        "/repo",
+        "src/app.ts",
+        expect.objectContaining({ mode: "branch" }),
+        expect.any(AbortSignal),
+      ),
+    );
+
+    rerender(<DiffViewer open cwd="/repo" branchInfo={BRANCH_INFO} onClose={() => {}} />);
+    expect(await screen.findByText("BETA")).toBeTruthy();
+    expect(screen.queryByText("Loading diff…")).toBeNull();
+  });
+
+  it("prefetches patches for a pre-open git-dirty edit before the viewer has ever been opened", async () => {
+    // Regression: the closed-viewer git-dirty refresh was gated on
+    // hasBeenOpenedRef, which dropped EVERY signal before first open — not just
+    // the redundant startup one. A real local edit made once the terminal had
+    // settled (but before opening) was skipped, so the file list stayed at the
+    // startup snapshot and the first open hit the on-demand path ("Loading
+    // diff…"). The gate now keys off the current mode's list being loaded, so
+    // only the startup signal (duplicate of the cwd-change fetch) is skipped.
+    const cleanList: GitDiffFileListResponse = { isRepo: true, files: [] };
+    let workingTreeDirty = false;
+    filesMock.mockImplementation((_cwd, query) =>
+      Promise.resolve(
+        query.mode === "working" ? (workingTreeDirty ? FILE_LIST : cleanList) : FILE_LIST,
+      ),
+    );
+    patchMock.mockImplementation((_cwd, path) => Promise.resolve(PATCHES[path] ?? null));
+
+    const { rerender } = render(
+      <DiffViewer open={false} cwd="/repo" branchInfo={null} onClose={() => {}} />,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    workingTreeDirty = true;
+    rerender(
+      <DiffViewer
+        open={false}
+        cwd="/repo"
+        branchInfo={null}
+        gitDirtyVersion={1}
+        onClose={() => {}}
+      />,
+    );
+
+    await vi.waitFor(() =>
+      expect(filesMock).toHaveBeenCalledWith(
+        "/repo",
+        expect.objectContaining({ mode: "working" }),
+        expect.any(AbortSignal),
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(patchMock).toHaveBeenCalledWith(
+        "/repo",
+        "src/app.ts",
+        expect.objectContaining({ mode: "working" }),
+        expect.any(AbortSignal),
+      ),
+    );
+
+    rerender(<DiffViewer open cwd="/repo" branchInfo={null} onClose={() => {}} />);
+    expect(await screen.findByText("BETA")).toBeTruthy();
+    expect(screen.queryByText("Loading diff…")).toBeNull();
+  });
+
   it("stays in working mode when there is no PR", async () => {
     mockHappyPath();
     renderDiffViewer({ branchInfo: { ...BRANCH_INFO, pr: null } });
