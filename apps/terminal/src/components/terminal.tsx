@@ -5,7 +5,7 @@ import { ProgressAddon } from "@xterm/addon-progress";
 import { SearchAddon } from "@xterm/addon-search";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { WebglAddon } from "../../vendor/xterm-addon-webgl.mjs";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { IUnicodeVersionProvider } from "@xterm/xterm";
 import {

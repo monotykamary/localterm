@@ -18,4 +18,5 @@ overrides:
   vite: npm:@voidzero-dev/vite-plus-core@^0.1.12
 
 patchedDependencies:
+  "@xterm/addon-webgl@0.20.0-beta.286": patches/@xterm__addon-webgl@0.20.0-beta.286.patch
   "node-pty@1.1.0": "patches/node-pty@1.1.0.patch"

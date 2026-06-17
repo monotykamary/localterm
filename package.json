@@ -20,7 +20,6 @@
     "lint:fix": "node scripts/lint.mjs --fix",
     "format": "vp fmt",
     "format:check": "vp fmt --check",
-    "vendor:webgl": "node scripts/vendor-webgl-addon.mjs",
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck",
     "changeset": "changeset",
     "version": "changeset version",
