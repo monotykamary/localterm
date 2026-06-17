@@ -868,12 +868,12 @@ export const AutomationsModal = ({
           <div ref={contentRowRef} className="flex min-h-0 flex-1">
             <div
               style={{ width: sidebarCollapsed ? 0 : AUTOMATIONS_SIDEBAR_WIDTH_PX }}
-              className="shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-snappy"
+              className="h-full shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-snappy"
             >
               <div
                 style={{ width: AUTOMATIONS_SIDEBAR_WIDTH_PX }}
                 className={cn(
-                  "border-r border-border/40 opacity-100 transition-opacity duration-200 ease-snappy",
+                  "flex h-full flex-col border-r border-border/40 opacity-100 transition-opacity duration-200 ease-snappy",
                   sidebarCollapsed && "opacity-0",
                 )}
               >
@@ -1581,7 +1581,7 @@ const AutomationSidebar = ({
   });
 
   return (
-    <div className="flex flex-col">
+    <div className="flex h-full flex-col">
       <div className="relative px-1.5 pt-1.5 pb-0.5">
         <Search
           className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3 text-muted-foreground"
