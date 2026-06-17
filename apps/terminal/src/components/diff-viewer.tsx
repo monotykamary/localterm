@@ -1044,9 +1044,16 @@ const FileDiffPane = ({
 
   const displayHunks = useMemo<DiffHunk[]>(() => {
     if (exitingLines.length === 0) return hunks;
-    const sorted = exitingLines
-      .slice()
-      .sort((a, b) => (a.line.newLine ?? Infinity) - (b.line.newLine ?? Infinity));
+    const linePosition = (line: DiffLine) => line.newLine ?? line.oldLine ?? Infinity;
+    const sorted = exitingLines.slice().sort((a, b) => {
+      const aPosition = linePosition(a.line);
+      const bPosition = linePosition(b.line);
+      if (aPosition !== bPosition) return aPosition - bPosition;
+      const aOld = a.line.oldLine ?? -1;
+      const bOld = b.line.oldLine ?? -1;
+      if (aOld !== bOld) return aOld - bOld;
+      return (a.line.newLine ?? -1) - (b.line.newLine ?? -1);
+    });
     const result: DiffHunk[] = [];
     let exitIndex = 0;
     for (const hunk of hunks) {
@@ -1054,7 +1061,7 @@ const FileDiffPane = ({
       for (const line of hunk.lines) {
         while (
           exitIndex < sorted.length &&
-          (sorted[exitIndex].line.newLine ?? Infinity) < (line.newLine ?? Infinity)
+          linePosition(sorted[exitIndex].line) <= linePosition(line)
         ) {
           lines.push(sorted[exitIndex].line);
           exitIndex += 1;
