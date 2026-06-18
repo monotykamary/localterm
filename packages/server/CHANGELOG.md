@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.6.1
+
+### Patch Changes
+
+- 7055b95: Clarify the worktree PR input placeholder so users know entering a number opens that PR as a worktree, instead of only showing the expected format.
+
 ## 2.6.0
 
 ### Minor Changes
