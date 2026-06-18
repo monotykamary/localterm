@@ -208,6 +208,51 @@ export const GIT_MAX_BRANCHES = 500;
 // suppress) so the daemon's event loop can't be held indefinitely.
 export const GIT_SPAWN_TIMEOUT_MS = 30_000;
 
+// Per-repo worktree preferences (~/.localterm/worktree-configs/<repo-id>.json):
+// the setup script to run in each fresh worktree, the custom "Open in…"
+// launcher commands, and the default base ref new worktrees branch from.
+// Keyed by repo-id (a hash of the main worktree's absolute path) so the config
+// is stable regardless of the folder name auto-created worktrees land under.
+export const WORKTREE_CONFIG_FILE_VERSION = 1;
+export const WORKTREE_CONFIG_DIRNAME = "worktree-configs";
+export const REPO_MARKER_FILENAME = ".localterm-repo-id";
+export const REPO_ID_HASH_LENGTH = 12;
+export const PROJECT_FOLDER_HASH_LENGTH = 6;
+export const MAX_PROJECT_FOLDER_ATTEMPTS = 100;
+export const MAX_WORKTREE_NAME_ATTEMPTS = 50;
+// A setup script can be longer than a one-shot automation command (it may chain
+// env copy, install, db migrate, …), but it is injected into a new terminal
+// tab via the `?cmd=` query param, so it must stay well under the URL/header
+// limit. 8 KiB covers realistic bootstrap one-liners with room to spare.
+export const MAX_WORKTREE_SETUP_SCRIPT_LENGTH = 8192;
+// "Open in…" custom launcher commands appended to each non-current worktree row
+// (e.g. `code .`, `zed .`, `fork .`). Capped so the row menu stays legible.
+export const MAX_WORKTREE_OPEN_IN_COMMANDS = 20;
+export const MAX_WORKTREE_OPEN_IN_COMMAND_LENGTH = 1024;
+export const MAX_WORKTREE_OPEN_IN_LABEL_LENGTH = 64;
+export const MAX_WORKTREE_OPEN_IN_ID_LENGTH = 64;
+// `.worktreeinclude` (gitignore-syntax) copies gitignored files from the main
+// worktree into each fresh worktree so a new checkout is immediately usable
+// (.env, config/secrets.json, …). Tracked files are never copied.
+export const WORKTREEINCLUDE_FILENAME = ".worktreeinclude";
+export const MAX_WORKTREEINCLUDE_FILES = 500;
+export const MAX_WORKTREEINCLUDE_TOTAL_BYTES = 50 * 1024 * 1024;
+// Sweep removes stale, clean auto-created worktrees so the shared
+// ~/.localterm/worktrees/<project>/ dir doesn't accumulate orphans. A worktree
+// is eligible only if it is older than this many days AND has no uncommitted
+// changes, no untracked files, and no commits not on a remote-tracking branch.
+// Worktrees the user created manually (outside the shared dir) are never swept.
+export const WORKTREE_SWEEP_MAX_AGE_DAYS = 30;
+export const WORKTREE_SWEEP_BATCH_LIMIT = 100;
+// `git fetch` for a PR-based worktree (pull/<N>/head) and the freshness fetch
+// for base-ref "fresh" are bounded by the regular git timeout, but a PR number
+// is still validated against a generous ceiling before it reaches git.
+export const MAX_WORKTREE_PR_NUMBER = 1_000_000;
+// A launcher command run by the "Open in…" menu. Spawned detached via the user's
+// login shell so rc-sourced PATH entries (nvm, brew, editor CLIs) resolve; the
+// spawn is fire-and-forget (output discarded) since these are GUI launches.
+export const MAX_LAUNCH_COMMAND_LENGTH = 4096;
+
 export const HTTP_STATUS_CREATED = 201;
 
 export const MS_PER_MINUTE = 60_000;

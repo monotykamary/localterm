@@ -2,9 +2,17 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  MAX_PROJECT_FOLDER_ATTEMPTS,
+  MAX_WORKTREE_NAME_ATTEMPTS,
+  PROJECT_FOLDER_HASH_LENGTH,
+  REPO_ID_HASH_LENGTH,
+  REPO_MARKER_FILENAME,
+} from "./constants.js";
 import { runGit } from "./utils/run-git.js";
 import { generateWorktreeName } from "./utils/worktree-names.js";
-import type { GitWorktree, GitWorktreeListResponse } from "./types.js";
+import { copyWorktreeIncludes } from "./utils/copy-worktree-includes.js";
+import type { CreateWorktreeInput, GitWorktree, GitWorktreeListResponse } from "./types.js";
 
 // A user-facing git failure (path exists, branch checked out elsewhere, the
 // main worktree can't be removed, …). The route catches this and surfaces
@@ -21,15 +29,7 @@ const HOME = os.homedir();
 const PATH_SEPARATOR = path.sep;
 // Auto-created worktrees live under the localterm state dir (~/.localterm/),
 // next to the daemon's other per-project state (automations.json, server.log).
-const WORKTREES_PARENT_DIR = path.join(HOME, ".localterm", "worktrees");
-// Marker file placed in each project folder so a second repo with the same
-// project name (but a different main worktree path) gets its own folder instead
-// of colliding with the first repo's worktrees.
-const REPO_MARKER_FILENAME = ".localterm-repo-id";
-const REPO_ID_HASH_LENGTH = 12;
-const PROJECT_FOLDER_HASH_LENGTH = 6;
-const MAX_PROJECT_FOLDER_ATTEMPTS = 100;
-const MAX_WORKTREE_NAME_ATTEMPTS = 50;
+export const WORKTREES_PARENT_DIR = path.join(HOME, ".localterm", "worktrees");
 
 // Tildify an absolute path against the daemon's home. The browser can't resolve
 // the home dir itself, so the server does it for display strings (the absolute
@@ -44,7 +44,7 @@ const tildifyHome = (absolutePath: string): string => {
 // Stable per-repo identity: a short hash of the main worktree's absolute path.
 // Two repos with the same project name but different paths get different ids, so
 // their worktree folders don't collide.
-const repoId = (mainRoot: string): string =>
+export const repoId = (mainRoot: string): string =>
   crypto.createHash("sha256").update(mainRoot).digest("hex").slice(0, REPO_ID_HASH_LENGTH);
 
 const readRepoMarker = (dir: string): string | null => {
@@ -139,7 +139,7 @@ const currentWorktreeRoot = async (cwd: string): Promise<string | null> => {
 // own project folder. Resolved through realpath so it matches the paths git
 // prints in `worktree list --porcelain` (git resolves symlinks; a naive
 // path.resolve against a symlinked cwd would not).
-const mainWorktreeRoot = async (cwd: string): Promise<string | null> => {
+export const mainWorktreeRoot = async (cwd: string): Promise<string | null> => {
   const result = await runGit(cwd, ["rev-parse", "--git-common-dir"]);
   if (result.exitCode !== 0) return null;
   const commonDir = result.stdout.toString("utf8").trim();
@@ -253,17 +253,92 @@ export const listGitWorktrees = async (cwd: string): Promise<GitWorktreeListResp
   return { isRepo: true, worktrees, displayBaseDir };
 };
 
-// Create a worktree under ~/.localterm/worktrees/<project>/ on a memorable
-// auto-generated branch (adjective-noun) from HEAD. The branch and folder name
-// match, so the folder is self-describing. A collision (branch or folder
-// already exists) retries with a fresh phrase; any other git failure is
-// surfaced immediately.
-export const createGitWorktree = async (cwd: string): Promise<{ path: string; branch: string }> => {
+// origin/HEAD for base ref "fresh": the remote default branch a new worktree
+// should start from. Falls back to local HEAD when there's no remote, the
+// fetch fails, or origin/HEAD isn't set (after a bounded fetch attempt) —
+// matching how Claude Code degrades, and identical to pre-config behavior
+// (branch from HEAD) for repos with no remote.
+const resolveFreshStartRef = async (cwd: string): Promise<string | null> => {
+  const readOriginHead = async (): Promise<string | null> => {
+    const symbolic = await runGit(cwd, ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"]);
+    if (symbolic.exitCode !== 0) return null;
+    const target = symbolic.stdout.toString("utf8").trim();
+    if (!target.startsWith("refs/remotes/")) return null;
+    const shortName = target.slice("refs/remotes/".length);
+    const verify = await runGit(cwd, ["rev-parse", "--verify", "-q", shortName]);
+    return verify.exitCode === 0 ? shortName : null;
+  };
+  const direct = await readOriginHead();
+  if (direct) return direct;
+  // origin/HEAD isn't set locally. A bounded fetch lets origin set it (and
+  // populates the default branch's tracking ref) so the worktree starts from
+  // the remote default. Bounded by GIT_SPAWN_TIMEOUT_MS + GIT_TERMINAL_PROMPT=0,
+  // so a dead/unauthenticated remote degrades to local HEAD below.
+  const fetch = await runGit(cwd, ["fetch", "--no-tags", "--no-recurse-submodules", "origin"]);
+  if (fetch.exitCode === 0) {
+    const afterFetch = await readOriginHead();
+    if (afterFetch) return afterFetch;
+  }
+  return null;
+};
+
+// Fetch a GitHub PR's head so a worktree can be created from it as `pr-<N>`.
+// `pull/<N>/head` is GitHub's well-known refspec and works for any
+// GitHub-hosted origin without `gh`. Returns the resolved commit sha (FETCH_HEAD
+// is clobbered by the next fetch, so resolve it immediately).
+const fetchPullRequestHead = async (cwd: string, prNumber: number): Promise<string> => {
+  const fetch = await runGit(cwd, [
+    "fetch",
+    "--no-tags",
+    "--no-recurse-submodules",
+    "origin",
+    `pull/${prNumber}/head`,
+  ]);
+  if (fetch.exitCode !== 0) {
+    const stderr = fetch.stderr.trim();
+    throw new WorktreeError(
+      `couldn't fetch PR #${prNumber} from origin${stderr ? `: ${stderr}` : ""}`,
+    );
+  }
+  const rev = await runGit(cwd, ["rev-parse", "--verify", "-q", "FETCH_HEAD"]);
+  if (rev.exitCode !== 0) {
+    throw new WorktreeError(`couldn't resolve PR #${prNumber} head after fetch`);
+  }
+  return rev.stdout.toString("utf8").trim();
+};
+
+// Create a worktree under ~/.localterm/worktrees/<project>/ on either a
+// memorable auto-generated branch (adjective-noun) or, for a PR, `pr-<N>`. For
+// non-PR creates the branch and folder name match so the folder is
+// self-describing, and a collision (branch or folder already exists) retries
+// with a fresh phrase. A PR create is deterministic and surfaces git's "already
+// exists" directly. After the worktree exists, gitignored files matching
+// `.worktreeinclude` are copied from the main worktree so the fresh checkout is
+// immediately usable (.env, config/secrets.json, …); tracked files are never
+// copied, and copy failures never fail the create (git already succeeded).
+export const createGitWorktree = async (
+  cwd: string,
+  options: CreateWorktreeInput = {},
+): Promise<{ path: string; branch: string; copiedFiles: string[] }> => {
   const mainRoot = await mainWorktreeRoot(cwd);
   if (!mainRoot) throw new WorktreeError("couldn't resolve the repository's main worktree");
   const projectName = path.basename(mainRoot);
   if (!projectName) throw new WorktreeError("couldn't resolve the repository's project name");
   const projectDir = ensureProjectFolder(projectName, repoId(mainRoot));
+
+  if (options.pullRequestNumber) {
+    const branch = `pr-${options.pullRequestNumber}`;
+    const targetPath = path.join(projectDir, branch);
+    const startRef = await fetchPullRequestHead(cwd, options.pullRequestNumber);
+    const result = await runGit(cwd, ["worktree", "add", "-b", branch, targetPath, startRef]);
+    if (result.exitCode !== 0) {
+      throw new WorktreeError(result.stderr.trim() || "git worktree add failed");
+    }
+    const copiedFiles = await copyWorktreeIncludes(mainRoot, targetPath);
+    return { path: targetPath, branch, copiedFiles };
+  }
+
+  const startRef = options.baseRef === "head" ? null : await resolveFreshStartRef(cwd);
 
   let lastError: WorktreeError | null = null;
   const attempted = new Set<string>();
@@ -271,9 +346,21 @@ export const createGitWorktree = async (cwd: string): Promise<{ path: string; br
     const name = generateWorktreeName(attempted);
     attempted.add(name);
     const targetPath = path.join(projectDir, name);
-    const result = await runGit(cwd, ["worktree", "add", "-b", name, targetPath]);
-    if (result.exitCode === 0) return { path: targetPath, branch: name };
+    const args = startRef
+      ? ["worktree", "add", "-b", name, targetPath, startRef]
+      : ["worktree", "add", "-b", name, targetPath];
+    const result = await runGit(cwd, args);
+    if (result.exitCode === 0) {
+      const copiedFiles = await copyWorktreeIncludes(mainRoot, targetPath);
+      return { path: targetPath, branch: name, copiedFiles };
+    }
     const stderr = result.stderr.trim();
+    // A "fresh" start ref that was resolvable seconds ago may have raced (a
+    // force-push, a branch deletion); once it's gone, retrying with a new
+    // adjective-noun name won't help, so surface immediately.
+    if (startRef && !/already exists/i.test(stderr)) {
+      throw new WorktreeError(stderr || "git worktree add failed");
+    }
     if (/already exists/i.test(stderr)) {
       lastError = new WorktreeError(stderr);
       continue;

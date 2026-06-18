@@ -238,6 +238,77 @@ describe("createGitWorktree", () => {
   });
 });
 
+describe("createGitWorktree options", () => {
+  it("baseRef head branches from local HEAD and reports no copied files without a .worktreeinclude", async () => {
+    const repo = await initRepo(makeTempDir());
+    const baseDir = worktreesBaseDirFor(repo);
+    try {
+      fs.writeFileSync(path.join(repo.dir, "a.txt"), "a\n");
+      await commitAll(repo, "base");
+
+      const result = await createGitWorktree(repo.dir, { baseRef: "head" });
+      expect(result.branch).toMatch(/^[a-z]+-[a-z]+(-\d+)?$/);
+      expect(result.copiedFiles).toEqual([]);
+      expect(fs.existsSync(path.join(result.path, "a.txt"))).toBe(true);
+      const list = await listGitWorktrees(repo.dir);
+      expect(list.worktrees.some((worktree) => worktree.branch === result.branch)).toBe(true);
+    } finally {
+      fs.rmSync(repo.dir, { recursive: true, force: true });
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates a pr-<N> worktree from pull/<N>/head against a local bare origin", async () => {
+    const repo = await initRepo(makeTempDir());
+    const originDir = makeTempDir();
+    const baseDir = worktreesBaseDirFor(repo);
+    try {
+      fs.writeFileSync(path.join(repo.dir, "a.txt"), "a\n");
+      await commitAll(repo, "base");
+      const headSha = getHeadSha(repo.dir);
+
+      runGitSync(originDir, ["init", "--bare"]);
+      runGitSync(repo.dir, ["remote", "add", "origin", originDir]);
+      runGitSync(repo.dir, ["push", "-q", "origin", "main"]);
+      // Expose a GitHub-style pull request head ref on the bare origin.
+      runGitSync(originDir, ["update-ref", "refs/pull/42/head", headSha]);
+
+      const result = await createGitWorktree(repo.dir, { pullRequestNumber: 42 });
+      expect(result.branch).toBe("pr-42");
+      expect(path.basename(result.path)).toBe("pr-42");
+      expect(fs.existsSync(path.join(result.path, "a.txt"))).toBe(true);
+
+      const list = await listGitWorktrees(repo.dir);
+      const prWorktree = list.worktrees.find((worktree) => worktree.branch === "pr-42");
+      expect(prWorktree).toBeDefined();
+      expect(prWorktree?.path).toBe(result.path);
+    } finally {
+      fs.rmSync(repo.dir, { recursive: true, force: true });
+      fs.rmSync(originDir, { recursive: true, force: true });
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces a clear error when a PR head can't be fetched (no origin)", async () => {
+    const repo = await initRepo(makeTempDir());
+    const baseDir = worktreesBaseDirFor(repo);
+    try {
+      fs.writeFileSync(path.join(repo.dir, "a.txt"), "a\n");
+      await commitAll(repo, "base");
+
+      await expect(createGitWorktree(repo.dir, { pullRequestNumber: 7 })).rejects.toThrow(
+        /PR #7|fetch/i,
+      );
+      // Nothing was created.
+      const list = await listGitWorktrees(repo.dir);
+      expect(list.worktrees).toHaveLength(1);
+    } finally {
+      fs.rmSync(repo.dir, { recursive: true, force: true });
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("removeGitWorktree", () => {
   it("removes a non-current linked worktree", async () => {
     const repo = await initRepo(makeTempDir());

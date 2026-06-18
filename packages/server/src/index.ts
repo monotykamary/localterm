@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -44,6 +45,7 @@ import {
   WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
   WS_READY_STATE_OPEN,
 } from "./constants.js";
+import { getDefaultShell } from "./default-shell.js";
 import { ServerErrorException, serverError } from "./errors.js";
 import { FolderWatchManager } from "./folder-watch-manager.js";
 import { SessionEventManager } from "./session-event-manager.js";
@@ -68,13 +70,18 @@ import { createGitWorktree, listGitWorktrees, removeGitWorktree } from "./git-wo
 import {
   clientToServerMessageSchema,
   createAutomationInputSchema,
+  createWorktreeInputSchema,
+  launchInputSchema,
   resetAutomationInputSchema,
   updateAutomationInputSchema,
+  updateWorktreeConfigInputSchema,
 } from "./schemas.js";
 import { Session } from "./session.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
 import { SessionRegistry } from "./session-registry.js";
 import { resolveStaticAsset } from "./static-resolver.js";
+import { sweepStaleWorktrees } from "./utils/worktree-sweep.js";
+import { WorktreeConfigStore } from "./worktree-config-store.js";
 import {
   compileSchedule,
   compileScheduleAll,
@@ -256,6 +263,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const caffeinatePreferencesStore = new CaffeinatePreferencesStore(
     path.join(stateDirectory, "caffeinate.json"),
   );
+  const worktreeConfigStore = new WorktreeConfigStore(stateDirectory);
   const caffeinateManager = new CaffeinateManager({
     controller: caffeinateController,
     store: caffeinatePreferencesStore,
@@ -590,15 +598,93 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   api.post("/git/worktrees", async (context) => {
     const cwd = resolveCwdQuery(context.req.query("cwd"));
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    // An absent body (the modal `+`, the shortcut, the palette) creates a plain
+    // worktree on the repo's configured base ref; a body opts into a PR or an
+    // explicit base ref. The repo config supplies the base-ref default and the
+    // setup script the client should run in the new tab.
+    const parsed = createWorktreeInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) {
+      return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    }
     try {
-      const result = await createGitWorktree(cwd);
-      return context.json(result, HTTP_STATUS_CREATED);
+      const config = await worktreeConfigStore.get(cwd);
+      const baseRef = parsed.data.baseRef ?? config.baseRef;
+      const result = await createGitWorktree(cwd, {
+        baseRef,
+        pullRequestNumber: parsed.data.pullRequestNumber,
+      });
+      return context.json(
+        { ...result, setupCommand: config.setupScript || null },
+        HTTP_STATUS_CREATED,
+      );
     } catch (error) {
       return context.json(
         { error: "git_failed", message: worktreeErrorMessage(error) },
         HTTP_STATUS_BAD_REQUEST,
       );
     }
+  });
+
+  // Per-repo worktree config: the setup script, the "Open in…" launchers, and
+  // the default base ref. Keyed server-side by repo id so it survives across
+  // linked worktrees and is never committed to the repo.
+  api.get("/git/worktrees/config", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json(await worktreeConfigStore.get(cwd));
+  });
+
+  api.put("/git/worktrees/config", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    const parsed = updateWorktreeConfigInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json(await worktreeConfigStore.update(cwd, parsed.data));
+  });
+
+  // Remove stale, clean, auto-created worktrees older than the sweep threshold.
+  // Never removes the current/main worktree or any the user made manually; a
+  // dirty worktree is left untouched. Returns the paths removed. The branch
+  // refs survive `git worktree remove`, so swept work is recoverable.
+  api.post("/git/worktrees/sweep", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    try {
+      return context.json(await sweepStaleWorktrees(cwd));
+    } catch (error) {
+      return context.json(
+        { error: "git_failed", message: worktreeErrorMessage(error) },
+        HTTP_STATUS_BAD_REQUEST,
+      );
+    }
+  });
+
+  // Launch an external command (an "Open in…" entry) detached in a worktree via
+  // the user's login shell so rc-sourced PATH entries resolve. Fire-and-forget:
+  // the daemon never waits on the launched process, and its output is discarded
+  // (these are GUI launches like `code .`, `fork .`). The daemon already hands
+  // out unrestricted shells, so running a user-configured command is not an
+  // escalation.
+  api.post("/launch", async (context) => {
+    const parsed = launchInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    if (!resolveCwdQuery(parsed.data.cwd)) {
+      return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    try {
+      const child = spawn(getDefaultShell(), ["-l", "-c", parsed.data.command], {
+        cwd: parsed.data.cwd,
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+    } catch (error) {
+      return context.json(
+        { error: "launch_failed", message: worktreeErrorMessage(error) },
+        HTTP_STATUS_BAD_REQUEST,
+      );
+    }
+    return context.json({ ok: true });
   });
 
   api.delete("/git/worktrees", async (context) => {
@@ -761,6 +847,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
         }
       }
       const requestedRunId = context.req.query("run");
+      // A plain tab may carry an initial command (a worktree's setup script) —
+      // distinct from an automation run (`?run=`), which still takes precedence
+      // when both are present. The command is written to the PTY as if the user
+      // typed it, so its output is visible and the shell prompt returns after.
+      const requestedInitialCommand = context.req.query("cmd") ?? undefined;
 
       return {
         onOpen(_event, ws) {
@@ -791,7 +882,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           }
           const newSession = new Session({
             cwd: sessionCwd,
-            initialCommand: claimedRun?.command,
+            initialCommand: claimedRun?.command ?? requestedInitialCommand,
           });
           session = newSession;
           registry.register(newSession);

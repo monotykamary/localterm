@@ -55,7 +55,7 @@ import { WorktreesButton } from "@/components/worktrees-menu";
 import { WorktreesModal } from "@/components/worktrees-modal";
 import { useGitBranchInfo } from "@/hooks/use-git-branch-info";
 import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
-import { createGitWorktree } from "@/utils/fetch-git-worktrees";
+import { createGitWorktree, type CreateWorktreeOptions } from "@/utils/fetch-git-worktrees";
 import {
   COPY_FEEDBACK_MS,
   DEAD_SESSION_TITLE_PREFIX,
@@ -204,6 +204,7 @@ const SEARCH_DECORATION_OPTIONS = {
 };
 
 const CWD_QUERY_PARAM = "cwd";
+const INITIAL_COMMAND_QUERY_PARAM = "cmd";
 
 const buildWebSocketUrl = (cwdOverride?: string | null): string => {
   const url = new URL("/ws", window.location.href);
@@ -212,12 +213,20 @@ const buildWebSocketUrl = (cwdOverride?: string | null): string => {
   if (cwd) url.searchParams.set(CWD_QUERY_PARAM, cwd);
   const runId = new URLSearchParams(window.location.search).get(RUN_QUERY_PARAM);
   if (runId) url.searchParams.set(RUN_QUERY_PARAM, runId);
+  // Forward a transient initial command (a worktree's setup script) so the
+  // server writes it to the PTY as if the user typed it — the install/env-copy
+  // output is visible and the prompt returns when it finishes.
+  const initialCommand = new URLSearchParams(window.location.search).get(
+    INITIAL_COMMAND_QUERY_PARAM,
+  );
+  if (initialCommand) url.searchParams.set(INITIAL_COMMAND_QUERY_PARAM, initialCommand);
   return url.toString();
 };
 
-const buildNewTabUrl = (cwd: string | null): string => {
+const buildNewTabUrl = (cwd: string | null, command?: string): string => {
   const url = new URL(window.location.origin);
   if (cwd) url.searchParams.set(CWD_QUERY_PARAM, cwd);
+  if (command) url.searchParams.set(INITIAL_COMMAND_QUERY_PARAM, command);
   return url.toString();
 };
 
@@ -291,7 +300,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [worktreeCreateError, setWorktreeCreateError] = useState<string | null>(null);
   const openWorktreesRef = useRef<(() => void) | null>(null);
   const toggleWorktreesRef = useRef<(() => void) | null>(null);
-  const createWorktreeRef = useRef<((openAfter: boolean) => Promise<boolean>) | null>(null);
+  const createWorktreeRef = useRef<
+    ((options: CreateWorktreeOptions, openAfter: boolean) => Promise<boolean>) | null
+  >(null);
   const setCaffeinateModeRef = useRef<((mode: CaffeinateMode) => void) | null>(null);
   const setCaffeinateCommandsRef = useRef<((commands: string[]) => void) | null>(null);
   const setCaffeinateActivityGateRef = useRef<((enabled: boolean) => void) | null>(null);
@@ -825,7 +836,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       if (isWorktreesCreateShortcut(event, isMac)) {
         if (event.type === "keydown") {
           event.preventDefault();
-          void createWorktreeRef.current?.(true);
+          void createWorktreeRef.current?.({}, true);
         }
         return false;
       }
@@ -1482,27 +1493,31 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   }, [handleWorktreesOpenChange]);
   toggleWorktreesRef.current = toggleWorktrees;
 
-  const openShellAt = useCallback((shellCwd: string) => {
-    window.open(buildNewTabUrl(shellCwd), "_blank", "noopener,noreferrer");
+  const openShellAt = useCallback((shellCwd: string, command?: string) => {
+    window.open(buildNewTabUrl(shellCwd, command), "_blank", "noopener,noreferrer");
   }, []);
 
-  // Create a worktree on a fresh branch from HEAD, then (when openAfter) open a
-  // new PTY tab at it and switch over. Failures surface by opening the worktrees
-  // modal with the message shown in its footer, regardless of entry point. The
-  // modal `+` button calls this with openAfter=false (create + refresh the
-  // list, no tab switch); the command palette and ⌘/Ctrl+Shift+B call it with
-  // openAfter=true.
+  // Create a worktree on a fresh branch (or `pr-<N>`), then (when openAfter) open
+  // a new PTY tab at it and switch over. When the repo has a setup script it is
+  // run as the new tab's initial command, so env copy / installs happen in the
+  // right shell, visibly, before the prompt returns. Failures surface by opening
+  // the worktrees modal with the message shown in its footer, regardless of
+  // entry point. The modal `+` button calls this with openAfter=false (create +
+  // refresh the list, no tab switch); the command palette and the Shift shortcut
+  // call it with openAfter=true.
   const createWorktree = useCallback(
-    async (openAfter: boolean): Promise<boolean> => {
+    async (options: CreateWorktreeOptions, openAfter: boolean): Promise<boolean> => {
       if (!liveCwd) return false;
-      const result = await createGitWorktree(liveCwd);
+      const result = await createGitWorktree(liveCwd, options);
       if (!result.ok) {
         setWorktreeCreateError(result.message);
         setIsWorktreesOpen(true);
         return false;
       }
       setWorktreeCreateError(null);
-      if (openAfter) openShellAt(result.result.path);
+      if (openAfter) {
+        openShellAt(result.result.path, result.result.setupCommand ?? undefined);
+      }
       return true;
     },
     [liveCwd, openShellAt],
@@ -1738,7 +1753,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         shortcut: `${togglePrefix}Shift+B`,
         icon: <Plus className="size-3.5" />,
         action: () => {
-          void createWorktree(true);
+          void createWorktree({}, true);
         },
       },
       {

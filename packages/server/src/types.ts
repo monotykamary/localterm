@@ -32,6 +32,14 @@ import type {
   gitWorktreeListResponseSchema,
   gitWorktreeResultSchema,
   gitWorktreeSchema,
+  gitWorktreeBaseRefSchema,
+  createWorktreeInputSchema,
+  worktreeOpenInCommandSchema,
+  worktreeRepoConfigFileSchema,
+  worktreeRepoConfigSchema,
+  updateWorktreeConfigInputSchema,
+  worktreeSweepResultSchema,
+  launchInputSchema,
   resetAutomationInputSchema,
   serverToClientMessageSchema,
   triggerInputSchema,
@@ -88,6 +96,14 @@ export type GitBranchPrLease = z.infer<typeof gitBranchPrLeaseSchema>;
 export type GitWorktree = z.infer<typeof gitWorktreeSchema>;
 export type GitWorktreeListResponse = z.infer<typeof gitWorktreeListResponseSchema>;
 export type GitWorktreeResult = z.infer<typeof gitWorktreeResultSchema>;
+export type GitWorktreeBaseRef = z.infer<typeof gitWorktreeBaseRefSchema>;
+export type CreateWorktreeInput = z.infer<typeof createWorktreeInputSchema>;
+export type WorktreeOpenInCommand = z.infer<typeof worktreeOpenInCommandSchema>;
+export type WorktreeRepoConfigFile = z.infer<typeof worktreeRepoConfigFileSchema>;
+export type WorktreeRepoConfig = z.infer<typeof worktreeRepoConfigSchema>;
+export type UpdateWorktreeConfigInput = z.infer<typeof updateWorktreeConfigInputSchema>;
+export type WorktreeSweepResult = z.infer<typeof worktreeSweepResultSchema>;
+export type LaunchInput = z.infer<typeof launchInputSchema>;
 export type GitDiffSummary = z.infer<typeof gitDiffSummarySchema>;
 export type GitDiffFileMeta = z.infer<typeof gitDiffFileMetaSchema>;
 export type GitDiffFileListResponse = z.infer<typeof gitDiffFileListResponseSchema>;

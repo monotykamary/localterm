@@ -16,10 +16,18 @@ import {
   MAX_CRON_EXPRESSION_LENGTH,
   MAX_FOREGROUND_LENGTH,
   MAX_INPUT_BYTES,
+  MAX_LAUNCH_COMMAND_LENGTH,
   MAX_NOTIFICATION_LENGTH,
   MAX_OUTPUT_BYTES,
   MAX_ROWS,
   MAX_TITLE_LENGTH,
+  MAX_WORKTREE_OPEN_IN_COMMANDS,
+  MAX_WORKTREE_OPEN_IN_COMMAND_LENGTH,
+  MAX_WORKTREE_OPEN_IN_ID_LENGTH,
+  MAX_WORKTREE_OPEN_IN_LABEL_LENGTH,
+  MAX_WORKTREE_PR_NUMBER,
+  MAX_WORKTREE_SETUP_SCRIPT_LENGTH,
+  WORKTREE_CONFIG_FILE_VERSION,
 } from "./constants.js";
 
 export const healthSchema = z
@@ -320,11 +328,93 @@ export const gitWorktreeListResponseSchema = z
   .strict();
 
 // A completed create: the resolved absolute worktree path and the branch now
-// checked out there. Returned so the client can open or select it directly.
+// checked out there. `setupCommand` is the repo's configured setup script
+// (null when none) the client should run as the new tab's initial command so
+// env copy / installs run visibly in the right shell; `copiedFiles` are the
+// gitignored files `.worktreeinclude` copied from the main worktree.
 export const gitWorktreeResultSchema = z
   .object({
     path: z.string().min(1),
     branch: z.string().min(1),
+    setupCommand: z.string().nullable(),
+    copiedFiles: z.array(z.string()),
+  })
+  .strict();
+
+// The ref new worktrees branch from. "fresh" branches from origin/HEAD
+// (fetching first if needed) so each worktree starts from the remote default;
+// "head" branches from the local HEAD so a worktree carries in-progress,
+// unpushed work. "head" is what pre-config worktrees did (branch from HEAD).
+export const gitWorktreeBaseRefSchema = z.enum(["fresh", "head"]);
+
+// Body for POST /api/git/worktrees. Absent fields fall back to the repo's
+// configured defaults. `pullRequestNumber` (a GitHub PR number) overrides the
+// base ref: the worktree is created from pull/<N>/head on a `pr-<N>` branch.
+export const createWorktreeInputSchema = z
+  .object({
+    baseRef: gitWorktreeBaseRefSchema.optional(),
+    pullRequestNumber: z.number().int().positive().max(MAX_WORKTREE_PR_NUMBER).optional(),
+  })
+  .strict();
+
+// A custom "Open in…" launcher for a worktree row. `command` is run detached
+// in the worktree's cwd via the user's login shell (so `code .`, `zed .`,
+// `fork .` resolve); `label` is the button text. `id` is client-stable so the
+// editor can key rows and reconcile edits.
+export const worktreeOpenInCommandSchema = z
+  .object({
+    id: z.string().min(1).max(MAX_WORKTREE_OPEN_IN_ID_LENGTH),
+    label: z.string().trim().min(1).max(MAX_WORKTREE_OPEN_IN_LABEL_LENGTH),
+    command: z.string().trim().min(1).max(MAX_WORKTREE_OPEN_IN_COMMAND_LENGTH),
+  })
+  .strict();
+
+// Stored per-repo worktree config shape (~/.localterm/worktree-configs/
+// <repo-id>.json v1). All fields default to empty/off so a fresh repo behaves
+// like pre-config worktrees: no setup, no open-in commands, base ref "fresh"
+// (new worktrees branch from origin/HEAD when a remote exists, else HEAD).
+export const worktreeRepoConfigFileSchema = z
+  .object({
+    version: z.literal(WORKTREE_CONFIG_FILE_VERSION),
+    setupScript: z.string().max(MAX_WORKTREE_SETUP_SCRIPT_LENGTH),
+    openInCommands: z.array(worktreeOpenInCommandSchema).max(MAX_WORKTREE_OPEN_IN_COMMANDS),
+    baseRef: gitWorktreeBaseRefSchema,
+  })
+  .strict();
+
+// Wire shape for GET/PUT /api/git/worktrees/config: the stored fields without
+// the version tag (the store owns versioning). PUT accepts a partial of this.
+export const worktreeRepoConfigSchema = z
+  .object({
+    setupScript: z.string().max(MAX_WORKTREE_SETUP_SCRIPT_LENGTH),
+    openInCommands: z.array(worktreeOpenInCommandSchema).max(MAX_WORKTREE_OPEN_IN_COMMANDS),
+    baseRef: gitWorktreeBaseRefSchema,
+  })
+  .strict();
+
+export const updateWorktreeConfigInputSchema = z
+  .object({
+    setupScript: z.string().max(MAX_WORKTREE_SETUP_SCRIPT_LENGTH).optional(),
+    openInCommands: z
+      .array(worktreeOpenInCommandSchema)
+      .max(MAX_WORKTREE_OPEN_IN_COMMANDS)
+      .optional(),
+    baseRef: gitWorktreeBaseRefSchema.optional(),
+  })
+  .strict();
+
+// A completed sweep: the worktree paths removed. Skipped (dirty / unpushed /
+// too new / manual) worktrees are left untouched and not enumerated.
+export const worktreeSweepResultSchema = z.object({ removed: z.array(z.string().min(1)) }).strict();
+
+// Body for POST /api/launch: run `command` detached in `cwd` via the login
+// shell. Used by the "Open in…" menu to launch external editors/GUI git
+// clients at a worktree. The daemon already hands out unrestricted shells, so
+// running a user-configured command is not an escalation.
+export const launchInputSchema = z
+  .object({
+    cwd: z.string().min(1),
+    command: z.string().trim().min(1).max(MAX_LAUNCH_COMMAND_LENGTH),
   })
   .strict();
 
