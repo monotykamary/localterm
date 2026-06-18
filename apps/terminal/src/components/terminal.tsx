@@ -18,13 +18,17 @@ import {
   Copy,
   FileDiff,
   FolderGit2,
-  GitPullRequest,
   MonitorCog,
   Plus,
   Search,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PR_STATE_STYLES } from "@/lib/pr-state-styles";
+import {
+  PR_DISPLAY_STATE_LABELS,
+  PR_STATE_ICONS,
+  PR_STATE_STYLES,
+  resolvePrDisplayState,
+} from "@/lib/pr-state";
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,
@@ -394,6 +398,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   // and is handed to the diff viewer so it opens in branch mode instantly.
   const { branchInfo, refresh: refreshBranchInfo } = useGitBranchInfo(liveCwd);
   const branchPr = branchInfo?.pr ?? null;
+  const branchPrDisplayState = useMemo(
+    () => (branchPr ? resolvePrDisplayState(branchPr) : null),
+    [branchPr],
+  );
+  const BranchPrIcon = useMemo(
+    () => (branchPrDisplayState ? PR_STATE_ICONS[branchPrDisplayState] : null),
+    [branchPrDisplayState],
+  );
   // Either indicator (working-changes count or PR) keeps the toolbar "peeking":
   // the indicator stays visible while the action buttons collapse behind it and
   // expand on hover.
@@ -2074,18 +2086,18 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                       ) : null}
                     </button>
                   ) : null}
-                  {branchPr ? (
+                  {branchPr && branchPrDisplayState && BranchPrIcon ? (
                     <button
                       type="button"
                       onClick={openDiffViewer}
-                      aria-label={`view pull request diff: PR #${branchPr.number} (${branchPr.state})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
-                      title={`PR #${branchPr.number} (${branchPr.state})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
+                      aria-label={`view pull request diff: PR #${branchPr.number} (${PR_DISPLAY_STATE_LABELS[branchPrDisplayState]})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
+                      title={`PR #${branchPr.number} (${PR_DISPLAY_STATE_LABELS[branchPrDisplayState]})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
                       className={cn(
                         "flex h-8 items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 font-mono text-xs tabular-nums outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
-                        PR_STATE_STYLES[branchPr.state].text,
+                        PR_STATE_STYLES[branchPrDisplayState].text,
                       )}
                     >
-                      <GitPullRequest className="size-3.5" aria-hidden="true" />
+                      <BranchPrIcon className="size-3.5" aria-hidden="true" />
                       <span>#{branchPr.number}</span>
                     </button>
                   ) : null}

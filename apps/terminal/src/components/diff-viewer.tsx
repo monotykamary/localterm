@@ -12,7 +12,6 @@ import {
   ChevronDown,
   FileWarning,
   GitBranch,
-  GitPullRequest,
   MessageSquare,
   MessageSquarePlus,
   Pencil,
@@ -76,7 +75,12 @@ import {
   type DiffLineRange,
   type DiffLineTarget,
 } from "@/utils/diff-line-ranges";
-import { PR_STATE_STYLES } from "@/lib/pr-state-styles";
+import {
+  PR_DISPLAY_STATE_LABELS,
+  PR_STATE_ICONS,
+  PR_STATE_STYLES,
+  resolvePrDisplayState,
+} from "@/lib/pr-state";
 import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "@/utils/fetch-git-diff";
 import { PrefetchQueue, type PrefetchQueueItem } from "@/utils/prefetch-queue";
 import {
@@ -1022,18 +1026,21 @@ const FileDiffPane = ({
 // the add/delete greens and reds so a detected PR is obvious at a glance. Links
 // to the PR when gh gave us a URL.
 const PrBadge = ({ pr, hideTitle }: { pr: GitBranchPr; hideTitle: boolean }) => {
-  const style = PR_STATE_STYLES[pr.state];
+  const displayState = resolvePrDisplayState(pr);
+  const PrIcon = PR_STATE_ICONS[displayState];
+  const stateLabel = PR_DISPLAY_STATE_LABELS[displayState];
+  const style = PR_STATE_STYLES[displayState];
   const className = cn(
     "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] transition-colors",
     style.badge,
   );
-  const label = `PR #${pr.number} (${pr.state})${pr.title ? ` — ${pr.title}` : ""}`;
+  const label = `PR #${pr.number} (${stateLabel})${pr.title ? ` — ${pr.title}` : ""}`;
   const content = (
     <>
-      <GitPullRequest className="size-3 shrink-0" aria-hidden="true" />
+      <PrIcon className="size-3 shrink-0" aria-hidden="true" />
       <span className="shrink-0">#{pr.number}</span>
-      {pr.state !== "open" ? (
-        <span className="shrink-0 uppercase opacity-70">{pr.state}</span>
+      {displayState !== "open" ? (
+        <span className="shrink-0 uppercase opacity-70">{stateLabel}</span>
       ) : null}
       {!hideTitle && pr.title ? <span className="opacity-80">{pr.title}</span> : null}
     </>

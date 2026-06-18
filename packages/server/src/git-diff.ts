@@ -20,6 +20,7 @@ import type {
   GitBaseSource,
   GitBranchInfo,
   GitBranchPr,
+  GitBranchPrMergeable,
   GitBranchPrState,
   GitDiffFile,
   GitDiffFileListResponse,
@@ -790,6 +791,8 @@ interface PrApiData {
   baseRefName: string;
   url: string | null;
   state: GitBranchPrState;
+  isDraft: boolean;
+  mergeable: GitBranchPrMergeable;
   headOwner: string | null;
   baseRepoFullName: string | null;
 }
@@ -813,6 +816,11 @@ export interface PrFetcher {
   list(slug: string, head: string, state: string, perPage: number): Promise<PrApiData[]>;
 }
 
+const resolveMergeable = (mergeable: boolean | null | undefined): GitBranchPrMergeable => {
+  if (mergeable === null || mergeable === undefined) return "unknown";
+  return mergeable ? "mergeable" : "conflicting";
+};
+
 const defaultPrFetcher: PrFetcher = {
   list: async (slug, head, _state, perPage) => {
     const token = await resolveGithubToken();
@@ -829,15 +837,41 @@ const defaultPrFetcher: PrFetcher = {
         per_page: perPage,
       });
 
-      return data.map((pr) => ({
-        number: pr.number,
-        title: pr.title ?? "",
-        baseRefName: pr.base?.ref ?? "",
-        url: pr.html_url ?? null,
-        state: normalizeOctokitPrState(pr.state, pr.merged_at),
-        headOwner: pr.head?.repo?.owner?.login ?? null,
-        baseRepoFullName: pr.base?.repo?.full_name ?? null,
-      }));
+      // `pulls.list` never includes `mergeable`; fetch the detail for each open
+      // PR so the client can badge conflicted ones. Closed/merged PRs don't need
+      // mergeability for the UI, so we leave them as "unknown".
+      const mergeableByNumber = new Map<number, GitBranchPrMergeable>();
+      await Promise.all(
+        data
+          .filter((pr) => normalizeOctokitPrState(pr.state, pr.merged_at) === "open")
+          .map(async (pr) => {
+            try {
+              const { data: detail } = await octokit.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: pr.number,
+              });
+              mergeableByNumber.set(pr.number, resolveMergeable(detail.mergeable));
+            } catch {
+              mergeableByNumber.set(pr.number, "unknown");
+            }
+          }),
+      );
+
+      return data.map((pr) => {
+        const state = normalizeOctokitPrState(pr.state, pr.merged_at);
+        return {
+          number: pr.number,
+          title: pr.title ?? "",
+          baseRefName: pr.base?.ref ?? "",
+          url: pr.html_url ?? null,
+          state,
+          isDraft: pr.draft ?? false,
+          mergeable: state === "open" ? (mergeableByNumber.get(pr.number) ?? "unknown") : "unknown",
+          headOwner: pr.head?.repo?.owner?.login ?? null,
+          baseRepoFullName: pr.base?.repo?.full_name ?? null,
+        };
+      });
     } catch {
       return [];
     }
@@ -886,6 +920,8 @@ const toWirePr = (pr: ParsedPr): GitBranchPr => ({
   baseRef: pr.baseRef,
   url: pr.url,
   state: pr.state,
+  isDraft: pr.isDraft,
+  mergeable: pr.mergeable,
 });
 
 // detectPr returns the full ParsedPr (headOwner + baseRepoFullName retained)
@@ -923,6 +959,8 @@ const detectPr = async (cwd: string): Promise<ParsedPr | null> => {
         baseRefName: chosenApi.baseRefName,
         url: chosenApi.url,
         state: chosenApi.state,
+        isDraft: chosenApi.isDraft,
+        mergeable: chosenApi.mergeable,
         baseRef: (await resolvePrBaseRef(cwd, chosenApi, remotes))?.ref ?? null,
         headOwner: chosenApi.headOwner,
         baseRepoFullName: chosenApi.baseRepoFullName,

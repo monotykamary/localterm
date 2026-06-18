@@ -85,6 +85,8 @@ const BRANCH_INFO: GitBranchInfo = {
     baseRef: "origin/main",
     url: "https://example.test/pr/123",
     state: "open",
+    isDraft: false,
+    mergeable: "mergeable",
   },
 };
 

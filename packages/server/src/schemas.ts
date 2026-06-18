@@ -239,7 +239,10 @@ export const gitDiffModeSchema = z.enum(["working", "branch"]);
 // The PR (if any) the current branch maps to, discovered via `gh`. Null whenever
 // gh is missing, unauthenticated, or there's no PR for the branch. `state`
 // distinguishes an open PR from an already merged/closed one (both are surfaced).
+// `mergeable` mirrors GitHub's `mergeable` field, surfaced as a concrete enum so
+// the client can badge conflicted PRs without an extra round-trip.
 export const gitBranchPrStateSchema = z.enum(["open", "closed", "merged"]);
+export const gitBranchPrMergeableSchema = z.enum(["mergeable", "conflicting", "unknown"]);
 
 export const gitBranchPrSchema = z
   .object({
@@ -255,6 +258,8 @@ export const gitBranchPrSchema = z
     baseRef: z.string().min(1).nullable(),
     url: z.string().min(1).nullable(),
     state: gitBranchPrStateSchema,
+    isDraft: z.boolean(),
+    mergeable: gitBranchPrMergeableSchema,
   })
   .strict();
 

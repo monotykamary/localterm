@@ -19,6 +19,7 @@ import type {
   gitBaseSourceSchema,
   gitBranchInfoSchema,
   gitBranchPrLeaseSchema,
+  gitBranchPrMergeableSchema,
   gitBranchPrSchema,
   gitBranchPrStateSchema,
   gitDiffFileListResponseSchema,
@@ -90,6 +91,7 @@ export type GitDiffFileStatus = z.infer<typeof gitDiffFileStatusSchema>;
 export type GitDiffMode = z.infer<typeof gitDiffModeSchema>;
 export type GitBaseSource = z.infer<typeof gitBaseSourceSchema>;
 export type GitBranchPrState = z.infer<typeof gitBranchPrStateSchema>;
+export type GitBranchPrMergeable = z.infer<typeof gitBranchPrMergeableSchema>;
 export type GitBranchPr = z.infer<typeof gitBranchPrSchema>;
 export type GitBranchInfo = z.infer<typeof gitBranchInfoSchema>;
 export type GitBranchPrLease = z.infer<typeof gitBranchPrLeaseSchema>;
