@@ -1,5 +1,13 @@
 # localterm-server
 
+## 2.4.1
+
+### Patch Changes
+
+- Flush a trailing `git-dirty` event so external file saves refresh the diff viewer in the background.
+
+  The git-diff watcher's throttle was leading-edge-only, so a burst of `fs.watch` events (temp write → atomic rename on every external save) produced a single `git-dirty` against an intermediate tree state. That intermediate snapshot got cached, and with no trailing signal the cache stayed stale — the diff viewer didn't update until it was opened or the refresh button was pressed. The throttle now emits on the leading edge and once more after the burst settles, so the final tree state is always signaled.
+
 ## 2.4.0
 
 ### Minor Changes
