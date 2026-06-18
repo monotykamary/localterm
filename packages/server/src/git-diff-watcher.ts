@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 import { GIT_DIRTY_THROTTLE_MS } from "./constants.js";
+import { Throttle } from "./utils/throttle.js";
 
 interface GitDirResult {
   gitDir: string;
@@ -220,7 +221,7 @@ export const classifyGitChanges = (
 
 export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
   private watchers: fs.FSWatcher[] = [];
-  private throttleTimer: NodeJS.Timeout | null = null;
+  private throttle: Throttle | null = null;
   private disposed = false;
   private gitDir: string | null = null;
   private lastSnapshot: GitSnapshot | null = null;
@@ -234,6 +235,14 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
     const { gitDir, repoRoot } = result;
     this.gitDir = gitDir;
     this.lastSnapshot = buildGitSnapshot(gitDir);
+    // Leading + trailing throttle: emit `git-dirty` on the first fs event of a
+    // burst, then once more after the burst settles so the final tree state is
+    // always signaled (a burst often starts mid-rename, so the leading snapshot
+    // alone can leave the diff cache stale).
+    this.throttle = new Throttle(() => {
+      this.emit("git-dirty");
+      this.emitRefEventsIfNeeded();
+    }, GIT_DIRTY_THROTTLE_MS);
 
     const watch = (target: string, options?: fs.WatchOptions | BufferEncoding | null) => {
       try {
@@ -261,10 +270,8 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
   }
 
   stop(): void {
-    if (this.throttleTimer !== null) {
-      clearTimeout(this.throttleTimer);
-      this.throttleTimer = null;
-    }
+    this.throttle?.dispose();
+    this.throttle = null;
     for (const watcher of this.watchers) {
       try {
         watcher.close();
@@ -282,15 +289,7 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
   }
 
   private throttledEmit(): void {
-    if (this.throttleTimer !== null) return;
-    if (!this.disposed) {
-      this.emit("git-dirty");
-      this.emitRefEventsIfNeeded();
-    }
-    this.throttleTimer = setTimeout(() => {
-      this.throttleTimer = null;
-    }, GIT_DIRTY_THROTTLE_MS);
-    this.throttleTimer.unref?.();
+    this.throttle?.trigger();
   }
 
   private emitRefEventsIfNeeded(): void {
