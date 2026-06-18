@@ -23,7 +23,7 @@ export const CAFFEINATE_AUTO_DEFAULT_COMMANDS: readonly string[] = [
   "opencode",
   "pi",
 ];
-export const CAFFEINATE_PREFERENCES_FILE_VERSION = 2;
+export const CAFFEINATE_PREFERENCES_FILE_VERSION = 3;
 // Automatic detection is event-driven (no timer): a `ps` snapshot is taken only
 // in response to a foreground change or a session connect/disconnect. This
 // debounce window coalesces a burst of such events into a single snapshot; it
@@ -37,6 +37,34 @@ export const CAFFEINATE_AUTO_POKE_DEBOUNCE_MS = 150;
 export const CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS = 5_000;
 export const MAX_CAFFEINATE_COMMANDS = 50;
 export const MAX_CAFFEINATE_COMMAND_LENGTH = 128;
+// Battery floor for keep-awake: when the machine is on battery power and at or
+// below this percent, the daemon refuses to hold the power assertion (it stops
+// caffeinate without changing the selected mode). The default is on, so a
+// machine left unplugged stops keeping itself awake before it dies. `null`
+// (selectable in the menu as "Off") disables the guard entirely.
+export const CAFFEINATE_BATTERY_LOW_WATER_PERCENT_DEFAULT = 20;
+export const CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT = 5;
+export const CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT = 50;
+// The battery floor is enforced by reading `pmset -g batt` on an adaptive
+// schedule rather than a fixed heartbeat. `pmset` reports the charge percent
+// and an EWMA "time to empty" estimate; the next delay is 1/TIME_FRACTION of the
+// interpolated time-to-threshold (estimate × charge fraction still above the
+// floor), so polling tightens as the floor approaches and stays lax far from
+// it. Halving (not subtracting a fixed margin) scales the buffer with the
+// estimate: the EWMA lags real discharge and the active program drains faster
+// than the idle minutes it averaged, so a 2× buffer absorbs a stale-high
+// estimate without overshooting. Clamped to [MIN, MAX]: MIN keeps a
+// near-threshold reading from busy-looping and drives fast recovery while
+// suppressed; MAX bounds the far-from-threshold and on-AC cases. The floor is
+// a courtesy guard — macOS still forces low-battery sleep at ~5% regardless of
+// caffeinate — so a multi-minute MAX is an acceptable worst-case latency for
+// noticing an unplug or a stalled estimate.
+export const CAFFEINATE_BATTERY_POLL_MIN_INTERVAL_MS = 5_000;
+export const CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS = 15 * 60_000;
+// Poll at 1/N of the interpolated time-to-threshold. N=2 gives a 2× buffer
+// against the OS estimate being stale-high.
+export const CAFFEINATE_BATTERY_POLL_TIME_FRACTION = 2;
+export const CAFFEINATE_BATTERY_READ_TIMEOUT_MS = 2_000;
 
 export const TITLE_MAX_PATH_SEGMENTS = 1;
 

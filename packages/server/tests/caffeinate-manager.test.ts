@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   CaffeinateController,
   type CaffeinateProcessHandle,
 } from "../src/caffeinate-controller.js";
 import { CaffeinateManager } from "../src/caffeinate-manager.js";
+import { CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS } from "../src/constants.js";
 import { CaffeinatePreferencesStore } from "../src/caffeinate-preferences-store.js";
 import type { ProcessSnapshotEntry } from "../src/caffeinate-process-match.js";
 
@@ -35,6 +36,11 @@ describe("CaffeinateManager", () => {
   let sessionPids: number[];
   let snapshot: ProcessSnapshotEntry[];
   let recentOutputPids: number[];
+  let batteryStatus: {
+    percent: number;
+    isOnBattery: boolean;
+    minutesToEmpty: number | null;
+  } | null;
 
   const build = (supported = true) => {
     const { controller, spawned } = createFakeController(supported);
@@ -44,6 +50,7 @@ describe("CaffeinateManager", () => {
       listSessionPids: () => sessionPids,
       snapshotProcesses: async () => snapshot,
       hasRecentOutput: (pids) => pids.some((pid) => recentOutputPids.includes(pid)),
+      batteryProbe: async () => batteryStatus,
     });
     return { manager, controller, spawned };
   };
@@ -54,6 +61,9 @@ describe("CaffeinateManager", () => {
     sessionPids = [];
     snapshot = [];
     recentOutputPids = [];
+    // Default to a healthy plugged-out battery well above the 20% floor, so
+    // the guard is armed but never suppresses unless a test sets a low value.
+    batteryStatus = { percent: 80, isOnBattery: true, minutesToEmpty: 240 };
   });
 
   afterEach(() => {
@@ -69,9 +79,11 @@ describe("CaffeinateManager", () => {
     manager.dispose();
   });
 
-  it("is always active in on mode and never in off mode", () => {
+  it("is always active in on mode and never in off mode", async () => {
     const { manager, controller, spawned } = build();
     manager.setMode("on");
+    // The first probe healthy battery -> caffeinate engages.
+    await manager.pollBatteryNow();
     expect(controller.active).toBe(true);
     expect(spawned).toHaveLength(1);
     manager.setMode("off");
@@ -127,6 +139,9 @@ describe("CaffeinateManager", () => {
     manager.setCommands(["ollama"]);
     recentOutputPids = [100];
     await manager.pollNow();
+    // First probe resolves the battery floor; with a healthy battery the
+    // matched trigger engages.
+    await manager.pollBatteryNow();
     expect(controller.active).toBe(true);
     expect(manager.activeTrigger).toBe("ollama");
     manager.dispose();
@@ -213,6 +228,206 @@ describe("CaffeinateManager", () => {
     // noteOutputActivity should be a no-op when autoActive is true but
     // the gate timer is armed — it resets the timer.
     manager.noteOutputActivity();
+    manager.dispose();
+  });
+});
+
+describe("CaffeinateManager battery floor", () => {
+  let dir: string;
+  let store: CaffeinatePreferencesStore;
+  let sessionPids: number[];
+  let snapshot: ProcessSnapshotEntry[];
+  let recentOutputPids: number[];
+  let batteryStatus: {
+    percent: number;
+    isOnBattery: boolean;
+    minutesToEmpty: number | null;
+  } | null;
+
+  const build = (supported = true) => {
+    const { controller, spawned } = createFakeController(supported);
+    const manager = new CaffeinateManager({
+      controller,
+      store,
+      listSessionPids: () => sessionPids,
+      snapshotProcesses: async () => snapshot,
+      hasRecentOutput: (pids) => pids.some((pid) => recentOutputPids.includes(pid)),
+      batteryProbe: async () => batteryStatus,
+    });
+    return { manager, controller, spawned };
+  };
+
+  beforeEach(() => {
+    dir = path.join(os.tmpdir(), `localterm-caffeinate-battery-${randomUUID()}`);
+    store = new CaffeinatePreferencesStore(path.join(dir, "caffeinate.json"));
+    sessionPids = [];
+    snapshot = [];
+    recentOutputPids = [];
+    batteryStatus = { percent: 80, isOnBattery: true, minutesToEmpty: 240 };
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("defaults the threshold to 20%", () => {
+    const { manager } = build();
+    expect(manager.batteryThreshold).toBe(20);
+    manager.dispose();
+  });
+
+  it("suppresses caffeinate in on mode when below the floor on battery", async () => {
+    const { manager, controller, spawned } = build();
+    batteryStatus = { percent: 15, isOnBattery: true, minutesToEmpty: 30 };
+    manager.setMode("on");
+    // The first arming probes immediately; below 20% on battery -> suppress.
+    await manager.pollBatteryNow();
+    expect(controller.active).toBe(false);
+    expect(spawned).toHaveLength(0);
+    manager.dispose();
+  });
+
+  it("does not suppress when below the floor but on AC power", async () => {
+    const { manager, controller } = build();
+    batteryStatus = { percent: 5, isOnBattery: false, minutesToEmpty: null };
+    manager.setMode("on");
+    await manager.pollBatteryNow();
+    expect(controller.active).toBe(true);
+    manager.dispose();
+  });
+
+  it("resumes caffeinate when the battery charges back above the floor", async () => {
+    const { manager, controller } = build();
+    batteryStatus = { percent: 15, isOnBattery: true, minutesToEmpty: 30 };
+    manager.setMode("on");
+    await manager.pollBatteryNow();
+    expect(controller.active).toBe(false);
+
+    batteryStatus = { percent: 80, isOnBattery: true, minutesToEmpty: 240 };
+    await manager.pollBatteryNow();
+    expect(controller.active).toBe(true);
+    manager.dispose();
+  });
+
+  it("resumes caffeinate immediately when the user unplugs and is above the floor", async () => {
+    const { manager, controller } = build();
+    batteryStatus = { percent: 5, isOnBattery: false, minutesToEmpty: null };
+    manager.setMode("on");
+    await manager.pollBatteryNow();
+    expect(controller.active).toBe(true);
+
+    // Unplug at 80% — still well above the floor, so the floor should not suppress.
+    batteryStatus = { percent: 80, isOnBattery: true, minutesToEmpty: 240 };
+    await manager.pollBatteryNow();
+    expect(controller.active).toBe(true);
+    manager.dispose();
+  });
+
+  it("does not suppress when the guard is disabled (null threshold)", async () => {
+    const { manager, controller } = build();
+    batteryStatus = { percent: 5, isOnBattery: true, minutesToEmpty: 3 };
+    manager.setMode("on");
+    manager.setBatteryThreshold(null);
+    await manager.pollBatteryNow();
+    expect(manager.batteryThreshold).toBeNull();
+    expect(controller.active).toBe(true);
+    manager.dispose();
+  });
+
+  it("suppresses on the first probe without waiting for the adaptive timer", async () => {
+    // Guards against a regression where the first arm would wait MAX_INTERVAL
+    // before applying the floor — a freshly-booted on-mode with the battery
+    // already low would hold a power assertion for up to a minute.
+    const { manager, controller } = build();
+    batteryStatus = { percent: 10, isOnBattery: true, minutesToEmpty: 20 };
+    manager.setMode("on");
+    // No manual pollBatteryNow from production paths — the immediate probe
+    // driven by setMode -> recompute -> scheduleBatteryCheck(null) settles it.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(controller.active).toBe(false);
+    manager.dispose();
+  });
+
+  it("reevaluates the floor when the threshold is raised above the current charge", async () => {
+    const { manager, controller } = build();
+    batteryStatus = { percent: 25, isOnBattery: true, minutesToEmpty: 60 };
+    manager.setMode("on");
+    // 25% > 20% -> active under the default floor.
+    await manager.pollBatteryNow();
+    expect(controller.active).toBe(true);
+
+    // Raise the floor above the current charge -> suppress.
+    manager.setBatteryThreshold(30);
+    await manager.pollBatteryNow();
+    expect(controller.active).toBe(false);
+    manager.dispose();
+  });
+
+  it("fails open when the probe returns null (no battery / read failure)", async () => {
+    const { manager, controller } = build();
+    batteryStatus = null;
+    manager.setMode("on");
+    await manager.pollBatteryNow();
+    expect(controller.active).toBe(true);
+    manager.dispose();
+  });
+
+  it("retries on the MAX interval after a failing probe instead of going silent", async () => {
+    // Regression guard: a null status used to make scheduleBatteryCheck return
+    // without arming a timer, so a transient `pmset` failure left the guard
+    // silently un-armed (no retry until an external poke). The fix arms a
+    // MAX-interval retry so the guard self-heals instead of going silent.
+    vi.useFakeTimers();
+    try {
+      let probeCount = 0;
+      const { controller } = createFakeController(true);
+      const manager = new CaffeinateManager({
+        controller,
+        store,
+        listSessionPids: () => [],
+        snapshotProcesses: async () => [],
+        batteryProbe: async () => {
+          probeCount += 1;
+          return null;
+        },
+      });
+      manager.setMode("on");
+      // First probe fires immediately on arm; flush its microtasks.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(probeCount).toBe(1);
+      // Nothing fires short of the MAX retry interval (the guard is armed, not
+      // busy-looping at microtask latency).
+      await vi.advanceTimersByTimeAsync(CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS - 1);
+      expect(probeCount).toBe(1);
+      // At MAX the retry timer fires — the guard stays alive and re-probes
+      // instead of going silent after the first failure.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(probeCount).toBe(2);
+      expect(controller.active).toBe(true); // still fail-open
+      manager.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not run the probe while the mode does not want active", async () => {
+    let probed = false;
+    const { controller, spawned } = createFakeController(true);
+    const manager = new CaffeinateManager({
+      controller,
+      store,
+      listSessionPids: () => [],
+      snapshotProcesses: async () => [],
+      batteryProbe: async () => {
+        probed = true;
+        return batteryStatus;
+      },
+    });
+    // automatic mode with no sessions -> wantActive false -> no probe.
+    await manager.pollBatteryNow();
+    expect(probed).toBe(false);
+    expect(spawned).toHaveLength(0);
     manager.dispose();
   });
 });

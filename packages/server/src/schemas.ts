@@ -3,6 +3,8 @@ import {
   AUTOMATION_RUN_HISTORY_CAP,
   AUTOMATION_RUN_LIMIT_MAX,
   AUTOMATIONS_FILE_VERSION,
+  CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT,
+  CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT,
   CAFFEINATE_PREFERENCES_FILE_VERSION,
   MAX_AUTOMATION_COMMAND_LENGTH,
   MAX_AUTOMATION_NAME_LENGTH,
@@ -81,12 +83,28 @@ const caffeinateActivityGateInputMessageSchema = z
   })
   .strict();
 
+// Set the battery floor for keep-awake. When the machine is on battery power
+// at or below `percent`, the daemon stops caffeinate without changing the
+// selected mode; `null` disables the guard entirely.
+const caffeinateBatteryThresholdInputMessageSchema = z
+  .object({
+    type: z.literal("caffeinate-battery-threshold"),
+    percent: z
+      .number()
+      .int()
+      .min(CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT)
+      .max(CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT)
+      .nullable(),
+  })
+  .strict();
+
 export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   inputMessageSchema,
   resizeMessageSchema,
   caffeinateModeInputMessageSchema,
   caffeinateCommandsInputMessageSchema,
   caffeinateActivityGateInputMessageSchema,
+  caffeinateBatteryThresholdInputMessageSchema,
 ]);
 
 const outputMessageSchema = z
@@ -674,8 +692,10 @@ const automationsMessageSchema = z
 // exist. `active` is whether the process is running right now (drives the icon
 // tint); `mode` is the selected off/on/automatic. `activityGate` is whether
 // automatic mode requires recent stdout from a recognized program (defaults
-// true). `defaultCommands` are the fixed automatic triggers (shown read-only);
-// `commands` are the user's additions.
+// true). `batteryThreshold` is the percent floor at which keep-awake stops on
+// battery power, or null when the guard is off (defaults 20). `defaultCommands`
+// are the fixed automatic triggers (shown read-only); `commands` are the user's
+// additions.
 const caffeinateStateMessageSchema = z
   .object({
     type: z.literal("caffeinate"),
@@ -683,6 +703,12 @@ const caffeinateStateMessageSchema = z
     active: z.boolean(),
     mode: caffeinateModeSchema,
     activityGate: z.boolean(),
+    batteryThreshold: z
+      .number()
+      .int()
+      .min(CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT)
+      .max(CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT)
+      .nullable(),
     defaultCommands: z.array(z.string()),
     commands: z.array(z.string()),
     activeTrigger: z.string().nullable(),
@@ -695,6 +721,12 @@ export const caffeinatePreferencesFileSchema = z
     version: z.literal(CAFFEINATE_PREFERENCES_FILE_VERSION),
     mode: caffeinateModeSchema,
     activityGate: z.boolean(),
+    batteryThreshold: z
+      .number()
+      .int()
+      .min(CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT)
+      .max(CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT)
+      .nullable(),
     commands: z.array(caffeinateCommandSchema).max(MAX_CAFFEINATE_COMMANDS),
   })
   .strict();

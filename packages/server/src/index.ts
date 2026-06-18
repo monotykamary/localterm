@@ -9,6 +9,7 @@ import open from "open";
 import { AutomationRunTracker } from "./automation-run-tracker.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
+import type { BatteryProbe } from "./caffeinate-battery.js";
 import { CaffeinateController } from "./caffeinate-controller.js";
 import { CaffeinateManager } from "./caffeinate-manager.js";
 import { CaffeinatePreferencesStore } from "./caffeinate-preferences-store.js";
@@ -115,6 +116,12 @@ export interface ServerOptions {
    * deterministically without spawning processes.
    */
   caffeinateSnapshotProcesses?: SnapshotProcesses;
+  /**
+   * Override how keep-awake reads the machine's battery. Defaults to a real
+   * `pmset -g batt` read. Injectable so tests can drive the battery floor
+   * deterministically without shelling out.
+   */
+  caffeinateBatteryProbe?: BatteryProbe;
 }
 
 /** Opens and (optionally) closes the browser tab for an automation run. */
@@ -254,6 +261,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     store: caffeinatePreferencesStore,
     listSessionPids: () => registry.pids(),
     snapshotProcesses: options.caffeinateSnapshotProcesses,
+    batteryProbe: options.caffeinateBatteryProbe,
     hasRecentOutput: (pids, withinMs) => registry.hasRecentOutput(pids, withinMs),
   });
   const clientSockets = new Set<BroadcastSocket>();
@@ -330,6 +338,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     active: caffeinateManager.active,
     mode: caffeinateManager.mode,
     activityGate: caffeinateManager.activityGate,
+    batteryThreshold: caffeinateManager.batteryThreshold,
     defaultCommands: [...caffeinateManager.defaultCommands],
     commands: caffeinateManager.commands,
     activeTrigger: caffeinateManager.activeTrigger,
@@ -1024,6 +1033,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             caffeinateManager.setCommands(parsed.data.commands);
           } else if (parsed.data.type === "caffeinate-activity-gate") {
             caffeinateManager.setActivityGate(parsed.data.enabled);
+          } else if (parsed.data.type === "caffeinate-battery-threshold") {
+            caffeinateManager.setBatteryThreshold(parsed.data.percent);
           } else {
             session.resize(
               parsed.data.cols,

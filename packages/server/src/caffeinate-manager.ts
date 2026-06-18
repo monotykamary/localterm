@@ -2,6 +2,11 @@ import { EventEmitter } from "node:events";
 import type { CaffeinateController } from "./caffeinate-controller.js";
 import type { CaffeinatePreferencesStore } from "./caffeinate-preferences-store.js";
 import {
+  defaultBatteryProbe,
+  type BatteryProbe,
+  type BatteryStatus,
+} from "./caffeinate-battery.js";
+import {
   anySessionRunsTrigger,
   defaultSnapshotProcesses,
   type SnapshotProcesses,
@@ -10,6 +15,10 @@ import {
   CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS,
   CAFFEINATE_AUTO_DEFAULT_COMMANDS,
   CAFFEINATE_AUTO_POKE_DEBOUNCE_MS,
+  CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS,
+  CAFFEINATE_BATTERY_POLL_MIN_INTERVAL_MS,
+  CAFFEINATE_BATTERY_POLL_TIME_FRACTION,
+  MS_PER_MINUTE,
 } from "./constants.js";
 import type { CaffeinateMode } from "./types.js";
 
@@ -27,6 +36,12 @@ export interface CaffeinateManagerOptions {
   // is enabled, caffeinate only stays active while a recognized program is
   // producing output within the debounce window.
   hasRecentOutput?: (pids: readonly number[], withinMs: number) => boolean;
+  // Injectable battery probe for tests; defaults to a real `pmset -g batt`
+  // read. The battery floor is enforced on an adaptive schedule that mirrors
+  // the activity gate's design: status-driven (a `pmset` read only happens
+  // while a mode wants caffeinate active, and the next read's delay is derived
+  // from the latest estimate).
+  batteryProbe?: BatteryProbe;
 }
 
 interface CaffeinateManagerEvents {
@@ -41,7 +56,7 @@ interface CaffeinateManagerEvents {
 // (the default), caffeinate further requires that a recognized program is
 // producing output; after CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS of silence,
 // caffeinate releases. Emits `change` whenever any broadcastable field
-// (mode/active/commands) moves.
+// (mode/active/commands/batteryThreshold) moves.
 //
 // Automatic detection is event-driven: it never polls on a timer. A `ps`
 // snapshot is taken only in response to an event — a session's foreground
@@ -52,18 +67,52 @@ interface CaffeinateManagerEvents {
 // The activity gate is driven by a trailing-edge timer: output resets it, and
 // when it finally fires (no output for the debounce window), it pokes a
 // re-check.
+//
+// The battery floor is the one piece of polling in this module, and it is
+// adaptive rather than a fixed heartbeat: a `pmset -g batt` read happens only
+// while a mode wants caffeinate active (off/idle `automatic` never reads it),
+// and the delay until the next read is 1/TIME_FRACTION of the interpolated
+// time-to-threshold, so polling tightens as the floor approaches and stays lax
+// far from it (capped at MAX, floored at MIN). macOS pushes no notification at
+// an arbitrary percent, so a bounded polling timer is unavoidable here; the
+// adaptive schedule keeps it as cheap as it can be. While below the floor on
+// battery, the daemon refuses to hold the power assertion (it stops caffeinate
+// without changing the selected mode); plugging in or charging back above the
+// floor resumes normally.
 export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
   private readonly controller: CaffeinateController;
   private readonly store: CaffeinatePreferencesStore;
   private readonly listSessionPids: () => number[];
   private readonly snapshotProcesses: SnapshotProcesses;
   private readonly checkRecentOutput?: (pids: readonly number[], withinMs: number) => boolean;
+  private readonly batteryProbe: BatteryProbe;
   readonly defaultCommands: readonly string[];
 
   private autoActive = false;
   private autoTrigger: string | null = null;
   private pokeTimer: NodeJS.Timeout | null = null;
   private activityGateTimer: NodeJS.Timeout | null = null;
+  // The cached battery-suppression flag: true means the machine is on battery
+  // power at or below the configured threshold, so `recompute` suppresses
+  // caffeinate regardless of what the mode wants.
+  private batteryLow = false;
+  // The most recent battery read, used to choose the next adaptive delay. Null
+  // until the first read completes (and is reset to null after a read failure
+  // so computeBatteryDelay's null branch picks MAX — fail-open retries slowly).
+  private lastBatteryStatus: BatteryStatus | null = null;
+  // Whether performBatteryCheck has resolved at least once. Drives
+  // `needsFirstProbe` in `recompute` independently of lastBatteryStatus: a
+  // daemon that boots with the battery already below the floor never briefly
+  // spawns the power assertion before the first read suppresses it, while a
+  // later failed read (lastBatteryStatus -> null) still fail-opens instead of
+  // re-gating caffeinate off forever.
+  private hasProbedBattery = false;
+  private batteryTimer: NodeJS.Timeout | null = null;
+  // Coalesces concurrent battery checks: callers (the timer, setBatteryThreshold,
+  // pollBatteryNow) all funnel through runBatteryCheck, which returns the same
+  // in-flight promise so they all settle on the same result without piling up
+  // `pmset` calls — the promise-tracking analogue of pollAuto's polling flag.
+  private batteryCheckInFlight: Promise<void> | null = null;
   private polling = false;
   private pollQueued = false;
   private disposed = false;
@@ -76,6 +125,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.snapshotProcesses = options.snapshotProcesses ?? defaultSnapshotProcesses;
     this.defaultCommands = options.defaultCommands ?? CAFFEINATE_AUTO_DEFAULT_COMMANDS;
     this.checkRecentOutput = options.hasRecentOutput;
+    this.batteryProbe = options.batteryProbe ?? defaultBatteryProbe;
 
     // An unexpected death of the caffeinate process flips controller state; pass
     // that through so every tab rebroadcasts the authoritative `active`.
@@ -105,6 +155,10 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
 
   get activityGate(): boolean {
     return this.store.getActivityGate();
+  }
+
+  get batteryThreshold(): number | null {
+    return this.store.getBatteryThreshold();
   }
 
   get activeTrigger(): string | null {
@@ -201,6 +255,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
       this.pokeTimer = null;
     }
     this.clearActivityGateTimer();
+    this.clearBatteryTimer();
     this.controller.dispose();
     this.removeAllListeners();
   }
@@ -215,15 +270,163 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
   }
 
   private recompute(): void {
-    const mode = this.mode;
-    const desired = mode === "on" || (mode === "automatic" && this.autoActive);
+    const wantActive = this.modeWantsActive();
+    const guardApplies = this.supported && this.batteryThreshold !== null;
+    // While the guard is on but we've never read the battery, hold off engaging
+    // until that first read resolves — otherwise a daemon that boots with the
+    // battery already below the floor briefly spawns the power assertion before
+    // the probe suppresses it. Subsequent arms use the cached flag instead.
+    const needsFirstProbe = guardApplies && !this.hasProbedBattery;
+    const desired = wantActive && !(guardApplies && (this.batteryLow || needsFirstProbe));
     this.controller.setActive(desired);
+    if (wantActive && guardApplies) {
+      // Start (or keep) the adaptive battery check armed. The next delay is
+      // derived from the last status, or an immediate probe when there's no
+      // cached reading yet.
+      this.scheduleBatteryCheck(this.lastBatteryStatus);
+    } else {
+      this.clearBatteryTimer();
+    }
+  }
+
+  private modeWantsActive(): boolean {
+    const mode = this.mode;
+    return mode === "on" || (mode === "automatic" && this.autoActive);
   }
 
   private clearActivityGateTimer(): void {
     if (this.activityGateTimer !== null) {
       clearTimeout(this.activityGateTimer);
       this.activityGateTimer = null;
+    }
+  }
+
+  // Force an immediate battery re-check and resolve when it settles. Used by
+  // tests; production code re-checks via the adaptive timer. Awaits an already
+  // in-flight check (so concurrent test calls see the same resolved state)
+  // rather than queueing a second probe.
+  pollBatteryNow(): Promise<void> {
+    return this.runBatteryCheck();
+  }
+
+  // Set the persisted battery floor. `null` disables the guard. Persists
+  // immediately (so every tab stays in lockstep via the broadcast) and re-derives
+  // suppression from a fresh read so the user sees the floor take effect at
+  // once rather than after the adaptive timer's first delay.
+  setBatteryThreshold(percent: number | null): void {
+    if (this.disposed) return;
+    this.store.setBatteryThreshold(percent);
+    this.emit("change");
+    // Clear any pending adaptive check so the next read re-arms with a delay
+    // derived from the new threshold (and a fresh status), not the old one.
+    this.clearBatteryTimer();
+    if (!this.supported || percent === null) {
+      // Guard disabled: clear any stale suppression so it can't keep
+      // caffeinate off after the user turned the floor off.
+      this.batteryLow = false;
+      this.recompute();
+      return;
+    }
+    if (this.modeWantsActive()) {
+      // Probe immediately so an already-low battery stops caffeinate at once
+      // (the adaptive arming would otherwise wait up to MAX_INTERVAL for the
+      // first read, since lastBatteryStatus is stale/null until this resolves).
+      void this.runBatteryCheck();
+    }
+  }
+
+  // Single entry point for every battery probe. Coalesces concurrent callers
+  // onto one in-flight promise so the `pmset` call fires at most once per tick
+  // even if the timer, setBatteryThreshold, and a manual pollBatteryNow all race.
+  private runBatteryCheck(): Promise<void> {
+    if (this.batteryCheckInFlight !== null) return this.batteryCheckInFlight;
+    const promise = this.performBatteryCheck().finally(() => {
+      if (this.batteryCheckInFlight === promise) this.batteryCheckInFlight = null;
+    });
+    this.batteryCheckInFlight = promise;
+    return promise;
+  }
+
+  private async performBatteryCheck(): Promise<void> {
+    if (this.disposed) return;
+    const threshold = this.batteryThreshold;
+    // Nothing to gate on: unsupported, guard disabled, or nothing wanting
+    // active. The last case keeps the design claim that reads happen only while
+    // a mode wants caffeinate active (a probe here would be wasted work and
+    // couldn't change `desired`, since `wantActive` already forces it false).
+    if (!this.supported || threshold === null || !this.modeWantsActive()) {
+      this.clearBatteryTimer();
+      return;
+    }
+    const status = await this.batteryProbe();
+    if (this.disposed) return;
+    this.lastBatteryStatus = status;
+    this.hasProbedBattery = true;
+    // Fail-open on read failure (null): a missing battery or a transient pmset
+    // error cannot take keep-awake away from the user. The scheduler stays
+    // armed via the recompute below so a later successful read can re-impose
+    // the floor.
+    const nextLow = status !== null && status.isOnBattery && status.percent <= threshold;
+    if (nextLow !== this.batteryLow) {
+      this.batteryLow = nextLow;
+      this.emit("change");
+    }
+    this.recompute();
+  }
+
+  private scheduleBatteryCheck(status: BatteryStatus | null): void {
+    if (this.disposed) return;
+    // Coalesce: if a check is already armed, let it run — it reschedules
+    // adaptively from a fresh read when it completes, so re-entry here is a no-op.
+    if (this.batteryTimer !== null) return;
+    if (!this.hasProbedBattery) {
+      // Never probed: fire immediately (coalesced by runBatteryCheck) so the
+      // first arm doesn't wait MAX before applying the floor — a daemon that
+      // boots with the battery already below the threshold suppresses at once.
+      void this.runBatteryCheck();
+      return;
+    }
+    // A null status here means a prior probe failed or found no battery:
+    // computeBatteryDelay maps that to MAX so we retry slowly instead of
+    // re-firing immediately and busy-looping on a persistently-failing read.
+    const delay = this.computeBatteryDelay(status);
+    this.batteryTimer = setTimeout(() => {
+      this.batteryTimer = null;
+      void this.runBatteryCheck();
+    }, delay);
+    this.batteryTimer.unref?.();
+  }
+
+  private computeBatteryDelay(status: BatteryStatus | null): number {
+    const threshold = this.batteryThreshold;
+    if (threshold === null) return CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS;
+    // Already suppressed: poll fast so charging back above the threshold or
+    // plugging in resumes promptly. Bounded by how long the machine stays
+    // below the floor — which should be short (it's about to lose power).
+    if (this.batteryLow) return CAFFEINATE_BATTERY_POLL_MIN_INTERVAL_MS;
+    if (status === null || !status.isOnBattery) return CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS;
+    if (status.minutesToEmpty === null) return CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS;
+    // Half of the interpolated time-to-threshold: the OS estimate (minutes to
+    // 0%) scaled by the charge fraction still above the floor. Halving gives a
+    // 2× buffer against the EWMA lagging real discharge (and the active program
+    // draining faster than the idle minutes the average was computed over), so
+    // a stale-high estimate still catches the crossing in time rather than
+    // sleeping past it. Clamped to [MIN, MAX] below.
+    const remaining = status.percent - threshold;
+    if (remaining <= 0) return CAFFEINATE_BATTERY_POLL_MIN_INTERVAL_MS;
+    const fractionAbove = remaining / status.percent;
+    const interpolatedMs = status.minutesToEmpty * MS_PER_MINUTE * fractionAbove;
+    const scheduledMs = interpolatedMs / CAFFEINATE_BATTERY_POLL_TIME_FRACTION;
+    return Math.max(
+      CAFFEINATE_BATTERY_POLL_MIN_INTERVAL_MS,
+      Math.min(scheduledMs, CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS),
+    );
+  }
+
+  private clearBatteryTimer(): void {
+    if (this.batteryTimer !== null) {
+      clearTimeout(this.batteryTimer);
+      this.batteryTimer = null;
     }
   }
 

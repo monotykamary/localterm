@@ -4,6 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { CaffeinatePreferencesStore } from "../src/caffeinate-preferences-store.js";
+import {
+  CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT,
+  CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT,
+  CAFFEINATE_BATTERY_LOW_WATER_PERCENT_DEFAULT,
+} from "../src/constants.js";
 
 describe("CaffeinatePreferencesStore", () => {
   let dir: string;
@@ -25,6 +30,11 @@ describe("CaffeinatePreferencesStore", () => {
     expect(store.getCommands()).toEqual([]);
   });
 
+  it("defaults the battery threshold to 20% when no file exists", () => {
+    const store = new CaffeinatePreferencesStore(filePath);
+    expect(store.getBatteryThreshold()).toBe(20);
+  });
+
   it("persists mode, activity gate, and commands across reloads", () => {
     const store = new CaffeinatePreferencesStore(filePath);
     store.setMode("on");
@@ -35,6 +45,27 @@ describe("CaffeinatePreferencesStore", () => {
     expect(reloaded.getMode()).toBe("on");
     expect(reloaded.getActivityGate()).toBe(false);
     expect(reloaded.getCommands()).toEqual(["ollama"]);
+  });
+
+  it("persists the battery threshold across reloads, including null", () => {
+    const store = new CaffeinatePreferencesStore(filePath);
+    store.setBatteryThreshold(30);
+    expect(store.getBatteryThreshold()).toBe(30);
+
+    const mid = new CaffeinatePreferencesStore(filePath);
+    expect(mid.getBatteryThreshold()).toBe(30);
+
+    mid.setBatteryThreshold(null);
+    const reloaded = new CaffeinatePreferencesStore(filePath);
+    expect(reloaded.getBatteryThreshold()).toBeNull();
+  });
+
+  it("clamps out-of-range battery thresholds into bounds", () => {
+    const store = new CaffeinatePreferencesStore(filePath);
+    store.setBatteryThreshold(2);
+    expect(store.getBatteryThreshold()).toBe(CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT);
+    store.setBatteryThreshold(99);
+    expect(store.getBatteryThreshold()).toBe(CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT);
   });
 
   it("trims, drops empties, and de-duplicates commands case-insensitively", () => {
@@ -65,5 +96,23 @@ describe("CaffeinatePreferencesStore", () => {
     fs.writeFileSync(filePath, JSON.stringify(v1), "utf8");
     const store = new CaffeinatePreferencesStore(filePath);
     expect(store.getActivityGate()).toBe(true);
+  });
+
+  it("migrates v1 files by defaulting batteryThreshold to the floor default", () => {
+    fs.mkdirSync(dir, { recursive: true });
+    const v1 = { version: 1, mode: "automatic", activityGate: false, commands: [] };
+    fs.writeFileSync(filePath, JSON.stringify(v1), "utf8");
+    const store = new CaffeinatePreferencesStore(filePath);
+    expect(store.getBatteryThreshold()).toBe(CAFFEINATE_BATTERY_LOW_WATER_PERCENT_DEFAULT);
+  });
+
+  it("migrates v2 files by defaulting batteryThreshold to the floor default", () => {
+    fs.mkdirSync(dir, { recursive: true });
+    const v2 = { version: 2, mode: "on", activityGate: true, commands: ["ollama"] };
+    fs.writeFileSync(filePath, JSON.stringify(v2), "utf8");
+    const store = new CaffeinatePreferencesStore(filePath);
+    expect(store.getBatteryThreshold()).toBe(CAFFEINATE_BATTERY_LOW_WATER_PERCENT_DEFAULT);
+    expect(store.getMode()).toBe("on");
+    expect(store.getCommands()).toEqual(["ollama"]);
   });
 });

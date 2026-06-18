@@ -295,6 +295,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const setCaffeinateModeRef = useRef<((mode: CaffeinateMode) => void) | null>(null);
   const setCaffeinateCommandsRef = useRef<((commands: string[]) => void) | null>(null);
   const setCaffeinateActivityGateRef = useRef<((enabled: boolean) => void) | null>(null);
+  const setCaffeinateBatteryThresholdRef = useRef<((percent: number | null) => void) | null>(null);
   const toolbarHoverTimeoutRef = useRef<number | null>(null);
   const isSettingsPopoverOpenRef = useRef(false);
   const isAutomationsOpenRef = useRef(false);
@@ -366,6 +367,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [caffeinateDefaultCommands, setCaffeinateDefaultCommands] = useState<string[]>([]);
   const [caffeinateCommands, setCaffeinateCommands] = useState<string[]>([]);
   const [caffeinateActivityGate, setCaffeinateActivityGate] = useState(true);
+  // Default null = guard off on the client seed; the server's authoritative
+  // threshold (which defaults to 20% on) overwrites this on the first WS frame.
+  const [caffeinateBatteryThreshold, setCaffeinateBatteryThreshold] = useState<number | null>(null);
   const caffeinateActiveTriggerRef = useRef<string | null>(null);
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
   const { summary: diffSummary, setGitDiffSummary } = useGitDiffSummary();
@@ -755,6 +759,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       send({ type: "caffeinate-commands", commands });
     setCaffeinateActivityGateRef.current = (enabled: boolean) =>
       send({ type: "caffeinate-activity-gate", enabled });
+    setCaffeinateBatteryThresholdRef.current = (percent: number | null) =>
+      send({ type: "caffeinate-battery-threshold", percent });
 
     const clearResizeScrollRestore = () => {
       const state = resizeScrollRestoreRef.current;
@@ -1041,6 +1047,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           setCaffeinateDefaultCommands(message.defaultCommands);
           setCaffeinateCommands(message.commands);
           setCaffeinateActivityGate(message.activityGate);
+          setCaffeinateBatteryThreshold(message.batteryThreshold);
           caffeinateActiveTriggerRef.current = message.activeTrigger;
         } else if (message.type === "cwd") {
           setLiveCwd(message.cwd);
@@ -1352,6 +1359,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
   const handleCaffeinateActivityGateChange = useCallback((enabled: boolean) => {
     setCaffeinateActivityGateRef.current?.(enabled);
+  }, []);
+
+  const handleCaffeinateBatteryThresholdChange = useCallback((percent: number | null) => {
+    setCaffeinateBatteryThresholdRef.current?.(percent);
   }, []);
 
   const handleKeepAwakePopoverOpenChange = useCallback((open: boolean) => {
@@ -1993,12 +2004,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                       mode={caffeinateMode}
                       active={caffeinateActive}
                       activityGate={caffeinateActivityGate}
+                      batteryThreshold={caffeinateBatteryThreshold}
                       defaultCommands={caffeinateDefaultCommands}
                       commands={caffeinateCommands}
                       activeTriggerRef={caffeinateActiveTriggerRef}
                       onModeChange={handleCaffeinateModeChange}
                       onCommandsChange={handleCaffeinateCommandsChange}
                       onActivityGateChange={handleCaffeinateActivityGateChange}
+                      onBatteryThresholdChange={handleCaffeinateBatteryThresholdChange}
                       onPopoverOpenChange={handleKeepAwakePopoverOpenChange}
                       onClose={refocusTerminalRef.current ?? undefined}
                     />

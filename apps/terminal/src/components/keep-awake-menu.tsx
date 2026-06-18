@@ -18,12 +18,14 @@ interface KeepAwakeMenuProps {
   mode: CaffeinateMode;
   active: boolean;
   activityGate: boolean;
+  batteryThreshold: number | null;
   defaultCommands: readonly string[];
   commands: readonly string[];
   activeTriggerRef: RefObject<string | null>;
   onModeChange: (mode: CaffeinateMode) => void;
   onCommandsChange: (commands: string[]) => void;
   onActivityGateChange: (enabled: boolean) => void;
+  onBatteryThresholdChange: (percent: number | null) => void;
   onPopoverOpenChange?: (open: boolean) => void;
   onClose?: () => void;
 }
@@ -36,6 +38,25 @@ const MODE_ITEMS: readonly SettingsSelectItem[] = [
   { id: "on", label: "On" },
   { id: "automatic", label: "Automatic" },
 ];
+
+// Battery floor choices. `off` maps to null (guard disabled); the rest are
+// literal percents the daemon refuses to keep awake below while on battery
+// power. Picked to cover the realistic range without an open numeric field.
+const BATTERY_THRESHOLD_ITEMS: readonly SettingsSelectItem[] = [
+  { id: "off", label: "Off" },
+  { id: "10", label: "10%" },
+  { id: "15", label: "15%" },
+  { id: "20", label: "20%" },
+  { id: "30", label: "30%" },
+  { id: "50", label: "50%" },
+];
+const BATTERY_THRESHOLD_VALUE_OFF = "off";
+
+const thresholdToItemId = (percent: number | null): string =>
+  percent === null ? BATTERY_THRESHOLD_VALUE_OFF : String(percent);
+
+const itemIdToThreshold = (id: string | null): number | null =>
+  id === null || id === BATTERY_THRESHOLD_VALUE_OFF ? null : Number(id);
 
 const MODE_DESCRIPTION: Record<CaffeinateMode, string> = {
   off: "Never keep the system awake.",
@@ -55,12 +76,14 @@ export const KeepAwakeMenu = ({
   mode,
   active,
   activityGate,
+  batteryThreshold,
   defaultCommands,
   commands,
   activeTriggerRef,
   onModeChange,
   onCommandsChange,
   onActivityGateChange,
+  onBatteryThresholdChange,
   onPopoverOpenChange,
   onClose,
 }: KeepAwakeMenuProps) => {
@@ -78,6 +101,13 @@ export const KeepAwakeMenu = ({
 
   const handleModeChange = (next: string | null) => {
     if (isCaffeinateMode(next)) onModeChange(next);
+  };
+
+  const handleBatteryThresholdChange = (next: string | null) => {
+    const parsed = itemIdToThreshold(next);
+    if (parsed === null || Number.isFinite(parsed)) {
+      onBatteryThresholdChange(parsed);
+    }
   };
 
   const addDraftCommand = () => {
@@ -174,6 +204,23 @@ export const KeepAwakeMenu = ({
             />
             <p className="text-[11px] leading-snug text-muted-foreground">
               {MODE_DESCRIPTION[mode]}
+            </p>
+          </Field>
+
+          <Separator className="bg-border/40" />
+          <Field orientation="vertical" className="gap-1.5">
+            <FieldLabel className={SECTION_LABEL_CLASSES}>Battery floor</FieldLabel>
+            <SettingsSelect
+              value={thresholdToItemId(batteryThreshold)}
+              items={BATTERY_THRESHOLD_ITEMS}
+              ariaLabel="select battery floor"
+              placeholder="Floor"
+              onValueChange={handleBatteryThresholdChange}
+            />
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              {batteryThreshold === null
+                ? "Never stop on battery."
+                : `Stop keeping awake at or below ${batteryThreshold}% on battery power.`}
             </p>
           </Field>
 

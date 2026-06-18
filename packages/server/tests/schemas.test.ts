@@ -61,6 +61,36 @@ describe("clientToServerMessageSchema", () => {
     ).toBe(false);
   });
 
+  it("accepts a caffeinate-battery-threshold frame with a percent or null", () => {
+    expect(
+      clientToServerMessageSchema.safeParse({
+        type: "caffeinate-battery-threshold",
+        percent: 20,
+      }).success,
+    ).toBe(true);
+    expect(
+      clientToServerMessageSchema.safeParse({
+        type: "caffeinate-battery-threshold",
+        percent: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a caffeinate-battery-threshold frame out of bounds", () => {
+    expect(
+      clientToServerMessageSchema.safeParse({
+        type: "caffeinate-battery-threshold",
+        percent: 4,
+      }).success,
+    ).toBe(false);
+    expect(
+      clientToServerMessageSchema.safeParse({
+        type: "caffeinate-battery-threshold",
+        percent: 51,
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects negative dimensions", () => {
     expect(
       clientToServerMessageSchema.safeParse({ type: "resize", cols: 0, rows: 24 }).success,
@@ -214,6 +244,7 @@ describe("serverToClientMessageSchema", () => {
       active: true,
       mode: "automatic",
       activityGate: true,
+      batteryThreshold: 20,
       defaultCommands: ["claude", "codex"],
       commands: ["ollama"],
       activeTrigger: "claude",
