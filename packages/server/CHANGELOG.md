@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.6.0
+
+### Minor Changes
+
+- 8f76ed3: Add a `.worktreeinclude` editor to the worktree settings panel. The file can now be read and written via `/api/git/worktrees/include-file`, with a UI that shows whether it exists and lets users create or update it.
+
 ## 2.5.1
 
 ### Patch Changes
