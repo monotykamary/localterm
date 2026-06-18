@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.6.2
+
+### Patch Changes
+
+- 8b790ce: Use a muted gray for draft PR state instead of blue so drafts read as inactive, matching GitHub's draft treatment.
+
 ## 2.6.1
 
 ### Patch Changes
