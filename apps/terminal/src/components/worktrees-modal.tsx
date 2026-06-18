@@ -2,6 +2,7 @@ import type {
   GitWorktree,
   GitWorktreeBaseRef,
   GitWorktreeListResponse,
+  WorktreeIncludeFile,
   WorktreeOpenInCommand,
   WorktreeRepoConfig,
 } from "@monotykamary/localterm-server/protocol";
@@ -26,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { WorktreeIncludeFileEditor } from "@/components/worktree-include-file-editor";
 import {
   COMMAND_PALETTE_BACKDROP_CLASSES,
   COMMAND_PALETTE_PANEL_CLASSES,
@@ -36,10 +38,12 @@ import { cn } from "@/lib/utils";
 import {
   fetchGitWorktrees,
   fetchWorktreeConfig,
+  fetchWorktreeIncludeFile,
   launchCommand,
   removeGitWorktree,
   sweepWorktrees,
   updateWorktreeConfig,
+  updateWorktreeIncludeFile,
   type CreateWorktreeOptions,
 } from "@/utils/fetch-git-worktrees";
 
@@ -223,6 +227,8 @@ export const WorktreesModal = ({
   const [refreshCount, setRefreshCount] = useState(0);
   const [config, setConfig] = useState<WorktreeRepoConfig | null>(null);
   const [configError, setConfigError] = useState(false);
+  const [includeFile, setIncludeFile] = useState<WorktreeIncludeFile | null>(null);
+  const [includeFileError, setIncludeFileError] = useState(false);
   const [view, setView] = useState<"list" | "settings">("list");
   const [sweepInFlight, setSweepInFlight] = useState(false);
   const [sweepRemovedCount, setSweepRemovedCount] = useState<number | null>(null);
@@ -255,6 +261,17 @@ export const WorktreesModal = ({
     setConfig(fetched);
   }, [cwd]);
 
+  const refreshIncludeFile = useCallback(async () => {
+    if (!cwd) return;
+    const fetched = await fetchWorktreeIncludeFile(cwd);
+    if (!fetched) {
+      setIncludeFileError(true);
+      return;
+    }
+    setIncludeFileError(false);
+    setIncludeFile(fetched);
+  }, [cwd]);
+
   useEffect(() => {
     if (open) {
       setMounted(true);
@@ -280,7 +297,8 @@ export const WorktreesModal = ({
     }
     void refresh();
     void refreshConfig();
-  }, [open, refresh, refreshConfig, refreshCount]);
+    void refreshIncludeFile();
+  }, [open, refresh, refreshConfig, refreshIncludeFile, refreshCount]);
 
   // Reset everything when the project changes so stale worktrees from another
   // repo never flash in on open.
@@ -291,6 +309,8 @@ export const WorktreesModal = ({
     setRemoveError(null);
     setConfig(null);
     setConfigError(false);
+    setIncludeFile(null);
+    setIncludeFileError(false);
     setView("list");
   }, [cwd]);
 
@@ -551,8 +571,12 @@ export const WorktreesModal = ({
             cwd={cwd}
             config={config}
             configError={configError}
+            includeFile={includeFile}
+            includeFileError={includeFileError}
+            isRepo={isRepo}
             onSaved={async () => {
               await refreshConfig();
+              await refreshIncludeFile();
               setView("list");
             }}
           />
@@ -706,6 +730,9 @@ interface WorktreeSettingsPanelProps {
   cwd: string | null;
   config: WorktreeRepoConfig | null;
   configError: boolean;
+  includeFile: WorktreeIncludeFile | null;
+  includeFileError: boolean;
+  isRepo: boolean;
   onSaved: () => Promise<void>;
 }
 
@@ -713,14 +740,19 @@ const WorktreeSettingsPanel = ({
   cwd,
   config,
   configError,
+  includeFile,
+  includeFileError,
+  isRepo,
   onSaved,
 }: WorktreeSettingsPanelProps) => {
   const [baseRef, setBaseRef] = useState<GitWorktreeBaseRef>("fresh");
   const [setupScript, setSetupScript] = useState("");
   const [openInDrafts, setOpenInDrafts] = useState<WorktreeOpenInCommand[]>([]);
+  const [includeContent, setIncludeContent] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
+  const [includeContentInitialized, setIncludeContentInitialized] = useState(false);
 
   // Seed the draft from the loaded config once (and re-seed if the repo changes
   // before the user has edited anything).
@@ -731,6 +763,12 @@ const WorktreeSettingsPanel = ({
     setOpenInDrafts(config.openInCommands.map((entry) => ({ ...entry })));
     setInitialized(true);
   }, [config, initialized]);
+
+  useEffect(() => {
+    if (!includeFile || includeContentInitialized) return;
+    setIncludeContent(includeFile.content);
+    setIncludeContentInitialized(true);
+  }, [includeFile, includeContentInitialized]);
 
   if (configError) {
     return (
@@ -770,17 +808,25 @@ const WorktreeSettingsPanel = ({
         command: entry.command.trim(),
       }))
       .filter((entry) => entry.label && entry.command);
-    const updated = await updateWorktreeConfig(cwd, {
-      baseRef,
-      setupScript,
-      openInCommands: cleaned,
-    });
+    const shouldUpdateIncludeFile =
+      isRepo && (includeFile !== null || includeContent.trim() !== "");
+    const [updatedConfig, updatedIncludeFile] = await Promise.all([
+      updateWorktreeConfig(cwd, {
+        baseRef,
+        setupScript,
+        openInCommands: cleaned,
+      }),
+      shouldUpdateIncludeFile
+        ? updateWorktreeIncludeFile(cwd, includeContent)
+        : Promise.resolve(includeFile),
+    ]);
     setIsSaving(false);
-    if (!updated) {
+    if (!updatedConfig || (shouldUpdateIncludeFile && !updatedIncludeFile)) {
       setSaveError("couldn't save settings");
       return;
     }
     setInitialized(false);
+    setIncludeContentInitialized(false);
     await onSaved();
   };
 
@@ -825,6 +871,38 @@ const WorktreeSettingsPanel = ({
             installs, and db migration run visibly in the right shell.
           </p>
         </div>
+
+        {isRepo ? (
+          includeFileError ? (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-foreground">.worktreeinclude</span>
+              <div className="flex items-center gap-1.5 text-xs text-red-400">
+                <AlertTriangle className="size-3.5" aria-hidden="true" />
+                Couldn't load .worktreeinclude from the localterm daemon.
+              </div>
+            </div>
+          ) : includeFile ? (
+            <WorktreeIncludeFileEditor
+              includeFile={includeFile}
+              value={includeContent}
+              onChange={setIncludeContent}
+            />
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-foreground">.worktreeinclude</span>
+              <div className="flex h-20 items-center justify-center rounded border border-dashed border-border/60">
+                <Spinner className="size-4" aria-label="loading .worktreeinclude" />
+              </div>
+            </div>
+          )
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-foreground">.worktreeinclude</span>
+            <p className="text-[10px] text-muted-foreground">
+              Only available inside a git repository.
+            </p>
+          </div>
+        )}
 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">

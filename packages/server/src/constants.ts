@@ -235,6 +235,7 @@ export const MAX_WORKTREE_OPEN_IN_ID_LENGTH = 64;
 // worktree into each fresh worktree so a new checkout is immediately usable
 // (.env, config/secrets.json, …). Tracked files are never copied.
 export const WORKTREEINCLUDE_FILENAME = ".worktreeinclude";
+export const MAX_WORKTREEINCLUDE_FILE_BYTES = 64 * 1024;
 export const MAX_WORKTREEINCLUDE_FILES = 500;
 export const MAX_WORKTREEINCLUDE_TOTAL_BYTES = 50 * 1024 * 1024;
 // Sweep removes stale, clean auto-created worktrees so the shared

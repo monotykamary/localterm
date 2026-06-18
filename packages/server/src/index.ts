@@ -75,12 +75,17 @@ import {
   resetAutomationInputSchema,
   updateAutomationInputSchema,
   updateWorktreeConfigInputSchema,
+  worktreeIncludeFileInputSchema,
 } from "./schemas.js";
 import { Session } from "./session.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
 import { SessionRegistry } from "./session-registry.js";
 import { resolveStaticAsset } from "./static-resolver.js";
 import { sweepStaleWorktrees } from "./utils/worktree-sweep.js";
+import {
+  readWorktreeIncludeFile,
+  writeWorktreeIncludeFile,
+} from "./utils/worktree-include-file.js";
 import { WorktreeConfigStore } from "./worktree-config-store.js";
 import {
   compileSchedule,
@@ -640,6 +645,28 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const parsed = updateWorktreeConfigInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
     return context.json(await worktreeConfigStore.update(cwd, parsed.data));
+  });
+
+  // Repo-root `.worktreeinclude` file: a gitignore-syntax allowlist of gitignored
+  // files copied from the main worktree into each fresh worktree. Exposed so the
+  // UI can show the current contents (or an empty editor when none exists) and
+  // let the user create or update it.
+  api.get("/git/worktrees/include-file", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    const file = await readWorktreeIncludeFile(cwd);
+    if (!file) return context.json({ error: "not_a_git_repo" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json(file);
+  });
+
+  api.put("/git/worktrees/include-file", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    const parsed = worktreeIncludeFileInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const file = await writeWorktreeIncludeFile(cwd, parsed.data.content);
+    if (!file) return context.json({ error: "not_a_git_repo" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json(file);
   });
 
   // Remove stale, clean, auto-created worktrees older than the sweep threshold.

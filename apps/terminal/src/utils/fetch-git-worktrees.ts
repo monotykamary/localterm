@@ -1,16 +1,19 @@
 import {
   gitWorktreeListResponseSchema,
   gitWorktreeResultSchema,
+  worktreeIncludeFileSchema,
   worktreeRepoConfigSchema,
   worktreeSweepResultSchema,
   type GitWorktreeBaseRef,
   type GitWorktreeListResponse,
   type GitWorktreeResult,
+  type WorktreeIncludeFile,
   type WorktreeRepoConfig,
 } from "@monotykamary/localterm-server/protocol";
 
 const GIT_WORKTREES_ENDPOINT = "/api/git/worktrees";
 const GIT_WORKTREES_CONFIG_ENDPOINT = "/api/git/worktrees/config";
+const GIT_WORKTREES_INCLUDE_FILE_ENDPOINT = "/api/git/worktrees/include-file";
 const GIT_WORKTREES_SWEEP_ENDPOINT = "/api/git/worktrees/sweep";
 const LAUNCH_ENDPOINT = "/api/launch";
 
@@ -131,6 +134,41 @@ export const updateWorktreeConfig = async (
     });
     if (!response.ok) return null;
     const parsed = worktreeRepoConfigSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+};
+
+// Read the repo's `.worktreeinclude` file. Returns null when the daemon is
+// unreachable or the cwd is not inside a git repository.
+export const fetchWorktreeIncludeFile = async (
+  cwd: string,
+): Promise<WorktreeIncludeFile | null> => {
+  try {
+    const response = await fetch(buildEndpointUrl(GIT_WORKTREES_INCLUDE_FILE_ENDPOINT, { cwd }));
+    if (!response.ok) return null;
+    const parsed = worktreeIncludeFileSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+};
+
+// Write the repo's `.worktreeinclude` file. Passing empty content deletes it.
+// Returns null when the daemon is unreachable or the cwd is not a git repo.
+export const updateWorktreeIncludeFile = async (
+  cwd: string,
+  content: string,
+): Promise<WorktreeIncludeFile | null> => {
+  try {
+    const response = await fetch(buildEndpointUrl(GIT_WORKTREES_INCLUDE_FILE_ENDPOINT, { cwd }), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+    if (!response.ok) return null;
+    const parsed = worktreeIncludeFileSchema.safeParse(await response.json());
     return parsed.success ? parsed.data : null;
   } catch {
     return null;

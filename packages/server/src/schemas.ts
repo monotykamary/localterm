@@ -21,6 +21,7 @@ import {
   MAX_OUTPUT_BYTES,
   MAX_ROWS,
   MAX_TITLE_LENGTH,
+  MAX_WORKTREEINCLUDE_FILE_BYTES,
   MAX_WORKTREE_OPEN_IN_COMMANDS,
   MAX_WORKTREE_OPEN_IN_COMMAND_LENGTH,
   MAX_WORKTREE_OPEN_IN_ID_LENGTH,
@@ -405,6 +406,25 @@ export const updateWorktreeConfigInputSchema = z
       .max(MAX_WORKTREE_OPEN_IN_COMMANDS)
       .optional(),
     baseRef: gitWorktreeBaseRefSchema.optional(),
+  })
+  .strict();
+
+// Wire shape for GET /api/git/worktrees/include-file: the content of the repo's
+// `.worktreeinclude` file (gitignore-syntax), plus whether it currently exists.
+// The path is always the constant filename; included so the UI can label it
+// without hard-coding the name.
+export const worktreeIncludeFileSchema = z
+  .object({
+    exists: z.boolean(),
+    content: z.string().max(MAX_WORKTREEINCLUDE_FILE_BYTES),
+    path: z.string().min(1),
+  })
+  .strict();
+
+// Body for PUT /api/git/worktrees/include-file. Empty string removes the file.
+export const worktreeIncludeFileInputSchema = z
+  .object({
+    content: z.string().max(MAX_WORKTREEINCLUDE_FILE_BYTES),
   })
   .strict();
 

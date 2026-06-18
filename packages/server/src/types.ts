@@ -39,6 +39,8 @@ import type {
   worktreeRepoConfigFileSchema,
   worktreeRepoConfigSchema,
   updateWorktreeConfigInputSchema,
+  worktreeIncludeFileInputSchema,
+  worktreeIncludeFileSchema,
   worktreeSweepResultSchema,
   launchInputSchema,
   resetAutomationInputSchema,
@@ -104,6 +106,8 @@ export type WorktreeOpenInCommand = z.infer<typeof worktreeOpenInCommandSchema>;
 export type WorktreeRepoConfigFile = z.infer<typeof worktreeRepoConfigFileSchema>;
 export type WorktreeRepoConfig = z.infer<typeof worktreeRepoConfigSchema>;
 export type UpdateWorktreeConfigInput = z.infer<typeof updateWorktreeConfigInputSchema>;
+export type WorktreeIncludeFile = z.infer<typeof worktreeIncludeFileSchema>;
+export type WorktreeIncludeFileInput = z.infer<typeof worktreeIncludeFileInputSchema>;
 export type WorktreeSweepResult = z.infer<typeof worktreeSweepResultSchema>;
 export type LaunchInput = z.infer<typeof launchInputSchema>;
 export type GitDiffSummary = z.infer<typeof gitDiffSummarySchema>;
