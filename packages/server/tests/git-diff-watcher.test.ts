@@ -71,6 +71,16 @@ describe("classifyGitChanges", () => {
     expect(classifyGitChanges(base, next)).toEqual(["git-branch-change", "git-commit"]);
   });
 
+  it("does not classify a newly created branch ref as git-commit", () => {
+    const next = addRef(base, "heads/feature", sha(1));
+    expect(classifyGitChanges(base, next)).toEqual(["git-branch-change"]);
+  });
+
+  it("does not classify a deleted branch ref as git-commit", () => {
+    const withFeature = addRef(base, "heads/feature", sha(1));
+    expect(classifyGitChanges(withFeature, base)).toEqual(["git-branch-change"]);
+  });
+
   it("classifies a HEAD change as git-checkout", () => {
     const next = setHead(base, sha(99));
     expect(classifyGitChanges(base, next)).toEqual(["git-head-change", "git-checkout"]);

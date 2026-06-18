@@ -63,20 +63,20 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
     operation-level events are best-effort guesses based on which ref namespace
     moved and which git internal files were present during the change.
 
-    | event               | fires when                                                        |
-    | ------------------- | ----------------------------------------------------------------- |
-    | `git-head-change`   | `.git/HEAD` changes (checkout, reset, merge into detached HEAD)   |
-    | `git-branch-change` | a local branch ref moves (commit, merge, pull, reset)             |
-    | `git-tag-change`    | a tag is created, updated, or deleted                             |
-    | `git-remote-change` | remote-tracking refs change (fetch, pull)                         |
-    | `git-stash-change`  | the stash ref changes                                             |
-    | `git-commit`        | a local branch advances with no merge/rebase/reset state detected |
-    | `git-checkout`      | HEAD changes while no branch ref moves                            |
-    | `git-reset`         | HEAD or a branch ref moves and `ORIG_HEAD` appears                |
-    | `git-merge`         | a branch ref moves while `MERGE_HEAD` was present                 |
-    | `git-rebase`        | a branch ref moves while a rebase directory was present           |
-    | `git-cherry-pick`   | a branch ref moves while `CHERRY_PICK_HEAD` was present           |
-    | `git-fetch`         | only remote-tracking refs changed                                 |
+    | event               | fires when                                                                                  |
+    | ------------------- | ------------------------------------------------------------------------------------------- |
+    | `git-head-change`   | `.git/HEAD` changes (checkout, reset, merge into detached HEAD)                             |
+    | `git-branch-change` | a local branch ref is created, deleted, or moves (commit, merge, pull, reset, worktree add) |
+    | `git-tag-change`    | a tag is created, updated, or deleted                                                       |
+    | `git-remote-change` | remote-tracking refs change (fetch, pull)                                                   |
+    | `git-stash-change`  | the stash ref changes                                                                       |
+    | `git-commit`        | an existing local branch ref advances with no merge/rebase/reset state detected             |
+    | `git-checkout`      | HEAD changes while no branch ref moves                                                      |
+    | `git-reset`         | HEAD or a branch ref moves and `ORIG_HEAD` appears                                          |
+    | `git-merge`         | a branch ref moves while `MERGE_HEAD` was present                                           |
+    | `git-rebase`        | a branch ref moves while a rebase directory was present                                     |
+    | `git-cherry-pick`   | a branch ref moves while `CHERRY_PICK_HEAD` was present                                     |
+    | `git-fetch`         | only remote-tracking refs changed                                                           |
 
     | `git-stash` | the stash ref changed |
     | `git-tag` | a tag ref changed |

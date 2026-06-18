@@ -140,6 +140,9 @@ export const buildGitSnapshot = (gitDir: string): GitSnapshot | null => {
 interface GitChanges {
   head: boolean;
   branch: boolean;
+  // Existing heads/ ref changed SHA; unlike `branch` this excludes created/deleted
+  // refs (worktree add -b, branch -d), so it gates op-level classification.
+  branchAdvanced: boolean;
   tag: boolean;
   remote: boolean;
   stash: boolean;
@@ -163,12 +166,21 @@ const computeGitChanges = (previous: GitSnapshot, current: GitSnapshot): GitChan
   };
 
   const refChanged = (name: string): boolean => previous.refs.get(name) !== current.refs.get(name);
+  const existingRefAdvanced = (prefix: string): boolean => {
+    for (const [key, previousValue] of previous.refs) {
+      if (!key.startsWith(prefix)) continue;
+      const currentValue = current.refs.get(key);
+      if (currentValue !== undefined && currentValue !== previousValue) return true;
+    }
+    return false;
+  };
   const specialChanged = (key: keyof GitSpecialSnapshot): boolean =>
     previous.special[key] !== current.special[key];
 
   return {
     head: previous.head !== current.head,
     branch: namespaceChanged("heads/"),
+    branchAdvanced: existingRefAdvanced("heads/"),
     tag: namespaceChanged("tags/"),
     remote: namespaceChanged("remotes/"),
     stash: refChanged("stash"),
@@ -200,7 +212,7 @@ export const classifyGitChanges = (
     previous.special.rebaseMergeExists ||
     previous.special.rebaseApplyExists;
 
-  if (changes.branch) {
+  if (changes.branchAdvanced) {
     if (previous.special.mergeHead) events.push("git-merge");
     else if (previous.special.cherryPickHead) events.push("git-cherry-pick");
     else if (previous.special.rebaseMergeExists || previous.special.rebaseApplyExists)
