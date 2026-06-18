@@ -1,5 +1,16 @@
 # localterm
 
+## 2.5.0
+
+### Minor Changes
+
+- 2a0858a: Reflect PR draft and merge-conflict states with Lucide icons in the toolbar and diff viewer
+
+### Patch Changes
+
+- Updated dependencies [2a0858a]
+  - @monotykamary/localterm-server@2.5.0
+
 ## 2.4.1
 
 ### Patch Changes
