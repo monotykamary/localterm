@@ -1,5 +1,20 @@
 # localterm-server
 
+## 2.4.0
+
+### Minor Changes
+
+- Add a battery floor guard to keep-awake: stop caffeinate when the machine is
+  on battery power at or below a configurable percent (defaults to 20%), without
+  changing the selected mode. The floor is discharge-only (never applies on AC)
+  and enforced by adapting-polling `pmset -g batt` only while a mode wants
+  caffeinate active — the next delay is 1/2 of the interpolated time-to-threshold,
+  clamped to [5s, 15min]. Add a "Battery floor" selector to the keep-awake
+  popover (Off / 10% / 15% / 20% / 30% / 50%); persist the choice to the
+  caffeinate preferences file (v2 -> v3 migration defaults existing installs to
+  20%). Fail-open on a missing battery or a transient pmset read, with a
+  MAX-interval retry so the guard self-heals.
+
 ## 2.3.0
 
 ### Minor Changes
