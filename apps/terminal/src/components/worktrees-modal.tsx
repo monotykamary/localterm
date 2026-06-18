@@ -597,7 +597,7 @@ export const WorktreesModal = ({
                       void handlePrCreate();
                     }
                   }}
-                  placeholder="Pull request number (e.g. 1234)"
+                  placeholder="Open PR #1234 as a worktree"
                   inputMode="numeric"
                   autoFocus
                   className="h-6 flex-1 text-xs"
