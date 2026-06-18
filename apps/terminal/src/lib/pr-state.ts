@@ -20,7 +20,7 @@ export const PR_DISPLAY_STATE_LABELS: Record<PrDisplayState, string> = {
 
 // GitHub-flavored PR-state colors, shared by the toolbar PR indicator (compact
 // icon, uses `text`) and the diff viewer's PR badge (chip, uses `badge`/`hover`):
-// open = green, draft = blue, conflicting = amber, closed = red, merged = violet.
+// open = green, draft = gray, conflicting = amber, closed = red, merged = violet.
 export const PR_STATE_STYLES: Record<
   PrDisplayState,
   { text: string; badge: string; hover: string }
@@ -31,9 +31,9 @@ export const PR_STATE_STYLES: Record<
     hover: "hover:bg-emerald-500/25 hover:text-emerald-200",
   },
   draft: {
-    text: "text-blue-400",
-    badge: "border-blue-400/50 bg-blue-500/15 text-blue-300",
-    hover: "hover:bg-blue-500/25 hover:text-blue-200",
+    text: "text-slate-400",
+    badge: "border-slate-400/50 bg-slate-500/15 text-slate-300",
+    hover: "hover:bg-slate-500/25 hover:text-slate-200",
   },
   conflicting: {
     text: "text-amber-400",
