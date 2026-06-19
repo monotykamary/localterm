@@ -129,6 +129,10 @@ import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
 import { isWorktreesCreateShortcut } from "@/utils/is-worktrees-create-shortcut";
 import { isWorktreesShortcut } from "@/utils/is-worktrees-shortcut";
+import {
+  INITIAL_COMMAND_QUERY_PARAM,
+  removeInitialCommandQueryParam,
+} from "@/utils/remove-initial-command-query-param";
 import { removeRunQueryParam, RUN_QUERY_PARAM } from "@/utils/remove-run-query-param";
 import {
   loadStoredTerminalCursorBlink,
@@ -208,7 +212,6 @@ const SEARCH_DECORATION_OPTIONS = {
 };
 
 const CWD_QUERY_PARAM = "cwd";
-const INITIAL_COMMAND_QUERY_PARAM = "cmd";
 
 const buildWebSocketUrl = (cwdOverride?: string | null): string => {
   const url = new URL("/ws", window.location.href);
@@ -1061,6 +1064,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           setLiveCwd(message.cwd);
           applyIncomingTitle(message.title);
           removeRunQueryParam();
+          removeInitialCommandQueryParam();
         } else if (message.type === "automations") {
           setAutomations(message.automations);
         } else if (message.type === "caffeinate") {
