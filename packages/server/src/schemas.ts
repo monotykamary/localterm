@@ -261,6 +261,10 @@ export const gitBranchPrSchema = z
     state: gitBranchPrStateSchema,
     isDraft: z.boolean(),
     mergeable: gitBranchPrMergeableSchema,
+    // ISO 8601 timestamp from GitHub's `merged_at` (null for open/closed PRs).
+    // Drives the client's merged-PR overlay TTL: a merged PR stops surfacing in
+    // the toolbar/diff-viewer once it's older than the TTL window.
+    mergedAt: z.string().datetime().nullable(),
   })
   .strict();
 

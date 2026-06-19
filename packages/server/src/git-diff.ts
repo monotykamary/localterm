@@ -795,6 +795,7 @@ interface PrApiData {
   mergeable: GitBranchPrMergeable;
   headOwner: string | null;
   baseRepoFullName: string | null;
+  mergedAt: string | null;
 }
 
 // ParsedPr is the wire type + the internal owner/repo hints. baseRef (a wire
@@ -870,6 +871,7 @@ const defaultPrFetcher: PrFetcher = {
           mergeable: state === "open" ? (mergeableByNumber.get(pr.number) ?? "unknown") : "unknown",
           headOwner: pr.head?.repo?.owner?.login ?? null,
           baseRepoFullName: pr.base?.repo?.full_name ?? null,
+          mergedAt: pr.merged_at ?? null,
         };
       });
     } catch {
@@ -922,6 +924,7 @@ const toWirePr = (pr: ParsedPr): GitBranchPr => ({
   state: pr.state,
   isDraft: pr.isDraft,
   mergeable: pr.mergeable,
+  mergedAt: pr.mergedAt,
 });
 
 // detectPr returns the full ParsedPr (headOwner + baseRepoFullName retained)
@@ -964,6 +967,7 @@ const detectPr = async (cwd: string): Promise<ParsedPr | null> => {
         baseRef: (await resolvePrBaseRef(cwd, chosenApi, remotes))?.ref ?? null,
         headOwner: chosenApi.headOwner,
         baseRepoFullName: chosenApi.baseRepoFullName,
+        mergedAt: chosenApi.mergedAt,
       }
     : null;
   writePrCache(cwd, currentBranch, chosen);

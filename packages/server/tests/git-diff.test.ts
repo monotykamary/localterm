@@ -560,6 +560,7 @@ describe("branch comparison mode", () => {
                 mergeable: "mergeable" as const,
                 headOwner: "me",
                 baseRepoFullName: "them/repo",
+                mergedAt: null,
               },
             ];
           }
@@ -580,6 +581,7 @@ describe("branch comparison mode", () => {
           state: "open",
           isDraft: false,
           mergeable: "mergeable",
+          mergedAt: null,
         });
         expect(detected).not.toHaveProperty("headOwner");
         expect(detected).not.toHaveProperty("baseRepoFullName");
@@ -658,6 +660,7 @@ describe("fork PR base resolution", () => {
               mergeable: "mergeable" as const,
               headOwner: "me",
               baseRepoFullName: "them/repo",
+              mergedAt: null,
             },
           ];
         }
@@ -742,6 +745,7 @@ describe("fork PR base resolution", () => {
                   mergeable: "mergeable" as const,
                   headOwner: "me",
                   baseRepoFullName: "me/repo",
+                  mergedAt: null,
                 },
               ]
             : [],
@@ -796,6 +800,7 @@ describe("fork PR base resolution", () => {
                   mergeable: "mergeable" as const,
                   headOwner: "me",
                   baseRepoFullName: "them/repo",
+                  mergedAt: null,
                 },
               ]
             : [],
@@ -845,6 +850,7 @@ describe("fork PR base resolution", () => {
                   mergeable: "mergeable" as const,
                   headOwner: "me",
                   baseRepoFullName: "them/repo",
+                  mergedAt: null,
                 },
               ]
             : [],

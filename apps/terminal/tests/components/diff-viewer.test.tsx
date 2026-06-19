@@ -87,6 +87,7 @@ const BRANCH_INFO: GitBranchInfo = {
     state: "open",
     isDraft: false,
     mergeable: "mergeable",
+    mergedAt: null,
   },
 };
 

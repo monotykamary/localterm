@@ -399,8 +399,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const { branchInfo, refresh: refreshBranchInfo } = useGitBranchInfo(liveCwd);
   const branchPr = branchInfo?.pr ?? null;
   const branchPrDisplayState = useMemo(
-    () => (branchPr ? resolvePrDisplayState(branchPr) : null),
-    [branchPr],
+    () => (branchPr ? resolvePrDisplayState(branchPr, branchInfo?.currentBranch ?? null) : null),
+    [branchPr, branchInfo?.currentBranch],
   );
   const BranchPrIcon = useMemo(
     () => (branchPrDisplayState ? PR_STATE_ICONS[branchPrDisplayState] : null),
@@ -408,8 +408,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   );
   // Either indicator (working-changes count or PR) keeps the toolbar "peeking":
   // the indicator stays visible while the action buttons collapse behind it and
-  // expand on hover.
-  const hasToolbarIndicator = hasDiff || branchPr !== null;
+  // expand on hover. A stale merged PR (null display state) doesn't count.
+  const hasToolbarIndicator = hasDiff || branchPrDisplayState !== null;
 
   // A `git checkout` keeps the same cwd, so the cwd-keyed lease wouldn't notice.
   // The ambient summary carries the live branch; when it diverges from the branch
@@ -2062,7 +2062,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                   </Button>
                 </div>
               </div>
-              {(hasDiff && diffSummary !== null) || branchPr ? (
+              {(hasDiff && diffSummary !== null) || branchPrDisplayState ? (
                 <div className="flex items-center">
                   {hasDiff && diffSummary !== null ? (
                     <button

@@ -7,6 +7,8 @@ import {
   GitPullRequestDraft,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { MERGED_PR_OVERLAY_TTL_MS } from "@/lib/constants";
+import { isBaseBranch } from "@/utils/is-base-branch";
 
 export type PrDisplayState = "open" | "draft" | "conflicting" | "closed" | "merged";
 
@@ -62,9 +64,26 @@ export const PR_STATE_ICONS: Record<PrDisplayState, LucideIcon> = {
 
 // Map a PR's wire state (open/closed/merged), draft flag, and mergeability to a
 // single display state that drives both its icon and color. Conflicts outrank
-// drafts: a conflicted draft PR still surfaces as conflicted.
-export const resolvePrDisplayState = (pr: GitBranchPr): PrDisplayState => {
-  if (pr.state === "merged") return "merged";
+// drafts: a conflicted draft PR still surfaces as conflicted. Returns null to
+// hide the PR from the toolbar/diff-viewer only when it's a merged PR that is
+// older than MERGED_PR_OVERLAY_TTL_MS AND the current branch is a base branch
+// (main, staging, production, …) — a stale merged PR on a base branch is noise
+// (e.g. a main→production reverse-merge lingering on main), while the same PR
+// on a feature branch stays visible since merged-PR context remains useful there.
+export const resolvePrDisplayState = (
+  pr: GitBranchPr,
+  currentBranch: string | null,
+): PrDisplayState | null => {
+  if (pr.state === "merged") {
+    if (
+      isBaseBranch(currentBranch) &&
+      pr.mergedAt &&
+      Date.now() - Date.parse(pr.mergedAt) > MERGED_PR_OVERLAY_TTL_MS
+    ) {
+      return null;
+    }
+    return "merged";
+  }
   if (pr.state === "closed") return "closed";
   if (pr.mergeable === "conflicting") return "conflicting";
   if (pr.isDraft) return "draft";

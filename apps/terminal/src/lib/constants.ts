@@ -28,6 +28,14 @@ export const RECONNECT_FAST_POLL_INTERVAL_MS = 250;
 export const RECONNECT_FAST_POLL_DURATION_MS = 5000;
 export const RECONNECT_POLL_INTERVAL_MS = 5000;
 export const FAVICON_RUNNING_DEBOUNCE_MS = 250;
+// How long a merged PR stays surfaced in the toolbar indicator and diff-viewer
+// branch-mode auto-open. Past this, the PR is considered stale noise (e.g. a
+// main→production reverse-merge lingering on main) and the overlay hides it.
+export const MERGED_PR_OVERLAY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Branches where a stale merged PR is noise (a merged PR lingering on the base
+// branch — e.g. a main→production reverse-merge — stops surfacing after the
+// TTL above). Feature branches keep their merged PR indicator indefinitely.
+export const BASE_BRANCHES = ["main", "master", "dev", "develop", "staging", "production"] as const;
 export const FAVICON_READY_DEBOUNCE_MS = 750;
 export const FAVICON_DEAD_OPACITY = 0.35;
 

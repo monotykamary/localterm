@@ -1025,8 +1025,17 @@ const FileDiffPane = ({
 // "This branch has a GitHub PR" chip — color-coded by state and set apart from
 // the add/delete greens and reds so a detected PR is obvious at a glance. Links
 // to the PR when gh gave us a URL.
-const PrBadge = ({ pr, hideTitle }: { pr: GitBranchPr; hideTitle: boolean }) => {
-  const displayState = resolvePrDisplayState(pr);
+const PrBadge = ({
+  pr,
+  currentBranch,
+  hideTitle,
+}: {
+  pr: GitBranchPr;
+  currentBranch: string | null;
+  hideTitle: boolean;
+}) => {
+  const displayState = resolvePrDisplayState(pr, currentBranch);
+  if (!displayState) return null;
   const PrIcon = PR_STATE_ICONS[displayState];
   const stateLabel = PR_DISPLAY_STATE_LABELS[displayState];
   const style = PR_STATE_STYLES[displayState];
@@ -1100,7 +1109,17 @@ export const DiffViewer = ({
   const [baseOverride, setBaseOverride] = useState<string | null>(null);
   const [refreshCount, setRefreshCount] = useState(0);
 
-  const compareMode: GitDiffMode = userPickedMode ?? (branchInfo?.pr ? "branch" : "working");
+  // Effective PR for this open: the detected branch PR, unless it's a stale
+  // merged PR (older than the overlay TTL) — in which case it's treated as no
+  // PR, so branch-mode auto-open, the base-picker default, and the header chip
+  // all drop it instead of surfacing merge noise.
+  const detectedPr = branchInfo?.pr ?? null;
+  const pr =
+    detectedPr && resolvePrDisplayState(detectedPr, branchInfo?.currentBranch ?? null)
+      ? detectedPr
+      : null;
+
+  const compareMode: GitDiffMode = userPickedMode ?? (pr ? "branch" : "working");
   // Base ref shown in the picker. Prefers the PR's resolved base (a fork PR's
   // upstream ref, a same-repo PR's origin ref) over the repo default so the
   // picker matches the comparison the server actually runs. The DIFF fetch,
@@ -1109,7 +1128,7 @@ export const DiffViewer = ({
   // diff never waits on the (slower, gh-backed) branch metadata.
   const displayBase =
     compareMode === "branch"
-      ? (baseOverride ?? branchInfo?.pr?.baseRef ?? branchInfo?.defaultBase ?? null)
+      ? (baseOverride ?? pr?.baseRef ?? branchInfo?.defaultBase ?? null)
       : null;
   // Pending review annotations survive close/reopen until they are sent.
   const [annotations, setAnnotations] = useState<Record<string, DiffAnnotation>>({});
@@ -1620,7 +1639,6 @@ export const DiffViewer = ({
   }, [onSendToTerminal, annotationList, onClose]);
 
   const isBranchMode = compareMode === "branch";
-  const pr = branchInfo?.pr ?? null;
   const headerConfigIndexRef = useRef(0);
 
   const headerLayout = useMemo(() => {
@@ -1741,7 +1759,13 @@ export const DiffViewer = ({
               </select>
             </div>
           ) : null}
-          {pr ? <PrBadge pr={pr} hideTitle={!headerLayout.prShowTitle} /> : null}
+          {pr ? (
+            <PrBadge
+              pr={pr}
+              currentBranch={branchInfo?.currentBranch ?? null}
+              hideTitle={!headerLayout.prShowTitle}
+            />
+          ) : null}
           <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
             <span className={ADDITIONS_CLASSES}>+{totals.additions.toLocaleString()}</span>{" "}
             <span className={DELETIONS_CLASSES}>−{totals.deletions.toLocaleString()}</span>
