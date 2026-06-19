@@ -113,7 +113,7 @@ interface AutomationFormState {
 const DEFAULT_LIMIT_MAX = 20;
 const SECTION_LABEL_CLASSES =
   "text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase";
-const FORM_INPUT_CLASSES = "h-7 px-2 text-xs md:text-xs";
+const FORM_INPUT_CLASSES = "h-7 px-2 text-xs";
 
 const runTimestamp = (run: AutomationRunRecord): number =>
   run.finishedAt ?? run.startedAt ?? run.scheduledFor;
