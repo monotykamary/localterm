@@ -62,6 +62,10 @@ export const RECENT_RUNS_LIMIT = 50;
 
 export const WORKTREES_MODAL_CLOSE_TRANSITION_MS = 150;
 export const WORKTREES_LIST_ROW_HEIGHT_PX = 56;
+// Min height for the error block (stacked Alert + message + Retry button needs
+// ~84px of vertical room). Preserves the original min-h-32 (8rem) comfort.
+export const WORKTREES_MESSAGE_BLOCK_MIN_HEIGHT_PX = 128;
+export const WORKTREES_MODAL_MAX_HEIGHT_REM = 40;
 
 export const TOOLBAR_HIDE_DELAY_MS = 200;
 export const TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS = 1500;

@@ -33,7 +33,12 @@ import {
   COMMAND_PALETTE_PANEL_CLASSES,
   MODAL_PANEL_CLASSES,
 } from "@/lib/animation-classes";
-import { WORKTREES_LIST_ROW_HEIGHT_PX, WORKTREES_MODAL_CLOSE_TRANSITION_MS } from "@/lib/constants";
+import {
+  WORKTREES_LIST_ROW_HEIGHT_PX,
+  WORKTREES_MESSAGE_BLOCK_MIN_HEIGHT_PX,
+  WORKTREES_MODAL_CLOSE_TRANSITION_MS,
+  WORKTREES_MODAL_MAX_HEIGHT_REM,
+} from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import {
   fetchGitWorktrees,
@@ -431,6 +436,9 @@ export const WorktreesModal = ({
   if (!mounted) return null;
 
   const isVisible = open && settled;
+  const listHeightPx = hasError
+    ? WORKTREES_MESSAGE_BLOCK_MIN_HEIGHT_PX
+    : Math.max(WORKTREES_LIST_ROW_HEIGHT_PX, virtualizer.getTotalSize());
   const actionError = createError ?? removeError;
   const sweepMessage =
     sweepRemovedCount !== null
@@ -456,10 +464,11 @@ export const WorktreesModal = ({
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
         className={cn(
-          "relative z-10 flex h-full max-h-[40rem] w-full max-w-2xl flex-col overflow-hidden rounded-xl outline-none",
+          "relative z-10 flex w-full max-w-2xl flex-col overflow-hidden rounded-xl outline-none",
           MODAL_PANEL_CLASSES,
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
+        style={{ maxHeight: `min(100%, ${WORKTREES_MODAL_MAX_HEIGHT_REM}rem)` }}
       >
         <header className="flex shrink-0 items-center gap-3 border-b border-border/40 px-4 py-2.5">
           <FolderGit2 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -617,79 +626,84 @@ export const WorktreesModal = ({
               </div>
             ) : null}
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={listScrollRef}>
-              {!isRepo ? (
-                <div className="flex h-full min-h-32 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-                  <FolderGit2 className="size-4" aria-hidden="true" />
-                  Not a git repository.
-                </div>
-              ) : hasError ? (
-                <div className="flex h-full min-h-32 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-                  <AlertTriangle className="size-4" aria-hidden="true" />
-                  Couldn't load worktrees from the localterm daemon.
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    onClick={() => setRefreshCount((count) => count + 1)}
-                  >
-                    Retry
-                  </Button>
-                </div>
-              ) : data === null ? (
-                <div className="flex h-full min-h-32 items-center justify-center">
-                  <Spinner aria-label="loading worktrees" />
-                </div>
-              ) : worktrees.length === 0 ? (
-                <div className="flex h-full min-h-32 items-center justify-center text-sm text-muted-foreground">
-                  No worktrees. Create one to get started.
-                </div>
-              ) : (
-                <div role="list" aria-label="git worktrees">
-                  <div
-                    style={{
-                      height: `${virtualizer.getTotalSize()}px`,
-                      width: "100%",
-                      position: "relative",
-                    }}
-                  >
-                    {virtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
-                      const worktree = worktrees[virtualRow.index];
-                      return (
-                        <div
-                          key={worktree.path}
-                          ref={virtualizer.measureElement}
-                          data-index={virtualRow.index}
-                          style={
-                            {
-                              position: "absolute",
-                              top: 0,
-                              left: 0,
-                              width: "100%",
-                              transform: `translateY(${virtualRow.start}px)`,
-                            } satisfies CSSProperties
-                          }
-                        >
-                          <WorktreeRow
-                            worktree={worktree}
-                            openInCommands={openInCommands}
-                            isRemoving={removingPath === worktree.path}
-                            isArmedRemove={armedRemovePath === worktree.path}
-                            isLaunching={launchingPath === worktree.path}
-                            onOpen={() => handleOpenShell(worktree)}
-                            onArmRemove={() => handleArmRemove(worktree)}
-                            onConfirmRemove={() => void handleConfirmRemove(worktree)}
-                            onLaunch={(command) => {
-                              setLaunchingPath(worktree.path);
-                              void handleLaunch(worktree, command).finally(() =>
-                                setLaunchingPath(null),
-                              );
-                            }}
-                          />
-                        </div>
-                      );
-                    })}
+              <div
+                className="relative transition-[height] duration-150 ease-snappy"
+                style={{ height: listHeightPx }}
+              >
+                {!isRepo ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <FolderGit2 className="size-4" aria-hidden="true" />
+                    Not a git repository.
                   </div>
-                </div>
-              )}
+                ) : hasError ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+                    <AlertTriangle className="size-4" aria-hidden="true" />
+                    Couldn't load worktrees from the localterm daemon.
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={() => setRefreshCount((count) => count + 1)}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : data === null ? null : worktrees.length === 0 ? (
+                  <div className="animate-in fade-in-0 duration-150 ease-snappy absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+                    No worktrees. Create one to get started.
+                  </div>
+                ) : (
+                  <div
+                    role="list"
+                    aria-label="git worktrees"
+                    className="animate-in fade-in-0 duration-150 ease-snappy"
+                  >
+                    <div
+                      style={{
+                        height: `${virtualizer.getTotalSize()}px`,
+                        width: "100%",
+                        position: "relative",
+                      }}
+                    >
+                      {virtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
+                        const worktree = worktrees[virtualRow.index];
+                        return (
+                          <div
+                            key={worktree.path}
+                            ref={virtualizer.measureElement}
+                            data-index={virtualRow.index}
+                            style={
+                              {
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: "100%",
+                                transform: `translateY(${virtualRow.start}px)`,
+                              } satisfies CSSProperties
+                            }
+                          >
+                            <WorktreeRow
+                              worktree={worktree}
+                              openInCommands={openInCommands}
+                              isRemoving={removingPath === worktree.path}
+                              isArmedRemove={armedRemovePath === worktree.path}
+                              isLaunching={launchingPath === worktree.path}
+                              onOpen={() => handleOpenShell(worktree)}
+                              onArmRemove={() => handleArmRemove(worktree)}
+                              onConfirmRemove={() => void handleConfirmRemove(worktree)}
+                              onLaunch={(command) => {
+                                setLaunchingPath(worktree.path);
+                                void handleLaunch(worktree, command).finally(() =>
+                                  setLaunchingPath(null),
+                                );
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </>
         )}
