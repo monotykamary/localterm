@@ -7,7 +7,6 @@ import {
   COLORTERM_VALUE,
   DEFAULT_COLS,
   DEFAULT_ROWS,
-  FOREGROUND_POLL_INTERVAL_MS,
   LOCALTERM_VALUE,
   MAX_NOTIFICATION_LENGTH,
   MAX_PENDING_PARSE_BYTES,
@@ -20,6 +19,7 @@ import {
 // TUIs (e.g. Cursor Agent / Claude Code use DECSET 2026 synchronized output
 // mode and any byte landing inside that frame breaks the parser state).
 import { ensureSpawnHelperExecutable } from "./ensure-spawn-helper-executable.js";
+import { ForegroundWatcher } from "./foreground-watcher.js";
 import { getDefaultShell } from "./default-shell.js";
 import type { SpawnPtyInput } from "./types.js";
 import { formatWorkingDirectoryTitle } from "./utils/format-working-directory-title.js";
@@ -59,7 +59,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private pixelResizeSupported: boolean | null = null;
   private hookCleanupPaths: string[] = [];
   private pendingParse = "";
-  private foregroundPollTimer: NodeJS.Timeout | null = null;
+  private readonly foregroundWatcher: ForegroundWatcher;
   private readonly reportInitialCommandExit: boolean;
   private hasEmittedAutomationExit = false;
 
@@ -138,7 +138,12 @@ export class Session extends EventEmitter<SessionEvents> {
     if (input.initialCommand) this.pty.write(`${input.initialCommand}\r`);
 
     this.emitInitialMetadata();
-    this.startForegroundPoll();
+    this.foregroundWatcher = new ForegroundWatcher(
+      () => this.inferForegroundProcess(),
+      (next) => this.handleForegroundChange(next),
+      () => !this.exited,
+    );
+    this.foregroundWatcher.start();
   }
 
   get pid(): number {
@@ -238,10 +243,7 @@ export class Session extends EventEmitter<SessionEvents> {
   dispose(): void {
     this.kill();
     this.exited = true;
-    if (this.foregroundPollTimer !== null) {
-      clearInterval(this.foregroundPollTimer);
-      this.foregroundPollTimer = null;
-    }
+    this.foregroundWatcher.dispose();
     this.cleanUpHookFiles();
     this.removeAllListeners();
   }
@@ -285,7 +287,7 @@ export class Session extends EventEmitter<SessionEvents> {
 
     const altScreen = parseAltScreenFromChunk(combined);
     if (altScreen !== null && !altScreen) {
-      this.emitForegroundIfChanged(null);
+      this.foregroundWatcher.set(null);
     }
 
     const notifications = parseOscNotificationsFromChunk(combined);
@@ -419,30 +421,15 @@ export class Session extends EventEmitter<SessionEvents> {
     ].join("\n");
   }
 
-  private startForegroundPoll(): void {
-    this.foregroundPollTimer = setInterval(() => {
-      if (this.exited) {
-        clearInterval(this.foregroundPollTimer!);
-        this.foregroundPollTimer = null;
-        return;
-      }
-      const next = this.inferForegroundProcess();
-      this.emitForegroundIfChanged(next);
-    }, FOREGROUND_POLL_INTERVAL_MS);
-    this.foregroundPollTimer.unref?.();
-  }
-
-  private emitForegroundIfChanged(next: string | null): void {
-    if (next !== this.lastEmittedForeground) {
-      const hadForeground = this.lastEmittedForeground != null;
-      this.lastEmittedForeground = next;
-      this.emit("foreground", next);
-      if (hadForeground && next === null) {
-        const cwdTitle = formatWorkingDirectoryTitle(this.lastEmittedCwdValue);
-        if (cwdTitle && cwdTitle !== this.lastEmittedTitle) {
-          this.lastEmittedTitle = cwdTitle;
-          this.emit("title", cwdTitle);
-        }
+  private handleForegroundChange(next: string | null): void {
+    const hadForeground = this.lastEmittedForeground != null;
+    this.lastEmittedForeground = next;
+    this.emit("foreground", next);
+    if (hadForeground && next === null) {
+      const cwdTitle = formatWorkingDirectoryTitle(this.lastEmittedCwdValue);
+      if (cwdTitle && cwdTitle !== this.lastEmittedTitle) {
+        this.lastEmittedTitle = cwdTitle;
+        this.emit("title", cwdTitle);
       }
     }
   }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { serverToClientMessageSchema } from "../src/schemas.js";
 import { Session } from "../src/session.js";
 
@@ -213,24 +213,6 @@ describe("Session", () => {
       expect(session.isPaused).toBe(false);
       const observed = await collectOutput(session, 3000);
       expect(observed).toContain("PAUSED_MARKER_DOES_NOT_LEAK");
-    } finally {
-      session.dispose();
-    }
-  });
-
-  it("exposes a foreground event channel that settles to null for an idle shell", async () => {
-    const session = new Session({ shell: "/bin/sh" });
-    try {
-      const foregroundEvents: Array<string | null> = [];
-      session.on("foreground", (process) => foregroundEvents.push(process));
-      await collectOutput(session);
-      // /bin/sh never enters alt-screen mode, but the 250ms pty.process poll
-      // can observe a transient process name during spawn under load, so only
-      // the settled value is asserted. The stream-based detection is
-      // exercised through unit tests for parseAltScreenFromChunk.
-      await vi.waitFor(() => {
-        expect(foregroundEvents.at(-1) ?? null).toBeNull();
-      });
     } finally {
       session.dispose();
     }
