@@ -1,5 +1,12 @@
 # localterm
 
+## 2.7.3
+
+### Patch Changes
+
+- b1574cc: Harden the diff-viewer "caps the first paint of a large diff" jsdom test against CPU contention. The test stubs `requestAnimationFrame` and awaits the first paint, so it's correct in isolation (25/25), but jsdom's first paint of a 2500-line patch is CPU-bound and under turbo's parallel cross-package run it starves past vitest's 5s default — flaking sporadically. Added an inline per-test timeout (15s, matching the server's heavy-test precedent in `session.test.ts`) so contention can't blow the default.
+  - @monotykamary/localterm-server@2.7.3
+
 ## 2.7.2
 
 ### Patch Changes
