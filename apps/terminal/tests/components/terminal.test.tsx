@@ -83,20 +83,6 @@ const installFakeWebSocket = () => {
           this.dispatch("open", {});
         },
         fireMessage: (payload) => {
-          // Output frames travel as binary ArrayBuffers (raw UTF-8 bytes) to
-          // match the production wire format after the binary-frame change.
-          // Everything else goes out as JSON text.
-          if (
-            typeof payload === "object" &&
-            payload !== null &&
-            (payload as Record<string, unknown>).type === "output"
-          ) {
-            const data = (payload as { data: string }).data;
-            this.dispatch("message", {
-              data: new TextEncoder().encode(data).buffer,
-            });
-            return;
-          }
           this.dispatch("message", { data: JSON.stringify(payload) });
         },
         fireClose: (code = 1006, reason = "", wasClean = false) => {
@@ -316,17 +302,6 @@ const dispatchFindShortcut = (handle: FakeXtermHandle | undefined): boolean | un
   const event = new KeyboardEvent("keydown", { key: "f", metaKey: true });
   Object.defineProperty(event, "preventDefault", { value: vi.fn() });
   return handle.customKeyEventHandler(event);
-};
-
-// Decode the last terminal.write() call's first arg to a string. Production
-// xterm accepts string | Uint8Array interchangeably (string = UTF-16, bytes =
-// UTF-8); our binary WS path always hands xterm a Uint8Array, but the test
-// assertions compare against the original UTF-8 string for readability.
-const lastWriteArgAsString = (handle: FakeXtermHandle | undefined): string | undefined => {
-  const arg = handle?.write.mock.calls.at(-1)?.[0];
-  if (typeof arg === "string") return arg;
-  if (arg instanceof Uint8Array) return new TextDecoder().decode(arg);
-  return undefined;
 };
 
 const originalNavigatorPlatform = navigator.platform;
@@ -1104,7 +1079,7 @@ describe("Terminal scroll preservation through hot-swaps", () => {
     });
 
     await vi.waitFor(() => {
-      expect(lastWriteArgAsString(handle)).toBe("replayed transcript");
+      expect(handle.write).toHaveBeenCalledWith("replayed transcript");
     });
   });
 
@@ -1118,7 +1093,8 @@ describe("Terminal scroll preservation through hot-swaps", () => {
     });
 
     await vi.waitFor(() => {
-      expect(lastWriteArgAsString(handle)).toBe("\x1b[2J\x1b[H\x1b[3Jredraw");
+      const writtenData = handle.write.mock.calls.at(-1)?.[0];
+      expect(writtenData).toBe("\x1b[2J\x1b[H\x1b[3Jredraw");
     });
   });
 
