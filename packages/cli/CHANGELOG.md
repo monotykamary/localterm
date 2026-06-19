@@ -1,5 +1,20 @@
 # localterm
 
+## 2.7.0
+
+### Minor Changes
+
+- Hide stale merged PRs from the toolbar indicator and diff viewer on base branches (main, master, dev, develop, staging, production) once they're older than a week. A merged PR lingering on a base branch — e.g. a main→production reverse-merge — is noise once it ages out; feature branches keep their merged-PR indicator indefinitely.
+
+  - The server now forwards GitHub's `merged_at` on each detected PR (new `mergedAt` wire field).
+  - The client's PR display state resolves to `null` for a merged PR past the TTL on a base branch, so the toolbar button, diff-viewer branch-mode auto-open, base-picker default, and header chip all drop it consistently.
+  - New `BASE_BRANCHES` and `MERGED_PR_OVERLAY_TTL_MS` constants (7 days) in `apps/terminal/src/lib/constants.ts`.
+
+### Patch Changes
+
+- Updated dependencies
+  - @monotykamary/localterm-server@2.7.0
+
 ## 2.6.3
 
 ### Patch Changes
