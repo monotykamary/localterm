@@ -125,6 +125,15 @@ export const FONT_LOAD_PROBE_PX = 16;
 // double-capacity on demand until they fit into the reused backing store.
 export const OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES = 8 * 1024;
 
+// Cap on bytes per terminal.write() within a single rAF. xterm's WriteBuffer
+// holds an internal 12ms per-chunk parse budget; exceeding it still yields to
+// setTimeout(0) for the continuation (even after the sync-parse opt-in via
+// WriteBuffer._didUserInput), which would defer the grid mutation past the
+// compositor's next vsync and reintroduce presentation gaps. 16KB sits under
+// the 12ms ceiling for ANSI-dense output while still amortizing rAF call
+// overhead; anything larger risks tripping xterm's internal async-yield path.
+export const MAX_WRITE_PER_FRAME_BYTES = 16 * 1024;
+
 // Grace window after the last output chunk during which OutputBatcher holds a
 // self-requeuing requestAnimationFrame. Without an outstanding rAF, Chrome's
 // compositor flips `needsBeginFrame` to false the moment the main thread has no
