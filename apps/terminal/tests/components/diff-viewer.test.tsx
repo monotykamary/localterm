@@ -373,7 +373,9 @@ describe("DiffViewer", () => {
     expect(await screen.findByText("line 0")).toBeTruthy();
     expect(screen.queryByText(`line ${lineCount - 1}`)).toBeNull();
     expect(screen.getByText(/rendering .* more lines/)).toBeTruthy();
-  });
+  }, // jsdom first-paint of a 2500-line patch is CPU-bound; under turbo's
+  // parallel cross-package run this starves past vitest's 5s default.
+  15_000);
 
   it("auto-switches to branch mode when the leased branchInfo has a PR", async () => {
     mockHappyPath();
