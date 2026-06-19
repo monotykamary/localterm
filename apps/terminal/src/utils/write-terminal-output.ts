@@ -10,6 +10,15 @@ class OutputBatcher {
   private animationFrameId: number | null = null;
   private lastOutputAtMs = 0;
   private afterFlush: (() => void) | null = null;
+  // Re-entrancy guard. The keep-warm re-arm at the bottom of onFrame schedules
+  // the next rAF; in production that's async so onFrame finishes before the
+  // next call. But test rAF stubs typically fire the callback synchronously
+  // from inside requestAnimationFrame, which would infinite-recurse via the
+  // keep-warm branch (RangeError: Maximum call stack size exceeded). The flag
+  // is checked at entry: if onFrame fires synchronously while we're still
+  // dispatching the outer call, the inner one skips — the next vsync (or
+  // time advance in tests) will pick up the keep-warm arm the outer call set.
+  private isDispatching = false;
 
   attach = (terminal: XtermTerminal) => {
     this.terminal = terminal;
@@ -64,10 +73,16 @@ class OutputBatcher {
   // compositor never hibernates the frame loop between animation frames; let it
   // lapse once output is genuinely idle so a static terminal rests.
   private onFrame = () => {
-    this.animationFrameId = null;
-    this.flushPending();
-    if (performanceNow() - this.lastOutputAtMs < OUTPUT_KEEP_WARM_MS) {
-      this.scheduleFrame();
+    if (this.isDispatching) return;
+    this.isDispatching = true;
+    try {
+      this.animationFrameId = null;
+      this.flushPending();
+      if (performanceNow() - this.lastOutputAtMs < OUTPUT_KEEP_WARM_MS) {
+        this.scheduleFrame();
+      }
+    } finally {
+      this.isDispatching = false;
     }
   };
 
