@@ -30,6 +30,7 @@ import {
   HTTP_STATUS_NOT_FOUND,
   MAX_AUTOMATIONS,
   MAX_CONCURRENT_SESSIONS,
+  MAX_OUTPUT_BYTES,
   MS_PER_MINUTE,
   OUTPUT_BATCH_FLUSH_BYTES,
   OUTPUT_BATCH_WINDOW_MS,
@@ -157,7 +158,12 @@ export interface RunningServer {
 
 interface BroadcastSocket {
   readyState: number;
-  send: (raw: string) => void;
+  // Accepts a UTF-8 JSON string for control frames (title, exit, etc.) or a
+  // raw Uint8Array<ArrayBuffer> for binary PTY output frames, which bypass JSON
+  // entirely — see sendOutputBytes/sendOutputBatchBytes. Matches the underlying
+  // WSContext.send signature from @hono/node-ws exactly so the ws argument from
+  // onOpen(ws) is assignable to this interface.
+  send: (raw: string | ArrayBuffer | Uint8Array<ArrayBuffer>) => void;
   close: (code?: number, reason?: string) => void;
   raw?: unknown;
 }
@@ -213,6 +219,45 @@ const safeSend = (ws: BroadcastSocket, payload: ServerToClientMessage) => {
     ws.send(JSON.stringify(payload));
   } catch {
     /* socket closed between readyState check and send */
+  }
+};
+
+// Output frames travel as raw UTF-8 bytes, not JSON. JSON.stringify/parse on
+// terminal output is the dominant per-byte cost on the renderer main thread
+// (traced: ~36% of main-thread busy in steady-state cmatrix is JSON.parse of
+// {"type":"output","data":"..."}, scaling linearly with payload size because of
+// per-character escape scanning on both sides). PTY output is already bytes; the
+// server UTF-8-encodes the accumulated string batch once at flush and emits a
+// single binary frame. The client gets event.data as an ArrayBuffer and hands
+// it to OutputBatcher with no JSON.parse, no string roundtrip. Splits at
+// MAX_OUTPUT_BYTES as a safety cap on single-frame size (unreachable in
+// practice — OUTPUT_BATCH_FLUSH_BYTES=32KB flushes well below this).
+const sendOutputBytes = (ws: BroadcastSocket, bytes: Uint8Array<ArrayBuffer>) => {
+  if (ws.readyState !== WS_READY_STATE_OPEN) return;
+  if (getRawBufferedAmount(ws.raw) > WS_BACKPRESSURE_THRESHOLD_BYTES) {
+    ws.close(WS_CLOSE_BACKPRESSURE, "backpressure");
+    return;
+  }
+  try {
+    ws.send(bytes);
+  } catch {
+    /* socket closed between readyState check and send */
+  }
+};
+
+// Stateless UTF-8 encode + chunked send of the batch string. Shared by the
+// onOpen flush path (which additionally enforces per-session backpressure)
+// and the onClose/onError teardown paths (which don't — the socket is already
+// closing, so triggering a PTY pause would just stall the teardown).
+const sendOutputBatchBytes = (ws: BroadcastSocket, batch: string) => {
+  if (!batch) return;
+  const bytes = Buffer.from(batch, "utf8");
+  if (bytes.byteLength <= MAX_OUTPUT_BYTES) {
+    sendOutputBytes(ws, bytes);
+  } else {
+    for (let offset = 0; offset < bytes.byteLength; offset += MAX_OUTPUT_BYTES) {
+      sendOutputBytes(ws, bytes.subarray(offset, offset + MAX_OUTPUT_BYTES));
+    }
   }
 };
 
@@ -982,19 +1027,25 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             drainPollTimer.unref?.();
           };
 
-          const flushOutputBatch = () => {
-            outputBatchTimer = null;
-            if (!outputBatch) return;
-            const payload = outputBatch;
+          // Drain-and-pause for the timer-driven and threshold flushes; the per-
+          // session backpressure pause check lives here (and only here — the
+          // onClose/onError teardown paths skip it via sendOutputBatchBytes
+          // directly).
+          const drainOutputBatch = (target: BroadcastSocket) => {
+            sendOutputBatchBytes(target, outputBatch);
             outputBatch = "";
-            safeSend(ws, { type: "output", data: payload });
             if (
               !newSession.isPaused &&
-              getRawBufferedAmount(ws.raw) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES
+              getRawBufferedAmount(target.raw) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES
             ) {
               newSession.pause();
               ensureDrainPoll();
             }
+          };
+
+          const flushOutputBatch = () => {
+            outputBatchTimer = null;
+            drainOutputBatch(ws);
           };
 
           // Wire listeners so any emit from Session (current or future)
@@ -1168,7 +1219,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             outputBatchTimer = null;
           }
           if (outputBatch && activeWs) {
-            safeSend(activeWs, { type: "output", data: outputBatch });
+            sendOutputBatchBytes(activeWs, outputBatch);
             outputBatch = "";
           }
           stopDrainPoll();
@@ -1198,7 +1249,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             outputBatchTimer = null;
           }
           if (outputBatch && activeWs) {
-            safeSend(activeWs, { type: "output", data: outputBatch });
+            sendOutputBatchBytes(activeWs, outputBatch);
             outputBatch = "";
           }
           stopDrainPoll();

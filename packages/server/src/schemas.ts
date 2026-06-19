@@ -18,7 +18,6 @@ import {
   MAX_INPUT_BYTES,
   MAX_LAUNCH_COMMAND_LENGTH,
   MAX_NOTIFICATION_LENGTH,
-  MAX_OUTPUT_BYTES,
   MAX_ROWS,
   MAX_TITLE_LENGTH,
   MAX_WORKTREEINCLUDE_FILE_BYTES,
@@ -115,13 +114,6 @@ export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   caffeinateActivityGateInputMessageSchema,
   caffeinateBatteryThresholdInputMessageSchema,
 ]);
-
-const outputMessageSchema = z
-  .object({
-    type: z.literal("output"),
-    data: z.string().max(MAX_OUTPUT_BYTES),
-  })
-  .strict();
 
 const exitMessageSchema = z
   .object({
@@ -851,7 +843,14 @@ export const caffeinatePreferencesFileSchema = z
   .strict();
 
 export const serverToClientMessageSchema = z.discriminatedUnion("type", [
-  outputMessageSchema,
+  // NOTE: PTY output is NOT a JSON member of this union. The server emits output
+  // as a binary WebSocket frame (raw UTF-8 bytes via sendOutputBytes in index.ts).
+  // The client dispatches by `event.data instanceof ArrayBuffer` in terminal.tsx
+  // and hands the bytes directly to OutputBatcher, bypassing JSON.parse. JSON
+  // stringify/parse of `{ type: "output", data: "..." }` was the dominant
+  // per-byte cost on the renderer main thread (traced: ~36% of main-thread
+  // busy in steady-state stream, scaling linearly with payload size due to
+  // per-character escape scanning on both sides).
   exitMessageSchema,
   titleMessageSchema,
   sessionMessageSchema,

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   MAX_FOREGROUND_LENGTH,
   MAX_INPUT_BYTES,
-  MAX_OUTPUT_BYTES,
   MAX_TITLE_LENGTH,
 } from "../src/constants.js";
 import { clientToServerMessageSchema, serverToClientMessageSchema } from "../src/schemas.js";
@@ -120,13 +119,22 @@ describe("clientToServerMessageSchema", () => {
 });
 
 describe("serverToClientMessageSchema", () => {
-  it("accepts every variant", () => {
-    expect(serverToClientMessageSchema.safeParse({ type: "output", data: "x" }).success).toBe(true);
+  it("accepts every JSON variant", () => {
     expect(serverToClientMessageSchema.safeParse({ type: "exit", code: 0 }).success).toBe(true);
     expect(serverToClientMessageSchema.safeParse({ type: "exit", code: null }).success).toBe(true);
     expect(serverToClientMessageSchema.safeParse({ type: "title", title: "shell" }).success).toBe(
       true,
     );
+  });
+
+  // Output is NOT a JSON member of the union — the server emits it as a binary
+  // WebSocket frame (sendOutputBatchBytes in src/index.ts), and the client
+  // dispatches by `event.data instanceof ArrayBuffer` in terminal.tsx. Asserting
+  // rejection here guards against accidentally re-adding the JSON path.
+  it("rejects JSON output frames (output is binary-only)", () => {
+    expect(
+      serverToClientMessageSchema.safeParse({ type: "output", data: "x" }).success,
+    ).toBe(false);
   });
 
   it("rejects the legacy snapshot frame", () => {
@@ -143,13 +151,6 @@ describe("serverToClientMessageSchema", () => {
 
   it("rejects title frames missing the title field", () => {
     expect(serverToClientMessageSchema.safeParse({ type: "title" }).success).toBe(false);
-  });
-
-  it("rejects oversized output payloads (defense in depth against compromised servers)", () => {
-    const oversized = "a".repeat(MAX_OUTPUT_BYTES + 1);
-    expect(serverToClientMessageSchema.safeParse({ type: "output", data: oversized }).success).toBe(
-      false,
-    );
   });
 
   it("rejects oversized title payloads", () => {

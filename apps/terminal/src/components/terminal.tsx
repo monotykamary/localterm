@@ -1016,6 +1016,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       const nextSocket = new WebSocket(buildWebSocketUrl(liveCwdRef.current));
       socket = nextSocket;
 
+      nextSocket.binaryType = "arraybuffer";
       nextSocket.addEventListener("open", () => {
         if (disposed || socket !== nextSocket) return;
         wasEverConnected = true;
@@ -1026,26 +1027,19 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
       nextSocket.addEventListener("message", (event) => {
         if (disposed || socket !== nextSocket) return;
+        // Output frames are raw UTF-8 bytes (binary WebSocket frames) — bypass
+        // JSON entirely and hand the bytes straight to the batcher. The server
+        // emits every other message type as JSON text, so anything that isn't
+        // an ArrayBuffer goes through the schema parser.
+        if (event.data instanceof ArrayBuffer) {
+          outputBatcher.pushBytes(new Uint8Array(event.data));
+          noteOutputActivity();
+          return;
+        }
         let raw: unknown;
         try {
           raw = JSON.parse(typeof event.data === "string" ? event.data : String(event.data));
         } catch {
-          return;
-        }
-        // Output frames dominate traffic (~100× all other message types combined).
-        // Parsing every frame through zod adds measurable latency on fast scrollback, so
-        // we fast-path the known shape — `{ type: "output", data: string }` — and fall
-        // through to the full schema for everything else. The server only emits this frame
-        // from a single code path (the output batch flush), so the shape is stable.
-        if (
-          typeof raw === "object" &&
-          raw !== null &&
-          (raw as Record<string, unknown>).type === "output" &&
-          typeof (raw as Record<string, unknown>).data === "string"
-        ) {
-          const outputData = (raw as { type: "output"; data: string }).data;
-          outputBatcher.push(outputData);
-          noteOutputActivity();
           return;
         }
         const parsed = serverToClientMessageSchema.safeParse(raw);

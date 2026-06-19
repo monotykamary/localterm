@@ -6,6 +6,25 @@ import { WebSocket } from "ws";
 import { createServer, type RunningServer } from "../src/index.js";
 import { automationWithNextRunSchema } from "../src/schemas.js";
 
+// Output frames arrive as binary (raw UTF-8 bytes); everything else is JSON text.
+// Returns the decoded output as `{type:"output", data:string}`, the parsed JSON
+// object otherwise, or null on miss. Lets test sites keep matching on
+// `{type:"output", data:string}` / `"session"` / `.cwd` without re-writing the
+// binary dispatch three times.
+const readMessage = (data: unknown): Record<string, unknown> | null => {
+  if (data instanceof ArrayBuffer) {
+    return { type: "output", data: Buffer.from(data).toString("utf8") };
+  }
+  if (typeof data !== "string") return null;
+  try {
+    const parsed = JSON.parse(data);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+};
+
 interface TestContext {
   server: RunningServer;
   stateDirectory: string;
@@ -389,15 +408,10 @@ describe("automations REST API", () => {
       const socket = new WebSocket(
         `ws://127.0.0.1:${testContext.server.port}/ws?run=${String(runId)}`,
       );
+      socket.binaryType = "arraybuffer";
       socket.addEventListener("message", (event) => {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(String(event.data));
-        } catch {
-          return;
-        }
-        if (!parsed || typeof parsed !== "object") return;
-        const message = parsed as Record<string, unknown>;
+        const message = readMessage(event.data);
+        if (!message) return;
         if (message.type === "session" && typeof message.cwd === "string") {
           sessionCwd = message.cwd;
         }
@@ -429,15 +443,10 @@ describe("automations REST API", () => {
         `ws://127.0.0.1:${testContext.server.port}/ws?run=${String(runId)}`,
       );
       const secondOutputs: string[] = [];
+      secondSocket.binaryType = "arraybuffer";
       secondSocket.addEventListener("message", (event) => {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(String(event.data));
-        } catch {
-          return;
-        }
-        if (!parsed || typeof parsed !== "object") return;
-        const message = parsed as Record<string, unknown>;
+        const message = readMessage(event.data);
+        if (!message) return;
         if (message.type === "session") secondOutputs.push("session");
         if (message.type === "output" && typeof message.data === "string") {
           secondOutputs.push(message.data);
@@ -548,14 +557,11 @@ describe("automations REST API", () => {
 
       const collected: string[] = [];
       const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws?run=${run.runId}`);
+      socket.binaryType = "arraybuffer";
       socket.addEventListener("message", (event) => {
-        try {
-          const message = JSON.parse(String(event.data)) as Record<string, unknown>;
-          if (message.type === "output" && typeof message.data === "string") {
-            collected.push(message.data);
-          }
-        } catch {
-          /* ignore */
+        const message = readMessage(event.data);
+        if (message?.type === "output" && typeof message.data === "string") {
+          collected.push(message.data);
         }
       });
       try {

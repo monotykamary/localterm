@@ -118,3 +118,23 @@ export const NERD_FONT_ENABLED_STORAGE_KEY = "localterm:nerd-font-enabled";
 export const NERD_FONT_SYMBOLS_FAMILY = "Symbols Nerd Font";
 export const NERD_FONT_STYLESHEET_ID = "localterm-nerd-font";
 export const FONT_LOAD_PROBE_PX = 16;
+
+// Initial byte capacity of the OutputBatcher staging buffer. Picked above the
+// largest single TUI repaint (~6KB on a 120×40 terminal) so the buffer doesn't
+// need to grow on the first frame of an ASCII animation; subsequent bursts
+// double-capacity on demand until they fit into the reused backing store.
+export const OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES = 8 * 1024;
+
+// Grace window after the last output chunk during which OutputBatcher holds a
+// self-requeuing requestAnimationFrame. Without an outstanding rAF, Chrome's
+// compositor flips `needsBeginFrame` to false the moment the main thread has no
+// pending work — which happens on the natural multi-tens-of-ms gaps between
+// ASCII-animation frames. The tab then hibernates its frame loop until the next
+// output chunk arrives (~100ms later), then renders the whole backlog in one
+// frame: the visible "stall then catch-up burst" jank. A no-op vsync commit
+// for this window keeps the frame loop warm (adaptive — lapses to idle/rest
+// after the window, so a static terminal uses zero extra frames) and lets each
+// animation frame paint in its own frame. Picked above the largest expected
+// inter-frame gap of common animators (cmatrix ~100ms, sl ~50ms) so streaming
+// output keeps continuous cadence while a genuinely idle terminal rests.
+export const OUTPUT_KEEP_WARM_MS = 150;

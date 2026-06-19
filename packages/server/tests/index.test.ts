@@ -2,6 +2,21 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { createServer, type RunningServer } from "../src/index.js";
 import { WebSocket } from "ws";
 
+// Output frames arrive as binary (raw UTF-8 bytes) so the client can dispense
+// with JSON.parse. In tests we normalize them back into a JSON-shaped
+// {type:"output", data:string} so assertions that write
+// `message.type === "output"` (or match a string data field) remain unchanged.
+const normalizeMessage = (event: WebSocket.MessageEvent): unknown => {
+  if (event.data instanceof ArrayBuffer) {
+    return { type: "output", data: Buffer.from(event.data).toString("utf8") };
+  }
+  try {
+    return JSON.parse(event.data as string);
+  } catch {
+    return event.data;
+  }
+};
+
 const connectAndCollect = (
   port: number,
   timeoutMs = 10_000,
@@ -11,13 +26,9 @@ const connectAndCollect = (
     const messages: unknown[] = [];
     const sessionResolved: (() => void)[] = [];
     const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    socket.binaryType = "arraybuffer";
     socket.addEventListener("message", (event) => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(event.data as string);
-      } catch {
-        parsed = event.data;
-      }
+      const parsed = normalizeMessage(event);
       messages.push(parsed);
       if (
         parsed &&
@@ -74,12 +85,7 @@ const waitForMessage = (
       timeoutMs,
     );
     const handler = (event: WebSocket.MessageEvent) => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(event.data as string);
-      } catch {
-        parsed = event.data;
-      }
+      const parsed = normalizeMessage(event);
       if (predicate(parsed)) {
         clearTimeout(timer);
         socket.removeEventListener("message", handler);
@@ -151,7 +157,7 @@ describe("createServer WS lifecycle", () => {
     expect(server.registry.size()).toBe(0);
   });
 
-  it("echoes input back as output", async () => {
+  it("echoes input back as binary output", async () => {
     const { socket, waitForSession } = await connectAndCollect(server.port);
     try {
       await waitForSession();

@@ -115,15 +115,31 @@ export const WS_OUTBOUND_RESUME_LOW_WATER_BYTES = 1 * 1024 * 1024;
 export const WS_OUTBOUND_DRAIN_POLL_MS = 50;
 export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 
-// Output batch early-flush threshold. During continuous high-throughput output
-// (ASCII animations, cat of large files), waiting the full OUTPUT_BATCH_WINDOW_MS
-// can accumulate hundreds of KB in one WebSocket message. Flushing when the
-// batch passes this size keeps individual messages small, maintaining a steady
-// data flow to the client. The value is calibrated to be generous enough for
-// the largest single TUI frame (ink erase + repaint typically 3–6KB on a
-// 120×40 terminal) so that the 2ms window can still coalesce those frames into
-// one message before the size threshold is hit.
-export const OUTPUT_BATCH_FLUSH_BYTES = 8 * 1024;
+// Output batch early-flush threshold. The OUTPUT_BATCH_WINDOW_MS timer is
+// authoritative for low-throughput streams (keystroke echo, TUI redraws of
+// 3–6KB on a 120×40 terminal): it coalesces the per-chunk data events of one
+// logical frame into a single message, which xterm.js parses atomically —
+// splitting a frame causes the half-erased frame to render and flicker (visible
+// on every keypress in cmd/Claude Code). TUI frames never approach this
+// threshold, so the timer governs them.
+//
+// This threshold only governs high-throughput output (cat of large files, full
+// TTY repaints, `gcc -v`, ~15MB/s), where the threshold not the timer sets the
+// message rate. There the dominant cost is per-message RunTask plumbing on the
+// renderer main thread: every WS message arrives in its own V8 task whose
+// median 0.30ms body is ~88% fixed V8/Chrome task-lifecycle overhead and only
+// ~12% the onmessage JS (measured 1364 msg/sec => 36.5% of main thread busy on
+// pure per-message overhead). The 8KB threshold made 15MB/s => ~1880 msg/sec,
+// burning ~9.4ms of every 16.6ms frame on invisible plumbing. Coalescing four
+// times more (>32KB) reduces that to ~470 msg/sec => ~2.4ms/frame, freeing
+// ~7ms/frame and bringing per-frame busy from ~12.5ms down under the 60Hz
+// budget. xterm's own parser amortises the parse cost across batched bytes —
+// its internal chunk cap is ~15ms — so a 32KB batch at sustained 15MB/s parses
+// in ~6ms, under the cap. Batch latency at this size is ~2ms at 15MB/s,
+// imperceptible; the keep-warm rAF on the client holds needsBeginFrame=1 across
+// inter-arrival gaps regardless of burst heaviness (traced and verified), so
+// fatter-but-rarer batches do not reintroduce the 122ms hibernation stalls.
+export const OUTPUT_BATCH_FLUSH_BYTES = 32 * 1024;
 
 // Output batching window. The kernel PTY delivers child writes in 1024-byte
 // chunks on macOS, and node-pty emits each chunk as a separate data event in
