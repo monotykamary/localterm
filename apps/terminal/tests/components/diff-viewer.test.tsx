@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS } from "../../src/lib/constants";
 import type {
   GitBranchInfo,
@@ -339,6 +339,44 @@ describe("DiffViewer", () => {
 
     expect(await screen.findByText("looks good")).toBeTruthy();
     expect(screen.getByText(/1 pending comment/)).toBeTruthy();
+  });
+
+  it("extends the range highlight over the sticky line-number gutter", async () => {
+    // Regression: RangeHighlight had no z-index (z-auto), so the opaque sticky
+    // gutter (z-10, painted in a higher stacking group) covered it and the
+    // comment-range tint stopped at the line-number column. The highlight must
+    // stack above the gutter so its tint reaches the gutter.
+    mockHappyPath();
+    const { container } = renderDiffViewer();
+    await screen.findByText("BETA");
+
+    const zIndexOf = (node: Element | null): number | null => {
+      if (!node) return null;
+      const match = (node.getAttribute("class") ?? "").match(/(?:^|\s)z-(\d+)(?:\s|$)/);
+      return match ? Number(match[1]) : null;
+    };
+
+    // Anchoring a drag highlights the anchored line immediately (the in-progress
+    // selection covers at least the anchor), mounting a RangeHighlight there.
+    const annotateButtons = screen.getAllByLabelText(/comment on line/);
+    act(() => {
+      fireEvent.pointerDown(annotateButtons[1], { button: 0 });
+    });
+
+    const highlights = Array.from(
+      container.querySelectorAll<HTMLElement>('span[aria-hidden="true"]'),
+    ).filter((node) => (node.getAttribute("class") ?? "").includes("bg-primary/10"));
+    expect(highlights.length).toBeGreaterThan(0);
+
+    const highlight = highlights[0];
+    const lineDiv = highlight.parentElement;
+    const gutter = Array.from(lineDiv?.children ?? []).find(
+      (node) => zIndexOf(node) === 10,
+    );
+
+    expect(zIndexOf(highlight)).not.toBeNull();
+    expect(gutter).toBeTruthy();
+    expect(Number(zIndexOf(highlight))).toBeGreaterThan(Number(zIndexOf(gutter)));
   });
 
   it("renders the annotate button above the sticky line-number gutter in unified mode", async () => {

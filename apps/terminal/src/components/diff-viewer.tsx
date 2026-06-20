@@ -156,7 +156,7 @@ const formatRangeLabel = (start: DiffLineTarget, end: DiffLineTarget): string =>
 const RangeHighlight = () => (
   <span
     aria-hidden="true"
-    className="pointer-events-none absolute inset-0 border-l-2 border-primary/60 bg-primary/10"
+    className="pointer-events-none absolute inset-0 z-20 border-l-2 border-primary/60 bg-primary/10"
   />
 );
 
