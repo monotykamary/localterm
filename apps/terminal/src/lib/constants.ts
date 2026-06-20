@@ -118,8 +118,6 @@ export const NERD_FONT_ENABLED_STORAGE_KEY = "localterm:nerd-font-enabled";
 export const NERD_FONT_SYMBOLS_FAMILY = "Symbols Nerd Font";
 export const NERD_FONT_STYLESHEET_ID = "localterm-nerd-font";
 export const FONT_LOAD_PROBE_PX = 16;
-export const FONT_FACE_LOAD_POLL_INTERVAL_MS = 25;
-export const FONT_FACE_LOAD_TIMEOUT_MS = 4000;
 
 // Initial byte capacity of the OutputBatcher staging buffer. Picked above the
 // largest single TUI repaint (~6KB on a 120×40 terminal) so the buffer doesn't
