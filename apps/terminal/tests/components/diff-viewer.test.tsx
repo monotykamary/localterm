@@ -120,6 +120,14 @@ const PATCHES: Record<string, GitDiffFilePatch> = {
   "image.png": { patch: null, patchOmitted: false, binary: true },
 };
 
+// Reads the numeric suffix from a Tailwind `z-N` utility so stacking-order
+// assertions don't depend on layout/paint.
+const tailwindZIndexOf = (node: Element | null | undefined): number | null => {
+  if (!node) return null;
+  const match = (node.getAttribute("class") ?? "").match(/(?:^|\s)z-(\d+)(?:\s|$)/);
+  return match ? Number(match[1]) : null;
+};
+
 // Default happy path: a two-file list whose patches resolve from PATCHES.
 const mockHappyPath = () => {
   filesMock.mockResolvedValue(FILE_LIST);
@@ -138,6 +146,10 @@ afterEach(() => {
   filesMock.mockReset();
   patchMock.mockReset();
   vi.unstubAllGlobals();
+  // The diff view mode persists in localStorage across tests in this file; the
+  // split-toggle tests below would otherwise leak "split" into later tests that
+  // render in the default (unified) mode.
+  localStorage.clear();
 });
 
 describe("DiffViewer", () => {
@@ -350,12 +362,6 @@ describe("DiffViewer", () => {
     const { container } = renderDiffViewer();
     await screen.findByText("BETA");
 
-    const zIndexOf = (node: Element | null): number | null => {
-      if (!node) return null;
-      const match = (node.getAttribute("class") ?? "").match(/(?:^|\s)z-(\d+)(?:\s|$)/);
-      return match ? Number(match[1]) : null;
-    };
-
     // Anchoring a drag highlights the anchored line immediately (the in-progress
     // selection covers at least the anchor), mounting a RangeHighlight there.
     const annotateButtons = screen.getAllByLabelText(/comment on line/);
@@ -369,14 +375,13 @@ describe("DiffViewer", () => {
     expect(highlights.length).toBeGreaterThan(0);
 
     const highlight = highlights[0];
-    const lineDiv = highlight.parentElement;
-    const gutter = Array.from(lineDiv?.children ?? []).find(
-      (node) => zIndexOf(node) === 10,
+    const gutter = Array.from(highlight.parentElement?.children ?? []).find(
+      (node) => tailwindZIndexOf(node) === 10,
     );
 
-    expect(zIndexOf(highlight)).not.toBeNull();
+    expect(tailwindZIndexOf(highlight)).not.toBeNull();
     expect(gutter).toBeTruthy();
-    expect(Number(zIndexOf(highlight))).toBeGreaterThan(Number(zIndexOf(gutter)));
+    expect(Number(tailwindZIndexOf(highlight))).toBeGreaterThan(Number(tailwindZIndexOf(gutter)));
   });
 
   it("renders the annotate button above the sticky line-number gutter in unified mode", async () => {
@@ -391,14 +396,9 @@ describe("DiffViewer", () => {
     const annotateButtons = screen.getAllByLabelText(/comment on line/);
     expect(annotateButtons.length).toBeGreaterThan(0);
 
-    const zIndexOf = (node: Element | null): number | null => {
-      if (!node) return null;
-      const match = (node.getAttribute("class") ?? "").match(/(?:^|\s)z-(\d+)(?:\s|$)/);
-      return match ? Number(match[1]) : null;
-    };
     const annotateButton = annotateButtons[0];
-    const buttonZ = zIndexOf(annotateButton);
-    const gutterZ = zIndexOf(annotateButton.nextElementSibling);
+    const buttonZ = tailwindZIndexOf(annotateButton);
+    const gutterZ = tailwindZIndexOf(annotateButton.nextElementSibling);
 
     expect(buttonZ).not.toBeNull();
     expect(gutterZ).not.toBeNull();
@@ -437,8 +437,7 @@ describe("DiffViewer", () => {
     expect(await screen.findByText("line 0")).toBeTruthy();
     expect(screen.queryByText(`line ${lineCount - 1}`)).toBeNull();
     expect(screen.getByText(/rendering .* more lines/)).toBeTruthy();
-  }, // parallel cross-package run this starves past vitest's 5s default. // jsdom first-paint of a 2500-line patch is CPU-bound; under turbo's
-  15_000);
+  }, 15_000); // parallel cross-package run this starves past vitest's 5s default. // jsdom first-paint of a 2500-line patch is CPU-bound; under turbo's
 
   it("auto-switches to branch mode when the leased branchInfo has a PR", async () => {
     mockHappyPath();
