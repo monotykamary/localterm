@@ -1,12 +1,14 @@
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { type RawData, WebSocketServer } from "ws";
+import { type RawData, type WebSocket, WebSocketServer } from "ws";
 import { CdpClient } from "../src/cdp/cdp-client.js";
 import type { DetectedBrowser } from "../src/cdp/detect-chromium.js";
 
 type MockMode = "ok" | "error" | "silent";
 
 type CreatedTab = { url: string; background: boolean };
+
+type TargetInfo = { type: string; targetId: string; url: string };
 
 type MockBrowser = {
   wsUrl: string;
@@ -18,6 +20,14 @@ type MockBrowser = {
   windowClosed: string[];
   /** Highest number of close sequences (attach..closeTarget) overlapping. */
   maxCloseConcurrency: number;
+  /** Set once Target.setDiscoverTargets has been received (connect × observe). */
+  discoveredTargets: boolean;
+  /** targetId → ambient tab token, captured from Page.addScriptToEvaluateOnNewDocument. */
+  injectedTokens: Record<string, string>;
+  /** Server-side push of a Target.targetCreated event to the connected socket. */
+  emitTargetCreated: (targetInfo: TargetInfo) => void;
+  /** Server-side push of a Target.targetDestroyed event to the connected socket. */
+  emitTargetDestroyed: (targetId: string) => void;
   close: () => Promise<void>;
 };
 
@@ -32,6 +42,10 @@ const startMockBrowser = async (mode: MockMode = "ok"): Promise<MockBrowser> => 
   // sessionId -> targetId, so a window.close() evaluate can be attributed.
   const sessionTargets = new Map<string, string>();
   let closeInFlight = 0;
+  // Active client socket — captured on each connect so emit* helpers can push
+  // unsolicited Target events to the CdpClient the way a real browser does
+  // when a new page opens.
+  let activeSocket: WebSocket | null = null;
   const browser: MockBrowser = {
     wsUrl: `ws://127.0.0.1:${port}/devtools/browser/mock`,
     created: [],
@@ -39,6 +53,18 @@ const startMockBrowser = async (mode: MockMode = "ok"): Promise<MockBrowser> => 
     closed: [],
     windowClosed: [],
     maxCloseConcurrency: 0,
+    discoveredTargets: false,
+    injectedTokens: {},
+    emitTargetCreated: (targetInfo) => {
+      activeSocket?.send(
+        JSON.stringify({ method: "Target.targetCreated", params: { targetInfo } }),
+      );
+    },
+    emitTargetDestroyed: (targetId) => {
+      activeSocket?.send(
+        JSON.stringify({ method: "Target.targetDestroyed", params: { targetId } }),
+      );
+    },
     close: () =>
       new Promise<void>((resolve) => {
         for (const client of wss.clients) client.terminate();
@@ -47,13 +73,21 @@ const startMockBrowser = async (mode: MockMode = "ok"): Promise<MockBrowser> => 
   };
 
   wss.on("connection", (socket) => {
+    activeSocket = socket;
     browser.connections++;
     socket.on("message", (raw: RawData) => {
       const message = JSON.parse(String(raw)) as {
         id: number;
         method: string;
         sessionId?: string;
-        params?: { url?: string; background?: boolean; targetId?: string; expression?: string };
+        params?: {
+          url?: string;
+          background?: boolean;
+          targetId?: string;
+          expression?: string;
+          discover?: boolean;
+          source?: string;
+        };
       };
       const reply = (result: unknown) => socket.send(JSON.stringify({ id: message.id, result }));
 
@@ -95,6 +129,28 @@ const startMockBrowser = async (mode: MockMode = "ok"): Promise<MockBrowser> => 
         if (message.params?.targetId) browser.closed.push(message.params.targetId);
         closeInFlight--;
         reply({ success: true });
+        return;
+      }
+      if (message.method === "Target.setDiscoverTargets") {
+        browser.discoveredTargets = true;
+        reply({});
+        return;
+      }
+      if (message.method === "Page.enable") {
+        reply({});
+        return;
+      }
+      if (message.method === "Page.addScriptToEvaluateOnNewDocument") {
+        const targetId = message.sessionId ? sessionTargets.get(message.sessionId) : undefined;
+        // Pull the token out of the injected expression the CdpClient sends:
+        //   window["__LOCALTERM_TAB_TOKEN"]="<token>";window.dispatchEvent(...)
+        // Captured so a test can drive findTargetIdForToken with the actual
+        // token the page would have echoed on its WS.
+        const match = /window\["__LOCALTERM_TAB_TOKEN"\]="([^"]+)"/.exec(
+          message.params?.source ?? "",
+        );
+        if (targetId && match) browser.injectedTokens[targetId] = match[1];
+        reply({ identifier: 1 });
         return;
       }
     });
@@ -237,6 +293,92 @@ describe("CdpClient.closeTab", () => {
     await Promise.all(handles.map((handle) => client.closeTab(handle as string)));
     expect(browser.closed.sort()).toEqual(["target-1", "target-2", "target-3", "target-4"]);
     expect(browser.maxCloseConcurrency).toBe(1);
+    client.close();
+  });
+});
+
+const relaxForObserve = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+describe("CdpClient ambient tab observation", () => {
+  it("sends Target.setDiscoverTargets once on connect", async () => {
+    const browser = await startMockBrowser("ok");
+    const client = new CdpClient({
+      detect: async () => [detected(browser.wsUrl)],
+      connectTimeoutMs: 500,
+      callTimeoutMs: 500,
+    });
+    await client.connect();
+    // observeTargets is fire-and-forget; give the setDiscoverTargets
+    // round-trip a tick to land before the assertion.
+    await relaxForObserve();
+    expect(browser.discoveredTargets).toBe(true);
+    client.close();
+  });
+
+  it("injects an ambient token for a page target on our origin and resolves it via findTargetIdForToken", async () => {
+    const browser = await startMockBrowser("ok");
+    const client = new CdpClient({
+      detect: async () => [detected(browser.wsUrl)],
+      tabUrlFilter: () => true,
+      connectTimeoutMs: 500,
+      callTimeoutMs: 500,
+    });
+    await client.connect();
+    await relaxForObserve();
+    expect(browser.discoveredTargets).toBe(true);
+
+    browser.emitTargetCreated({ type: "page", targetId: "page-1", url: "http://x/" });
+    // injectToken round-trips attach → Page.enable → addScript → Runtime.evaluate.
+    await relaxForObserve();
+
+    const token = browser.injectedTokens["page-1"];
+    expect(typeof token).toBe("string");
+    expect(token.length).toBeGreaterThan(0);
+    expect(client.findTargetIdForToken(token)).toBe("page-1");
+    client.close();
+  });
+
+  it("does not inject a token for a target the filter rejects", async () => {
+    const browser = await startMockBrowser("ok");
+    const client = new CdpClient({
+      detect: async () => [detected(browser.wsUrl)],
+      tabUrlFilter: () => false,
+      connectTimeoutMs: 500,
+      callTimeoutMs: 500,
+    });
+    await client.connect();
+    await relaxForObserve();
+
+    browser.emitTargetCreated({
+      type: "page",
+      targetId: "off-origin",
+      url: "https://example.com/",
+    });
+    await relaxForObserve();
+
+    expect(browser.injectedTokens["off-origin"]).toBeUndefined();
+    client.close();
+  });
+
+  it("clears targetId↔token maps on Target.targetDestroyed", async () => {
+    const browser = await startMockBrowser("ok");
+    const client = new CdpClient({
+      detect: async () => [detected(browser.wsUrl)],
+      tabUrlFilter: () => true,
+      connectTimeoutMs: 500,
+      callTimeoutMs: 500,
+    });
+    await client.connect();
+    await relaxForObserve();
+
+    browser.emitTargetCreated({ type: "page", targetId: "page-1", url: "http://x/" });
+    await relaxForObserve();
+    const token = browser.injectedTokens["page-1"];
+    expect(client.findTargetIdForToken(token)).toBe("page-1");
+
+    browser.emitTargetDestroyed("page-1");
+    await relaxForObserve();
+    expect(client.findTargetIdForToken(token)).toBeUndefined();
     client.close();
   });
 });

@@ -19,6 +19,7 @@ import {
   MAX_LAUNCH_COMMAND_LENGTH,
   MAX_NOTIFICATION_LENGTH,
   MAX_ROWS,
+  MAX_TAB_TOKEN_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_WORKTREEINCLUDE_FILE_BYTES,
   MAX_WORKTREE_OPEN_IN_COMMANDS,
@@ -106,6 +107,18 @@ const caffeinateBatteryThresholdInputMessageSchema = z
   })
   .strict();
 
+// Ambient tab provenance. The page reads window[LOCALTERM_TAB_TOKEN_PROPERTY]
+// (injected by the daemon via CDP) and echoes it here on WS-open (and again on
+// the 'localterm-token' event if injection arrives after the WS connects).
+// `token:null` means injection hasn't landed yet — the server waits for a
+// follow-up identify with the real token rather than pairing eagerly.
+const identifyMessageSchema = z
+  .object({
+    type: z.literal("identify"),
+    token: z.string().min(1).max(MAX_TAB_TOKEN_LENGTH).nullable(),
+  })
+  .strict();
+
 export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   inputMessageSchema,
   resizeMessageSchema,
@@ -113,6 +126,7 @@ export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   caffeinateCommandsInputMessageSchema,
   caffeinateActivityGateInputMessageSchema,
   caffeinateBatteryThresholdInputMessageSchema,
+  identifyMessageSchema,
 ]);
 
 const exitMessageSchema = z
@@ -807,6 +821,17 @@ const automationsMessageSchema = z
 // battery power, or null when the guard is off (defaults 20). `defaultCommands`
 // are the fixed automatic triggers (shown read-only); `commands` are the user's
 // additions.
+// Server tells the client whether this socket is paired with a CDP target —
+// i.e. whether the daemon can reliably closeTab on shell exit. Drives the
+// client's markShellDead path: a CDP-controlled clean exit waits for the
+// server-driven close instead of front-running with window.close().
+const cdpControlledMessageSchema = z
+  .object({
+    type: z.literal("cdp-controlled"),
+    controlled: z.boolean(),
+  })
+  .strict();
+
 const caffeinateStateMessageSchema = z
   .object({
     type: z.literal("caffeinate"),
@@ -860,6 +885,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   gitDiffSummaryMessageSchema,
   automationsMessageSchema,
   caffeinateStateMessageSchema,
+  cdpControlledMessageSchema,
 ]);
 
 export const gitDiffFileSchema = gitDiffFileMetaSchema

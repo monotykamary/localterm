@@ -339,3 +339,20 @@ export const WS_READY_STATE_OPEN = 1;
 export const WS_CLOSE_POLICY_VIOLATION = 1008;
 export const WS_CLOSE_BACKPRESSURE = 4429;
 export const WS_CLOSE_CAPACITY_REACHED = 4503;
+
+// Ambient tab provenance over the WS handshake. The daemon's CDP client injects
+// a unique token into every page-type target on our origin (via
+// Page.addScriptToEvaluateOnNewDocument so it survives navigations/reloads);
+// the page reads `window[LOCALTERM_TAB_TOKEN_PROPERTY]` and echoes it in a
+// `{type:"identify"}` WS message so the server pairs the socket with the CDP
+// targetId (for reliable closeTab on shell exit). The `localterm-token` event
+// fires after the property is set, so a page that already opened its WS with
+// `token:null` re-sends once injection lands.
+export const LOCALTERM_TAB_TOKEN_PROPERTY = "__LOCALTERM_TAB_TOKEN";
+export const LOCALTERM_TAB_TOKEN_EVENT = "localterm-token";
+export const MAX_TAB_TOKEN_LENGTH = 128;
+// How long the client waits for the daemon's CDP-driven closeTab to settle on
+// a clean shell exit before falling back to window.close() + the dead-session
+// mask. Generous vs. CLOSE_SETTLE_MS (100ms) + the queued close latency so
+// reliable CDP closes don't flash the mask.
+export const AMBIENT_TAB_CLOSE_DEADLINE_MS = 1_000;

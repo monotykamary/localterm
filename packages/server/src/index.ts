@@ -94,6 +94,7 @@ import {
   normalizeTriggerInput,
 } from "./utils/compile-schedule.js";
 import { computeNextAutomationRunAt } from "./utils/compute-next-automation-run-at.js";
+import { isLocaltermTabUrl } from "./utils/is-localterm-tab-url.js";
 import { enumerateMissedOccurrences } from "./utils/reconcile-downtime.js";
 import type {
   Automation,
@@ -328,7 +329,18 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // (below), so the user clears the browser's remote-debugging prompt a single
   // time rather than on every run. Skipped when a caller injects its own
   // `tabController` (it owns tab control) or when disabled via env.
-  const cdpClient = options.tabController || cdpBackgroundTabsDisabled ? null : new CdpClient();
+  const cdpClient =
+    options.tabController || cdpBackgroundTabsDisabled
+      ? null
+      : new CdpClient({
+          // Only page-type targets on the daemon's own origin get an ambient token
+          // injected — unrelated tabs the user has open in their debugged browser
+          // stay untouched. `actualPort` is bound by the http server's listen
+          // callback below; the filter is only invoked at targetCreated event
+          // time (after CdpClient.connect, which runs after listen), so it reads
+          // the resolved port rather than the pre-bind placeholder.
+          tabUrlFilter: (candidateUrl: string) => isLocaltermTabUrl(candidateUrl, actualPort, host),
+        });
   const tabController: AutomationTabController = options.tabController ?? {
     open: async (url: string) => {
       // Best case: if a debug-enabled Chromium browser is running, open the run
@@ -875,6 +887,13 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       let session: Session | null = null;
       let activeWs: BroadcastSocket | null = null;
       let claimedRunId: string | null = null;
+      // The CDP targetId this WS socket was paired with via the
+      // `{type:"identify"}` handshake (page's ambient token →
+      // CdpClient.findTargetIdForToken). Set on identify; drives closeTab on
+      // clean shell exit. Stays null when no CDP is reachable, the token raced
+      // (page opened before the CdpClient observed it), or the page never
+      // re-identified.
+      let claimedTargetId: string | null = null;
       let drainPollTimer: NodeJS.Timeout | null = null;
       let heartbeatTimer: NodeJS.Timeout | null = null;
       let stopHeartbeat: (() => void) | null = null;
@@ -1075,6 +1094,18 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           };
           const onNotification = (body: string) => safeSend(ws, { type: "notification", body });
           const onExit = (code: number | null) => {
+            // Reliable closeTab on a clean shell exit for CDP-controlled tabs.
+            // closeTab drives the browser's own close path via CDP instead of
+            // relying on the client's window.close() — which often doesn't
+            // apply (Dia/Arc, or a tab the user opened by URL rather than via
+            // window.open) and strands the tab. Fire-and-forget onto the same
+            // closeQueue that serializes automation-run closes, so concurrent
+            // Ctrl+Ds across tabs never interleave and orphan targets.
+            // Skipped on non-zero exit codes so the dead-session mask surfaces
+            // the failure instead of closing the tab silently.
+            if (claimedTargetId && (code === null || code === 0)) {
+              void cdpClient?.closeTab(claimedTargetId);
+            }
             if (outputBatchTimer !== null) {
               clearTimeout(outputBatchTimer);
               outputBatchTimer = null;
@@ -1204,6 +1235,26 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             caffeinateManager.setActivityGate(parsed.data.enabled);
           } else if (parsed.data.type === "caffeinate-battery-threshold") {
             caffeinateManager.setBatteryThreshold(parsed.data.percent);
+          } else if (parsed.data.type === "identify") {
+            // Ambient tab provenance: the page echoes the CDP-injected token so
+            // we pair this socket with its targetId for closeTab on shell exit.
+            // `token:null` means injection hasn't landed yet (page opened its
+            // WS before the CdpClient observed it) — wait for the page to
+            // re-identify on the 'localterm-token' event rather than pairing
+            // eagerly against a null token. We always ack the client either
+            // way so its markShellDead path knows whether to fall back to
+            // window.close() or wait for the CDP-driven close.
+            const token = parsed.data.token;
+            if (token !== null) {
+              const targetId = cdpClient?.findTargetIdForToken(token);
+              if (targetId) claimedTargetId = targetId;
+            }
+            if (activeWs) {
+              safeSend(activeWs, {
+                type: "cdp-controlled",
+                controlled: claimedTargetId !== null,
+              });
+            }
           } else {
             session.resize(
               parsed.data.cols,

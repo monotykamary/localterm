@@ -89,6 +89,9 @@ import {
   TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS,
 } from "@/lib/constants";
 import {
+  AMBIENT_TAB_CLOSE_DEADLINE_MS,
+  LOCALTERM_TAB_TOKEN_EVENT,
+  LOCALTERM_TAB_TOKEN_PROPERTY,
   serverToClientMessageSchema,
   type AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
@@ -428,11 +431,26 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     const container = containerRef.current;
     if (!container) return;
 
+    // Reads the CDP-injected ambient tab token off `window`. Injected by the
+    // daemon's CdpClient via Page.addScriptToEvaluateOnNewDocument on every
+    // page-type target on our origin; the property name lives in
+    // LOCALTERM_TAB_TOKEN_PROPERTY so the wire protocol stays authoritative
+    // (no parallel literal). Cast unavoidable — TS can't type-index Window by
+    // a runtime-constant string.
+    const readTabToken = (): string | undefined =>
+      (window as unknown as Record<string, string | undefined>)[LOCALTERM_TAB_TOKEN_PROPERTY];
+
     let disposed = false;
     let exited = false;
     let wasEverConnected = false;
     let lastTitle = "";
     let socket: WebSocket | null = null;
+    // Whether the server paired this WS socket with a CDP target via the
+    // `{type:"identify"}` handshake → the server will drive closeTab on a
+    // clean shell exit, so the client defers window.close() to give the
+    // CDP-driven close time to land. Reset whenever the socket changes; the
+    // next identify acks with the up-to-date value over the new WS.
+    let cdpControlled = false;
     let reconnectTimer: number | null = null;
     let resizeTimer: number | null = null;
     let faviconRunningTimer: number | null = null;
@@ -977,28 +995,40 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     fitToContainer();
     requestAnimationFrame(() => terminal.focus());
 
-    const markShellDead = (exitCode: number | null) => {
-      if (exited) return;
-      exited = true;
-      if (exitCode === null || exitCode === 0) {
-        window.close();
-        setTimeout(() => {
-          if (disposed) return;
-          resetFavicon();
-          setTabFaviconState("dead");
-          terminal.write(formatShellExitMarker(exitCode));
-          document.title = titleForDeadSession(lastTitle);
-          setExitInfo({ reason: "shell-exited", exitCode });
-          setSessionInfo(null);
-        }, 100);
-        return;
-      }
+    const showDeadSessionMask = (exitCode: number | null) => {
+      if (disposed) return;
       resetFavicon();
       setTabFaviconState("dead");
       terminal.write(formatShellExitMarker(exitCode));
       document.title = titleForDeadSession(lastTitle);
       setExitInfo({ reason: "shell-exited", exitCode });
       setSessionInfo(null);
+    };
+    const markShellDead = (exitCode: number | null) => {
+      if (exited) return;
+      exited = true;
+      if (exitCode !== null && exitCode !== 0) {
+        // Non-zero exit — surface immediately. The server's onExit deliberately
+        // skips closeTab on non-clean codes so the tab stays as the failure mask.
+        showDeadSessionMask(exitCode);
+        return;
+      }
+      const settleAndMask = () => {
+        window.close();
+        setTimeout(() => showDeadSessionMask(exitCode), 100);
+      };
+      if (cdpControlled) {
+        // CDP-controlled tab: defer window.close() (and the mask) so the
+        // daemon's server-driven closeTab has time to settle first. closeTab
+        // drives the browser's own close path via CDP — reliable where
+        // window.close() doesn't (Dia/Arc, or a tab opened by URL rather than
+        // via window.open). If the CDP close hasn't landed by the deadline,
+        // we fall back to window.close() + the mask so the user still sees
+        // what happened.
+        setTimeout(settleAndMask, AMBIENT_TAB_CLOSE_DEADLINE_MS);
+      } else {
+        settleAndMask();
+      }
     };
 
     const markConnectionLost = (closeCode: number, closeReason: string, wasClean: boolean) => {
@@ -1024,6 +1054,22 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         wsConnectedRef.current = true;
         setConsecutiveFailures(0);
         sendResize(terminal.cols, terminal.rows);
+        // Ambient tab provenance: echo the CDP-injected token so the server
+        // pairs this socket with its CDP target for closeTab on shell exit.
+        // Always send — with `token:null` when injection hasn't landed yet —
+        // and register a one-shot listener for the 'localterm-token' event the
+        // injection dispatches, so we re-identify with the real token when it
+        // arrives. Idempotent across reconnects: the {once:true} old listener's
+        // `socket !== nextSocket` guard rejects the next socket.
+        send({ type: "identify", token: readTabToken() ?? null });
+        window.addEventListener(
+          LOCALTERM_TAB_TOKEN_EVENT,
+          () => {
+            if (disposed || socket !== nextSocket) return;
+            send({ type: "identify", token: readTabToken() ?? null });
+          },
+          { once: true },
+        );
       });
 
       nextSocket.addEventListener("message", (event) => {
@@ -1096,6 +1142,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         } else if (message.type === "exit") {
           resetFavicon();
           markShellDead(message.code);
+        } else if (message.type === "cdp-controlled") {
+          cdpControlled = message.controlled;
         }
       });
 
@@ -1103,6 +1151,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         if (socket !== nextSocket) return;
         socket = null;
         wsConnectedRef.current = false;
+        cdpControlled = false;
         if (disposed) return;
         if (exited) return;
         if (wasEverConnected) {
@@ -1137,6 +1186,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       // open a new tab") loses the user's tab state for a recoverable failure.
       exited = false;
       wasEverConnected = false;
+      cdpControlled = false;
       wsConnectedRef.current = false;
       setExitInfo(null);
       setSessionInfo(null);
