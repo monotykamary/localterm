@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.7.6
+
+### Patch Changes
+
+- Add test coverage for the binary-output WebSocket paths shipped in 2.7.5: the client-side cross-realm ArrayBuffer dispatch fallback, the OutputBatcher's byte-buffer growth past the initial capacity, and the keep-warm rAF cadence; plus a server-side assertion that output frames arrive as raw binary ArrayBuffers rather than JSON text.
+
 ## 2.7.5
 
 ### Patch Changes
