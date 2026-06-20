@@ -1,5 +1,20 @@
 # localterm
 
+## 2.7.7
+
+### Patch Changes
+
+- Fix the diff viewer's per-line comment controls being occluded by the sticky
+  line-number gutter. Both the `+` annotate button and the multiline
+  drag-to-comment range highlight are positioned descendants of the line row
+  painted before the sticky gutter (an opaque `bg-background` `z-10` descendant)
+  in DOM order, so with equal `z-index` the later-painted gutter covered them —
+  the comment bubble never appeared on hover and drags couldn't start, and
+  saved/in-progress range tints stopped at the line-number column. Raised both to
+  `z-20` so they stack strictly above the gutter.
+- Updated dependencies
+  - @monotykamary/localterm-server@2.7.7
+
 ## 2.7.6
 
 ### Patch Changes
