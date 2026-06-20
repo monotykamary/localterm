@@ -101,4 +101,4 @@ class OutputBatcher {
 
 const outputBatcher = new OutputBatcher();
 
-export { outputBatcher };
+export { OutputBatcher, outputBatcher };

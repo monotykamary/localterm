@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import {
-  MAX_FOREGROUND_LENGTH,
-  MAX_INPUT_BYTES,
-  MAX_TITLE_LENGTH,
-} from "../src/constants.js";
+import { MAX_FOREGROUND_LENGTH, MAX_INPUT_BYTES, MAX_TITLE_LENGTH } from "../src/constants.js";
 import { clientToServerMessageSchema, serverToClientMessageSchema } from "../src/schemas.js";
 
 describe("clientToServerMessageSchema", () => {
@@ -132,9 +128,9 @@ describe("serverToClientMessageSchema", () => {
   // dispatches by `event.data instanceof ArrayBuffer` in terminal.tsx. Asserting
   // rejection here guards against accidentally re-adding the JSON path.
   it("rejects JSON output frames (output is binary-only)", () => {
-    expect(
-      serverToClientMessageSchema.safeParse({ type: "output", data: "x" }).success,
-    ).toBe(false);
+    expect(serverToClientMessageSchema.safeParse({ type: "output", data: "x" }).success).toBe(
+      false,
+    );
   });
 
   it("rejects the legacy snapshot frame", () => {

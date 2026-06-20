@@ -180,6 +180,43 @@ describe("createServer WS lifecycle", () => {
     }
   });
 
+  // The sibling "echoes input back as binary output" test decodes binary frames
+  // back to {type:"output"} via normalizeMessage, so a regression making the
+  // server emit JSON {type:"output"} text would still pass it. This side-listens
+  // for the raw event before sending input and asserts the first output frame's
+  // event.data is an ArrayBuffer (binary), never a JSON string. Guards against
+  // re-adding the JSON output path that 2.7.4 inadvertently shipped without the
+  // client-side instanceof branch being covered.
+  it("emits output as a raw binary ArrayBuffer frame, not JSON text", async () => {
+    const { socket, waitForSession } = await connectAndCollect(server.port);
+    try {
+      await waitForSession();
+
+      let rawOutputFrame: unknown = null;
+      const captureRawOutput = (event: WebSocket.MessageEvent) => {
+        if (rawOutputFrame === null && event.data instanceof ArrayBuffer) {
+          rawOutputFrame = event.data;
+        }
+      };
+      socket.addEventListener("message", captureRawOutput);
+
+      socket.send(JSON.stringify({ type: "input", data: "echo hi\n" }));
+      await waitForMessage(socket, (message) =>
+        Boolean(
+          message &&
+          typeof message === "object" &&
+          (message as Record<string, unknown>).type === "output",
+        ),
+      );
+      socket.removeEventListener("message", captureRawOutput);
+
+      expect(rawOutputFrame).toBeInstanceOf(ArrayBuffer);
+      expect(Buffer.from(rawOutputFrame as ArrayBuffer).toString("utf8")).toContain("hi");
+    } finally {
+      await closeWs(socket);
+    }
+  });
+
   it("rejects invalid JSON gracefully", async () => {
     const { socket, waitForSession } = await connectAndCollect(server.port);
     try {
