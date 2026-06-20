@@ -1,5 +1,17 @@
 # localterm-server
 
+## 2.7.5
+
+### Patch Changes
+
+- Emit PTY output as raw UTF-8 binary WebSocket frames instead of JSON `{type:"output",data}` messages, and raise the batch early-flush threshold from 8KB to 32KB.
+
+  JSON.stringify/parse of terminal output was the dominant per-byte cost on the renderer main thread — ~36% of main-thread busy in steady-state output, scaling linearly with payload size due to per-character escape scanning on both sides. PTY output is already bytes; the server now UTF-8-encodes the accumulated batch once at flush and emits a single binary frame. The client dispatches by `event.data instanceof ArrayBuffer` and hands the bytes directly to the output batcher with no JSON.parse and no string roundtrip.
+
+  The 8KB flush threshold made 15MB/s output produce ~1880 WebSocket messages/sec, burning ~9.4ms of every 16.6ms frame on invisible per-message RunTask plumbing. Coalescing four times more (~32KB) reduces that to ~470 msg/sec (~2.4ms/frame), freeing ~7ms/frame while keeping batch latency at ~2ms at 15MB/s — imperceptible. xterm.js's own parser amortises parse across batched bytes; its internal chunk cap (~15ms) parses a 32KB batch in ~6ms, under the cap.
+
+  The `output` variant is removed from `serverToClientMessageSchema`; output frames are now dispatched by ArrayBuffer type on the client.
+
 ## 2.7.4
 
 ## 2.7.3
