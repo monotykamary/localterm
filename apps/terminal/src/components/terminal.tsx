@@ -97,10 +97,16 @@ import {
   type TerminalCursorStyle,
   isTerminalCursorStyle,
 } from "@/lib/terminal-cursor";
-import { TERMINAL_FONTS, familyForFont, findTerminalFontById } from "@/lib/terminal-fonts";
+import {
+  TERMINAL_FONTS,
+  familyForFont,
+  findTerminalFontById,
+  type TerminalFont,
+} from "@/lib/terminal-fonts";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
 import { TERMINAL_THEMES, findTerminalThemeById } from "@/lib/terminal-themes";
 import { generateExtendedPalette } from "@/utils/generate-extended-palette";
+import { applyTerminalFont } from "@/utils/apply-terminal-font";
 import { awaitFontReady } from "@/utils/await-font-ready";
 import { buildKittyKeySequence } from "@/utils/build-kitty-key-sequence";
 import {
@@ -351,6 +357,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     initialNerdFontEnabledRef.current,
   );
   const effectiveFont = useMemo(() => findTerminalFontById(effectiveFontId), [effectiveFontId]);
+  const effectiveFontRef = useRef<TerminalFont>(effectiveFont);
+  const activeNerdFontEnabledRef = useRef<boolean>(activeNerdFontEnabled);
+  effectiveFontRef.current = effectiveFont;
+  activeNerdFontEnabledRef.current = activeNerdFontEnabled;
   const [activeFontSize, setActiveFontSize] = useState<number>(initialFontSizeRef.current);
   const [activeLineHeight, setActiveLineHeight] = useState<number>(initialLineHeightRef.current);
   const [activeCursorStyle, setActiveCursorStyle] = useState<TerminalCursorStyle>(
@@ -1060,6 +1070,12 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           applyIncomingTitle(message.title);
           removeRunQueryParam();
           removeInitialCommandQueryParam();
+          // The PTY session message means the shell has loaded. Re-apply the
+          // font and re-measure so a clean atlas clear runs after the faces are ready.
+          void awaitFontReady(effectiveFontRef.current).then(() => {
+            if (disposed || terminalRef.current !== terminal) return;
+            applyTerminalFont(terminal, fitAddon, effectiveFontRef.current, activeNerdFontEnabledRef.current);
+          });
         } else if (message.type === "automations") {
           setAutomations(message.automations);
         } else if (message.type === "caffeinate") {
@@ -1212,10 +1228,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       if (cancelled) return;
       const liveTerminal = terminalRef.current;
       if (!liveTerminal) return;
-      liveTerminal.options.fontFamily = familyForFont(effectiveFont, activeNerdFontEnabled);
-      liveTerminal.clearTextureAtlas();
       const liveFitAddon = fitAddonRef.current;
-      if (liveFitAddon) fitTerminalPreservingScroll(liveTerminal, liveFitAddon);
+      applyTerminalFont(liveTerminal, liveFitAddon, effectiveFont, activeNerdFontEnabled);
     });
     return () => {
       cancelled = true;
