@@ -228,7 +228,7 @@ const AnnotateLineButton = ({
       onDragStart();
     }}
     aria-label="comment on line — drag to select multiple lines"
-    className="absolute top-1/2 left-1 z-10 hidden size-4 -translate-y-1/2 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-transform group-hover/line:flex hover:scale-110"
+    className="absolute top-1/2 left-1 z-20 hidden size-4 -translate-y-1/2 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-transform group-hover/line:flex hover:scale-110"
   >
     <MessageSquarePlus className="size-3" aria-hidden="true" />
   </button>

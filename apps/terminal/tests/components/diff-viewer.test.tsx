@@ -341,6 +341,32 @@ describe("DiffViewer", () => {
     expect(screen.getByText(/1 pending comment/)).toBeTruthy();
   });
 
+  it("renders the annotate button above the sticky line-number gutter in unified mode", async () => {
+    // Regression: the sticky gutter (z-10, opaque bg-background, painted after
+    // the button in DOM order) occluded the annotate button at the same z-index,
+    // so the comment bubble never showed on hover and pointerdown never reached
+    // the drag handler. The button must stack strictly above the gutter.
+    mockHappyPath();
+    renderDiffViewer();
+    await screen.findByText("BETA");
+
+    const annotateButtons = screen.getAllByLabelText(/comment on line/);
+    expect(annotateButtons.length).toBeGreaterThan(0);
+
+    const zIndexOf = (node: Element | null): number | null => {
+      if (!node) return null;
+      const match = (node.getAttribute("class") ?? "").match(/(?:^|\s)z-(\d+)(?:\s|$)/);
+      return match ? Number(match[1]) : null;
+    };
+    const annotateButton = annotateButtons[0];
+    const buttonZ = zIndexOf(annotateButton);
+    const gutterZ = zIndexOf(annotateButton.nextElementSibling);
+
+    expect(buttonZ).not.toBeNull();
+    expect(gutterZ).not.toBeNull();
+    expect(Number(buttonZ)).toBeGreaterThan(Number(gutterZ));
+  });
+
   it("caps the first paint of a large diff and shows a progress indicator", async () => {
     // Freeze animation frames so the progressive grow can't advance — this pins
     // the first-paint state: only the first chunk is mounted, the tail is not,
