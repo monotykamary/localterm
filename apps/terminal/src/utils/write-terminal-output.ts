@@ -3,6 +3,32 @@ import type { Terminal as XtermTerminal } from "@xterm/xterm";
 
 const performanceNow = () => performance.now();
 
+// xterm's WriteBuffer defers every non-user-driven terminal.write via
+// setTimeout(0), pushing the grid mutation past the next compositor vsync and
+// committing the rAF's frame against the unchanged grid — new state lands one
+// or two vsyncs late, and on a 450-frame/sec emitter xterm installs a
+// refreshRows rAF on every 12ms async-yield. Setting _didUserInput true before
+// write routes xterm through its synchronous _innerWrite() branch so parse
+// begins inside the write call itself. _didUserInput is preserved verbatim in
+// @xterm/xterm's shipped bundle (no private-name mangling), so the reach is
+// stable across versions. flushSync has the same effect but discards parse()'s
+// async-handler Promise return and can strand _parseStack continuation state.
+interface XtermWriteBuffer {
+  _didUserInput?: boolean;
+}
+interface XtermCore {
+  _writeBuffer?: XtermWriteBuffer;
+}
+interface XtermTerminalWithCore extends XtermTerminal {
+  _core?: XtermCore;
+}
+
+const writeSynchronously = (terminal: XtermTerminal, bytes: Uint8Array) => {
+  const writeBuffer = (terminal as XtermTerminalWithCore)._core?._writeBuffer;
+  if (writeBuffer) writeBuffer._didUserInput = true;
+  terminal.write(bytes);
+};
+
 class OutputBatcher {
   private terminal: XtermTerminal | null = null;
   private buffer = new Uint8Array(OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES);
@@ -91,10 +117,11 @@ class OutputBatcher {
     const byteLength = this.byteLength;
     this.byteLength = 0;
     if (!terminal || byteLength === 0) return;
-    // xterm's WriteBuffer retains the input bytes across an async yield while it
-    // drains its parser, so hand over a private copy rather than a view into the
-    // mutable staging buffer that the next push() will overwrite.
-    terminal.write(this.buffer.subarray(0, byteLength).slice());
+    // xterm's WriteBuffer retains the input bytes across any async yield while
+    // it drains its parser (sync-parse only covers the first ~12ms of a large
+    // write), so hand over a private copy rather than a view into the mutable
+    // staging buffer that the next push() will overwrite.
+    writeSynchronously(terminal, this.buffer.subarray(0, byteLength).slice());
     this.afterFlush?.();
   };
 }
