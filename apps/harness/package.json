@@ -2,8 +2,8 @@
   "name": "@monotykamary/localterm-harness",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "bin": {
     "donut": "./donut.mjs"
-  }
+  },
+  "type": "module"
 }

@@ -21,8 +21,16 @@ const routes = [
   ["/xterm/css/xterm.css", join(xtermDir, "css/xterm.css"), "text/css"],
   ["/xterm/lib/xterm.mjs", join(xtermDir, "lib/xterm.mjs"), "text/javascript"],
   ["/addon/lib/addon-webgl.mjs", join(addonDir, "addon-webgl.mjs"), "text/javascript"],
-  ["/fonts/geist-mono-latin-400-normal.woff2", join(fontDir, "geist-mono-latin-400-normal.woff2"), "font/woff2"],
-  ["/fonts/geist-mono-latin-700-normal.woff2", join(fontDir, "geist-mono-latin-700-normal.woff2"), "font/woff2"],
+  [
+    "/fonts/geist-mono-latin-400-normal.woff2",
+    join(fontDir, "geist-mono-latin-400-normal.woff2"),
+    "font/woff2",
+  ],
+  [
+    "/fonts/geist-mono-latin-700-normal.woff2",
+    join(fontDir, "geist-mono-latin-700-normal.woff2"),
+    "font/woff2",
+  ],
   ["/harness/index.html", join(harnessDir, "index.html"), "text/html"],
   ["/harness/main.mjs", join(harnessDir, "main.mjs"), "text/javascript"],
   ["/", join(harnessDir, "index.html"), "text/html"],
@@ -49,7 +57,10 @@ const server = createServer(async (request, response) => {
   const [, absolutePath, mime] = route;
   try {
     const buffer = await readFile(absolutePath);
-    response.writeHead(200, { "content-type": mime ?? mimeForPath(absolutePath), "cache-control": "no-store" });
+    response.writeHead(200, {
+      "content-type": mime ?? mimeForPath(absolutePath),
+      "cache-control": "no-store",
+    });
     response.end(buffer);
   } catch (error) {
     response.writeHead(500, { "content-type": "text/plain" });

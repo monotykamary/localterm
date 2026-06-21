@@ -7,8 +7,7 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 
 const CHROME =
-  process.env.CHROME_PATH ??
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const PORT = Number.parseInt(process.env.CDP_PORT ?? "9555", 10);
 const HARNESS_URL = process.env.HARNESS_URL ?? "http://127.0.0.1:4817/";
 const HEADLESS = process.env.HEADLESS !== "0";
@@ -141,7 +140,9 @@ const run = async () => {
     console.log("\n===== SCAN REPORT =====");
     for (const entry of value.report ?? []) console.log(JSON.stringify(entry));
     const boldTabs = (value.log ?? "").match(/\bBOLD\b/g)?.length ?? 0;
-    console.log(`\nVERDICT: ${boldTabs > 0 ? "BOLDENING REPRODUCED" : "no boldening detected"} (${boldTabs} bold tab-measurements)`);
+    console.log(
+      `\nVERDICT: ${boldTabs > 0 ? "BOLDENING REPRODUCED" : "no boldening detected"} (${boldTabs} bold tab-measurements)`,
+    );
   } catch (error) {
     console.error("driver error:", error.message ?? error);
     process.exitCode = 2;

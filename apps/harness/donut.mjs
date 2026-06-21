@@ -47,9 +47,7 @@ const parsePositiveIntArg = (flagName, fallbackValue) => {
   const flagIndex = process.argv.indexOf(flagName);
   if (flagIndex === -1) return fallbackValue;
   const parsedValue = Number.parseInt(process.argv[flagIndex + 1] ?? "", 10);
-  return Number.isFinite(parsedValue) && parsedValue > 0
-    ? parsedValue
-    : fallbackValue;
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallbackValue;
 };
 
 const resolveDimensions = () => {
@@ -57,14 +55,8 @@ const resolveDimensions = () => {
     "--cols",
     process.stdout.columns ?? DEFAULT_COLUMNS_COUNT,
   );
-  const rowsCount = parsePositiveIntArg(
-    "--rows",
-    process.stdout.rows ?? DEFAULT_ROWS_COUNT,
-  );
-  const framesPerSecond = parsePositiveIntArg(
-    "--fps",
-    DEFAULT_FRAMES_PER_SECOND,
-  );
+  const rowsCount = parsePositiveIntArg("--rows", process.stdout.rows ?? DEFAULT_ROWS_COUNT);
+  const framesPerSecond = parsePositiveIntArg("--fps", DEFAULT_FRAMES_PER_SECOND);
   return { columnsCount, rowsCount, framesPerSecond };
 };
 
@@ -106,12 +98,9 @@ const applyRotation = (matrix, pointX, pointY, pointZ) => ({
 // matching the heavy-output burst volume in the trace.
 const computeBackgroundRgb = (frameIndex, rowIndex, columnIndex) => {
   const timeScalar = frameIndex * 0.1;
-  const redUnit =
-    Math.sin(timeScalar + rowIndex * 0.15 + columnIndex * 0.08) * 0.5 + 0.5;
-  const greenUnit =
-    Math.sin(timeScalar * 1.3 + columnIndex * 0.12) * 0.5 + 0.5;
-  const blueUnit =
-    Math.sin(timeScalar * 0.7 + (rowIndex + columnIndex) * 0.05) * 0.5 + 0.5;
+  const redUnit = Math.sin(timeScalar + rowIndex * 0.15 + columnIndex * 0.08) * 0.5 + 0.5;
+  const greenUnit = Math.sin(timeScalar * 1.3 + columnIndex * 0.12) * 0.5 + 0.5;
+  const blueUnit = Math.sin(timeScalar * 0.7 + (rowIndex + columnIndex) * 0.05) * 0.5 + 0.5;
   return [
     normalizeToColorByte(redUnit),
     normalizeToColorByte(greenUnit),
@@ -119,8 +108,7 @@ const computeBackgroundRgb = (frameIndex, rowIndex, columnIndex) => {
   ];
 };
 
-const formatRgbSuffix = (redByte, greenByte, blueByte) =>
-  `${redByte};${greenByte};${blueByte}m`;
+const formatRgbSuffix = (redByte, greenByte, blueByte) => `${redByte};${greenByte};${blueByte}m`;
 
 const renderDonutFrame = (
   charBuffer,
@@ -163,8 +151,7 @@ const renderDonutFrame = (
       );
       const projectedRow = Math.round(
         centerRow -
-          (PROJECTION_SCALE * rotated.y * CELL_ASPECT_RATIO_HEIGHT_TO_WIDTH) /
-            denominator,
+          (PROJECTION_SCALE * rotated.y * CELL_ASPECT_RATIO_HEIGHT_TO_WIDTH) / denominator,
       );
       if (projectedColumn < 0 || projectedColumn >= columnsCount) continue;
       if (projectedRow < 0 || projectedRow >= rowsCount) continue;
@@ -176,15 +163,8 @@ const renderDonutFrame = (
 
       // Surface normal (cosTheta*cosPhi, cosTheta*sinPhi, sinTheta) rotated
       // by the same matrix; luminance = dot(n, light=(0, 0.7071, -0.7071)).
-      const normal = applyRotation(
-        matrix,
-        cosTheta * cosPhi,
-        cosTheta * sinPhi,
-        sinTheta,
-      );
-      const luminance =
-        LIGHT_VECTOR_Y_COMPONENT * normal.y +
-        LIGHT_VECTOR_Z_COMPONENT * normal.z;
+      const normal = applyRotation(matrix, cosTheta * cosPhi, cosTheta * sinPhi, sinTheta);
+      const luminance = LIGHT_VECTOR_Y_COMPONENT * normal.y + LIGHT_VECTOR_Z_COMPONENT * normal.z;
       if (luminance < 0) continue;
 
       const rampIndex = Math.min(
@@ -221,11 +201,7 @@ const renderDonutFrame = (
         blueByte = foregroundBlueBuffer[cellIndex];
         cellChar = charBuffer[cellIndex];
       } else {
-        [redByte, greenByte, blueByte] = computeBackgroundRgb(
-          frameIndex,
-          rowIndex,
-          columnIndex,
-        );
+        [redByte, greenByte, blueByte] = computeBackgroundRgb(frameIndex, rowIndex, columnIndex);
       }
       output +=
         BG_TRUECOLOR_PREFIX +
@@ -248,8 +224,7 @@ const installSignalHandlers = () => {
   // the cursor-restore escapes unflushed and the terminal stuck in hide-cursor.
   // Write synchronously, then exit on the drain callback; if it never fires
   // (broken pipe), the raw exit keeps the process from hanging.
-  const cleanupSequence =
-    ANSI_SHOW_CURSOR + ANSI_RESET_SGR + ANSI_CLEAR_SCREEN + ANSI_HOME_CURSOR;
+  const cleanupSequence = ANSI_SHOW_CURSOR + ANSI_RESET_SGR + ANSI_CLEAR_SCREEN + ANSI_HOME_CURSOR;
   const cleanup = () => {
     process.stdout.write(cleanupSequence, () => process.exit(0));
     setTimeout(() => process.exit(0), 100);
@@ -310,9 +285,4 @@ if (process.argv[1] && process.argv[1].endsWith("donut.mjs")) {
   startDonut();
 }
 
-export {
-  renderDonutFrame,
-  resolveDimensions,
-  instantiateFrameBuffers,
-  startDonut,
-};
+export { renderDonutFrame, resolveDimensions, instantiateFrameBuffers, startDonut };

@@ -9,7 +9,7 @@ const COLS = 28;
 const ROWS = 3;
 const SAMPLE_ROW = "MMMMMMMMMMMMMMMMMMMMMMMMMMMM";
 const PROMPT_ROW = "\u001b[32m$\u001b[0m mmvmvmmvmvmmvmvmmv";
-const INK_RATIO_BOLD_THRESHOLD = 1.10; // Geist 700 is ~1.16x ink of 400
+const INK_RATIO_BOLD_THRESHOLD = 1.1; // Geist 700 is ~1.16x ink of 400
 const WEIGHT_MATCH_TOLERANCE = 0.04; // |ink-ref|/ref within 4% => classified
 const SPAWN_GAP_MS = 25;
 
@@ -98,7 +98,8 @@ const classifyWeight = (inkRatio) => {
 const inspectAtlas = (terminal) => {
   const renderer = terminal._core?._renderService?._renderer;
   if (!renderer) return { hasRenderer: false };
-  const atlasCanvas = renderer.textureAtlas ?? renderer._glyphRenderer?.value?._atlas?.pages?.[0]?.canvas;
+  const atlasCanvas =
+    renderer.textureAtlas ?? renderer._glyphRenderer?.value?._atlas?.pages?.[0]?.canvas;
   if (!atlasCanvas) return { hasRenderer: true, atlas: false };
   const width = Math.min(atlasCanvas.width, 256);
   const height = Math.min(atlasCanvas.height, 64);
@@ -143,7 +144,8 @@ const inspectDimensions = (terminal) => {
   const core = terminal._core;
   const charSize = core?._charSizeService;
   const xtermRoot = terminal.element; // terminal.element is the `.xterm` root
-  const measureEl = xtermRoot?.querySelector(".xterm-xmeasure") ?? xtermRoot?.querySelector(".xterm-rows");
+  const measureEl =
+    xtermRoot?.querySelector(".xterm-xmeasure") ?? xtermRoot?.querySelector(".xterm-rows");
   const computed = measureEl ? globalThis.getComputedStyle(measureEl) : null;
   const rootComputed = xtermRoot ? globalThis.getComputedStyle(xtermRoot) : null;
   return {
@@ -170,7 +172,10 @@ const loadGeistFace = async (weight, url) => {
 
 const preloadGeist = async () => {
   await Promise.all([loadGeistFace("400", GEIST_LATIN_400), loadGeistFace("700", GEIST_LATIN_700)]);
-  appendLog(`preload: Geist Mono 400/700 faces loaded (document.fonts.status=${document.fonts.status})`, "muted");
+  appendLog(
+    `preload: Geist Mono 400/700 faces loaded (document.fonts.status=${document.fonts.status})`,
+    "muted",
+  );
 };
 
 const measureInkRatio = (terminal) => {
@@ -292,7 +297,11 @@ const spawnTerminal = async (index, forceBold = false) => {
   const inkRatio = measureInkRatio(terminal);
   const compareAgainst = referenceBaseline ?? baselineInkRatio;
   const isBold =
-    inkRatio == null ? null : compareAgainst == null ? null : inkRatio > compareAgainst * INK_RATIO_BOLD_THRESHOLD;
+    inkRatio == null
+      ? null
+      : compareAgainst == null
+        ? null
+        : inkRatio > compareAgainst * INK_RATIO_BOLD_THRESHOLD;
   const weightLabel = classifyWeight(inkRatio);
   const dimensions = inspectDimensions(terminal);
   const atlasProbe = inspectAtlas(terminal);
@@ -319,7 +328,10 @@ const spawnBatch = async () => {
   const count = Number.parseInt(document.getElementById("count").value, 10) || 6;
   const awaitFonts = document.getElementById("awaitFonts").checked;
   const prewarm = document.getElementById("prewarmFont").checked;
-  appendLog(`spawn: ${count} tabs | awaitFonts=${awaitFonts} | prewarm=${prewarm} | ref=${fmt(referenceBaseline)}`, "muted");
+  appendLog(
+    `spawn: ${count} tabs | awaitFonts=${awaitFonts} | prewarm=${prewarm} | ref=${fmt(referenceBaseline)}`,
+    "muted",
+  );
 
   if (prewarm) {
     await preloadGeist();
@@ -335,7 +347,11 @@ const spawnBatch = async () => {
   let boldCount = 0;
   for (let index = 0; index < count; index++) {
     const { inkRatio, isBold, weightLabel, dimensions, atlasProbe } = await spawnTerminal(index);
-    if (index === 0) appendLog(`dims: ${JSON.stringify(dimensions)} | atlas: ${JSON.stringify(atlasProbe)}`, "muted");
+    if (index === 0)
+      appendLog(
+        `dims: ${JSON.stringify(dimensions)} | atlas: ${JSON.stringify(atlasProbe)}`,
+        "muted",
+      );
     appendLog(
       `tab #${index}: inkRatio=${fmt(inkRatio)} weight=${weightLabel ?? "?"} ${isBold == null ? "(baseline)" : isBold ? "BOLD" : "ok"}`,
       isBold === true ? "bad" : isBold === false ? "good" : "muted",
@@ -344,7 +360,10 @@ const spawnBatch = async () => {
     if (isBold === true) boldCount += 1;
     await sleep(SPAWN_GAP_MS);
   }
-  appendLog(`done: ${boldCount}/${count} tabs rendered bold (batch baseline ink=${fmt(baselineInkRatio)})`, boldCount > 0 ? "bad" : "good");
+  appendLog(
+    `done: ${boldCount}/${count} tabs rendered bold (batch baseline ink=${fmt(baselineInkRatio)})`,
+    boldCount > 0 ? "bad" : "good",
+  );
   appendLog(
     `shared atlas cache: terminal._glRenderer? ${terminals[0]?.terminal?._core?._renderService?._renderer?._glyphRenderer?.value?._atlas ? "yes" : "?"}`,
     "muted",
@@ -385,7 +404,10 @@ const reMeasure = async () => {
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const inkRatio = measureInkRatio(entry.terminal);
     const compareAgainst = referenceBaseline ?? baselineInkRatio;
-    const isBold = inkRatio == null || compareAgainst == null ? null : inkRatio > compareAgainst * INK_RATIO_BOLD_THRESHOLD;
+    const isBold =
+      inkRatio == null || compareAgainst == null
+        ? null
+        : inkRatio > compareAgainst * INK_RATIO_BOLD_THRESHOLD;
     const weightLabel = classifyWeight(inkRatio);
     entry.inkRatio = inkRatio;
     entry.isBold = isBold;
@@ -393,7 +415,10 @@ const reMeasure = async () => {
     updateBar(entry.card, inkRatio, isBold, weightLabel);
     if (isBold === true) boldCount += 1;
   }
-  appendLog(`re-measured: ${boldCount}/${terminals.length} bold (ref=${fmt(referenceBaseline)})`, boldCount > 0 ? "bad" : "good");
+  appendLog(
+    `re-measured: ${boldCount}/${terminals.length} bold (ref=${fmt(referenceBaseline)})`,
+    boldCount > 0 ? "bad" : "good",
+  );
 };
 
 // Auto-scan sweeps the most likely triggers so a single click exercises the
@@ -409,7 +434,10 @@ const autoScan = async () => {
 
   appendLog("## calibrating Geist 400 vs 700 weight anchors...", "muted");
   await calibrateWeights();
-  appendLog(`## calibrated: w400=${weightReference.w400} w700=${weightReference.w700} (bold ratio=${(weightReference.w700 / weightReference.w400).toFixed(3)})`, "muted");
+  appendLog(
+    `## calibrated: w400=${weightReference.w400} w700=${weightReference.w700} (bold ratio=${(weightReference.w700 / weightReference.w400).toFixed(3)})`,
+    "muted",
+  );
 
   const safeConfig = { prewarm: true, awaitFonts: true };
   document.getElementById("prewarmFont").checked = safeConfig.prewarm;
@@ -420,8 +448,18 @@ const autoScan = async () => {
   await sleep(120);
   await spawnBatch();
   referenceBaseline = terminals[0]?.inkRatio ?? null;
-  appendLog(`## reference ink=${fmt(referenceBaseline)} (terminal weight=${terminals[0]?.weightLabel ?? "?"}; all other configs compared to this)\n`, "muted");
-  if (typeof window !== "undefined") window.__scanReport.push({ config: "reference", ink: referenceBaseline, weight: terminals[0]?.weightLabel, bold: 0, total: terminals.length });
+  appendLog(
+    `## reference ink=${fmt(referenceBaseline)} (terminal weight=${terminals[0]?.weightLabel ?? "?"}; all other configs compared to this)\n`,
+    "muted",
+  );
+  if (typeof window !== "undefined")
+    window.__scanReport.push({
+      config: "reference",
+      ink: referenceBaseline,
+      weight: terminals[0]?.weightLabel,
+      bold: 0,
+      total: terminals.length,
+    });
 
   // Positive control: a terminal whose xterm fontWeight option is forced to
   // "bold" must rasterize 700. If the classifier doesn't flag it, the detector
@@ -432,14 +470,36 @@ const autoScan = async () => {
   await sleep(120);
   const positiveCardForce = true;
   await spawnTerminal(0, positiveCardForce);
-  appendLog(`## positive control weight=${terminals[0]?.weightLabel} (must be ~700)\n`, terminals[0]?.weightLabel?.includes("700") ? "bad" : "muted");
-  if (typeof window !== "undefined") window.__scanReport.push({ config: "positive-control:fontWeight=bold", ink: terminals[0]?.inkRatio, weight: terminals[0]?.weightLabel, bold: terminals[0]?.weightLabel?.includes("700") ? 1 : 0, total: 1 });
+  appendLog(
+    `## positive control weight=${terminals[0]?.weightLabel} (must be ~700)\n`,
+    terminals[0]?.weightLabel?.includes("700") ? "bad" : "muted",
+  );
+  if (typeof window !== "undefined")
+    window.__scanReport.push({
+      config: "positive-control:fontWeight=bold",
+      ink: terminals[0]?.inkRatio,
+      weight: terminals[0]?.weightLabel,
+      bold: terminals[0]?.weightLabel?.includes("700") ? 1 : 0,
+      total: 1,
+    });
 
   document.getElementById("count").value = String(6);
   const configs = [
-    { prewarm: false, awaitFonts: false, label: "cold: no preload + no await  (racy startup, e.g. refreshed tab mid-load)" },
-    { prewarm: true, awaitFonts: false, label: "warm: preload only  (faces added, fonts.ready not awaited)" },
-    { prewarm: true, awaitFonts: true, label: "safe-repeat: preload + await (shared atlas after clear)" },
+    {
+      prewarm: false,
+      awaitFonts: false,
+      label: "cold: no preload + no await  (racy startup, e.g. refreshed tab mid-load)",
+    },
+    {
+      prewarm: true,
+      awaitFonts: false,
+      label: "warm: preload only  (faces added, fonts.ready not awaited)",
+    },
+    {
+      prewarm: true,
+      awaitFonts: true,
+      label: "safe-repeat: preload + await (shared atlas after clear)",
+    },
   ];
   for (const config of configs) {
     document.getElementById("prewarmFont").checked = config.prewarm;
@@ -449,7 +509,13 @@ const autoScan = async () => {
     await sleep(120);
     await spawnBatch();
     const boldTabs = terminals.filter((entry) => entry.isBold === true).length;
-    if (typeof window !== "undefined") window.__scanReport.push({ config: config.label, ink: terminals.map((entry) => entry.inkRatio), bold: boldTabs, total: terminals.length });
+    if (typeof window !== "undefined")
+      window.__scanReport.push({
+        config: config.label,
+        ink: terminals.map((entry) => entry.inkRatio),
+        bold: boldTabs,
+        total: terminals.length,
+      });
     await sleep(120);
   }
 
@@ -466,8 +532,17 @@ const autoScan = async () => {
   await sleep(300);
   await reMeasure();
   const boldAfterHeal = terminals.filter((entry) => entry.isBold === true).length;
-  appendLog(`heal: ${boldBeforeHeal}/${terminals.length} bold before clearTextureAtlas -> ${boldAfterHeal}/${terminals.length} after`, boldAfterHeal > 0 ? "bad" : "good");
-  if (typeof window !== "undefined") window.__scanReport.push({ config: "heal:cold+clearTextureAtlas", boldBefore: boldBeforeHeal, boldAfter: boldAfterHeal, total: terminals.length });
+  appendLog(
+    `heal: ${boldBeforeHeal}/${terminals.length} bold before clearTextureAtlas -> ${boldAfterHeal}/${terminals.length} after`,
+    boldAfterHeal > 0 ? "bad" : "good",
+  );
+  if (typeof window !== "undefined")
+    window.__scanReport.push({
+      config: "heal:cold+clearTextureAtlas",
+      boldBefore: boldBeforeHeal,
+      boldAfter: boldAfterHeal,
+      total: terminals.length,
+    });
 
   appendLog("\nAUTOSCAN DONE", "muted");
 };

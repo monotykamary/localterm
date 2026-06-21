@@ -49,8 +49,8 @@
     "jsdom": "^29.0.2",
     "react-grab": "^0.1.32",
     "tailwindcss": "^4.1.14",
-    "typescript": "^5.9.3",
-    "vite": "npm:@voidzero-dev/vite-plus-core@^0.1.12",
-    "vite-plus": "^0.1.12"
+    "typescript": "^6.0.3",
+    "vite": "npm:@voidzero-dev/vite-plus-core@^0.2.1",
+    "vite-plus": "^0.2.1"
   }
 }
