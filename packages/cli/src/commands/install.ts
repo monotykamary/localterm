@@ -4,10 +4,11 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import kleur from "kleur";
-import { LAUNCHD_LABEL, PORTLESS_SERVICE_TIMEOUT_MS } from "../constants.js";
+import { LAUNCHD_LABEL, PORTLESS_SERVICE_TIMEOUT_MS, TAILSCALE_HTTPS_PORT } from "../constants.js";
 import { cliError, type CliError, exitCodeForCliError } from "../errors.js";
 import { getLaunchdPlistPath, getStateDirectory } from "../paths.js";
 import { cliEntry } from "../utils/cli-entry.js";
+import { configureTailscaleServe, removeTailscaleServe } from "../utils/tailscale.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 
 const execFileAsync = promisify(execFile);
@@ -66,16 +67,16 @@ const launchctl = async (...args: string[]): Promise<{ stdout: string; stderr: s
 const isPortlessMissing = (error: unknown): boolean =>
   error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT";
 
-const runPortless = async (
-  args: string[],
-  successMessage: string,
-): Promise<void> => {
+const runPortless = async (args: string[], successMessage: string): Promise<void> => {
   try {
     await execFileAsync("portless", args, { timeout: PORTLESS_SERVICE_TIMEOUT_MS });
     console.log(kleur.green(successMessage));
   } catch (error) {
     if (isPortlessMissing(error)) {
-      console.warn(kleur.yellow(`  ⚠ portless not found on PATH — skipped \`${args.join(" ")}\``));
+      console.warn(kleur.yellow(`  ⚠ portless not installed — skipped \`${args.join(" ")}\``));
+      console.warn(
+        kleur.dim(`    install: pnpm add -Dw portless  (workspace) or npm i -g portless`),
+      );
       return;
     }
     const message = error instanceof Error ? error.message : String(error);
@@ -85,12 +86,57 @@ const runPortless = async (
 
 const setupPortlessProxy = async (): Promise<void> => {
   console.log();
-  console.log(kleur.cyan("portless proxy"));
+  console.log(kleur.cyan("portless proxy  — named .localhost URLs"));
   await runPortless(
     ["service", "install"],
     "  ✔ proxy service installed (HTTPS on :443, starts at boot)",
   );
   await runPortless(["trust"], "  ✔ local CA trusted (browsers accept https://*.localhost)");
+};
+
+const setupTailscaleServe = async (port: number): Promise<void> => {
+  console.log();
+  console.log(kleur.cyan("tailscale  — share on your tailnet at https://<node>.ts.net"));
+  const route = await configureTailscaleServe(port);
+  if (route.registered && route.url) {
+    console.log(kleur.green(`  ✔ tailnet URL: ${route.url}`));
+    console.log(
+      kleur.dim(`    exposed on tailnet at :${TAILSCALE_HTTPS_PORT} (HTTPS cert auto-managed)`),
+    );
+    return;
+  }
+  switch (route.reason) {
+    case "binary-missing":
+      console.warn(kleur.yellow(`  ⚠ tailscale not installed — skipped tailnet exposure`));
+      console.warn(kleur.dim(`    install: ${route.hint ?? "https://tailscale.com/download"}`));
+      break;
+    case "https-disabled":
+      console.warn(
+        kleur.yellow(`  ⚠ tailscale HTTPS certificates are not enabled on your tailnet`),
+      );
+      console.warn(
+        kleur.dim(
+          `    enable: ${route.hint ?? "https://login.tailscale.com/admin/settings/features"}`,
+        ),
+      );
+      console.warn(
+        kleur.dim(`    then re-run: ${kleur.bold("localterm install")} to provision the cert`),
+      );
+      break;
+    case "offline":
+      console.warn(
+        kleur.yellow(
+          `  ⚠ tailscale not online — run \`tailscale up\` and re-run \`localterm install\``,
+        ),
+      );
+      break;
+    case "serve-mismatch":
+    case undefined:
+      console.warn(
+        kleur.yellow(`  ⚠ could not configure tailscale serve (port ${port} not registered)`),
+      );
+      break;
+  }
 };
 
 const validateLaunchAgentsDirectory = (): CliError | null => {
@@ -162,6 +208,7 @@ export const runInstall = async (options: InstallOptions): Promise<void> => {
   console.log(`  remove with ${kleur.bold("localterm uninstall")}`);
 
   await setupPortlessProxy();
+  await setupTailscaleServe(options.port);
 };
 
 export const runUninstall = async (): Promise<void> => {
@@ -184,6 +231,8 @@ export const runUninstall = async (): Promise<void> => {
   } catch {
     // May not be loaded; that's fine
   }
+
+  await removeTailscaleServe();
 
   try {
     unlinkSync(plistPath);

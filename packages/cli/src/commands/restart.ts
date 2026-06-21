@@ -8,7 +8,7 @@ import { ensureLogFile, isAlive, readHost, readPid, readPort } from "../state.js
 import { buildDaemonStartArgs } from "../utils/build-daemon-args.js";
 import { isLaunchdServiceLoaded } from "../utils/is-launchd-service-loaded.js";
 import { pollForDaemonReady } from "../utils/poll-for-daemon-ready.js";
-import { announcePortlessRoute, ensurePortlessRoute } from "../utils/portless.js";
+import { announceResolvedUrl, resolveDaemonUrl } from "../utils/portless.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 import { sleep } from "../utils/sleep.js";
 import { spawnDaemon } from "../utils/spawn-daemon.js";
@@ -89,9 +89,11 @@ const restartViaLaunchd = async (_options: RestartOptions): Promise<void> => {
         console.log(
           kleur.green(`✔ restarted via launchd (pid ${pid}, port ${port}, logs: ${logPath})`),
         );
-        const route = await ensurePortlessRoute(port);
-        console.log(`  url:      ${kleur.cyan(route.url)}`);
-        announcePortlessRoute(route);
+        const resolved = await resolveDaemonUrl(port);
+        announceResolvedUrl(resolved.url, resolved.surface);
+        for (const warning of resolved.warnings) {
+          console.log(kleur.yellow(`  ⚠ ${warning}`));
+        }
         return;
       }
     } catch {
@@ -151,7 +153,9 @@ export const runRestart = async (options: RestartOptions): Promise<void> => {
   }
 
   console.log(kleur.green(`✔ restarted (pid ${childPid}, port ${result.port}, logs: ${logPath})`));
-  const route = await ensurePortlessRoute(result.port);
-  console.log(`  url:      ${kleur.cyan(route.url)}`);
-  announcePortlessRoute(route);
+  const resolved = await resolveDaemonUrl(result.port);
+  announceResolvedUrl(resolved.url, resolved.surface);
+  for (const warning of resolved.warnings) {
+    console.log(kleur.yellow(`  ⚠ ${warning}`));
+  }
 };

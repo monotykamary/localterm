@@ -1,5 +1,35 @@
 # localterm
 
+## 2.10.0
+
+### Minor Changes
+
+- Tailscale sharing + clearer URL surfacing.
+
+  - `localterm install` now configures `tailscale serve --bg --https 443` so the
+    daemon is reachable on your tailnet at `https://<node>.ts.net` (real
+    Let's Encrypt cert, auto-managed by Tailscale). Falls back gracefully with
+    actionable hints when tailscale is absent, HTTPS certs are disabled on the
+    tailnet, or the node is offline. `localterm uninstall` tears the serve rule
+    down.
+  - `localterm start` / `restart` / `status` resolve the URL across three
+    surfaces and announce the best one with a label (`tailnet` / `local` /
+    `loopback`): tailscale serve → portless alias on `:443` → the RFC 6761
+    named-with-port fallback.
+  - Proxy liveness probe before announcing the portless URL: closes the dead-URL
+    footgun where `pnpm run start` without `pnpm cli install` registered an
+    alias that pointed at nothing.
+  - `install` warns with install commands when portless or tailscale are missing,
+    and links to the Tailscale HTTPS-certs admin toggle when certs aren't
+    enabled, so contributors know exactly what to do.
+  - Tailscale binary discovery probes well-known paths (macOS app,
+    Homebrew `/usr/local` + `/opt/homebrew`, `/usr/bin`) so no PATH symlink is
+    required.
+
+### Patch Changes
+
+- @monotykamary/localterm-server@2.10.0
+
 ## 2.9.0
 
 ### Minor Changes

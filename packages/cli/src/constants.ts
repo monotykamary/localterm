@@ -12,6 +12,18 @@ export const FRIENDLY_HOSTNAME = "localterm.localhost";
 export const PORTLESS_APP_NAME = "localterm";
 export const PORTLESS_ALIAS_TIMEOUT_MS = 5_000;
 export const PORTLESS_SERVICE_TIMEOUT_MS = 30_000;
+export const TAILSCALE_SERVE_TIMEOUT_MS = 30_000;
+export const TAILSCALE_STATUS_TIMEOUT_MS = 5_000;
+export const PROXY_LIVENESS_PROBE_TIMEOUT_MS = 300;
+export const TAILSCALE_HTTPS_PORT = 443;
+export const TAILSCALE_BINARY_PATHS = [
+  "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+  "/usr/local/bin/tailscale",
+  "/opt/homebrew/bin/tailscale",
+  "/usr/bin/tailscale",
+] as const;
+export const TAILSCALE_HTTPS_SETTINGS_URL = "https://login.tailscale.com/admin/settings/features";
+export const TAILSCALE_DOWNLOAD_URL = "https://tailscale.com/download";
 export const STOP_COMMAND = "npx @monotykamary/localterm@latest stop";
 export const DAEMON_CHILD_ENV_FLAG = "LOCALTERM_DAEMON_CHILD";
 export const RESTART_DAEMON_ENV_FLAG = "LOCALTERM_RESTART_DAEMON";

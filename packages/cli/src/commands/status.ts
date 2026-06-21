@@ -1,8 +1,9 @@
 import kleur from "kleur";
 import { healthSchema } from "@monotykamary/localterm-server";
-import { getDirectUrl, getFriendlyUrl } from "../constants.js";
+import { getDirectUrl } from "../constants.js";
 import { cliError, exitCodeForCliError } from "../errors.js";
 import { clearPid, isAlive, readHost, readPid, readPort } from "../state.js";
+import { resolveDaemonUrl } from "../utils/portless.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 
 export const runStatus = async (): Promise<void> => {
@@ -40,7 +41,11 @@ export const runStatus = async (): Promise<void> => {
     console.log(kleur.green("● running"));
     console.log(`  pid:      ${pid}`);
     console.log(`  port:     ${port}`);
-    console.log(`  url:      ${kleur.cyan(getFriendlyUrl(port))}`);
+    const resolved = await resolveDaemonUrl(port);
+    console.log(`  url:      ${kleur.cyan(resolved.url)}  ${kleur.dim(`(${resolved.surface})`)}`);
+    for (const warning of resolved.warnings) {
+      console.log(kleur.yellow(`  ⚠ ${warning}`));
+    }
     console.log(`  raw:      ${kleur.dim(getDirectUrl(port, resolvedHost))}`);
     console.log(`  sessions: ${health.sessions}`);
   } catch (error) {

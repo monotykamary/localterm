@@ -11,10 +11,6 @@
     "test": "vp test --run",
     "typecheck": "tsc -b --noEmit"
   },
-  "portless": {
-    "name": "dev.localterm",
-    "script": "dev:app"
-  },
   "dependencies": {
     "@azurity/pure-nerd-font": "^3.0.5",
     "@base-ui/react": "^1.4.1",
@@ -57,5 +53,9 @@
     "typescript": "^6.0.3",
     "vite": "npm:@voidzero-dev/vite-plus-core@^0.2.1",
     "vite-plus": "^0.2.1"
+  },
+  "portless": {
+    "name": "dev.localterm",
+    "script": "dev:app"
   }
 }
