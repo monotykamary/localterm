@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>localterm alpha-mask bold repro</title>
+    <link rel="stylesheet" href="/xterm/css/xterm.css" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1e1e2e;
+        --panel: #2a2a3c;
+        --ink: #cdd6f4;
+        --muted: #9399b2;
+        --accent: #89b4fa;
+        --bad: #f38ba8;
+        --good: #a6e3a1;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 13px/1.5 ui-monospace, "Geist Mono", monospace;
+      }
+      header {
+        padding: 12px 16px;
+        background: var(--panel);
+        border-bottom: 1px solid #0003;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      header h1 {
+        font-size: 14px;
+        margin: 0;
+        font-weight: 600;
+      }
+      header .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      button {
+        background: var(--panel);
+        color: var(--ink);
+        border: 1px solid #0006;
+        border-radius: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+        font: inherit;
+      }
+      button:hover {
+        border-color: var(--accent);
+      }
+      label {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+        color: var(--muted);
+      }
+      input[type="number"] {
+        width: 64px;
+        background: #0003;
+        color: var(--ink);
+        border: 1px solid #0006;
+        border-radius: 6px;
+        padding: 3px 6px;
+        font: inherit;
+      }
+      main {
+        padding: 16px;
+        display: flex;
+        gap: 16px;
+        flex-direction: column;
+      }
+      #log {
+        background: #0005;
+        border: 1px solid #0006;
+        border-radius: 8px;
+        padding: 8px 12px;
+        max-height: 180px;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+      #log .bad {
+        color: var(--bad);
+      }
+      #log .good {
+        color: var(--good);
+      }
+      #log .muted {
+        color: var(--muted);
+      }
+      #deck {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+        gap: 12px;
+      }
+      .term-card {
+        background: #000;
+        border: 1px solid #0006;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .term-card .bar {
+        background: var(--panel);
+        padding: 4px 8px;
+        font-size: 11px;
+        color: var(--muted);
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .term-card .bar .ink {
+        font-variant-numeric: tabular-nums;
+      }
+      .term-card .bar .ink.bold {
+        color: var(--bad);
+      }
+      .term-card .xterm {
+        padding: 6px 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>alpha-mask bold repro</h1>
+      <div class="controls">
+        <label>tabs <input id="count" type="number" value="6" min="1" max="24" /></label>
+        <label><input id="awaitFonts" type="checkbox" /> await fonts first</label>
+        <label><input id="prewarmFont" type="checkbox" checked /> preload Geist Mono face</label>
+        <button id="spawn">spawn tabs (shared atlas)</button>
+        <button id="dispose">dispose all</button>
+        <button id="clearAtlas">clearTextureAtlas on all</button>
+        <button id="resize">resize nudge</button>
+        <button id="autoscan">auto-scan</button>
+      </div>
+    </header>
+    <main>
+      <div id="log" class="muted">idle.</div>
+      <div id="deck"></div>
+    </main>
+
+    <script type="module" src="/harness/main.mjs"></script>
+  </body>
+</html>

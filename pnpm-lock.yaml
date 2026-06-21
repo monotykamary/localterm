@@ -8,7 +8,7 @@ overrides:
   vite: npm:@voidzero-dev/vite-plus-core@^0.1.12
 
 patchedDependencies:
-  '@xterm/addon-webgl@0.20.0-beta.286': a3287c0a583a31a209b66bea46cfe4a9f0c67648c1475cffc9a97303f36c5f5e
+  '@xterm/addon-webgl@0.20.0-beta.286': 08eaece520d2d450dddfa4399f36c63834d15c8d51e2fdd2b11944303259879b
   node-pty@1.1.0: 055369749ed898a53d1d3c2b69c380d70a244e8d869a1df14bf514e4ae000556
 
 importers:
@@ -38,6 +38,8 @@ importers:
         version: 0.1.19(@types/node@25.6.0)(jiti@2.6.1)(jsdom@29.0.2(@noble/hashes@1.8.0))(typescript@5.9.3)(vite@8.0.10(@types/node@25.6.0)(jiti@2.6.1))
 
   apps/harness: {}
+
+  apps/harness/alpha-mask: {}
 
   apps/terminal:
     dependencies:
@@ -91,7 +93,7 @@ importers:
         version: 0.13.0-beta.287(@xterm/xterm@6.1.0-beta.287)
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.286
-        version: 0.20.0-beta.286(patch_hash=a3287c0a583a31a209b66bea46cfe4a9f0c67648c1475cffc9a97303f36c5f5e)(@xterm/xterm@6.1.0-beta.287)
+        version: 0.20.0-beta.286(patch_hash=08eaece520d2d450dddfa4399f36c63834d15c8d51e2fdd2b11944303259879b)(@xterm/xterm@6.1.0-beta.287)
       '@xterm/xterm':
         specifier: 6.1.0-beta.287
         version: 6.1.0-beta.287
@@ -4847,7 +4849,7 @@ snapshots:
     dependencies:
       '@xterm/xterm': 6.1.0-beta.287
 
-  '@xterm/addon-webgl@0.20.0-beta.286(patch_hash=a3287c0a583a31a209b66bea46cfe4a9f0c67648c1475cffc9a97303f36c5f5e)(@xterm/xterm@6.1.0-beta.287)':
+  '@xterm/addon-webgl@0.20.0-beta.286(patch_hash=08eaece520d2d450dddfa4399f36c63834d15c8d51e2fdd2b11944303259879b)(@xterm/xterm@6.1.0-beta.287)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.287
 

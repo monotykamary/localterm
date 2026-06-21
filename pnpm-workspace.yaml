@@ -1,5 +1,6 @@
 packages:
   - "apps/*"
+  - "apps/harness/*"
   - "packages/*"
 
 allowBuilds:
