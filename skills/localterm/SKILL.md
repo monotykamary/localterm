@@ -45,82 +45,10 @@ don't depend on which surface the browser happens to use.
 An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
 
 - `trigger` — what makes the automation run, a tagged union on `kind`:
-  - `{kind:"schedule", schedule}` — time-based (the common case).
-  - `{kind:"watch", recursive, filter?}` — fires when the automation's `cwd`
-    changes, observed via native filesystem events (**no polling**). `recursive`
-    (default `true`) watches the whole subtree. Optional `filter` is a glob
-    pattern matched against the **basename** of the changed file (e.g.
-    `"*.mov"` only fires on `.mov` files; `"*.{mov,avi}"` matches multiple
-    extensions). When `filter` is omitted or empty, **any** change triggers the
-    automation. Events from non-matching files are dropped before the debounce
-    — the command never runs, and the run limit is unaffected. After a
-    watch-triggered run finishes, a 1-second grace period suppresses new
-    events so the command's own side effects (e.g. deleting the source file
-    after conversion) don't retrigger the automation. A burst of changes is
-    debounced into a single run, and no new run starts while a previous one is
-    still in-flight. Watch triggers have no `cron`/`nextRunAt` (both `null`).
-  - `{kind:"event", events: [...]}` — fires when a localterm session emits any
-    of the named events whose cwd matches the automation's `cwd` (or is inside
-    it). This is **session-scoped** — the automation only triggers when you are
-    _in_ localterm and the event occurs, not from background filesystem noise. A
-    burst of events is debounced into a single run and no new run starts while
-    a previous one is still in-flight. Event triggers have no `cron`/`nextRunAt`
-    (both `null`).
-
-    Git events are detected by watching the repository's `.git` directory. The
-    operation-level events are best-effort guesses based on which ref namespace
-    moved and which git internal files were present during the change.
-
-    | event               | fires when                                                                                  |
-    | ------------------- | ------------------------------------------------------------------------------------------- |
-    | `git-head-change`   | `.git/HEAD` changes (checkout, reset, merge into detached HEAD)                             |
-    | `git-branch-change` | a local branch ref is created, deleted, or moves (commit, merge, pull, reset, worktree add) |
-    | `git-tag-change`    | a tag is created, updated, or deleted                                                       |
-    | `git-remote-change` | remote-tracking refs change (fetch, pull)                                                   |
-    | `git-stash-change`  | the stash ref changes                                                                       |
-    | `git-commit`        | an existing local branch ref advances with no merge/rebase/reset state detected             |
-    | `git-checkout`      | HEAD changes while no branch ref moves                                                      |
-    | `git-reset`         | HEAD or a branch ref moves and `ORIG_HEAD` appears                                          |
-    | `git-merge`         | a branch ref moves while `MERGE_HEAD` was present                                           |
-    | `git-rebase`        | a branch ref moves while a rebase directory was present                                     |
-    | `git-cherry-pick`   | a branch ref moves while `CHERRY_PICK_HEAD` was present                                     |
-    | `git-fetch`         | only remote-tracking refs changed                                                           |
-
-    | `git-stash` | the stash ref changed |
-    | `git-tag` | a tag ref changed |
-    | `notification` | a command emits OSC 9 (`printf '\e]9;message\a'`) |
-    | | in a session whose cwd matches — use your own scripts as event sources |
-    | `cwd` | you `cd` into or out of the automation's directory |
-    | `foreground` | the foreground process changes in a matching session (e.g. vim starts) |
-    | `exit` | a shell session in a matching directory closes |
-
-    For "notify on push" workflows, use `git-fetch` or a custom
-    `notification` event from your own hook — localterm cannot detect a bare
-    `git push` from the local repository because push updates the remote, not
-    local refs.
-
-  A schedule trigger's `schedule` is a **structured schedule object** (preferred)
-  or a bare 5-field cron string — a tagged union on `kind`:
-
-  | `kind`           | shape                                                                  | example meaning                 |
-  | ---------------- | ---------------------------------------------------------------------- | ------------------------------- |
-  | `hourly`         | `{kind:"hourly", minute}`                                              | every hour at `:minute`         |
-  | `daily`          | `{kind:"daily", hour, minute}`                                         | every day at 9am                |
-  | `timesOfDay`     | `{kind:"timesOfDay", times:[{hour,minute},…]}`                         | several fixed times a day (≤12) |
-  | `weekdaysPreset` | `{kind:"weekdaysPreset", preset:"weekdays"\|"weekends", hour, minute}` | Mon–Fri / Sat–Sun               |
-  | `weekly`         | `{kind:"weekly", daysOfWeek:[0–6], hour, minute}`                      | 0=Sun … 6=Sat                   |
-  | `monthly`        | `{kind:"monthly", daysOfMonth:[1–31], hour, minute}`                   | on the 1st and 15th             |
-  | `everyNMinutes`  | `{kind:"everyNMinutes", step}`                                         | every N minutes                 |
-  | `everyNHours`    | `{kind:"everyNHours", step, minute}`                                   | every N hours on the clock      |
-  | `cron`           | `{kind:"cron", expression}`                                            | the advanced escape hatch       |
-
-  Schedules are evaluated in the server's **local timezone**. The raw-cron escape
-  hatch (`{kind:"cron", expression}`) and bare-string `schedule` support `*`,
-  lists (`1,15`), ranges (`9-17`), steps (`*/5`, `9-17/2`), month/weekday names
-  (`jan`, `mon-fri`), and `@hourly`/`@daily`/`@midnight`/`@weekly`/`@monthly`/
-  `@yearly`. Vixie day semantics: if both day fields are restricted, either match
-  fires. A bare-string schedule is recognized as a friendly preset where it maps
-  cleanly, and kept as raw cron otherwise — losslessly either way.
+  - `{kind:"schedule", schedule}` — time-based (the common case; `daily` is shown in the create examples below).
+  - `{kind:"watch", recursive, filter?}` — fires when the automation's `cwd` changes (native filesystem events, no polling).
+  - `{kind:"event", events: [...]}` — fires when a localterm session emits a named event matching `cwd` (session-scoped).
+  See [references/triggers.md](references/triggers.md) for the full schedule-shape table (`hourly`/`weekly`/`monthly`/`cron`/…), git-event taxonomy, watch filter/debounce/grace semantics, and the cron escape-hatch details.
 
 - `cwd` — absolute path; must exist and be a directory on the daemon's machine
   (validated at create/update time).
@@ -132,26 +60,9 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
   `lifecycle:"finished"` state) and stops firing but stays listed with its
   history. Scheduled, watch, and event runs count toward the limit; manual `/run` never
   does.
-- `closeOnFinish` — defaults to `false` (the tab stays open). When `true`, the
-  run's browser tab is closed once the command finishes. Only honored for tabs
-  opened via CDP (the background-tab path); on the `open -g` fallback it's a
-  silent no-op since that tab has no closeable handle.
+- `closeOnFinish` — defaults to `false` (the tab stays open). When `true`, the run's browser tab is closed once the command finishes. Only honored for CDP-opened tabs; silent no-op on the OS-opener fallback.
 
-When a job fires (or is run manually), the server opens the daemon's resolved
-URL with a `?run=<id>` query in the user's browser; the new tab claims the
-single-use run id, spawns a shell in `cwd`, and runs `command`. The shell stays
-open afterwards. For zsh/bash sessions the command's exit code is reported back
-and recorded in the automation's run history. The resolved URL is whichever
-surface `localterm install` configured (tailnet / local / loopback — see
-[Connect](#connect)); the `127.0.0.1:$PORT/?run=<id>` raw form also works.
-
-The run tab opens in the **background** (it does not steal focus). When a
-Chromium-based browser is running with remote debugging enabled, the server
-creates the tab behind the active one via the DevTools Protocol over a
-connection opened once at daemon start (so any remote-debugging prompt is
-cleared a single time, not per run); otherwise it falls back to the OS opener
-(macOS `open -g`, which keeps the browser from foregrounding).
-`LOCALTERM_DISABLE_CDP_TABS=1` forces the fallback.
+For run-tab mechanics (background CDP vs. opener fallback, `LOCALTERM_DISABLE_CDP_TABS`), the run-status table (`launched`/`running`/`completed`/`failed`/`missed`/`skipped`), `runs`/`runCount`/`lifecycle`/`lastRun` shape, and `trigger` field values, see [references/run-states.md](references/run-states.md).
 
 ### Endpoints
 
@@ -249,30 +160,6 @@ curl -s -X POST "$BASE/automations/<id>/run"
 curl -s -X POST "$BASE/automations/<id>/reset"
 ```
 
-### Reading run state
-
-Each automation carries `runs` (newest-first, capped at 50) of
-`{runId, scheduledFor, startedAt, finishedAt, status, exitCode, trigger, countsTowardLimit}`,
-plus `runCount`, `lifecycle` (`active`|`finished`), and a back-compat
-`lastRun: {runId, at, status, exitCode}` (= the newest run):
-
-| status      | meaning                                                                |
-| ----------- | ---------------------------------------------------------------------- |
-| `launched`  | tab open requested, not yet claimed by a browser tab                   |
-| `running`   | a tab claimed the run and the command is executing                     |
-| `completed` | command finished with exit code 0                                      |
-| `failed`    | command finished with a non-zero `exitCode`                            |
-| `missed`    | no tab claimed the run within 5 minutes (browser closed/headless)      |
-| `skipped`   | the daemon was **down** at that scheduled minute — reconstructed at    |
-|             | startup from a downtime heartbeat (only the ~10 most-recent missed     |
-|             | occurrences per automation, so real runs aren't evicted); never re-run |
-
-`completed`/`failed` are only reported for zsh and bash login shells; other shells
-stay at `running` until the tab closes. The `trigger` field in each run record is
-`"schedule"`, `"manual"`, `"watch"`, or `"event"`. The automation-level
-`lifecycle:"finished"` means a `count` limit was reached — use `POST …/reset` to
-run it again.
-
 ### Error responses
 
 `400` with `{"error": "invalid_body" | "invalid_schedule" | "invalid_cwd" | "too_many_automations" | "automation_finished"}`,
@@ -297,9 +184,7 @@ an absolute path.
 6. Don't schedule destructive commands without explicit user confirmation.
 7. For git-related workflows ("run tests after commit", "notify after merge"),
    use the granular git events such as `{kind:"event", events:["git-commit"]}`,
-   `{kind:"event", events:["git-merge"]}`, or `{kind:"event", events:["git-fetch"]}.
-Operation detection is best-effort; for guaranteed signals, use `{kind:"event",
-   events:["notification"]}`and have your scripts emit`OSC 9` as the signal.
+   `{kind:"event", events:["git-merge"]}`, or `{kind:"event", events:["git-fetch"]}`.
 8. When the command is too complex for a readable one-liner (loops, multi-step
    pipelines with temp files, heredocs, structured output payloads, etc.), write
    a shell script in the automation's `cwd` and set `command` to `bash <name>.sh`.
