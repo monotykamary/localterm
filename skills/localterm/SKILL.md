@@ -32,6 +32,14 @@ npx @monotykamary/localterm@latest start
 Requests must come from the same machine; `Host` must be loopback (using
 `127.0.0.1` with curl satisfies this).
 
+The user-facing browser URL (what `localterm status` prints as `url:`) is
+resolved across three surfaces, best-first: **tailnet**
+(`https://<node>.ts.net`, when `localterm install` ran the Tailscale step),
+**local** (`https://localterm.localhost`, when the portless proxy service is
+up on `:443`), or **loopback** (`http://localterm.localhost:<port>`, always
+works via RFC 6761). The API calls above use the loopback raw form directly —
+don't depend on which surface the browser happens to use.
+
 ## Automations
 
 An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
@@ -129,11 +137,13 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
   opened via CDP (the background-tab path); on the `open -g` fallback it's a
   silent no-op since that tab has no closeable handle.
 
-When a job fires (or is run manually), the server opens
-`http://localterm.localhost:<port>/?run=<id>` in the user's browser; the new tab
-claims the single-use run id, spawns a shell in `cwd`, and runs `command`. The
-shell stays open afterwards. For zsh/bash sessions the command's exit code is
-reported back and recorded in the automation's run history.
+When a job fires (or is run manually), the server opens the daemon's resolved
+URL with a `?run=<id>` query in the user's browser; the new tab claims the
+single-use run id, spawns a shell in `cwd`, and runs `command`. The shell stays
+open afterwards. For zsh/bash sessions the command's exit code is reported back
+and recorded in the automation's run history. The resolved URL is whichever
+surface `localterm install` configured (tailnet / local / loopback — see
+[Connect](#connect)); the `127.0.0.1:$PORT/?run=<id>` raw form also works.
 
 The run tab opens in the **background** (it does not steal focus). When a
 Chromium-based browser is running with remote debugging enabled, the server

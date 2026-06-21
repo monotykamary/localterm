@@ -17,7 +17,14 @@ Run this command anywhere:
 npx @monotykamary/localterm@latest start
 ```
 
-This boots a local daemon and opens [`http://localterm.localhost:3417`](http://localterm.localhost:3417) in your browser. (`*.localhost` is reserved by [RFC 6761](https://datatracker.ietf.org/doc/html/rfc6761) and resolves to `127.0.0.1` in every modern browser, so no `/etc/hosts` edit needed.)
+This boots a local daemon and opens a browser tab. The URL depends on what's
+installed on the machine — `localterm status` shows the active one:
+
+| Surface      | URL                               | Requires                                                                                                                                  |
+| ------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **tailnet**  | `https://<your-node>.ts.net`      | [Tailscale](https://tailscale.com) connected, HTTPS certs enabled for the tailnet                                                         |
+| **local**    | `https://localterm.localhost`     | `portless` (workspace dev dep) — installed via `localterm install`                                                                        |
+| **loopback** | `http://localterm.localhost:3417` | nothing — `.localhost` resolves to `127.0.0.1` via [RFC 6761](https://datatracker.ietf.org/doc/html/rfc6761), no `/etc/hosts` edit needed |
 
 To install globally:
 
@@ -56,6 +63,19 @@ State lives in `~/.localterm/` (PID, port, server log at `~/.localterm/server.lo
 - **RunAtLoad** — localterm starts automatically when you log in.
 - **KeepAlive** — launchd restarts the daemon immediately if it crashes.
 
+The same command also configures the optional URL surfaces (best-effort, with
+actionable hints when a prerequisite is missing):
+
+- **portless** — installs a root-owned launchd proxy on `:443` so the daemon
+  is reachable at `https://localterm.localhost` (HTTPS, no port). Skipped with
+  an install command if `portless` isn't on PATH.
+- **Tailscale** — runs `tailscale serve --bg --https 443 localhost:<port>` so
+  the daemon is reachable on your tailnet at `https://<node>.ts.net` with a
+  real Let's Encrypt cert. Skipped with a hint if Tailscale isn't installed,
+  the node is offline, or HTTPS certificates aren't enabled on the tailnet
+  (enable them at <https://login.tailscale.com/admin/settings/features>, then
+  re-run `localterm install`).
+
 One-time setup:
 
 ```bash
@@ -64,7 +84,15 @@ npx @monotykamary/localterm@latest install
 localterm install
 ```
 
-Remove with `localterm uninstall`.
+Remove with `localterm uninstall` (also tears down the Tailscale serve rule).
+
+### Dev server (workspace contributors)
+
+`pnpm dev` runs the terminal's Vite dev server through portless at
+`https://dev.localterm.localhost` (the daemon's `https://localterm.localhost`
+hostname is reserved for the built daemon). The two `tsc --watch` packages keep
+running in parallel via turbo. Escape hatch: `pnpm dev:app` runs `vp dev`
+without portless.
 
 ## Automations
 
@@ -88,6 +116,7 @@ npx skills add monotykamary/localterm
 ## Security
 
 - By default, binds loopback (`127.0.0.1`) and enforces loopback `Host`/`Origin` headers to defeat DNS-rebinding and cross-origin attacks.
+- To share the daemon across machines, prefer `localterm install`'s Tailscale step — it surfaces the daemon on your tailnet at `https://<node>.ts.net` over a real Let's Encrypt cert, on an end-to-end-encrypted WireGuard mesh, with no port exposed to the public internet.
 - Pass `-H 0.0.0.0` (or any non-loopback address) to expose the server on all network interfaces. In this mode, `Host`/`Origin` must be from a private network (RFC 1918, CGNAT/Tailscale `100.64.127.x`, link-local, `*.localhost`) and WebSocket source IPs are filtered to private ranges — only use on trusted networks.
 - One PTY per WebSocket. Closing the tab kills the shell — no orphaned processes.
 
