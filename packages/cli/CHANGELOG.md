@@ -1,5 +1,17 @@
 # localterm
 
+## 2.8.1
+
+### Patch Changes
+
+- Key the WebGL glyph atlas cache by font config so a stale heavy glyph can't be served after the config stabilizes.
+
+  The intermittent emboldening was a stale atlas cache entry: the cache key omitted every font-config field, so a glyph baked under a transiently-wrong `_config` was cached forever under the normal key. Measured live via CDP on emboldened tabs — `term.options.fontWeight="normal"` + identical atlas config, but the baked 'M' had 154 bright / 40 mid pixels vs 96 / 86 on a normal tab, self-healing only on `clearTextureAtlas` / resize.
+
+  Fold a hash of (`fontWeight`, `fontWeightBold`, `fontSize`, `devicePixelRatio`, `fontFamily`) into the cache key's unused second slot so the transient entry can't hit after recovery, guard the canvas font-string weights (`||"bold"`/`||"normal"`) so an undefined weight can never leave the canvas on a sticky-bold font, and reset the hash in `atlas.clearTexture`.
+
+  - @monotykamary/localterm-server@2.8.1
+
 ## 2.8.0
 
 ### Patch Changes
