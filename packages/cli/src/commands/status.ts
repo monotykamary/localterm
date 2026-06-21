@@ -1,6 +1,6 @@
 import kleur from "kleur";
 import { healthSchema } from "@monotykamary/localterm-server";
-import { getFriendlyUrl } from "../constants.js";
+import { getDirectUrl, getFriendlyUrl } from "../constants.js";
 import { cliError, exitCodeForCliError } from "../errors.js";
 import { clearPid, isAlive, readHost, readPid, readPort } from "../state.js";
 import { reportCliError } from "../utils/report-cli-error.js";
@@ -41,7 +41,7 @@ export const runStatus = async (): Promise<void> => {
     console.log(`  pid:      ${pid}`);
     console.log(`  port:     ${port}`);
     console.log(`  url:      ${kleur.cyan(getFriendlyUrl(port))}`);
-    console.log(`  raw:      ${kleur.dim(`http://${resolvedHost}:${port}`)}`);
+    console.log(`  raw:      ${kleur.dim(getDirectUrl(port, resolvedHost))}`);
     console.log(`  sessions: ${health.sessions}`);
   } catch (error) {
     const healthError = cliError.healthCheckFailed(

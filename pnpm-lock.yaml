@@ -27,6 +27,9 @@ importers:
       '@xterm/addon-canvas':
         specifier: 0.8.0-beta.48
         version: 0.8.0-beta.48(@xterm/xterm@6.1.0-beta.287)
+      portless:
+        specifier: ^0.14.0
+        version: 0.14.0
       turbo:
         specifier: ^2.9.18
         version: 2.9.18
@@ -2880,6 +2883,12 @@ packages:
   pngjs@7.0.0:
     resolution: {integrity: sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==}
     engines: {node: '>=14.19.0'}
+
+  portless@0.14.0:
+    resolution: {integrity: sha512-kKxmxB1DQ9gI8t+V13VhuwTXu31io5nbFubvZAE82AxzXBsvcJV7qQJbmomrQUpbVxo2UVHqs14iX4YK0BClmQ==}
+    engines: {node: '>=24'}
+    os: [darwin, linux, win32]
+    hasBin: true
 
   postcss-selector-parser@7.1.1:
     resolution: {integrity: sha512-orRsuYpJVw8LdAwqqLykBj9ecS5/cRHlI5+nvTo8LcCKmzDmqVORXtOIYEEQuL9D4BxtA1lm5isAqzQZCoQ6Eg==}
@@ -6110,6 +6119,8 @@ snapshots:
   pkce-challenge@5.0.1: {}
 
   pngjs@7.0.0: {}
+
+  portless@0.14.0: {}
 
   postcss-selector-parser@7.1.1:
     dependencies:

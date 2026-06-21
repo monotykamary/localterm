@@ -19,7 +19,6 @@ import {
   EXIT_FAILURE,
   EXIT_OK,
   FORCE_EXIT_TIMEOUT_MS,
-  getFriendlyUrl,
   RESTART_BIND_RETRY_INTERVAL_MS,
   RESTART_BIND_RETRY_MAX_MS,
   STOP_COMMAND,
@@ -38,6 +37,8 @@ import { buildDaemonStartArgs } from "../utils/build-daemon-args.js";
 import { isRunningUnderLaunchd } from "../utils/is-running-under-launchd.js";
 import { pollForDaemonReady } from "../utils/poll-for-daemon-ready.js";
 import { reportCliError } from "../utils/report-cli-error.js";
+import { announcePortlessRoute, ensurePortlessRoute } from "../utils/portless.js";
+import type { PortlessRoute } from "../utils/portless.js";
 import { runStartPreflight } from "../utils/run-start-preflight.js";
 import { sleep } from "../utils/sleep.js";
 import { spawnDaemon } from "../utils/spawn-daemon.js";
@@ -121,16 +122,16 @@ const runStartAsDaemon = async (options: StartOptions): Promise<void> => {
   });
 
   if (result.ok) {
-    printDaemonStartedBanner(result.port);
-    if (options.open) await openInBrowser(getFriendlyUrl(result.port));
+    const route = await printDaemonStartedBanner(result.port);
+    if (options.open) await openInBrowser(route.url);
     return;
   }
 
   if (result.error.kind === "daemon-ready-timeout" && isAlive(childPid)) {
     const finalPort = readPort();
     if (finalPort !== null && finalPort !== portBeforeSpawn) {
-      printDaemonStartedBanner(finalPort);
-      if (options.open) await openInBrowser(getFriendlyUrl(finalPort));
+      const route = await printDaemonStartedBanner(finalPort);
+      if (options.open) await openInBrowser(route.url);
       return;
     }
   }
@@ -139,9 +140,12 @@ const runStartAsDaemon = async (options: StartOptions): Promise<void> => {
   process.exit(exitCodeForCliError(result.error));
 };
 
-const printDaemonStartedBanner = (port: number): void => {
-  console.log(`${kleur.green("✔")} running at ${kleur.cyan(getFriendlyUrl(port))}`);
+const printDaemonStartedBanner = async (port: number): Promise<PortlessRoute> => {
+  const route = await ensurePortlessRoute(port);
+  console.log(`${kleur.green("✔")} running at ${kleur.cyan(route.url)}`);
+  announcePortlessRoute(route);
   console.log(`  stop with ${kleur.bold(STOP_COMMAND)}`);
+  return route;
 };
 
 const openInBrowser = async (url: string): Promise<void> => {
@@ -263,15 +267,17 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
 
   writePid(process.pid, server.port, options.host);
 
-  const namedUrl = getFriendlyUrl(server.port);
+  const route = await ensurePortlessRoute(server.port);
   if (isRunningAsDaemonChild()) {
-    console.log(`${kleur.green("✔")} daemon listening on ${namedUrl} (pid ${process.pid})`);
+    console.log(`${kleur.green("✔")} daemon listening on ${route.url} (pid ${process.pid})`);
+    announcePortlessRoute(route);
   } else {
-    console.log(`${kleur.green("✔")} running at ${kleur.cyan(namedUrl)}`);
+    console.log(`${kleur.green("✔")} running at ${kleur.cyan(route.url)}`);
+    announcePortlessRoute(route);
     console.log(`  press ${kleur.bold("Ctrl+C")} to stop`);
   }
 
-  if (options.open && !isRunningAsDaemonChild()) await openInBrowser(namedUrl);
+  if (options.open && !isRunningAsDaemonChild()) await openInBrowser(route.url);
 
   let shuttingDown = false;
   const shutdown = async (signal: NodeJS.Signals) => {

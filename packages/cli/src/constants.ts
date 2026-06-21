@@ -9,6 +9,9 @@ export const MIN_TCP_PORT = 1;
 export const MAX_TCP_PORT = 65535;
 
 export const FRIENDLY_HOSTNAME = "localterm.localhost";
+export const PORTLESS_APP_NAME = "localterm";
+export const PORTLESS_ALIAS_TIMEOUT_MS = 5_000;
+export const PORTLESS_SERVICE_TIMEOUT_MS = 30_000;
 export const STOP_COMMAND = "npx @monotykamary/localterm@latest stop";
 export const DAEMON_CHILD_ENV_FLAG = "LOCALTERM_DAEMON_CHILD";
 export const RESTART_DAEMON_ENV_FLAG = "LOCALTERM_RESTART_DAEMON";
@@ -34,3 +37,7 @@ export const RESTART_BIND_RETRY_INTERVAL_MS = 200;
 export const RESTART_BIND_RETRY_MAX_MS = 5000;
 
 export const getFriendlyUrl = (port: number): string => `http://${FRIENDLY_HOSTNAME}:${port}`;
+
+export const getPortlessUrl = (): string => `https://${FRIENDLY_HOSTNAME}`;
+
+export const getDirectUrl = (port: number, host = "127.0.0.1"): string => `http://${host}:${port}`;

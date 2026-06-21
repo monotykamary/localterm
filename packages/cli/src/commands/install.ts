@@ -4,7 +4,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import kleur from "kleur";
-import { LAUNCHD_LABEL } from "../constants.js";
+import { LAUNCHD_LABEL, PORTLESS_SERVICE_TIMEOUT_MS } from "../constants.js";
 import { cliError, type CliError, exitCodeForCliError } from "../errors.js";
 import { getLaunchdPlistPath, getStateDirectory } from "../paths.js";
 import { cliEntry } from "../utils/cli-entry.js";
@@ -61,6 +61,36 @@ export const buildPlistContent = (options: InstallOptions): string => {
 
 const launchctl = async (...args: string[]): Promise<{ stdout: string; stderr: string }> => {
   return execFileAsync("launchctl", args, { timeout: 10_000 });
+};
+
+const isPortlessMissing = (error: unknown): boolean =>
+  error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT";
+
+const runPortless = async (
+  args: string[],
+  successMessage: string,
+): Promise<void> => {
+  try {
+    await execFileAsync("portless", args, { timeout: PORTLESS_SERVICE_TIMEOUT_MS });
+    console.log(kleur.green(successMessage));
+  } catch (error) {
+    if (isPortlessMissing(error)) {
+      console.warn(kleur.yellow(`  ⚠ portless not found on PATH — skipped \`${args.join(" ")}\``));
+      return;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(kleur.yellow(`  ⚠ portless ${args[0]} failed: ${message}`));
+  }
+};
+
+const setupPortlessProxy = async (): Promise<void> => {
+  console.log();
+  console.log(kleur.cyan("portless proxy"));
+  await runPortless(
+    ["service", "install"],
+    "  ✔ proxy service installed (HTTPS on :443, starts at boot)",
+  );
+  await runPortless(["trust"], "  ✔ local CA trusted (browsers accept https://*.localhost)");
 };
 
 const validateLaunchAgentsDirectory = (): CliError | null => {
@@ -130,6 +160,8 @@ export const runInstall = async (options: InstallOptions): Promise<void> => {
   console.log(`    • restart immediately if it crashes`);
   console.log();
   console.log(`  remove with ${kleur.bold("localterm uninstall")}`);
+
+  await setupPortlessProxy();
 };
 
 export const runUninstall = async (): Promise<void> => {

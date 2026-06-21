@@ -4,11 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vp dev",
+    "dev": "portless",
+    "dev:app": "vp dev",
     "build": "tsc -b && vp build",
     "preview": "vp preview",
     "test": "vp test --run",
     "typecheck": "tsc -b --noEmit"
+  },
+  "portless": {
+    "name": "dev.localterm",
+    "script": "dev:app"
   },
   "dependencies": {
     "@azurity/pure-nerd-font": "^3.0.5",
