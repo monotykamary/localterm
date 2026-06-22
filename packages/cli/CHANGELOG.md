@@ -1,5 +1,12 @@
 # localterm
 
+## 2.10.1
+
+### Patch Changes
+
+- Updated dependencies [afcca5d]
+  - @monotykamary/localterm-server@2.10.1
+
 ## 2.10.0
 
 ### Minor Changes
