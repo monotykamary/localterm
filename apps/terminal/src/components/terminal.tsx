@@ -454,6 +454,18 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     // SessionReattachPool. Cleared on genuine shell exit (markShellDead) so
     // the dead session is never reattached on a manual Reconnect.
     let liveSessionId: string | null = null;
+    // Silent-reattach state: on a WS close while we still have a liveSessionId,
+    // we skip the connection-lost marker/modal and try one quiet reconnect —
+    // the server's SessionReattachPool keeps the PTY alive across transient
+    // drops (portless teardown on wake, brief network blip). If the reconnect's
+    // session frame has the same id, the shell survived and the user sees
+    // nothing. If the id differs the grace elapsed and a fresh shell spawned —
+    // we surface that honestly with both markers. Cleared on session landing
+    // or on a second close (silent reconnect failed). Stashed close info is
+    // reused for the miss case so we don't lose the original code/reason.
+    let reattachPending = false;
+    let reattachCloseCode = 0;
+    let reattachCloseReason = "";
     // Whether the server paired this WS socket with a CDP target via the
     // `{type:"identify"}` handshake → the server will drive closeTab on a
     // clean shell exit, so the client defers window.close() to give the
@@ -1104,6 +1116,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         if (message.type === "title") {
           applyIncomingTitle(message.title);
         } else if (message.type === "session") {
+          const wasReattachPending = reattachPending;
+          const expectedSid = wasReattachPending ? liveSessionId : null;
+          const stashedCloseCode = reattachCloseCode;
+          const stashedCloseReason = reattachCloseReason;
+          reattachPending = false;
+          reattachCloseCode = 0;
+          reattachCloseReason = "";
           if (message.id) liveSessionId = message.id;
           setSessionInfo({
             shell: message.shell,
@@ -1116,6 +1135,21 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           applyIncomingTitle(message.title);
           removeRunQueryParam();
           removeInitialCommandQueryParam();
+          // Silent reattach succeeded: the server parked the PTY across the WS
+          // drop and ?sid= reattached to it. Same id, same pid — keep the
+          // screen exactly as the user left it. No markers, no modal: a
+          // mid-keystroke interactive CLI (vim, fzf, a REPL) continues
+          // uninterrupted, which is the whole point of the reattach pool.
+          if (expectedSid !== null && message.id === expectedSid) return;
+          // Reattach missed: the prior PTY was gone by the time the reconnect
+          // landed (grace expired, or the shell exited while parked), so the
+          // daemon spawned a fresh shell. Surface the stashed close info
+          // honestly so the user can tell where the prior shell ended and the
+          // fresh prompt began. No modal — the user's already at a usable
+          // prompt and can keep working.
+          if (expectedSid !== null) {
+            terminal.write(formatConnectionLostMarker(stashedCloseCode, stashedCloseReason));
+          }
         } else if (message.type === "automations") {
           setAutomations(message.automations);
         } else if (message.type === "caffeinate") {
@@ -1171,6 +1205,30 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           console.warn(
             `[localterm] websocket closed: code=${event.code} reason=${JSON.stringify(event.reason)} wasClean=${event.wasClean}`,
           );
+          // Silent-reattach attempt: the server's SessionReattachPool holds
+          // the PTY across this drop, and on a successful reattach the user
+          // should see nothing — mid-keystroke interactive CLIs continue
+          // uninterrupted. We stash the close info and schedule a direct
+          // reconnect (bypassing the connection-lost/modal path that fires
+          // `exited = true`). If the silent reconnect itself closes before a
+          // session frame lands (daemon genuinely down), fall through to
+          // markConnectionLost with the stashed close info.
+          if (liveSessionId && !reattachPending) {
+            reattachPending = true;
+            reattachCloseCode = event.code;
+            reattachCloseReason = event.reason;
+            reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
+            return;
+          }
+          if (reattachPending) {
+            const stashedCode = reattachCloseCode;
+            const stashedReason = reattachCloseReason;
+            reattachPending = false;
+            reattachCloseCode = 0;
+            reattachCloseReason = "";
+            markConnectionLost(stashedCode, stashedReason, event.wasClean);
+            return;
+          }
           markConnectionLost(event.code, event.reason, event.wasClean);
           return;
         }
@@ -1197,6 +1255,9 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       exited = false;
       wasEverConnected = false;
       cdpControlled = false;
+      reattachPending = false;
+      reattachCloseCode = 0;
+      reattachCloseReason = "";
       wsConnectedRef.current = false;
       setExitInfo(null);
       setSessionInfo(null);
