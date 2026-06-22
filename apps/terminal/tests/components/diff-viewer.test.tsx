@@ -138,9 +138,22 @@ const mockHappyPath = () => {
 // directly (null = no PR / not loaded).
 const renderDiffViewer = ({
   onClose = () => {},
+  onOpenInEditor,
   branchInfo = null,
-}: { onClose?: () => void; branchInfo?: GitBranchInfo | null } = {}) =>
-  render(<DiffViewer open cwd="/repo" branchInfo={branchInfo} onClose={onClose} />);
+}: {
+  onClose?: () => void;
+  onOpenInEditor?: (filePath: string) => void;
+  branchInfo?: GitBranchInfo | null;
+} = {}) =>
+  render(
+    <DiffViewer
+      open
+      cwd="/repo"
+      branchInfo={branchInfo}
+      onClose={onClose}
+      onOpenInEditor={onOpenInEditor}
+    />,
+  );
 
 afterEach(() => {
   filesMock.mockReset();
@@ -318,6 +331,32 @@ describe("DiffViewer", () => {
     const imageCalls = patchMock.mock.calls.filter(([, path]) => path === "image.png");
     expect(appCalls).toHaveLength(1);
     expect(imageCalls).toHaveLength(1);
+  });
+
+  it("opens a regular file in neovim via the open-in-editor callback", async () => {
+    mockHappyPath();
+    const onOpenInEditor = vi.fn();
+    renderDiffViewer({ onOpenInEditor });
+    await screen.findByText("BETA");
+
+    const button = screen.getByRole("button", { name: /open .* in neovim/ });
+    fireEvent.click(button);
+
+    expect(onOpenInEditor).toHaveBeenCalledTimes(1);
+    expect(onOpenInEditor).toHaveBeenCalledWith("src/app.ts");
+  });
+
+  it("hides the open-in-neovim button for binary files", async () => {
+    mockHappyPath();
+    renderDiffViewer({ onOpenInEditor: () => {} });
+    await screen.findByText("BETA");
+
+    expect(screen.getByRole("button", { name: /open .* in neovim/ })).toBeTruthy();
+
+    fireEvent.click(await screen.findByRole("option", { name: /image\.png/ }));
+    await screen.findByText(/Binary file/);
+
+    expect(screen.queryByRole("button", { name: /open .* in neovim/ })).toBeNull();
   });
 
   it("retries a failed per-file patch fetch", async () => {

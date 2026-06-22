@@ -125,6 +125,7 @@ import { clampTerminalLineHeight } from "@/utils/clamp-terminal-line-height";
 import { clampTerminalPaddingX, clampTerminalPaddingY } from "@/utils/clamp-terminal-padding";
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { formatDiffCount } from "@/utils/format-diff-count";
+import { shellQuoteArg } from "@/utils/shell-quote-arg";
 import { isAutomationsShortcut } from "@/utils/is-automations-shortcut";
 import { isBinaryMessageData } from "@/utils/is-binary-message-data";
 import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
@@ -2214,6 +2215,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         gitDirtyVersion={gitDirtyVersion}
         onClose={closeDiffViewer}
         onSendToTerminal={sendDiffReviewToTerminal}
+        onOpenInEditor={(filePath) => {
+          if (!liveCwd) return;
+          openShellAt(liveCwd, `nvim ${shellQuoteArg(filePath)} && exit`);
+        }}
         onRefreshBranchInfo={refreshBranchInfo}
         onDiffSummaryUpdate={setGitDiffSummary}
       />

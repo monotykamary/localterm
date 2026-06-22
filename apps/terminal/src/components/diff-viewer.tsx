@@ -10,6 +10,7 @@ import type {
 import type { SyntaxLine } from "@/utils/syntax-highlight";
 import {
   ChevronDown,
+  ExternalLink,
   FileWarning,
   GitBranch,
   MessageSquare,
@@ -107,6 +108,10 @@ interface DiffViewerProps {
   // signal. The viewer debounces and refreshes in near-realtime while open.
   gitDirtyVersion?: number;
   onClose: () => void;
+  // Open a fresh browser tab running `nvim <path>` at the repo cwd, so the
+  // user can edit the file in place. Mirrors openShellAt from the worktrees
+  // modal — same ExternalLink icon, same new-tab mechanism.
+  onOpenInEditor?: (filePath: string) => void;
   onSendToTerminal?: (text: string) => void;
   // Ask the parent to re-fetch the leased branch info (wired to the refresh
   // button alongside re-fetching the diff).
@@ -1078,6 +1083,7 @@ export const DiffViewer = ({
   branchInfo,
   gitDirtyVersion,
   onClose,
+  onOpenInEditor,
   onSendToTerminal,
   onRefreshBranchInfo,
   onDiffSummaryUpdate,
@@ -1916,6 +1922,18 @@ export const DiffViewer = ({
                         </PopoverContent>
                       </Popover>
                     </span>
+                    {onOpenInEditor && !selectedFile.binary ? (
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => onOpenInEditor(selectedFile.path)}
+                        aria-label={`open ${selectedFile.path} in neovim`}
+                        title="open in neovim"
+                        className="shrink-0 hover:text-foreground"
+                      >
+                        <ExternalLink />
+                      </Button>
+                    ) : null}
                     {!selectedFile.binary ? (
                       <span className="ml-auto shrink-0 tabular-nums">
                         <span className={ADDITIONS_CLASSES}>+{selectedFile.additions}</span>{" "}
