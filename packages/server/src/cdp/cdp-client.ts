@@ -372,10 +372,19 @@ export class CdpClient {
         };
         return typeof result?.targetId === "string" ? result.targetId : null;
       } catch {
-        // Socket likely went stale between runs (browser restarted). Drop it and
-        // let the next loop iteration re-detect and reconnect once.
-        this.ws = undefined;
-        this.connectedBrowser = undefined;
+        // Socket went stale between runs (browser restarted, or a call timed
+        // out while still OPEN). Close it explicitly — failPending doesn't
+        // close() on its own — to avoid leaking a second live socket alongside
+        // the next connect()'s new one, and reset maps/handlers in one place.
+        const stale = this.ws;
+        if (stale) {
+          try {
+            stale.close();
+          } catch {
+            /* ignore */
+          }
+          this.failPending(stale, new Error("CDP call failed; dropping stale socket"));
+        }
       }
     }
     return null;
