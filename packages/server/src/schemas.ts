@@ -151,6 +151,11 @@ const sessionMessageSchema = z
     pid: z.number().int().nonnegative(),
     cwd: z.string().min(1),
     title: z.string().max(MAX_TITLE_LENGTH),
+    // Server-side id for the live PTY. A reconnecting client carries it back
+    // as the `sid` query param on the WS url so the daemon can reattach the
+    // prior Session instead of spawning a fresh shell — see
+    // SessionReattachPool. Optional for back-compat with older clients.
+    id: z.string().uuid().optional(),
   })
   .strict();
 

@@ -217,14 +217,16 @@ const SEARCH_DECORATION_OPTIONS = {
 };
 
 const CWD_QUERY_PARAM = "cwd";
+const SESSION_ID_QUERY_PARAM = "sid";
 
-const buildWebSocketUrl = (cwdOverride?: string | null): string => {
+const buildWebSocketUrl = (cwdOverride?: string | null, sid?: string | null): string => {
   const url = new URL("/ws", window.location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   const cwd = cwdOverride ?? new URLSearchParams(window.location.search).get(CWD_QUERY_PARAM);
   if (cwd) url.searchParams.set(CWD_QUERY_PARAM, cwd);
   const runId = new URLSearchParams(window.location.search).get(RUN_QUERY_PARAM);
   if (runId) url.searchParams.set(RUN_QUERY_PARAM, runId);
+  if (sid) url.searchParams.set(SESSION_ID_QUERY_PARAM, sid);
   // Forward a transient initial command (a worktree's setup script) so the
   // server writes it to the PTY as if the user typed it — the install/env-copy
   // output is visible and the prompt returns when it finishes.
@@ -446,6 +448,12 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     let wasEverConnected = false;
     let lastTitle = "";
     let socket: WebSocket | null = null;
+    // Server-side PTY id (sent in the {type:"session"} message). Preserved
+    // across reconnects and forwarded as `?sid=` so the daemon can reattach
+    // the parked PTY instead of spawning a fresh shell — see
+    // SessionReattachPool. Cleared on genuine shell exit (markShellDead) so
+    // the dead session is never reattached on a manual Reconnect.
+    let liveSessionId: string | null = null;
     // Whether the server paired this WS socket with a CDP target via the
     // `{type:"identify"}` handshake → the server will drive closeTab on a
     // clean shell exit, so the client defers window.close() to give the
@@ -1045,7 +1053,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
     const connect = () => {
       if (disposed) return;
-      const nextSocket = new WebSocket(buildWebSocketUrl(liveCwdRef.current));
+      const nextSocket = new WebSocket(buildWebSocketUrl(liveCwdRef.current, liveSessionId));
       socket = nextSocket;
 
       nextSocket.binaryType = "arraybuffer";
@@ -1096,6 +1104,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         if (message.type === "title") {
           applyIncomingTitle(message.title);
         } else if (message.type === "session") {
+          if (message.id) liveSessionId = message.id;
           setSessionInfo({
             shell: message.shell,
             shellName: message.shellName,

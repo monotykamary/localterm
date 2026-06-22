@@ -161,6 +161,16 @@ export const OUTPUT_BATCH_WINDOW_MS = 2;
 // trips its own write error and shows "Shell ended" with no idea why.
 export const WS_HEARTBEAT_INTERVAL_MS = 20_000;
 export const WS_HEARTBEAT_TIMEOUT_MS = 60_000;
+// How long a PTY survives after its WS closes (transient reconnect window).
+// Sized to cover the browser's reconnect cycle plus wake-from-sleep latency
+// when the WS was dropped by a proxy (portless's two-socket pipe tears down
+// on either side's close/error/end during wake, surfacing as 1006 before the
+// client even tries to reconnect). Within this window a fresh WS opening
+// with the matching `?sid=` re-attaches to the live PTY instead of spawning
+// a new shell; past it the PTY is killed and the next connect spawns fresh.
+export const SESSION_GRACE_MS = 30_000;
+// Query param a reconnecting client carries to reattach its prior PTY.
+export const SESSION_ID_QUERY_PARAM = "sid";
 // When the interval fires with a stale `lastPongAt` (the common case after a
 // laptop wake — the wall clock advanced during sleep, but the loopback socket
 // itself never actually dropped), send one fresh ping before tearing down. A

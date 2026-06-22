@@ -262,4 +262,119 @@ describe("createServer WS lifecycle", () => {
     expect(server.registry.size()).toBe(0);
     await closeWs(socket);
   });
+
+  it("attaches a session id to the session frame for reattach", async () => {
+    const { socket, waitForSession } = await connectAndCollect(server.port);
+    try {
+      const session = (await waitForSession()) as { id?: string; pid: number };
+      expect(typeof session.id).toBe("string");
+      expect(session.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    } finally {
+      await closeWs(socket);
+    }
+  });
+
+  it("parks the PTY on WS close and reattaches it on ?sid= reconnect", async () => {
+    const connectAndCollectSid = async (
+      port: number,
+      sid: string | null,
+    ): Promise<{
+      socket: WebSocket;
+      session: { id?: string; pid: number };
+    }> => {
+      const url = sid
+        ? `ws://127.0.0.1:${port}/ws?sid=${encodeURIComponent(sid)}`
+        : `ws://127.0.0.1:${port}/ws`;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("ws connect timeout")), 10_000);
+        const socket = new WebSocket(url);
+        socket.binaryType = "arraybuffer";
+        socket.addEventListener("message", function listener(event) {
+          const parsed = normalizeMessage(event as WebSocket.MessageEvent);
+          if (
+            parsed &&
+            typeof parsed === "object" &&
+            (parsed as Record<string, unknown>).type === "session"
+          ) {
+            clearTimeout(timer);
+            socket.removeEventListener("message", listener);
+            resolve({ socket, session: parsed as { id?: string; pid: number } });
+          }
+        });
+        socket.addEventListener("error", () => {
+          clearTimeout(timer);
+          reject(new Error("ws error"));
+        });
+      });
+    };
+
+    const first = await connectAndCollectSid(server.port, null);
+    const firstPid = first.session.pid;
+    const sid = first.session.id!;
+    expect(typeof sid).toBe("string");
+    expect(server.registry.size()).toBe(1);
+
+    // Drop the WS. The PTY stays parked behind `sid` for the grace window —
+    // see SessionReattachPool.
+    await closeWs(first.socket);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(server.registry.size()).toBe(0);
+
+    // Reconnect with the matching sid: the daemon re-attaches the parked PTY
+    // instead of spawning a fresh shell, so the pid matches and the same id
+    // is returned.
+    const reattached = await connectAndCollectSid(server.port, sid);
+    try {
+      expect(reattached.session.pid).toBe(firstPid);
+      expect(reattached.session.id).toBe(sid);
+      expect(server.registry.size()).toBe(1);
+    } finally {
+      await closeWs(reattached.socket);
+    }
+  });
+
+  it("spawns a fresh PTY when ?sid= misses the pool (grace expired or unknown)", async () => {
+    const connectAndCollectSid = async (
+      port: number,
+      sid: string | null,
+    ): Promise<{
+      socket: WebSocket;
+      session: { id?: string; pid: number };
+    }> => {
+      const url = sid
+        ? `ws://127.0.0.1:${port}/ws?sid=${encodeURIComponent(sid)}`
+        : `ws://127.0.0.1:${port}/ws`;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("ws connect timeout")), 10_000);
+        const socket = new WebSocket(url);
+        socket.binaryType = "arraybuffer";
+        socket.addEventListener("message", function listener(event) {
+          const parsed = normalizeMessage(event as WebSocket.MessageEvent);
+          if (
+            parsed &&
+            typeof parsed === "object" &&
+            (parsed as Record<string, unknown>).type === "session"
+          ) {
+            clearTimeout(timer);
+            socket.removeEventListener("message", listener);
+            resolve({ socket, session: parsed as { id?: string; pid: number } });
+          }
+        });
+        socket.addEventListener("error", () => {
+          clearTimeout(timer);
+          reject(new Error("ws error"));
+        });
+      });
+    };
+
+    // An unknown sid must fall through to a fresh spawn, not close the socket.
+    const result = await connectAndCollectSid(server.port, "00000000-0000-0000-0000-000000000000");
+    try {
+      expect(typeof result.session.id).toBe("string");
+      expect(result.session.id).not.toBe("00000000-0000-0000-0000-000000000000");
+      expect(server.registry.size()).toBe(1);
+    } finally {
+      await closeWs(result.socket);
+    }
+  });
 });

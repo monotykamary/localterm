@@ -35,6 +35,8 @@ import {
   OUTPUT_BATCH_FLUSH_BYTES,
   OUTPUT_BATCH_WINDOW_MS,
   SERVER_STOP_GRACE_MS,
+  SESSION_GRACE_MS,
+  SESSION_ID_QUERY_PARAM,
   WS_BACKPRESSURE_THRESHOLD_BYTES,
   WS_CLOSE_BACKPRESSURE,
   WS_CLOSE_CAPACITY_REACHED,
@@ -81,6 +83,7 @@ import {
 } from "./schemas.js";
 import { Session } from "./session.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
+import { SessionReattachPool, generateSessionId } from "./session-reattach-pool.js";
 import { SessionRegistry } from "./session-registry.js";
 import { resolveStaticAsset } from "./static-resolver.js";
 import { sweepStaleWorktrees } from "./utils/worktree-sweep.js";
@@ -278,6 +281,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   }
 
   const registry = new SessionRegistry();
+  // PTY reattach pool: a WS close (portless teardown on wake, transient drop)
+  // parks the live Session here instead of killing it. The next WS open
+  // carrying the matching `?sid=` reattaches; a grace timer disposes
+  // abandoned PTYs whose client never comes back.
+  const reattachPool = new SessionReattachPool({ graceMs: SESSION_GRACE_MS });
   const app = new Hono();
   app.use("*", createNetworkPolicyMiddleware(host));
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
@@ -888,6 +896,15 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       let session: Session | null = null;
       let activeWs: BroadcastSocket | null = null;
       let claimedRunId: string | null = null;
+      // Server-side id for the live PTY attached to this WS. Sent to the
+      // client in the {type:"session"} message so a reconnect carries it back
+      // as `?sid=` and the daemon reattaches the parked Session instead of
+      // spawning a fresh shell. Cleared on genuine shell exit (no reattach).
+      let sessionId: string | null = null;
+      // Persisted across park/reattach so onClose/onError can re-park the
+      // automation-run context (the run-tracker claim is single-use, so we
+      // can't re-derive automationId/runId from `?run=` on reconnect).
+      let automationId: string | null = null;
       // The CDP targetId this WS socket was paired with via the
       // `{type:"identify"}` handshake (page's ambient token →
       // CdpClient.findTargetIdForToken). Set on identify; drives closeTab on
@@ -927,6 +944,33 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           claimedRunId = null;
         }
       };
+      // Single-shot finalization shared by onClose/onError (ws fires error then
+      // close on a transport failure; without this guard both would try to
+      // dispose/park the same Session). Parks a still-live PTY behind `sid` so
+      // a reconnecting client with `?sid=` can reattach; disposes on genuine
+      // shell exit, when no sid was minted, or when the session is already
+      // gone.
+      let sessionFinalized = false;
+      const releaseSessionFromSocket = () => {
+        if (sessionFinalized) return;
+        if (!session) return;
+        sessionFinalized = true;
+        const live = session;
+        registry.unregister(live);
+        caffeinateManager.pokeAuto();
+        if (!live.isExited && sessionId) {
+          reattachPool.park(live, {
+            sid: sessionId,
+            claimedRunId,
+            claimedTargetId,
+            automationId,
+          });
+        } else {
+          live.dispose();
+        }
+        session = null;
+        activeWs = null;
+      };
 
       const rawCwd = context.req.query("cwd");
       let requestedCwd: string | undefined;
@@ -939,6 +983,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
         }
       }
       const requestedRunId = context.req.query("run");
+      const requestedSid = context.req.query(SESSION_ID_QUERY_PARAM) ?? null;
       // A plain tab may carry an initial command (a worktree's setup script) —
       // distinct from an automation run (`?run=`), which still takes precedence
       // when both are present. The command is written to the PTY as if the user
@@ -964,37 +1009,65 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           // in the same cwd instead of re-running the scheduled command.
           const claimedRun = requestedRunId ? automationRunTracker.claim(requestedRunId) : null;
           if (claimedRun) claimedRunId = claimedRun.runId;
-          let sessionCwd = requestedCwd;
-          if (claimedRun) {
-            try {
-              if (fs.statSync(claimedRun.cwd).isDirectory()) sessionCwd = claimedRun.cwd;
-            } catch {
-              /* automation cwd vanished since creation; fall back to default */
+          // Reattach: if the WS carries a `?sid=` for a PTY the pool still has
+          // parked (transient drop — portless teardown on wake, brief network
+          // blip), rebind the live Session to this socket instead of spawning
+          // a new shell. A `claim()` miss (grace expired, or shell exited while
+          // parked) falls through to the spawn path.
+          const parked = requestedSid ? reattachPool.claim(requestedSid) : null;
+          const isReattach = parked !== null;
+          let liveSession: Session;
+          if (parked) {
+            liveSession = parked.session;
+            sessionId = parked.sid;
+            claimedRunId = parked.claimedRunId;
+            claimedTargetId = parked.claimedTargetId;
+            automationId = parked.automationId;
+            // Re-register so the live PTY counts toward MAX_CONCURRENT_SESSIONS
+            // and caffeinate's ps-tree walk again. park() unregistered it on
+            // the prior WS close; if we skipped this, a transient drop would
+            // leave the PTY off the books until the next reconnect.
+            registry.register(liveSession);
+          } else {
+            let sessionCwd = requestedCwd;
+            if (claimedRun) {
+              try {
+                if (fs.statSync(claimedRun.cwd).isDirectory()) sessionCwd = claimedRun.cwd;
+              } catch {
+                /* automation cwd vanished since creation; fall back to default */
+              }
             }
+            const freshSession = new Session({
+              cwd: sessionCwd,
+              initialCommand: claimedRun?.command ?? requestedInitialCommand,
+            });
+            liveSession = freshSession;
+            sessionId = generateSessionId();
+            if (claimedRun) automationId = claimedRun.automationId;
+            registry.register(freshSession);
           }
-          const newSession = new Session({
-            cwd: sessionCwd,
-            initialCommand: claimedRun?.command ?? requestedInitialCommand,
-          });
-          session = newSession;
-          registry.register(newSession);
+          session = liveSession;
 
-          if (claimedRun) {
-            automationStore.updateRun(claimedRun.automationId, claimedRun.runId, {
+          const automationRunId = claimedRunId;
+          const isAutomationSession = automationId !== null;
+          if (isAutomationSession && !isReattach) {
+            automationStore.updateRun(automationId as string, automationRunId as string, {
               status: "running",
               startedAt: Date.now(),
             });
             broadcastAutomations();
-            newSession.on("automation-exit", (exitCode: number) => {
-              automationStore.updateRun(claimedRun.automationId, claimedRun.runId, {
+          }
+          if (isAutomationSession) {
+            liveSession.on("automation-exit", (exitCode: number) => {
+              automationStore.updateRun(automationId as string, automationRunId as string, {
                 status: exitCode === 0 ? "completed" : "failed",
                 exitCode,
                 finishedAt: Date.now(),
               });
               broadcastAutomations();
-              closeRunTabIfRequested(claimedRun.automationId, claimedRun.runId);
-              folderWatchManager.notifyRunFinished(claimedRun.automationId);
-              sessionEventManager.notifyRunFinished(claimedRun.automationId);
+              closeRunTabIfRequested(automationId as string, automationRunId as string);
+              folderWatchManager.notifyRunFinished(automationId as string);
+              sessionEventManager.notifyRunFinished(automationId as string);
             });
           }
 
@@ -1032,7 +1105,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
                 const pingPendingMs = Date.now() - pendingPingAt;
                 if (pingPendingMs < WS_HEARTBEAT_GRACE_MS) return;
                 console.warn(
-                  `ws heartbeat timeout: no pong for ${idleMs}ms (grace ${pingPendingMs}ms, pid ${newSession.pid}); terminating`,
+                  `ws heartbeat timeout: no pong for ${idleMs}ms (grace ${pingPendingMs}ms, pid ${liveSession.pid}); terminating`,
                 );
                 stopHeartbeatChecks();
                 if (!callRawMethod(ws.raw, "terminate")) ws.close();
@@ -1053,12 +1126,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           const ensureDrainPoll = () => {
             if (drainPollTimer !== null) return;
             drainPollTimer = setInterval(() => {
-              if (!newSession.isPaused) {
+              if (!liveSession.isPaused) {
                 stopDrainPoll();
                 return;
               }
               if (getRawBufferedAmount(ws.raw) <= WS_OUTBOUND_RESUME_LOW_WATER_BYTES) {
-                newSession.resume();
+                liveSession.resume();
                 stopDrainPoll();
               }
             }, WS_OUTBOUND_DRAIN_POLL_MS);
@@ -1073,10 +1146,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             sendOutputBatchBytes(target, outputBatch);
             outputBatch = "";
             if (
-              !newSession.isPaused &&
+              !liveSession.isPaused &&
               getRawBufferedAmount(target.raw) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES
             ) {
-              newSession.pause();
+              liveSession.pause();
               ensureDrainPoll();
             }
           };
@@ -1091,7 +1164,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           // this guards against drift.
           const onOutput = (data: string) => {
             outputBatch += data;
-            registry.noteOutput(newSession.pid);
+            registry.noteOutput(liveSession.pid);
             caffeinateManager.noteOutputActivity();
             if (outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
               if (outputBatchTimer !== null) {
@@ -1141,7 +1214,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           let gitDirtyInFlight = false;
           let gitDirtyPending = false;
           const handleGitDirty = async () => {
-            const cwd = newSession.lastEmittedCwd;
+            const cwd = liveSession.lastEmittedCwd;
             if (!cwd) return;
             if (gitDirtyInFlight) {
               gitDirtyPending = true;
@@ -1175,23 +1248,21 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           for (const eventName of gitAutomationEvents) {
             gitDiffWatcher.on(eventName, () => {
               if (!isAutomationSession) {
-                sessionEventManager.onSessionEvent(eventName, newSession.lastEmittedCwd);
+                sessionEventManager.onSessionEvent(eventName, liveSession.lastEmittedCwd);
               }
             });
           }
-          gitDiffWatcher.start(newSession.cwd);
+          gitDiffWatcher.start(liveSession.cwd);
 
           // Automation-run sessions should not feed events into the session
           // event manager — only user-driven sessions count.
-          const isAutomationSession = claimedRun !== null;
-
-          newSession.on("git-dirty", () => {
+          liveSession.on("git-dirty", () => {
             void handleGitDirty();
             if (!isAutomationSession) {
-              sessionEventManager.onSessionEvent("git-dirty", newSession.lastEmittedCwd);
+              sessionEventManager.onSessionEvent("git-dirty", liveSession.lastEmittedCwd);
             }
           });
-          newSession.on("cwd", (changedCwd: string) => {
+          liveSession.on("cwd", (changedCwd: string) => {
             gitDiffWatcher.stop();
             gitDiffWatcher.start(changedCwd);
             if (!isAutomationSession) {
@@ -1199,35 +1270,36 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             }
           });
 
-          newSession.on("output", onOutput);
-          newSession.on("title", onTitle);
-          newSession.on("cwd", onCwd);
-          newSession.on("foreground", (foregroundProcess: string | null) => {
+          liveSession.on("output", onOutput);
+          liveSession.on("title", onTitle);
+          liveSession.on("cwd", onCwd);
+          liveSession.on("foreground", (foregroundProcess: string | null) => {
             onForeground(foregroundProcess);
             if (!isAutomationSession) {
-              sessionEventManager.onSessionEvent("foreground", newSession.lastEmittedCwd);
+              sessionEventManager.onSessionEvent("foreground", liveSession.lastEmittedCwd);
             }
           });
-          newSession.on("notification", (body: string) => {
+          liveSession.on("notification", (body: string) => {
             onNotification(body);
             if (!isAutomationSession) {
-              sessionEventManager.onSessionEvent("notification", newSession.lastEmittedCwd);
+              sessionEventManager.onSessionEvent("notification", liveSession.lastEmittedCwd);
             }
           });
-          newSession.on("exit", (code: number | null) => {
+          liveSession.on("exit", (code: number | null) => {
             onExit(code);
-            if (!isAutomationSession && newSession.lastEmittedCwd) {
-              sessionEventManager.onSessionEvent("exit", newSession.lastEmittedCwd);
+            if (!isAutomationSession && liveSession.lastEmittedCwd) {
+              sessionEventManager.onSessionEvent("exit", liveSession.lastEmittedCwd);
             }
           });
 
           safeSend(ws, {
             type: "session",
-            shell: newSession.shell,
-            shellName: newSession.shellBaseName,
-            pid: newSession.pid,
-            cwd: newSession.cwd,
-            title: newSession.initialDocumentTitle,
+            shell: liveSession.shell,
+            shellName: liveSession.shellBaseName,
+            pid: liveSession.pid,
+            cwd: liveSession.lastEmittedCwd || liveSession.cwd,
+            title: liveSession.initialDocumentTitle,
+            id: sessionId ?? undefined,
           });
           // Tell this tab the current keep-awake state so its coffee toggle
           // renders correctly (and is hidden where caffeinate is unsupported).
@@ -1304,14 +1376,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           );
           if (activeWs) clientSockets.delete(activeWs);
           releaseRunTabHandle();
-          if (!session) return;
-          registry.unregister(session);
-          // A closed session may have been the only one running a trigger;
-          // re-evaluate automatic keep-awake now that its pid is gone.
-          caffeinateManager.pokeAuto();
-          session.dispose();
-          session = null;
-          activeWs = null;
+          releaseSessionFromSocket();
         },
         onError(event) {
           if (outputBatchTimer !== null) {
@@ -1331,14 +1396,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           console.error(`ws error${pidLabel}: ${message}`);
           if (activeWs) clientSockets.delete(activeWs);
           releaseRunTabHandle();
-          if (!session) return;
-          registry.unregister(session);
-          // A closed session may have been the only one running a trigger;
-          // re-evaluate automatic keep-awake now that its pid is gone.
-          caffeinateManager.pokeAuto();
-          session.dispose();
-          session = null;
-          activeWs = null;
+          releaseSessionFromSocket();
         },
       };
     }),
@@ -1450,6 +1508,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     caffeinateManager.dispose();
     cdpClient?.close();
     registry.disposeAll();
+    reattachPool.disposeAll();
     // Forcibly tear down every WS first. node-pty + ws upgraded sockets
     // aren't tracked in http.Server's keep-alive set, so target.close() would
     // otherwise wait forever for them and the CLI's force-exit fallback would
