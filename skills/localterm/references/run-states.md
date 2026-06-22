@@ -12,13 +12,13 @@ The run tab opens in the **background** (it does not steal focus). When a Chromi
 
 Each automation carries `runs` (newest-first, capped at 50) of `{runId, scheduledFor, startedAt, finishedAt, status, exitCode, trigger, countsTowardLimit}`, plus `runCount`, `lifecycle` (`active`|`finished`), and a back-compat `lastRun: {runId, at, status, exitCode}` (= the newest run):
 
-| status      | meaning                                                                                                                                                                       |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `launched`  | tab open requested, not yet claimed by a browser tab                                                                                                                          |
-| `running`   | a tab claimed the run and the command is executing                                                                                                                           |
-| `completed` | command finished with exit code 0                                                                                                                                             |
-| `failed`    | command finished with a non-zero `exitCode`                                                                                                                                   |
-| `missed`    | no tab claimed the run within 5 minutes (browser closed/headless)                                                                                                             |
+| status      | meaning                                                                                                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `launched`  | tab open requested, not yet claimed by a browser tab                                                                                                                                                          |
+| `running`   | a tab claimed the run and the command is executing                                                                                                                                                            |
+| `completed` | command finished with exit code 0                                                                                                                                                                             |
+| `failed`    | command finished with a non-zero `exitCode`                                                                                                                                                                   |
+| `missed`    | no tab claimed the run within 5 minutes (browser closed/headless)                                                                                                                                             |
 | `skipped`   | the daemon was **down** at that scheduled minute — reconstructed at startup from a downtime heartbeat (only the ~10 most-recent missed occurrences per automation, so real runs aren't evicted); never re-run |
 
 `completed`/`failed` are only reported for zsh and bash login shells; other shells stay at `running` until the tab closes. The `trigger` field in each run record is `"schedule"`, `"manual"`, `"watch"`, or `"event"`. The automation-level `lifecycle:"finished"` means a `count` limit was reached — use `POST …/reset` to run it again.

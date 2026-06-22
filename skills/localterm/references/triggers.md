@@ -51,13 +51,13 @@ Git events are detected by watching the repository's `.git` directory. The opera
 
 ### Other events
 
-| event          | fires when                                                                                                      |
-| -------------- | --------------------------------------------------------------------------------------------------------------- |
-| `git-stash`    | the stash ref changed                                                                                           |
-| `git-tag`      | a tag ref changed                                                                                               |
+| event          | fires when                                                                                                               |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `git-stash`    | the stash ref changed                                                                                                    |
+| `git-tag`      | a tag ref changed                                                                                                        |
 | `notification` | a command emits OSC 9 (`printf '\e]9;message\a'`) in a session whose cwd matches — use your own scripts as event sources |
-| `cwd`          | you `cd` into or out of the automation's directory                                                              |
-| `foreground`   | the foreground process changes in a matching session (e.g. vim starts)                                          |
-| `exit`         | a shell session in a matching directory closes                                                                  |
+| `cwd`          | you `cd` into or out of the automation's directory                                                                       |
+| `foreground`   | the foreground process changes in a matching session (e.g. vim starts)                                                   |
+| `exit`         | a shell session in a matching directory closes                                                                           |
 
 For "notify on push" workflows, use `git-fetch` or a custom `notification` event from your own hook — localterm cannot detect a bare `git push` from the local repository because push updates the remote, not local refs. Operation detection is best-effort; for guaranteed signals, use `{kind:"event", events:["notification"]}` and have your scripts emit `OSC 9` as the signal.

@@ -48,7 +48,7 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
   - `{kind:"schedule", schedule}` — time-based (the common case; `daily` is shown in the create examples below).
   - `{kind:"watch", recursive, filter?}` — fires when the automation's `cwd` changes (native filesystem events, no polling).
   - `{kind:"event", events: [...]}` — fires when a localterm session emits a named event matching `cwd` (session-scoped).
-  See [references/triggers.md](references/triggers.md) for the full schedule-shape table (`hourly`/`weekly`/`monthly`/`cron`/…), git-event taxonomy, watch filter/debounce/grace semantics, and the cron escape-hatch details.
+    See [references/triggers.md](references/triggers.md) for the full schedule-shape table (`hourly`/`weekly`/`monthly`/`cron`/…), git-event taxonomy, watch filter/debounce/grace semantics, and the cron escape-hatch details.
 
 - `cwd` — absolute path; must exist and be a directory on the daemon's machine
   (validated at create/update time).
