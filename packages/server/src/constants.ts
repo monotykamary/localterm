@@ -161,6 +161,14 @@ export const OUTPUT_BATCH_WINDOW_MS = 2;
 // trips its own write error and shows "Shell ended" with no idea why.
 export const WS_HEARTBEAT_INTERVAL_MS = 20_000;
 export const WS_HEARTBEAT_TIMEOUT_MS = 60_000;
+// When the interval fires with a stale `lastPongAt` (the common case after a
+// laptop wake — the wall clock advanced during sleep, but the loopback socket
+// itself never actually dropped), send one fresh ping before tearing down. A
+// live socket pongs within the grace window and the connection survives; a
+// truly half-open one stays silent and terminates on the next tick. Sized to
+// absorb a slow WS round-trip through a TLS proxy (portless on :443) without
+// leaving a dead session hanging past one extra interval.
+export const WS_HEARTBEAT_GRACE_MS = 15_000;
 export const FOREGROUND_POLL_INTERVAL_MS = 250;
 // Hard ceiling for server.stop() — clients get terminated, then the http
 // server is given this long to actually close before we resolve anyway. Keeps

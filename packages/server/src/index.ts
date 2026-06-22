@@ -39,6 +39,7 @@ import {
   WS_CLOSE_BACKPRESSURE,
   WS_CLOSE_CAPACITY_REACHED,
   WS_CLOSE_POLICY_VIOLATION,
+  WS_HEARTBEAT_GRACE_MS,
   WS_HEARTBEAT_INTERVAL_MS,
   WS_HEARTBEAT_TIMEOUT_MS,
   WS_OUTBOUND_DRAIN_POLL_MS,
@@ -1003,17 +1004,35 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           // socket exposes `on("pong")` — otherwise the timer would tick with
           // no pongs ever observed and kill healthy connections after the
           // first idle window.
+          //
+          // Stale-`lastPongAt` recovery: when the interval fires past the idle
+          // threshold (the common post-wake case — `Date.now()` advanced during
+          // sleep but the loopback socket itself never dropped), we send one
+          // fresh ping and wait through WS_HEARTBEAT_GRACE_MS for a pong before
+          // terminating. A live socket pongs inside the grace window; a truly
+          // half-open one stays silent and terminates on the next tick. This
+          // avoids killing sessions that survived a brief laptop sleep, while
+          // still tearing down genuinely dead sockets within ~one extra tick.
           let lastPongAt = Date.now();
+          let pendingPingAt = 0;
           stopHeartbeat = onRawEvent(ws.raw, "pong", () => {
             lastPongAt = Date.now();
+            pendingPingAt = 0;
           });
           if (stopHeartbeat) {
             heartbeatTimer = setInterval(() => {
               if (ws.readyState !== WS_READY_STATE_OPEN) return;
               const idleMs = Date.now() - lastPongAt;
               if (idleMs > WS_HEARTBEAT_TIMEOUT_MS) {
+                if (pendingPingAt === 0) {
+                  pendingPingAt = Date.now();
+                  callRawMethod(ws.raw, "ping");
+                  return;
+                }
+                const pingPendingMs = Date.now() - pendingPingAt;
+                if (pingPendingMs < WS_HEARTBEAT_GRACE_MS) return;
                 console.warn(
-                  `ws heartbeat timeout: no pong for ${idleMs}ms (pid ${newSession.pid}); terminating`,
+                  `ws heartbeat timeout: no pong for ${idleMs}ms (grace ${pingPendingMs}ms, pid ${newSession.pid}); terminating`,
                 );
                 stopHeartbeatChecks();
                 if (!callRawMethod(ws.raw, "terminate")) ws.close();
