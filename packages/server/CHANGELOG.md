@@ -8,11 +8,10 @@
 
   When the heartbeat interval fired past the idle threshold, the previous code
   terminated the socket immediately, before sending a fresh ping. On a laptop
-  wake this was a false positive: `Date.now()` had advanced during sleep (RTC
-  keeps running), so `idleMs` was already minutes past the 60s timeout, even
-  though the loopback socket itself was still alive — the connection just never
-  got a chance to prove it. The symptom was visible terminal sessions getting
-  terminated and reconnecting shortly after the machine woke up.
+  wake this was a latent false-positive path: `Date.now()` advances during
+  sleep (RTC keeps running), so if the interval fired post-wake `idleMs` could
+  already be minutes past the 60s timeout even though the socket itself was
+  still alive — the connection just never got a chance to prove it.
 
   Now when the idle threshold trips, the server sends one fresh ping and waits
   `WS_HEARTBEAT_GRACE_MS` (15s) for a pong before terminating. A live socket
@@ -21,11 +20,14 @@
   interval of lag for dead-connection teardown, which is well within the
   tolerance of the existing teardown path.
 
-  This became noticeably more frequent after the move from `ws://127.0.0.1`
-  to `wss://localterm.localhost` (portless on :443): the TLS/H2 session layer
-  in the proxy adds extra failure surfaces for half-open connections, so the
-  same stale-`lastPongAt` trap fires more often than it did over plain
-  loopback.
+  This is a defense-in-depth fix for the stale-`lastPongAt` path only; it does
+  not address terminal sessions dying on sleep when proxied through portless.
+  That symptom comes from portless's WebSocket proxy destroying both halves of
+  its two-socket pipe on any side's `close`/`error`/`end` during wake — which
+  surfaces as a `1006 wasClean=false` on the daemon side before the heartbeat
+  interval ever runs, and is followed by `onClose` tearing down the PTY. A
+  separate change to detach PTY lifetime from WS lifetime is needed to survive
+  that.
 
 ## 2.11.0
 
