@@ -179,6 +179,18 @@ export const SESSION_ID_QUERY_PARAM = "sid";
 // absorb a slow WS round-trip through a TLS proxy (portless on :443) without
 // leaving a dead session hanging past one extra interval.
 export const WS_HEARTBEAT_GRACE_MS = 15_000;
+// Keepalive for the daemon's one persistent CDP WebSocket (browser tab control
+// for automations). Same wake-from-sleep failure mode as the PTY WS heartbeat
+// above: the loopback socket usually survives sleep with the OS, but the wall
+// clock jumps so a naive staleness check looks dead and the next automation
+// run reopens a fresh socket — re-triggering the browser's one-time
+// remote-debugging prompt the user already cleared at `start`. The heartbeat
+// probes liveness after a quiet window; a live-but-silent socket replies and
+// is reused (no reopen, no re-prompt), a truly dead one is torn down so the
+// next run reconnects instead of stalling `Target.createTarget` for the full
+// call timeout.
+export const CDP_HEARTBEAT_INTERVAL_MS = 20_000;
+export const CDP_HEARTBEAT_TIMEOUT_MS = 60_000;
 export const FOREGROUND_POLL_INTERVAL_MS = 250;
 // Hard ceiling for server.stop() — clients get terminated, then the http
 // server is given this long to actually close before we resolve anyway. Keeps

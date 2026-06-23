@@ -17,9 +17,18 @@
 
 import { randomUUID } from "node:crypto";
 import { detectChromiumBrowsers, type DetectedBrowser } from "./detect-chromium.js";
-import { LOCALTERM_TAB_TOKEN_EVENT, LOCALTERM_TAB_TOKEN_PROPERTY } from "../constants.js";
+import {
+  CDP_HEARTBEAT_INTERVAL_MS,
+  CDP_HEARTBEAT_TIMEOUT_MS,
+  LOCALTERM_TAB_TOKEN_EVENT,
+  LOCALTERM_TAB_TOKEN_PROPERTY,
+} from "../constants.js";
 
 const WS_OPEN = 1; // WebSocket.OPEN
+
+// Cheap browser-level CDP round-trip used as a transport liveness probe by the
+// keepalive: no session, no side effects, minimal reply.
+const CDP_HEARTBEAT_PROBE_METHOD = "Target.getTargets";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
 const DEFAULT_CALL_TIMEOUT_MS = 5_000;
@@ -37,6 +46,10 @@ export type CdpClientOptions = {
   connectTimeoutMs?: number;
   /** Per-CDP-call timeout. */
   callTimeoutMs?: number;
+  /** Background keepalive interval for the persistent socket. */
+  heartbeatIntervalMs?: number;
+  /** Quiet window after which the keepalive treats the socket as stale and probes it. */
+  heartbeatTimeoutMs?: number;
   /**
    * Predicate over a candidate target's URL. Only page-type targets that pass
    * get an ambient token injected; everything else the user has open in their
@@ -55,6 +68,12 @@ export class CdpClient {
   private readonly detect: () => Promise<DetectedBrowser[]>;
   private readonly connectTimeoutMs: number;
   private readonly callTimeoutMs: number;
+  private readonly heartbeatIntervalMs: number;
+  private readonly heartbeatTimeoutMs: number;
+  /** Timestamp of the last inbound CDP frame (reply or event). */
+  private lastReplyAt = 0;
+  /** Background keepalive timer; unref'd so it never blocks daemon shutdown. */
+  private heartbeatTimer: NodeJS.Timeout | undefined;
   /** Serializes closeTab() so concurrent closes don't orphan tabs. */
   private closeQueue: Promise<void> = Promise.resolve();
   /** The browser the live socket is attached to, for diagnostics. */
@@ -79,6 +98,8 @@ export class CdpClient {
     this.detect = options.detect ?? detectChromiumBrowsers;
     this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     this.callTimeoutMs = options.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? CDP_HEARTBEAT_INTERVAL_MS;
+    this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? CDP_HEARTBEAT_TIMEOUT_MS;
     this.tabUrlFilter = options.tabUrlFilter;
   }
 
@@ -146,6 +167,7 @@ export class CdpClient {
         settled = true;
         clearTimeout(timer);
         this.ws = ws;
+        this.startHeartbeat();
         resolve();
       });
       ws.addEventListener("message", (event: MessageEvent) => this.onMessage(String(event.data)));
@@ -172,6 +194,7 @@ export class CdpClient {
   /** Reject in-flight calls, drop the socket, and clear ambient state. */
   private failPending(ws: WebSocket, error: Error): void {
     if (this.ws !== ws) return;
+    this.stopHeartbeat();
     this.ws = undefined;
     this.connectedBrowser = undefined;
     for (const pending of this.pending.values()) pending.reject(error);
@@ -198,6 +221,10 @@ export class CdpClient {
     } catch {
       return;
     }
+    // Any inbound frame — a command reply or an unsolicited Target event —
+    // proves the socket is live; reset the keepalive's quiet-window clock so
+    // an active or chatty connection never gets a redundant probe.
+    this.lastReplyAt = Date.now();
     if (typeof message.id === "number") {
       // A command reply: route to the pending call by id.
       const pending = this.pending.get(message.id);
@@ -438,7 +465,62 @@ export class CdpClient {
     return this.closeQueue;
   }
 
+  /** Background keepalive for the persistent socket. Mirrors the PTY WS
+   * heartbeat: a loopback CDP socket usually survives an OS sleep with the
+   * daemon, but the wall clock jumps during sleep so the quiet-window check
+   * looks stale on the first post-wake tick. Probing once (instead of tearing
+   * down on staleness alone) lets a live-but-silent socket prove it's still
+   * up and be *reused* — without this the next automation run reopens a fresh
+   * socket and re-triggers the browser's one-time remote-debugging prompt the
+   * user cleared at `start`. A probe that goes unanswered past the call
+   * timeout means the socket is genuinely half-open; it's torn down so the
+   * next `openBackgroundTab` reconnects instead of stalling `createTarget`. */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.lastReplyAt = Date.now();
+    this.heartbeatTimer = setInterval(() => this.heartbeatTick(), this.heartbeatIntervalMs);
+    this.heartbeatTimer.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
+  }
+
+  private heartbeatTick(): void {
+    if (!this.isConnected()) return;
+    if (Date.now() - this.lastReplyAt < this.heartbeatTimeoutMs) return;
+    // Quiet past the threshold: probe liveness rather than assume death. A
+    // reply resets lastReplyAt (via onMessage) and keeps the socket; a timeout
+    // or transport error tears it down. One probe at a time is fine — the
+    // interval is larger than the call timeout, so probes never overlap.
+    void this.call(CDP_HEARTBEAT_PROBE_METHOD, {})
+      .then(() => {
+        this.lastReplyAt = Date.now();
+      })
+      .catch(() => {
+        this.teardownStale("CDP heartbeat probe failed; dropping socket");
+      });
+  }
+
+  /** Close the (presumed dead) live socket and route teardown through
+   * failPending so maps/handlers reset in one place. Safe against a concurrent
+   * reconnect that already swapped in a fresh socket via the guard there. */
+  private teardownStale(reason: string): void {
+    const dead = this.ws;
+    if (!dead) return;
+    try {
+      dead.close();
+    } catch {
+      /* ignore */
+    }
+    this.failPending(dead, new Error(reason));
+  }
+
   close(): void {
+    this.stopHeartbeat();
     try {
       this.ws?.close();
     } catch {

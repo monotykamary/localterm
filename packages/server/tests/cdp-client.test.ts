@@ -34,7 +34,10 @@ type MockBrowser = {
 const servers: MockBrowser[] = [];
 
 /** A CDP-browser-level WS endpoint that answers the calls CdpClient makes. */
-const startMockBrowser = async (mode: MockMode = "ok"): Promise<MockBrowser> => {
+const startMockBrowser = async (
+  mode: MockMode = "ok",
+  options: { silenceProbe?: boolean } = {},
+): Promise<MockBrowser> => {
   const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
   await new Promise<void>((resolve) => wss.once("listening", resolve));
   const { port } = wss.address() as AddressInfo;
@@ -134,6 +137,13 @@ const startMockBrowser = async (mode: MockMode = "ok"): Promise<MockBrowser> => 
       if (message.method === "Target.setDiscoverTargets") {
         browser.discoveredTargets = true;
         reply({});
+        return;
+      }
+      if (message.method === "Target.getTargets") {
+        // Heartbeat liveness probe. `silenceProbe` simulates a half-open
+        // socket (OPEN but never replies) so the keepalive's probe times out
+        // and tears the socket down instead of stalling a real call.
+        if (!options.silenceProbe) reply({ targetInfos: [] });
         return;
       }
       if (message.method === "Page.enable") {
@@ -379,6 +389,64 @@ describe("CdpClient ambient tab observation", () => {
     browser.emitTargetDestroyed("page-1");
     await relaxForObserve();
     expect(client.findTargetIdForToken(token)).toBeUndefined();
+    client.close();
+  });
+});
+
+describe("CdpClient keepalive (wake-from-sleep)", () => {
+  it("tears down a half-open socket when the liveness probe goes unanswered, then reconnects", async () => {
+    // silenceProbe: the WebSocket stays OPEN but never replies to the keepalive's
+    // Target.getTargets probe — the same shape as a loopback socket that went
+    // stale across an OS sleep without an explicit close/error event.
+    const browser = await startMockBrowser("ok", { silenceProbe: true });
+    const client = new CdpClient({
+      detect: async () => [detected(browser.wsUrl)],
+      connectTimeoutMs: 500,
+      callTimeoutMs: 50,
+      heartbeatIntervalMs: 5,
+      heartbeatTimeoutMs: 1,
+    });
+    await client.connect();
+    expect(client.isConnected()).toBe(true);
+    expect(browser.connections).toBe(1);
+
+    // Wait past the probe's call timeout so the keepalive tears the socket
+    // down proactively, rather than the next real call stalling on it.
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(client.isConnected()).toBe(false);
+
+    // The next run reconnects on a fresh socket instead of wedging
+    // Target.createTarget against the dead one.
+    const handle = await client.openBackgroundTab("http://x/?run=1");
+    expect(handle).toBe("target-1");
+    expect(browser.connections).toBe(2);
+    client.close();
+  });
+
+  it("reuses a live socket across a quiet window (probe succeeds, no reopen)", async () => {
+    const browser = await startMockBrowser("ok");
+    const client = new CdpClient({
+      detect: async () => [detected(browser.wsUrl)],
+      connectTimeoutMs: 500,
+      callTimeoutMs: 500,
+      heartbeatIntervalMs: 5,
+      heartbeatTimeoutMs: 1,
+    });
+    await client.connect();
+    const connectionsBefore = browser.connections;
+
+    // A quiet window elapses; the keepalive probes Target.getTargets. A live
+    // socket replies (resetting lastReplyAt via onMessage) and is reused — no
+    // teardown, no fresh socket, so no re-trigger of the browser's debugging
+    // prompt. This is the wake-from-sleep recovery path.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(client.isConnected()).toBe(true);
+    expect(browser.connections).toBe(connectionsBefore);
+
+    const handle = await client.openBackgroundTab("http://x/?run=1");
+    expect(handle).toBe("target-1");
+    expect(browser.connections).toBe(connectionsBefore);
     client.close();
   });
 });
