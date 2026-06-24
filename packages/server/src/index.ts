@@ -266,6 +266,72 @@ const sendOutputBatchBytes = (ws: BroadcastSocket, batch: string) => {
   }
 };
 
+// Git metadata is per-repo, not per-tab. Two tabs in the same cwd share one
+// working tree, so a git-dirty signal from one tab — its shell's precmd OSC
+// hook, or its fs watcher on .git — must refresh every tab in that cwd, not
+// just the one whose shell produced the prompt. Without this, a git operation
+// run inside one of two side-by-side tabs updates only that tab; the sibling
+// stays stale until its own shell next renders a prompt (its precmd hook) or
+// its fs watcher happens to surface the change. The summary is pathscoped to
+// the cwd (`git diff` from a subdirectory lists only files under it), so the
+// coordinator is keyed by cwd, not by repo — tabs in different subdirectories
+// of the same repo get distinct summaries and never share.
+//
+// One coordinator per cwd also dedups the summary computation across concurrent
+// signals from sibling tabs: their independent fs watchers and prompt hooks all
+// funnel into a single in-flight pass (with one trailing pass after the burst
+// settles), and the result is broadcast to every subscribed socket.
+class GitDirtyCoordinator {
+  private inFlight = false;
+  private pending = false;
+  private readonly subscribers = new Set<BroadcastSocket>();
+
+  constructor(readonly cwd: string) {}
+
+  add(socket: BroadcastSocket): void {
+    this.subscribers.add(socket);
+  }
+
+  remove(socket: BroadcastSocket): void {
+    this.subscribers.delete(socket);
+  }
+
+  get isEmpty(): boolean {
+    return this.subscribers.size === 0;
+  }
+
+  signal(): void {
+    if (this.inFlight) {
+      this.pending = true;
+      return;
+    }
+    this.inFlight = true;
+    void this.run();
+  }
+
+  private readonly run = async (): Promise<void> => {
+    try {
+      // The working tree changed, so any cached full-diff pass for this cwd is
+      // stale — drop it before re-reading the summary so the viewer's next
+      // per-file fetch rebuilds against the new tree.
+      invalidateGitDiffCache(this.cwd);
+      const summary = await getGitDiffSummary(this.cwd);
+      const payload: ServerToClientMessage = { type: "git-diff-summary", summary };
+      for (const socket of this.subscribers) {
+        safeSend(socket, payload);
+      }
+    } catch {
+      /* transient git failure; the next signal retries */
+    } finally {
+      this.inFlight = false;
+      if (this.pending) {
+        this.pending = false;
+        this.signal();
+      }
+    }
+  };
+}
+
 export const createServer = async (options: ServerOptions = {}): Promise<RunningServer> => {
   const port = options.port ?? DEFAULT_PORT;
   const host = options.host ?? DEFAULT_HOST;
@@ -333,6 +399,24 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     hasRecentOutput: (pids, withinMs) => registry.hasRecentOutput(pids, withinMs),
   });
   const clientSockets = new Set<BroadcastSocket>();
+  // One GitDirtyCoordinator per cwd, shared by every tab whose session is in
+  // that cwd. A tab subscribes on open and resubscribes on every `cd`; a
+  // git-dirty signal from any tab in the cwd broadcasts the recomputed summary
+  // to all of them. Emptied coordinators are dropped so a cwd no tab is in
+  // holds no watcher state.
+  const gitDirtyCoordinatorsByCwd = new Map<string, GitDirtyCoordinator>();
+  const coordinatorForCwd = (cwd: string): GitDirtyCoordinator => {
+    const key = path.resolve(cwd);
+    let coordinator = gitDirtyCoordinatorsByCwd.get(key);
+    if (!coordinator) {
+      coordinator = new GitDirtyCoordinator(key);
+      gitDirtyCoordinatorsByCwd.set(key, coordinator);
+    }
+    return coordinator;
+  };
+  const releaseGitDirtyCoordinator = (coordinator: GitDirtyCoordinator): void => {
+    if (coordinator.isEmpty) gitDirtyCoordinatorsByCwd.delete(coordinator.cwd);
+  };
   const cdpBackgroundTabsDisabled = process.env.LOCALTERM_DISABLE_CDP_TABS === "1";
   // One persistent CDP socket for the daemon's lifetime — opened once at start
   // (below), so the user clears the browser's remote-debugging prompt a single
@@ -912,6 +996,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       // (page opened before the CdpClient observed it), or the page never
       // re-identified.
       let claimedTargetId: string | null = null;
+      // The per-cwd git-dirty coordinator this socket is currently subscribed
+      // to. Lives in this outer scope (not onOpen's) so the shared
+      // `releaseSessionFromSocket` finalization — called by both onClose and
+      // onError — can unsubscribe it. Moves whenever the session's cwd changes.
+      let gitDirtyCoordinator: GitDirtyCoordinator | null = null;
       let drainPollTimer: NodeJS.Timeout | null = null;
       let heartbeatTimer: NodeJS.Timeout | null = null;
       let stopHeartbeat: (() => void) | null = null;
@@ -967,6 +1056,15 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           });
         } else {
           live.dispose();
+        }
+        // Unsubscribe from the per-cwd git-dirty coordinator so a closed
+        // tab stops receiving (and stops keeping alive) broadcasts for its
+        // former cwd. `activeWs` is the socket this coordinator was added
+        // under; it's nulled below, so capture it first.
+        if (gitDirtyCoordinator && activeWs) {
+          gitDirtyCoordinator.remove(activeWs);
+          releaseGitDirtyCoordinator(gitDirtyCoordinator);
+          gitDirtyCoordinator = null;
         }
         session = null;
         activeWs = null;
@@ -1211,36 +1309,20 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           };
 
           const gitDiffWatcher = new GitDiffWatcher();
-          let gitDirtyInFlight = false;
-          let gitDirtyPending = false;
-          const handleGitDirty = async () => {
+          // Subscribe this tab to the per-cwd git-dirty coordinator so a git
+          // change observed by any tab in the same cwd (its prompt hook or fs
+          // watcher) refreshes this tab too. The coordinator dedups the
+          // summary computation and broadcasts the result to every subscriber.
+          gitDirtyCoordinator = coordinatorForCwd(liveSession.cwd);
+          gitDirtyCoordinator.add(ws);
+          const signalGitDirty = (): void => {
             const cwd = liveSession.lastEmittedCwd;
             if (!cwd) return;
-            if (gitDirtyInFlight) {
-              gitDirtyPending = true;
-              return;
-            }
-            gitDirtyInFlight = true;
-            try {
-              // The working tree changed, so any cached full-diff pass for
-              // this cwd is stale — drop it before re-reading the summary so
-              // the viewer's next per-file fetch rebuilds against the new tree.
-              invalidateGitDiffCache(cwd);
-              const summary = await getGitDiffSummary(cwd);
-              safeSend(ws, { type: "git-diff-summary", summary });
-            } catch {
-              /* transient git failure; next dirty signal will retry */
-            } finally {
-              gitDirtyInFlight = false;
-              if (gitDirtyPending) {
-                gitDirtyPending = false;
-                void handleGitDirty();
-              }
-            }
+            coordinatorForCwd(cwd).signal();
           };
 
           gitDiffWatcher.on("git-dirty", () => {
-            void handleGitDirty();
+            signalGitDirty();
           });
           const gitAutomationEvents: GitRefEventName[] = GIT_DIFF_WATCHER_EVENT_NAMES.filter(
             (eventName): eventName is GitRefEventName => eventName !== "git-dirty",
@@ -1257,7 +1339,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           // Automation-run sessions should not feed events into the session
           // event manager — only user-driven sessions count.
           liveSession.on("git-dirty", () => {
-            void handleGitDirty();
+            signalGitDirty();
             if (!isAutomationSession) {
               sessionEventManager.onSessionEvent("git-dirty", liveSession.lastEmittedCwd);
             }
@@ -1265,6 +1347,14 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           liveSession.on("cwd", (changedCwd: string) => {
             gitDiffWatcher.stop();
             gitDiffWatcher.start(changedCwd);
+            const nextCoordinator = coordinatorForCwd(changedCwd);
+            const current = gitDirtyCoordinator;
+            if (current && nextCoordinator !== current) {
+              current.remove(ws);
+              releaseGitDirtyCoordinator(current);
+              gitDirtyCoordinator = nextCoordinator;
+              nextCoordinator.add(ws);
+            }
             if (!isAutomationSession) {
               sessionEventManager.onSessionEvent("cwd", changedCwd);
             }
