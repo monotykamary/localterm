@@ -7,6 +7,7 @@ import type {
   GitDiffMode,
   GitDiffSummary,
 } from "@monotykamary/localterm-server/protocol";
+import { isImagePath } from "@monotykamary/localterm-server/protocol";
 import type { SyntaxLine } from "@/utils/syntax-highlight";
 import {
   ChevronDown,
@@ -83,6 +84,7 @@ import {
   resolvePrDisplayState,
 } from "@/lib/pr-state";
 import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "@/utils/fetch-git-diff";
+import { buildFileUrl } from "@/utils/build-file-url";
 import { PrefetchQueue, type PrefetchQueueItem } from "@/utils/prefetch-queue";
 import {
   annotationRangeStart,
@@ -112,6 +114,10 @@ interface DiffViewerProps {
   // user can edit the file in place. Mirrors openShellAt from the worktrees
   // modal — same ExternalLink icon, same new-tab mechanism.
   onOpenInEditor?: (filePath: string) => void;
+  // Open a working-tree image in a new browser tab. The server's /api/file
+  // route serves image bytes directly, so Chrome renders it natively — unlike
+  // text files, which need a PTY running nvim.
+  onOpenImage?: (filePath: string) => void;
   onSendToTerminal?: (text: string) => void;
   // Ask the parent to re-fetch the leased branch info (wired to the refresh
   // button alongside re-fetching the diff).
@@ -205,6 +211,22 @@ const splitFilePath = (filePath: string): { directory: string; basename: string 
   const lastSlash = filePath.lastIndexOf("/");
   if (lastSlash === -1) return { directory: "", basename: filePath };
   return { directory: filePath.slice(0, lastSlash + 1), basename: filePath.slice(lastSlash + 1) };
+};
+
+// Picks the open-file action for the header button: images open in a new tab
+// (the server serves the bytes directly), text files open in neovim, and
+// non-image binaries get no button. Returns null when nothing applies or no
+// handler is wired.
+const resolveOpenFileAction = (
+  file: GitDiffFileMeta,
+  onOpenInEditor: ((filePath: string) => void) | undefined,
+  onOpenImage: ((filePath: string) => void) | undefined,
+): { handler: (filePath: string) => void; label: string } | null => {
+  const image = isImagePath(file.path);
+  const handler = image ? onOpenImage : onOpenInEditor;
+  if (!handler) return null;
+  if (!image && file.binary) return null;
+  return { handler, label: image ? "open image" : "open in neovim" };
 };
 
 const lineBackgroundClasses = (type: DiffLine["type"]): string => {
@@ -705,8 +727,28 @@ const DiffPaneNotice = ({ children, icon }: { children: React.ReactNode; icon?: 
   </div>
 );
 
+// Inline image preview for binary image files. The bytes come straight from
+// /api/file (not the patch payload), so it paints instantly on selection. A
+// load failure — e.g. a deleted image whose working-tree file is gone — falls
+// back to a notice instead of a lingering broken-image icon.
+const ImagePreview = ({ src, alt }: { src: string; alt: string }) => {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <DiffPaneNotice icon>Couldn't load image preview.</DiffPaneNotice>;
+  return (
+    <div className="flex h-full min-h-32 items-center justify-center p-4">
+      <img
+        src={src}
+        alt={alt}
+        onError={() => setFailed(true)}
+        className="max-h-full max-w-full rounded border border-border/40 object-contain"
+      />
+    </div>
+  );
+};
+
 interface FileDiffPaneProps {
   file: GitDiffFileMeta;
+  cwd: string | null;
   payload: PatchEntry;
   viewMode: DiffViewMode;
   annotations: Record<string, DiffAnnotation>;
@@ -727,6 +769,7 @@ interface FileDiffPaneProps {
 // two files.
 const FileDiffPane = ({
   file,
+  cwd,
   payload,
   viewMode,
   annotations,
@@ -950,6 +993,10 @@ const FileDiffPane = ({
     return keys;
   }, [rangeIndex, dragRange, pendingRange, annotations, file.path]);
 
+  if (file.binary && isImagePath(file.path) && cwd) {
+    return <ImagePreview src={buildFileUrl(cwd, file.path)} alt={file.path} />;
+  }
+
   if (payload.state === "loading" && !payload.data) {
     return (
       <DiffPaneNotice>
@@ -1084,6 +1131,7 @@ export const DiffViewer = ({
   gitDirtyVersion,
   onClose,
   onOpenInEditor,
+  onOpenImage,
   onSendToTerminal,
   onRefreshBranchInfo,
   onDiffSummaryUpdate,
@@ -1458,6 +1506,9 @@ export const DiffViewer = ({
 
   const selectedFile = files.find((file) => file.path === selectedPath) ?? null;
   const selectedIndex = selectedFile ? files.indexOf(selectedFile) : -1;
+  const openFileAction = selectedFile
+    ? resolveOpenFileAction(selectedFile, onOpenInEditor, onOpenImage)
+    : null;
 
   const totals = useMemo(() => {
     let additions = 0;
@@ -1922,13 +1973,13 @@ export const DiffViewer = ({
                         </PopoverContent>
                       </Popover>
                     </span>
-                    {onOpenInEditor && !selectedFile.binary ? (
+                    {openFileAction ? (
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        onClick={() => onOpenInEditor(selectedFile.path)}
-                        aria-label={`open ${selectedFile.path} in neovim`}
-                        title="open in neovim"
+                        onClick={() => openFileAction.handler(selectedFile.path)}
+                        aria-label={`${openFileAction.label} ${selectedFile.path}`}
+                        title={openFileAction.label}
                         className="shrink-0 hover:text-foreground"
                       >
                         <ExternalLink />
@@ -1948,6 +1999,7 @@ export const DiffViewer = ({
                     <FileDiffPane
                       key={selectedFile.path}
                       file={selectedFile}
+                      cwd={cwd}
                       payload={patchCache[selectedFile.path] ?? { state: "loading" }}
                       viewMode={viewMode}
                       annotations={annotations}

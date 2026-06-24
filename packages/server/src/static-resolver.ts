@@ -26,7 +26,7 @@ export interface StaticAsset {
   status: number;
 }
 
-const isContained = (root: string, resolved: string): boolean => {
+export const isContained = (root: string, resolved: string): boolean => {
   const relative = path.relative(root, resolved);
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 };

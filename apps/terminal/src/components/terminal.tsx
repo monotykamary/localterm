@@ -126,6 +126,7 @@ import { clampTerminalPaddingX, clampTerminalPaddingY } from "@/utils/clamp-term
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { formatDiffCount } from "@/utils/format-diff-count";
 import { shellQuoteArg } from "@/utils/shell-quote-arg";
+import { buildFileUrl } from "@/utils/build-file-url";
 import { isAutomationsShortcut } from "@/utils/is-automations-shortcut";
 import { isBinaryMessageData } from "@/utils/is-binary-message-data";
 import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
@@ -2288,6 +2289,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         onOpenInEditor={(filePath) => {
           if (!liveCwd) return;
           openShellAt(liveCwd, `nvim ${shellQuoteArg(filePath)} && exit`);
+        }}
+        onOpenImage={(filePath) => {
+          if (!liveCwd) return;
+          window.open(buildFileUrl(liveCwd, filePath), "_blank", "noopener,noreferrer");
         }}
         onRefreshBranchInfo={refreshBranchInfo}
         onDiffSummaryUpdate={setGitDiffSummary}

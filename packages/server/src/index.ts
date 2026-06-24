@@ -86,6 +86,7 @@ import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from
 import { SessionReattachPool, generateSessionId } from "./session-reattach-pool.js";
 import { SessionRegistry } from "./session-registry.js";
 import { resolveStaticAsset } from "./static-resolver.js";
+import { resolveImageAsset } from "./utils/resolve-image-asset.js";
 import { sweepStaleWorktrees } from "./utils/worktree-sweep.js";
 import {
   readWorktreeIncludeFile,
@@ -709,6 +710,30 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const cwd = resolveCwdQuery(context.req.query("cwd"));
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
     return context.json({ pr: await getGitBranchPr(cwd) });
+  });
+
+  // Serves a working-tree image for the diff viewer's inline preview and
+  // "open image" button. Gated to image content types so it can never serve an
+  // arbitrary HTML/text file from the same origin (which would let a repo
+  // file XSS the terminal app). SVG additionally carries a CSP that blocks
+  // script execution even when navigated to directly. no-store keeps the
+  // preview current after an in-place edit rather than caching a stale copy.
+  api.get("/file", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    const filePath = sanitizeDiffPath(context.req.query("path"));
+    if (!filePath) return context.json({ error: "invalid_path" }, HTTP_STATUS_BAD_REQUEST);
+    const asset = resolveImageAsset(cwd, filePath);
+    if (!asset) return context.text("not found", HTTP_STATUS_NOT_FOUND);
+    const headers: Record<string, string> = {
+      "content-type": asset.contentType,
+      "content-disposition": "inline",
+      "cache-control": "no-store",
+    };
+    if (asset.isSvg) {
+      headers["content-security-policy"] = "default-src 'none'; style-src 'unsafe-inline'";
+    }
+    return new Response(new Uint8Array(asset.body), { status: 200, headers });
   });
 
   const readJsonBody = async (context: { req: { json: () => Promise<unknown> } }) => {

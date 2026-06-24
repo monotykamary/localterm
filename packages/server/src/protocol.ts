@@ -130,4 +130,5 @@ export type {
   UpdateAutomationInput,
 } from "./types.js";
 export { compileSchedule, compileScheduleAll } from "./utils/compile-schedule.js";
+export { isImagePath } from "./utils/image-extensions.js";
 export type { ServerError, ServerErrorCode, ServerErrorKind } from "./errors.js";

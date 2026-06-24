@@ -112,12 +112,21 @@ const FILE_LIST: GitDiffFileListResponse = {
       deletions: 0,
       binary: true,
     },
+    {
+      path: "data.bin",
+      oldPath: null,
+      status: "modified",
+      additions: 0,
+      deletions: 0,
+      binary: true,
+    },
   ],
 };
 
 const PATCHES: Record<string, GitDiffFilePatch> = {
   "src/app.ts": { patch: MODIFIED_PATCH, patchOmitted: false, binary: false },
   "image.png": { patch: null, patchOmitted: false, binary: true },
+  "data.bin": { patch: null, patchOmitted: false, binary: true },
 };
 
 // Reads the numeric suffix from a Tailwind `z-N` utility so stacking-order
@@ -139,10 +148,12 @@ const mockHappyPath = () => {
 const renderDiffViewer = ({
   onClose = () => {},
   onOpenInEditor,
+  onOpenImage,
   branchInfo = null,
 }: {
   onClose?: () => void;
   onOpenInEditor?: (filePath: string) => void;
+  onOpenImage?: (filePath: string) => void;
   branchInfo?: GitBranchInfo | null;
 } = {}) =>
   render(
@@ -152,6 +163,7 @@ const renderDiffViewer = ({
       branchInfo={branchInfo}
       onClose={onClose}
       onOpenInEditor={onOpenInEditor}
+      onOpenImage={onOpenImage}
     />,
   );
 
@@ -183,11 +195,11 @@ describe("DiffViewer", () => {
     expect(screen.getByText("@@ -1,3 +1,3 @@")).toBeTruthy();
   });
 
-  it("shows a binary notice when a binary file is selected", async () => {
+  it("shows a binary notice when a non-image binary file is selected", async () => {
     mockHappyPath();
     renderDiffViewer();
 
-    const binaryOption = await screen.findByRole("option", { name: /image\.png/ });
+    const binaryOption = await screen.findByRole("option", { name: /data\.bin/ });
     fireEvent.click(binaryOption);
     expect(await screen.findByText(/Binary file/)).toBeTruthy();
   });
@@ -323,7 +335,7 @@ describe("DiffViewer", () => {
 
     // image.png is prefetched as app.ts's neighbor; selecting it is a cache hit.
     fireEvent.click(await screen.findByRole("option", { name: /image\.png/ }));
-    await screen.findByText(/Binary file/);
+    await screen.findByAltText("image.png");
     fireEvent.click(screen.getByRole("option", { name: /app\.ts/ }));
     await screen.findByText("BETA");
 
@@ -346,17 +358,45 @@ describe("DiffViewer", () => {
     expect(onOpenInEditor).toHaveBeenCalledWith("src/app.ts");
   });
 
-  it("hides the open-in-neovim button for binary files", async () => {
+  it("hides the open button for non-image binary files", async () => {
     mockHappyPath();
-    renderDiffViewer({ onOpenInEditor: () => {} });
+    renderDiffViewer({ onOpenInEditor: () => {}, onOpenImage: () => {} });
     await screen.findByText("BETA");
 
     expect(screen.getByRole("button", { name: /open .* in neovim/ })).toBeTruthy();
 
-    fireEvent.click(await screen.findByRole("option", { name: /image\.png/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /data\.bin/ }));
     await screen.findByText(/Binary file/);
 
     expect(screen.queryByRole("button", { name: /open .* in neovim/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /open image/ })).toBeNull();
+  });
+
+  it("shows an inline preview for image files", async () => {
+    mockHappyPath();
+    renderDiffViewer({ onOpenImage: () => {} });
+    await screen.findByText("BETA");
+
+    fireEvent.click(await screen.findByRole("option", { name: /image\.png/ }));
+    const image = await screen.findByAltText("image.png");
+    expect(image.getAttribute("src")).toContain("/api/file");
+    expect(image.getAttribute("src")).toContain(encodeURIComponent("image.png"));
+    expect(screen.queryByText(/Binary file/)).toBeNull();
+  });
+
+  it("opens an image in a new tab via the open-image callback", async () => {
+    mockHappyPath();
+    const onOpenImage = vi.fn();
+    renderDiffViewer({ onOpenImage });
+    await screen.findByText("BETA");
+
+    fireEvent.click(await screen.findByRole("option", { name: /image\.png/ }));
+    await screen.findByAltText("image.png");
+
+    fireEvent.click(screen.getByRole("button", { name: /open image image\.png/ }));
+
+    expect(onOpenImage).toHaveBeenCalledTimes(1);
+    expect(onOpenImage).toHaveBeenCalledWith("image.png");
   });
 
   it("retries a failed per-file patch fetch", async () => {
