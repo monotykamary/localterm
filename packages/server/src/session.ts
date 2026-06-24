@@ -158,6 +158,15 @@ export class Session extends EventEmitter<SessionEvents> {
     return this.initialTitle;
   }
 
+  // The title the tab was last showing — the cwd-derived form or whatever the
+  // shell last set via OSC 0/2. Unlike `initialDocumentTitle` (frozen at
+  // spawn), this tracks the live cwd, so a reattached session re-seeds the
+  // client with its current title instead of reverting to the original spawn
+  // directory.
+  get currentTitle(): string {
+    return this.lastEmittedTitle;
+  }
+
   get cols(): number {
     return this.currentCols;
   }
