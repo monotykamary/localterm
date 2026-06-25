@@ -4,7 +4,13 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import kleur from "kleur";
-import { LAUNCHD_LABEL, PORTLESS_SERVICE_TIMEOUT_MS, TAILSCALE_HTTPS_PORT } from "../constants.js";
+import {
+  DAEMON_BASE_PATH,
+  LAUNCHD_LABEL,
+  PORTLESS_RESOLVE_TIMEOUT_MS,
+  PORTLESS_SERVICE_TIMEOUT_MS,
+  TAILSCALE_HTTPS_PORT,
+} from "../constants.js";
 import { cliError, type CliError, exitCodeForCliError } from "../errors.js";
 import { getLaunchdPlistPath, getStateDirectory } from "../paths.js";
 import { cliEntry } from "../utils/cli-entry.js";
@@ -19,20 +25,20 @@ const escapePlistString = (value: string): string =>
 export interface InstallOptions {
   port: number;
   host: string;
+  portlessDir?: string;
 }
 
 export const buildPlistContent = (options: InstallOptions): string => {
   const stateDirectory = getStateDirectory();
   const logPath = path.join(stateDirectory, "server.log");
-  // launchd starts the agent with a minimal PATH (essentially /usr/bin:/bin),
-  // so the daemon can't find `portless`, Homebrew `git`, or mise shims — which
-  // makes `resolveDaemonUrl` fall back to loopback and automation tabs open on
-  // http instead of the portless https surface. Bake the install-time PATH (the
-  // invoking shell already has mise/brew/npm-global bins on it). A login-shell
-  // wrapper was tried for this but made launchd respawn the launcher every 10s,
-  // so the static PATH is the non-thrashing alternative.
-  const pathEnv =
-    process.env.PATH ?? "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+  // Minimal system PATH + the daemon's own node dir + the portless dir (the
+  // latter two captured at install); see DAEMON_BASE_PATH for why the full user
+  // PATH must not be baked. node is needed because `portless` shebangs
+  // `#!/usr/bin/env node`.
+  const nodeDir = path.dirname(process.execPath);
+  const pathParts = [DAEMON_BASE_PATH, nodeDir];
+  if (options.portlessDir) pathParts.push(options.portlessDir);
+  const pathEnv = pathParts.join(":");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -191,7 +197,18 @@ export const runInstall = async (options: InstallOptions): Promise<void> => {
     return;
   }
 
-  const content = buildPlistContent(options);
+  let portlessDir: string | undefined;
+  try {
+    const { stdout } = await execFileAsync("/bin/sh", ["-c", "command -v portless"], {
+      timeout: PORTLESS_RESOLVE_TIMEOUT_MS,
+    });
+    const portlessBin = stdout.trim();
+    if (portlessBin) portlessDir = path.dirname(portlessBin);
+  } catch {
+    // portless not installed — daemon announces the loopback surface instead
+  }
+
+  const content = buildPlistContent({ ...options, portlessDir });
   writeFileSync(plistPath, content, "utf8");
 
   try {

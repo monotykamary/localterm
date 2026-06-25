@@ -41,6 +41,14 @@ export const DAEMON_PROCESS_TITLE = "localtermd";
 export const LAUNCHD_LABEL = "com.monotykamary.localterm";
 export const LAUNCHD_PLIST_FILENAME = `${LAUNCHD_LABEL}.plist`;
 
+// Minimal system PATH baked into the launchd plist for the daemon. The daemon
+// needs only system binaries (caffeinate, ps, security, xattr, codesign) plus
+// `portless` (its dir is appended at install time); `git` runs via /usr/bin/git
+// (Apple-signed, cached). Baking the full user PATH leaks homebrew/mise binaries
+// that syspolicyd re-assesses per PTY — a launchd agent has no GUI provenance.
+export const DAEMON_BASE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+export const PORTLESS_RESOLVE_TIMEOUT_MS = 5_000;
+
 export const EXIT_OK = 0;
 export const EXIT_FAILURE = 1;
 export const EXIT_USAGE_ERROR = 2;

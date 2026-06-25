@@ -623,7 +623,7 @@ describe("automation run tab surface", () => {
   const triggerRun = async (): Promise<string> => {
     const created = await request("POST", "", createInput());
     const automation = automationWithNextRunSchema.parse(created.body.automation);
-    const { body } = await request("POST", `/${automation.id}/run");
+    const { body } = await request("POST", `/${automation.id}/run`);
     return body.runId as string;
   };
 
@@ -635,9 +635,7 @@ describe("automation run tab surface", () => {
   it("opens the run tab at the loopback origin by default", async () => {
     await makeServer();
     const runId = await triggerRun();
-    expect(openedUrls).toEqual([
-      `http://localterm.localhost:${server.port}/?run=${runId}`,
-    ]);
+    expect(openedUrls).toEqual([`http://localterm.localhost:${server.port}/?run=${runId}`]);
   });
 
   it("opens the run tab at the announced publicUrl when set", async () => {

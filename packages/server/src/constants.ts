@@ -9,6 +9,12 @@ export const TERM_TYPE = "xterm-256color";
 export const COLORTERM_VALUE = "truecolor";
 export const LOCALTERM_VALUE = "1";
 
+// Base PATH for user shells (PTYs, "Open in…"). They set up their own PATH via
+// rc files like any login shell, so they must not inherit the daemon's baked
+// PATH: a launchd daemon has no GUI provenance, so the homebrew binaries mise/
+// direnv bootstrap from the leaked PATH get re-assessed by syspolicyd per prompt.
+export const PTY_BASE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+
 // Keep-awake (macOS only). `-d` display, `-i` idle, `-m` disk, `-s` system
 // sleep — held for as long as the spawned process lives.
 export const CAFFEINATE_BINARY = "caffeinate";

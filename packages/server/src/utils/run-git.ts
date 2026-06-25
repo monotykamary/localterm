@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { GIT_SPAWN_TIMEOUT_MS } from "../constants.js";
+import { resolveGitBinary } from "./resolve-git-binary.js";
 
 export interface RunGitResult {
   exitCode: number;
@@ -22,7 +23,7 @@ const GIT_ENV = {
 // callers decode with toString("utf8") where they know it's text.
 export const runGit = (cwd: string, args: string[]): Promise<RunGitResult> =>
   new Promise((resolve) => {
-    const child = spawn("git", args, { cwd, env: GIT_ENV });
+    const child = spawn(resolveGitBinary(), args, { cwd, env: GIT_ENV });
     const stdoutChunks: Buffer[] = [];
     let stderrText = "";
     let settled = false;

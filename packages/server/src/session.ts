@@ -21,6 +21,7 @@ import {
 import { ensureSpawnHelperExecutable } from "./ensure-spawn-helper-executable.js";
 import { ForegroundWatcher } from "./foreground-watcher.js";
 import { getDefaultShell } from "./default-shell.js";
+import { shellPathForUserShell } from "./utils/shell-path.js";
 import type { SpawnPtyInput } from "./types.js";
 import { formatWorkingDirectoryTitle } from "./utils/format-working-directory-title.js";
 import { parseAltScreenFromChunk } from "./utils/parse-alt-screen.js";
@@ -98,6 +99,8 @@ export class Session extends EventEmitter<SessionEvents> {
     }
     if (userZdotdirFromEnv) env.__LOCALTERM_ORIG_ZDOTDIR = userZdotdirFromEnv;
     else delete env.__LOCALTERM_ORIG_ZDOTDIR;
+    // User shells bootstrap their own PATH via rc files; don't leak the daemon's.
+    env.PATH = shellPathForUserShell();
     if (input.env) {
       for (const [key, value] of Object.entries(input.env)) {
         env[key] = value;

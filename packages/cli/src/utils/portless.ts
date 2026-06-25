@@ -16,7 +16,7 @@ const execFileAsync = promisify(execFile);
 export const isPortlessMissing = (error: unknown): boolean =>
   error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT";
 
-const isProxyLive = async (host: string, port: number): Promise<boolean> =>
+const probeLoopback = (host: string, port: number): Promise<boolean> =>
   new Promise((resolve) => {
     const socket = createConnection({ host, port });
     const timer = setTimeout(() => {
@@ -33,6 +33,12 @@ const isProxyLive = async (host: string, port: number): Promise<boolean> =>
       resolve(false);
     });
   });
+
+// portless's network extension serves loopback :443 on either IPv4 or IPv6;
+// observed setups answer on ::1 while a raw 127.0.0.1 connect times out, so
+// probe both and accept either.
+const isProxyLive = async (port: number): Promise<boolean> =>
+  (await Promise.all([probeLoopback("127.0.0.1", port), probeLoopback("::1", port)])).some(Boolean);
 
 export interface ResolveUrlResult {
   url: string;
@@ -67,7 +73,7 @@ const ensurePortlessRoute = async (
     await execFileAsync("portless", ["alias", PORTLESS_APP_NAME, String(port), "--force"], {
       timeout: PORTLESS_ALIAS_TIMEOUT_MS,
     });
-    if (!(await isProxyLive("127.0.0.1", 443))) {
+    if (!(await isProxyLive(443))) {
       return {
         url: getFriendlyUrl(port),
         registered: false,

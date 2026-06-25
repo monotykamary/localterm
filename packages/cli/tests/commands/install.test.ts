@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
+import path from "node:path";
 import { buildPlistContent } from "../../src/commands/install.js";
-import { LAUNCHD_LABEL } from "../../src/constants.js";
+import { DAEMON_BASE_PATH, LAUNCHD_LABEL } from "../../src/constants.js";
 
 describe("buildPlistContent", () => {
   it("includes the launchd label", () => {
@@ -38,10 +39,22 @@ describe("buildPlistContent", () => {
     expect(plist).toContain("<key>HOME</key>");
   });
 
-  it("includes the install-time PATH in EnvironmentVariables", () => {
+  it("includes the minimal daemon PATH in EnvironmentVariables", () => {
     const plist = buildPlistContent({ port: 3417, host: "127.0.0.1" });
     expect(plist).toContain("<key>PATH</key>");
-    expect(plist).toContain(process.env.PATH!);
+    expect(plist).toContain(DAEMON_BASE_PATH);
+    expect(plist).toContain(path.dirname(process.execPath));
+  });
+
+  it("appends the portless directory to the daemon PATH when provided", () => {
+    const plist = buildPlistContent({
+      port: 3417,
+      host: "127.0.0.1",
+      portlessDir: "/Users/x/.npm-global/bin",
+    });
+    expect(plist).toContain(
+      `<string>${DAEMON_BASE_PATH}:${path.dirname(process.execPath)}:/Users/x/.npm-global/bin</string>`,
+    );
   });
 
   it("uses custom port and host when specified", () => {

@@ -51,6 +51,7 @@ import {
   WS_READY_STATE_OPEN,
 } from "./constants.js";
 import { getDefaultShell } from "./default-shell.js";
+import { shellPathForUserShell } from "./utils/shell-path.js";
 import { ServerErrorException, serverError } from "./errors.js";
 import { FolderWatchManager } from "./folder-watch-manager.js";
 import { SessionEventManager } from "./session-event-manager.js";
@@ -584,9 +585,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     // one (tailnet / portless), else the loopback form. The CLI sets this post-
     // bind via setPublicUrl; a bare origin (no path) is the contract, so the
     // `new URL` base rewrites any stray path and searchParams encodes the id.
-    const runUrl = new URL(
-      publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`,
-    );
+    const runUrl = new URL(publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`);
     runUrl.searchParams.set(AUTOMATION_RUN_QUERY_PARAM, run.runId);
     void tabController
       .open(runUrl.href)
@@ -914,6 +913,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
         cwd: parsed.data.cwd,
         detached: true,
         stdio: "ignore",
+        env: { ...process.env, PATH: shellPathForUserShell() },
       });
       child.unref();
     } catch (error) {
