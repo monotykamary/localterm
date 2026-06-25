@@ -40,6 +40,13 @@ const probeLoopback = (host: string, port: number): Promise<boolean> =>
 const isProxyLive = async (port: number): Promise<boolean> =>
   (await Promise.all([probeLoopback("127.0.0.1", port), probeLoopback("::1", port)])).some(Boolean);
 
+// Whether the portless proxy is serving the loopback HTTPS surface (:443).
+// `portless service install` is only boot registration and fails spuriously on
+// existing installs, so callers (e.g. `localterm install`) treat this as the
+// source of truth for "is the proxy actually up" rather than the install's
+// exit code.
+export const isPortlessProxyLive = async (): Promise<boolean> => isProxyLive(443);
+
 export interface ResolveUrlResult {
   url: string;
   surface: "tailnet" | "portless" | "loopback";

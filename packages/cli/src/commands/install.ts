@@ -14,6 +14,7 @@ import {
 import { cliError, type CliError, exitCodeForCliError } from "../errors.js";
 import { getLaunchdPlistPath, getStateDirectory } from "../paths.js";
 import { cliEntry } from "../utils/cli-entry.js";
+import { isPortlessProxyLive } from "../utils/portless.js";
 import { configureTailscaleServe, removeTailscaleServe } from "../utils/tailscale.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 
@@ -87,31 +88,61 @@ const launchctl = async (...args: string[]): Promise<{ stdout: string; stderr: s
 const isPortlessMissing = (error: unknown): boolean =>
   error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT";
 
-const runPortless = async (args: string[], successMessage: string): Promise<void> => {
+type PortlessStepResult = { ok: true } | { ok: false; missing: boolean; message: string };
+
+const runPortlessStep = async (args: string[]): Promise<PortlessStepResult> => {
   try {
     await execFileAsync("portless", args, { timeout: PORTLESS_SERVICE_TIMEOUT_MS });
-    console.log(kleur.green(successMessage));
+    return { ok: true };
   } catch (error) {
     if (isPortlessMissing(error)) {
-      console.warn(kleur.yellow(`  ⚠ portless not installed — skipped \`${args.join(" ")}\``));
-      console.warn(
-        kleur.dim(`    install: pnpm add -Dw portless  (workspace) or npm i -g portless`),
-      );
-      return;
+      return { ok: false, missing: true, message: args.join(" ") };
     }
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(kleur.yellow(`  ⚠ portless ${args[0]} failed: ${message}`));
+    return { ok: false, missing: false, message };
   }
 };
 
-const setupPortlessProxy = async (): Promise<void> => {
+const warnPortlessMissing = (): void => {
+  console.warn(kleur.yellow("  ⚠ portless not installed"));
+  console.warn(kleur.dim("    install: pnpm add -Dw portless  (workspace) or npm i -g portless"));
+};
+
+export const setupPortlessProxy = async (): Promise<void> => {
   console.log();
   console.log(kleur.cyan("portless proxy  — named .localhost URLs"));
-  await runPortless(
-    ["service", "install"],
-    "  ✔ proxy service installed (HTTPS on :443, starts at boot)",
-  );
-  await runPortless(["trust"], "  ✔ local CA trusted (browsers accept https://*.localhost)");
+
+  // The proxy serving :443 is the only thing that matters; `portless service
+  // install` is just boot registration, and it fails spuriously when the proxy
+  // is already installed (it shells out to BSD `install` and chokes on existing
+  // state). Treat a live proxy as the source of truth: if it's already up,
+  // skip the install; otherwise attempt it and re-check liveness before
+  // warning, so a genuine "proxy not running" surfaces but the
+  // existing-install false-failure stays silent.
+  if (await isPortlessProxyLive()) {
+    console.log(kleur.green("  ✔ proxy already running (HTTPS on :443)"));
+  } else {
+    const install = await runPortlessStep(["service", "install"]);
+    if (install.ok) {
+      console.log(kleur.green("  ✔ proxy service installed (HTTPS on :443, starts at boot)"));
+    } else if (install.missing) {
+      warnPortlessMissing();
+      return;
+    } else if (!(await isPortlessProxyLive())) {
+      console.warn(
+        kleur.yellow("  ⚠ portless proxy not running on :443 — re-run `localterm install`"),
+      );
+    }
+  }
+
+  const trust = await runPortlessStep(["trust"]);
+  if (trust.ok) {
+    console.log(kleur.green("  ✔ local CA trusted (browsers accept https://*.localhost)"));
+  } else if (trust.missing) {
+    warnPortlessMissing();
+  } else {
+    console.warn(kleur.yellow(`  ⚠ portless trust failed: ${trust.message}`));
+  }
 };
 
 const setupTailscaleServe = async (port: number): Promise<void> => {
