@@ -582,3 +582,81 @@ describe("automations REST API", () => {
     }
   }, 90_000);
 });
+
+describe("automation run tab surface", () => {
+  let server: RunningServer;
+  let stateDirectory: string;
+  let openedUrls: string[];
+
+  const apiUrl = (suffix: string) => `http://127.0.0.1:${server.port}/api/automations${suffix}`;
+  const request = async (method: string, suffix: string, body?: unknown) => {
+    const response = await fetch(apiUrl(suffix), {
+      method,
+      ...(body !== undefined
+        ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+        : {}),
+    });
+    return {
+      status: response.status,
+      body: (await response.json()) as Record<string, unknown>,
+    };
+  };
+
+  const makeServer = async (publicUrl?: string | null): Promise<void> => {
+    stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-surface-"));
+    openedUrls = [];
+    server = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      stateDirectory,
+      ...(publicUrl !== undefined ? { publicUrl } : {}),
+      tabController: {
+        open: async (url) => {
+          openedUrls.push(url);
+          return null;
+        },
+        close: async () => {},
+      },
+    });
+  };
+
+  const triggerRun = async (): Promise<string> => {
+    const created = await request("POST", "", createInput());
+    const automation = automationWithNextRunSchema.parse(created.body.automation);
+    const { body } = await request("POST", `/${automation.id}/run");
+    return body.runId as string;
+  };
+
+  afterEach(async () => {
+    await server.stop();
+    fs.rmSync(stateDirectory, { recursive: true, force: true });
+  });
+
+  it("opens the run tab at the loopback origin by default", async () => {
+    await makeServer();
+    const runId = await triggerRun();
+    expect(openedUrls).toEqual([
+      `http://localterm.localhost:${server.port}/?run=${runId}`,
+    ]);
+  });
+
+  it("opens the run tab at the announced publicUrl when set", async () => {
+    await makeServer("https://localterm.localhost");
+    const runId = await triggerRun();
+    expect(openedUrls).toEqual([`https://localterm.localhost/?run=${runId}`]);
+  });
+
+  it("honors setPublicUrl after the server is already running", async () => {
+    await makeServer();
+    // First run opens at the loopback default before the CLI has resolved a
+    // surface.
+    const firstRunId = await triggerRun();
+    // Then the CLI hands the resolved surface to the daemon, post-bind.
+    server.setPublicUrl("https://localterm.localhost");
+    const secondRunId = await triggerRun();
+    expect(openedUrls).toEqual([
+      `http://localterm.localhost:${server.port}/?run=${firstRunId}`,
+      `https://localterm.localhost/?run=${secondRunId}`,
+    ]);
+  });
+});

@@ -38,9 +38,10 @@ describe("buildPlistContent", () => {
     expect(plist).toContain("<key>HOME</key>");
   });
 
-  it("does not include a static PATH in EnvironmentVariables", () => {
+  it("includes the install-time PATH in EnvironmentVariables", () => {
     const plist = buildPlistContent({ port: 3417, host: "127.0.0.1" });
-    expect(plist).not.toContain("<key>PATH</key>");
+    expect(plist).toContain("<key>PATH</key>");
+    expect(plist).toContain(process.env.PATH!);
   });
 
   it("uses custom port and host when specified", () => {

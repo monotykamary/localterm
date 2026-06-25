@@ -13,6 +13,9 @@ import { reportCliError } from "../utils/report-cli-error.js";
 
 const execFileAsync = promisify(execFile);
 
+const escapePlistString = (value: string): string =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 export interface InstallOptions {
   port: number;
   host: string;
@@ -21,6 +24,15 @@ export interface InstallOptions {
 export const buildPlistContent = (options: InstallOptions): string => {
   const stateDirectory = getStateDirectory();
   const logPath = path.join(stateDirectory, "server.log");
+  // launchd starts the agent with a minimal PATH (essentially /usr/bin:/bin),
+  // so the daemon can't find `portless`, Homebrew `git`, or mise shims — which
+  // makes `resolveDaemonUrl` fall back to loopback and automation tabs open on
+  // http instead of the portless https surface. Bake the install-time PATH (the
+  // invoking shell already has mise/brew/npm-global bins on it). A login-shell
+  // wrapper was tried for this but made launchd respawn the launcher every 10s,
+  // so the static PATH is the non-thrashing alternative.
+  const pathEnv =
+    process.env.PATH ?? "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -54,6 +66,8 @@ export const buildPlistContent = (options: InstallOptions): string => {
     <dict>
         <key>HOME</key>
         <string>${os.homedir()}</string>
+        <key>PATH</key>
+        <string>${escapePlistString(pathEnv)}</string>
     </dict>
 </dict>
 </plist>

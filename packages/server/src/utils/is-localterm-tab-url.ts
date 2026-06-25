@@ -12,16 +12,33 @@ const LOCALTERM_ORIGIN_HOSTNAMES: ReadonlySet<string> = new Set([
  * daemon's bound port on a loopback host (or the friendly hostname that
  * resolves to loopback) get a token injected.
  *
- * `port === 0` (server not yet bound) returns false. Observation only runs
- * after CdpClient.connect, which runs after app.listen, so this branch is
- * belt-and-braces rather than load-bearing — but it keeps an early
- * targetCreated event from picking up a stale placeholder.
+ * `port === 0` (server not yet bound) returns false for the loopback branch.
+ * Observation only runs after CdpClient.connect, which runs after app.listen,
+ * so this branch is belt-and-braces rather than load-bearing — but it keeps an
+ * early targetCreated event from picking up a stale placeholder.
+ *
+ * `publicUrl` is the announced surface origin the CLI resolved (best-first:
+ * tailnet `https://<node>.ts.net`, portless `https://localterm.localhost`, or
+ * null for the bare loopback form). A candidate matches if its origin equals
+ * it, so a tab opened at the portless URL (no port) or the tailnet URL (`:443`,
+ * different host) is still recognised as ours — without this, ambient-token
+ * injection and the CDP `closeTab`-on-exit path silently no-op on those
+ * surfaces. Origin comparison normalises default ports, so `:443` and the bare
+ * `https://` form both match.
  */
 export const isLocaltermTabUrl = (
   candidateUrl: string,
   port: number,
   bindHost: string,
+  publicUrl?: string | null,
 ): boolean => {
+  if (publicUrl) {
+    try {
+      if (new URL(candidateUrl).origin === new URL(publicUrl).origin) return true;
+    } catch {
+      /* malformed candidate or public URL — fall through to the loopback check */
+    }
+  }
   if (port === 0) return false;
   let parsed: URL;
   try {

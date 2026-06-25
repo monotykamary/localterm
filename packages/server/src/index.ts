@@ -17,8 +17,9 @@ import { CaffeinatePreferencesStore } from "./caffeinate-preferences-store.js";
 import type { SnapshotProcesses } from "./caffeinate-process-match.js";
 import { CdpClient } from "./cdp/cdp-client.js";
 import {
-  AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
   AUTOMATION_EVENT_DEBOUNCE_MS,
+  AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
+  AUTOMATION_RUN_QUERY_PARAM,
   AUTOMATION_WATCH_DEBOUNCE_MS,
   AUTOMATION_WATCH_POST_RUN_GRACE_MS,
   DEFAULT_HOST,
@@ -116,6 +117,17 @@ export interface ServerOptions {
   staticRoot?: string | null;
   stateDirectory?: string;
   /**
+   * The announced surface origin automation-run tabs should open at — the URL
+   * the CLI resolved best-first (tailnet `https://<node>.ts.net`, portless
+   * `https://localterm.localhost`, or null for the bare loopback form). When
+   * set, `tryLaunch` opens run tabs at this origin instead of the hardcoded
+   * loopback `http://<friendly>:<port>`, and the CDP tab filter recognises it
+   * so ambient-token injection and `closeOnFinish` keep working behind the
+   * proxy. Updatable post-bind via `RunningServer.setPublicUrl` since the
+   * bound port (and thus the loopback fallback) isn't known until `listen`.
+   */
+  publicUrl?: string | null;
+  /**
    * Override how automation run tabs are opened and closed. When provided, the
    * caller owns tab control and the built-in CDP background-tab path is
    * disabled. Defaults to: CDP background tab (closeable) when a debug-enabled
@@ -159,6 +171,12 @@ export interface RunningServer {
   port: number;
   host: string;
   registry: SessionRegistry;
+  /**
+   * Update the announced surface origin automation-run tabs open at. Called by
+   * the CLI once it has resolved the best surface from the bound port (tailnet
+   * / portless / loopback); null resets to the loopback default.
+   */
+  setPublicUrl: (url: string | null) => void;
   stop: () => Promise<void>;
 }
 
@@ -432,8 +450,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           // stay untouched. `actualPort` is bound by the http server's listen
           // callback below; the filter is only invoked at targetCreated event
           // time (after CdpClient.connect, which runs after listen), so it reads
-          // the resolved port rather than the pre-bind placeholder.
-          tabUrlFilter: (candidateUrl: string) => isLocaltermTabUrl(candidateUrl, actualPort, host),
+          // the resolved port rather than the pre-bind placeholder. `publicOrigin`
+          // is read live for the same reason — set post-bind via setPublicUrl.
+          tabUrlFilter: (candidateUrl: string) =>
+            isLocaltermTabUrl(candidateUrl, actualPort, host, publicOrigin),
         });
   const tabController: AutomationTabController = options.tabController ?? {
     open: async (url: string) => {
@@ -460,6 +480,15 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // Maps a run id -> the tab handle that ran it, so we can close the tab when
   // the command finishes (only set when the opener returned a closeable handle).
   const runTabHandles = new Map<string, string>();
+  // Announced surface origin for automation-run tabs (tailnet / portless / null
+  // = loopback). A `let` rather than a const so the CLI can swap it in after
+  // `listen` resolves the bound port and surface; `tryLaunch` and the CDP
+  // `tabUrlFilter` read it live, so a post-bind `setPublicUrl` takes effect
+  // for runs and token injection without re-wiring either closure.
+  let publicOrigin: string | null = options.publicUrl ?? null;
+  const setPublicUrl = (url: string | null): void => {
+    publicOrigin = url;
+  };
 
   // Project the newest run as the legacy `lastRun` for back-compat clients.
   const deriveLastRun = (automation: Automation): AutomationLastRun | null => {
@@ -551,9 +580,16 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     // watching its folder promptly instead of waiting for the next mutation.
     syncFolderWatchers();
     syncSessionEventListeners();
-    const runUrl = `http://${FRIENDLY_HOSTNAME}:${actualPort}/?run=${run.runId}`;
+    // Open the run tab at the announced surface origin when the CLI resolved
+    // one (tailnet / portless), else the loopback form. The CLI sets this post-
+    // bind via setPublicUrl; a bare origin (no path) is the contract, so the
+    // `new URL` base rewrites any stray path and searchParams encodes the id.
+    const runUrl = new URL(
+      publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`,
+    );
+    runUrl.searchParams.set(AUTOMATION_RUN_QUERY_PARAM, run.runId);
     void tabController
-      .open(runUrl)
+      .open(runUrl.href)
       .then((handle) => {
         // Remember the tab so `automation-exit` can close it if closeOnFinish.
         if (handle) runTabHandles.set(run.runId, handle);
@@ -1105,7 +1141,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           /* invalid or inaccessible path; fall back to default cwd */
         }
       }
-      const requestedRunId = context.req.query("run");
+      const requestedRunId = context.req.query(AUTOMATION_RUN_QUERY_PARAM);
       const requestedSid = context.req.query(SESSION_ID_QUERY_PARAM) ?? null;
       // A plain tab may carry an initial command (a worktree's setup script) —
       // distinct from an automation run (`?run=`), which still takes precedence
@@ -1662,7 +1698,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     });
   };
 
-  return { port: actualPort, host, registry, stop };
+  return { port: actualPort, host, registry, setPublicUrl, stop };
 };
 
 export type { Session } from "./session.js";

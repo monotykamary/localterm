@@ -171,6 +171,9 @@ export const WS_HEARTBEAT_TIMEOUT_MS = 60_000;
 export const SESSION_GRACE_MS = 30_000;
 // Query param a reconnecting client carries to reattach its prior PTY.
 export const SESSION_ID_QUERY_PARAM = "sid";
+// Query param an automation-run tab carries so the server can claim the run
+// (single-use) and pair the WS with the CDP target that opened it.
+export const AUTOMATION_RUN_QUERY_PARAM = "run";
 // When the interval fires with a stale `lastPongAt` (the common case after a
 // laptop wake — the wall clock advanced during sleep, but the loopback socket
 // itself never actually dropped), send one fresh ping before tearing down. A
