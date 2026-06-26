@@ -75,9 +75,17 @@ const KeyHint = ({ keys, label }: { keys: string; label: string }) => (
 );
 
 // A session row rendered as a command-palette option: icon + title (truncate)
-// on the left, the shell/pid/age detail on the right, a hover-revealed kill
-// button, and a Check when this is the tab's current session. The current
-// session can't be killed (it's the one this tab is viewing).
+// on the left, the status pill and shell/pid/age detail on the right, a
+// hover-revealed kill button, and a Check when this is the tab's current
+// session. The pill sits in a fixed 4rem column so current/active/orphaned
+// don't shift it; the meta is sized to its content (no fixed width) so there's
+// no slack to split between the pill→shell-name hug and the meta→action hug —
+// the meta's right edge is flush to the action slot and its left edge (the
+// shell name) is flush to the pill. The title's flex-1 truncation absorbs the
+// remaining slack on the left. When shell/pid/age widths vary across rows the
+// pill shifts with them (the tradeoff of a content-width meta); with uniform
+// widths — the common case — it stays columnized.
+// The current session can't be killed (it's the one this tab is viewing).
 interface SessionOptionProps {
   session: SessionListItem;
   optionId: string;
@@ -113,20 +121,26 @@ const SessionIcon = ({ state }: { state: SessionActivityState }) => (
 // dormant (no viewers, waiting out its grace window). Distinct from the
 // icon's activity color (running/quiet/idle) — the pill says who's looking,
 // the icon says what the shell is doing.
+// Rendered in a fixed 4rem column between the title and the meta, right-
+// aligned within the column (justify-end) so the pill's right edge meets the
+// meta's shell name. The meta is content-width and left-aligned, so the two
+// hug with no gap while the meta's far edge stays flush to the action slot.
 const StatusPill = ({ session, isCurrent }: { session: SessionListItem; isCurrent: boolean }) => {
   const isOrphaned = session.clients === 0;
   return (
-    <span
-      className={cn(
-        "shrink-0 rounded-full px-1.5 py-px text-[9px] font-medium uppercase tracking-wide",
-        isCurrent
-          ? "bg-foreground/15 text-foreground"
-          : isOrphaned
-            ? "bg-transparent text-muted-foreground/70 ring-1 ring-foreground/10"
-            : "bg-foreground/10 text-foreground/70",
-      )}
-    >
-      {isCurrent ? "current" : isOrphaned ? "orphaned" : "active"}
+    <span className="flex min-w-[4rem] shrink-0 items-center justify-end">
+      <span
+        className={cn(
+          "rounded-full px-1.5 py-px text-[9px] font-medium uppercase tracking-wide",
+          isCurrent
+            ? "bg-foreground/15 text-foreground"
+            : isOrphaned
+              ? "bg-transparent text-muted-foreground/70 ring-1 ring-foreground/10"
+              : "bg-foreground/10 text-foreground/70",
+        )}
+      >
+        {isCurrent ? "current" : isOrphaned ? "orphaned" : "active"}
+      </span>
     </span>
   );
 };
@@ -162,7 +176,7 @@ const SessionOption = ({
     <SessionIcon state={session.state} />
     <span className="min-w-0 flex-1 truncate text-left">{session.title || session.cwd}</span>
     <StatusPill session={session} isCurrent={isCurrent} />
-    <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/60">
+    <span className="shrink-0 text-left font-mono text-[10px] tabular-nums text-muted-foreground/60">
       {session.shellName} · pid {session.pid} · {formatRelativeTime(session.createdAt, nowMs)}
     </span>
     {isCurrent ? (
