@@ -12,6 +12,7 @@ import {
   TERMINAL_LINE_HEIGHT_STORAGE_KEY,
   TERMINAL_SCROLL_ON_USER_INPUT_STORAGE_KEY,
   TERMINAL_SCROLLBACK_STORAGE_KEY,
+  LIGATURES_ENABLED_STORAGE_KEY,
 } from "../../src/lib/constants";
 import { DEFAULT_TERMINAL_CURSOR_STYLE } from "../../src/lib/terminal-cursor";
 import { DEFAULT_TERMINAL_SCROLLBACK_LINES } from "../../src/lib/terminal-scrollback";
@@ -42,6 +43,8 @@ interface FakeXtermHandle {
   scrollToBottom: ReturnType<typeof vi.fn>;
   write: ReturnType<typeof vi.fn>;
   focus: ReturnType<typeof vi.fn>;
+  registerCharacterJoiner: ReturnType<typeof vi.fn>;
+  deregisterCharacterJoiner: ReturnType<typeof vi.fn>;
   invokeCsiHandler: (prefix: string | undefined, final: string, params: number[]) => boolean;
 }
 
@@ -135,6 +138,8 @@ vi.mock("@xterm/xterm", () => {
     scrollToBottom = vi.fn();
     write = vi.fn((_data: string, callback?: () => void) => callback?.());
     focus = vi.fn();
+    registerCharacterJoiner = vi.fn((_handler: (text: string) => [number, number][]) => 1);
+    deregisterCharacterJoiner = vi.fn((_joinerId: number) => {});
     private titleListeners = new Set<(title: string) => void>();
     private csiHandlers: FakeCsiHandlerEntry[] = [];
     private handle: FakeXtermHandle;
@@ -171,6 +176,8 @@ vi.mock("@xterm/xterm", () => {
         scrollToBottom: this.scrollToBottom,
         write: this.write,
         focus: this.focus,
+        registerCharacterJoiner: this.registerCharacterJoiner,
+        deregisterCharacterJoiner: this.deregisterCharacterJoiner,
         invokeCsiHandler: (prefix, final, params) => {
           for (let entryIndex = this.csiHandlers.length - 1; entryIndex >= 0; entryIndex -= 1) {
             const entry = this.csiHandlers[entryIndex];
@@ -1279,6 +1286,48 @@ describe("Terminal hot-swap", () => {
       fireEvent.click(screen.getByLabelText("toggle cursor blink"));
     });
     expect(fakeXterms[0]?.getOptions().cursorBlink).toBe(false);
+  });
+});
+
+describe("Terminal ligatures", () => {
+  it("does not register a character joiner on mount when ligatures are disabled", () => {
+    installFakeLocalStorage();
+    render(<Terminal />);
+    expect(fakeXterms[0]?.registerCharacterJoiner).not.toHaveBeenCalled();
+  });
+
+  it("registers a character joiner on mount when ligatures are stored enabled", () => {
+    installFakeLocalStorage({ [LIGATURES_ENABLED_STORAGE_KEY]: "true" });
+    render(<Terminal />);
+    expect(fakeXterms[0]?.registerCharacterJoiner).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers the joiner when the ligatures switch is toggled on", () => {
+    installFakeLocalStorage();
+    render(<Terminal />);
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    expect(fakeXterms[0]?.registerCharacterJoiner).not.toHaveBeenCalled();
+
+    act(() => {
+      fireEvent.click(screen.getByLabelText("toggle ligatures"));
+    });
+
+    expect(fakeXterms[0]?.registerCharacterJoiner).toHaveBeenCalledTimes(1);
+    expect(fakeXterms[0]?.deregisterCharacterJoiner).not.toHaveBeenCalled();
+  });
+
+  it("deregisters the joiner when the ligatures switch is toggled off", () => {
+    installFakeLocalStorage({ [LIGATURES_ENABLED_STORAGE_KEY]: "true" });
+    render(<Terminal />);
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    expect(fakeXterms[0]?.registerCharacterJoiner).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      fireEvent.click(screen.getByLabelText("toggle ligatures"));
+    });
+
+    expect(fakeXterms[0]?.deregisterCharacterJoiner).toHaveBeenCalledTimes(1);
+    expect(fakeXterms[0]?.deregisterCharacterJoiner.mock.calls[0]?.[0]).toBe(1);
   });
 });
 

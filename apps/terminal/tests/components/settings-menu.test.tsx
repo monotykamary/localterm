@@ -27,6 +27,7 @@ interface SettingsMenuHarnessProps {
   initialScrollOnUserInput?: boolean;
   initialThemeId?: string;
   initialFontId?: string;
+  initialLigaturesEnabled?: boolean;
   onThemeChange?: (id: string) => void;
   onThemePreview?: (id: string | null) => void;
   onFontChange?: (id: string) => void;
@@ -40,6 +41,7 @@ interface SettingsMenuHarnessProps {
   onScrollOnUserInputChange?: (scrollOnUserInput: boolean) => void;
   onPaddingXChange?: (paddingX: number) => void;
   onPaddingYChange?: (paddingY: number) => void;
+  onLigaturesEnabledChange?: (enabled: boolean) => void;
   notificationsPermission?: NotificationPermission | "unsupported";
   onNotificationsPermissionRequest?: () => void;
   sessionInfo?: TerminalSessionInfo | null;
@@ -54,6 +56,7 @@ const renderSettingsMenu = ({
   initialScrollOnUserInput = DEFAULT_TERMINAL_SCROLL_ON_USER_INPUT,
   initialThemeId = "vesper",
   initialFontId = "geist-mono",
+  initialLigaturesEnabled = false,
   onThemeChange = () => {},
   onThemePreview,
   onFontChange = () => {},
@@ -67,6 +70,7 @@ const renderSettingsMenu = ({
   onScrollOnUserInputChange = () => {},
   onPaddingXChange = () => {},
   onPaddingYChange = () => {},
+  onLigaturesEnabledChange = () => {},
   notificationsPermission = "default",
   onNotificationsPermissionRequest = () => {},
   sessionInfo,
@@ -82,6 +86,8 @@ const renderSettingsMenu = ({
         onFontPreview={onFontPreview}
         nerdFontEnabled={false}
         onNerdFontEnabledChange={() => {}}
+        ligaturesEnabled={initialLigaturesEnabled}
+        onLigaturesEnabledChange={onLigaturesEnabledChange}
         fontSize={initialFontSize}
         onFontSizeChange={onFontSizeChange}
         lineHeight={initialLineHeight}
@@ -249,6 +255,19 @@ describe("SettingsMenu cursor blink switch", () => {
 
     expect(onCursorBlinkChange).toHaveBeenCalledTimes(1);
     expect(onCursorBlinkChange.mock.calls[0]?.[0]).toBe(false);
+  });
+});
+
+describe("SettingsMenu ligatures switch", () => {
+  it("calls onLigaturesEnabledChange with the toggled value", () => {
+    const onLigaturesEnabledChange = vi.fn();
+    renderSettingsMenu({ initialLigaturesEnabled: false, onLigaturesEnabledChange });
+
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    fireEvent.click(screen.getByLabelText("toggle ligatures"));
+
+    expect(onLigaturesEnabledChange).toHaveBeenCalledTimes(1);
+    expect(onLigaturesEnabledChange.mock.calls[0]?.[0]).toBe(true);
   });
 });
 

@@ -42,6 +42,8 @@ interface SettingsMenuProps {
   onFontPreview?: (fontId: string | null) => void;
   nerdFontEnabled: boolean;
   onNerdFontEnabledChange: (enabled: boolean) => void;
+  ligaturesEnabled: boolean;
+  onLigaturesEnabledChange: (enabled: boolean) => void;
   fontSize: number;
   onFontSizeChange: (size: number) => void;
   lineHeight: number;
@@ -128,6 +130,8 @@ export const SettingsMenu = ({
   onFontPreview,
   nerdFontEnabled,
   onNerdFontEnabledChange,
+  ligaturesEnabled,
+  onLigaturesEnabledChange,
   fontSize,
   onFontSizeChange,
   lineHeight,
@@ -301,6 +305,30 @@ export const SettingsMenu = ({
                 aria-label="toggle nerd font icons"
                 checked={nerdFontEnabled}
                 onCheckedChange={onNerdFontEnabledChange}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <Tooltip>
+                <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                  Ligatures
+                </TooltipTrigger>
+                <TooltipContent
+                  side="bottom"
+                  sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                  className="max-w-xs"
+                >
+                  Fuses multi-character operators such as {"->"}, {"=>"}, and {"!=="} into single
+                  glyphs when the active font defines them (e.g. Fira Code, JetBrains Mono). Joins
+                  every run of operator characters so composable arrows like
+                  {"-->"} and {"===>"} shape at any length, plus letter pairs (fi, www) and
+                  hex/dimension literals (0xFF, 1920x1080) for full Fira Code parity. On fonts
+                  without ligatures this is a no-op and characters render exactly as before.
+                </TooltipContent>
+              </Tooltip>
+              <Switch
+                aria-label="toggle ligatures"
+                checked={ligaturesEnabled}
+                onCheckedChange={onLigaturesEnabledChange}
               />
             </div>
           </Field>

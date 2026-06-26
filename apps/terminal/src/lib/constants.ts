@@ -117,6 +117,7 @@ export const GOOGLE_FONTS_STYLESHEET_ID = "localterm-google-fonts";
 export const NERD_FONT_ENABLED_STORAGE_KEY = "localterm:nerd-font-enabled";
 export const NERD_FONT_SYMBOLS_FAMILY = "Symbols Nerd Font";
 export const NERD_FONT_STYLESHEET_ID = "localterm-nerd-font";
+export const LIGATURES_ENABLED_STORAGE_KEY = "localterm:ligatures-enabled";
 export const FONT_LOAD_PROBE_PX = 16;
 
 // Initial byte capacity of the OutputBatcher staging buffer. Picked above the

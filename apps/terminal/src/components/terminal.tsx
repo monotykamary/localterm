@@ -195,6 +195,12 @@ import {
   storeNerdFontEnabled,
   subscribeStoredNerdFontEnabled,
 } from "@/utils/stored-nerd-font-enabled";
+import {
+  loadStoredLigaturesEnabled,
+  storeLigaturesEnabled,
+  subscribeStoredLigaturesEnabled,
+} from "@/utils/stored-ligatures-enabled";
+import { findLigatureRanges } from "@/utils/ligature-joiner";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
@@ -292,6 +298,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const initialPaddingXRef = useRef<number>(loadStoredTerminalPaddingX());
   const initialPaddingYRef = useRef<number>(loadStoredTerminalPaddingY());
   const initialNerdFontEnabledRef = useRef<boolean>(loadStoredNerdFontEnabled());
+  const initialLigaturesEnabledRef = useRef<boolean>(loadStoredLigaturesEnabled());
   const fitAddonRef = useRef<FitAddon | null>(null);
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
   const openDiffViewerRef = useRef<(() => void) | null>(null);
@@ -357,6 +364,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [activeNerdFontEnabled, setActiveNerdFontEnabled] = useState<boolean>(
     initialNerdFontEnabledRef.current,
   );
+  const [activeLigaturesEnabled, setActiveLigaturesEnabled] = useState<boolean>(
+    initialLigaturesEnabledRef.current,
+  );
+  const ligatureJoinerIdRef = useRef<number | null>(null);
   const effectiveFont = useMemo(() => findTerminalFontById(effectiveFontId), [effectiveFontId]);
   const [activeFontSize, setActiveFontSize] = useState<number>(initialFontSizeRef.current);
   const [activeLineHeight, setActiveLineHeight] = useState<number>(initialLineHeightRef.current);
@@ -1361,6 +1372,29 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     storeNerdFontEnabled(nextEnabled);
   }, []);
 
+  const handleLigaturesEnabledChange = useCallback((nextEnabled: boolean) => {
+    setActiveLigaturesEnabled(nextEnabled);
+    storeLigaturesEnabled(nextEnabled);
+  }, []);
+
+  // registerCharacterJoiner/deregisterCharacterJoiner each refresh the whole
+  // viewport in xterm core, so toggling re-rasters joined spans without an
+  // explicit refresh. The id guards keep the register/deregister idempotent
+  // across effect re-runs.
+  useEffect(() => {
+    if (!terminalInitializedRef.current) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    if (activeLigaturesEnabled) {
+      if (ligatureJoinerIdRef.current === null) {
+        ligatureJoinerIdRef.current = terminal.registerCharacterJoiner(findLigatureRanges);
+      }
+    } else if (ligatureJoinerIdRef.current !== null) {
+      terminal.deregisterCharacterJoiner(ligatureJoinerIdRef.current);
+      ligatureJoinerIdRef.current = null;
+    }
+  }, [activeLigaturesEnabled]);
+
   useEffect(() => {
     if (!terminalInitializedRef.current) return;
     const terminal = terminalRef.current;
@@ -1470,6 +1504,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       subscribeStoredTerminalThemeId(setActiveThemeId),
       subscribeStoredTerminalFontId(setActiveFontId),
       subscribeStoredNerdFontEnabled(setActiveNerdFontEnabled),
+      subscribeStoredLigaturesEnabled(setActiveLigaturesEnabled),
       subscribeStoredTerminalFontSize(setActiveFontSize),
       subscribeStoredTerminalLineHeight(setActiveLineHeight),
       subscribeStoredTerminalCursorStyle(setActiveCursorStyle),
@@ -2110,6 +2145,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                     onFontPreview={setPreviewFontId}
                     nerdFontEnabled={activeNerdFontEnabled}
                     onNerdFontEnabledChange={handleNerdFontEnabledChange}
+                    ligaturesEnabled={activeLigaturesEnabled}
+                    onLigaturesEnabledChange={handleLigaturesEnabledChange}
                     fontSize={activeFontSize}
                     onFontSizeChange={handleFontSizeChange}
                     lineHeight={activeLineHeight}
