@@ -45,6 +45,8 @@ import type {
   launchInputSchema,
   resetAutomationInputSchema,
   serverToClientMessageSchema,
+  sessionListItemSchema,
+  sessionsListResponseSchema,
   triggerInputSchema,
   updateAutomationInputSchema,
 } from "./schemas.js";
@@ -111,6 +113,8 @@ export type WorktreeIncludeFileInput = z.infer<typeof worktreeIncludeFileInputSc
 export type WorktreeSweepResult = z.infer<typeof worktreeSweepResultSchema>;
 export type LaunchInput = z.infer<typeof launchInputSchema>;
 export type GitDiffSummary = z.infer<typeof gitDiffSummarySchema>;
+export type SessionListItem = z.infer<typeof sessionListItemSchema>;
+export type SessionListResponse = z.infer<typeof sessionsListResponseSchema>;
 export type GitDiffFileMeta = z.infer<typeof gitDiffFileMetaSchema>;
 export type GitDiffFileListResponse = z.infer<typeof gitDiffFileListResponseSchema>;
 export type GitDiffFilePatch = z.infer<typeof gitDiffFilePatchSchema>;

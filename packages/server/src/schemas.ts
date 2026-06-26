@@ -39,6 +39,28 @@ export const healthSchema = z
   })
   .strict();
 
+// One row in the session picker: a live PTY the user can attach to. `clients`
+// is the count of currently-attached sockets (0 = dormant — alive but no one
+// viewing it, the row the picker exists to surface). The current tab matches on
+// `id` against the session frame it received, so it can badge itself and skip
+// re-attaching to the PTY it's already on.
+export const sessionListItemSchema = z
+  .object({
+    id: z.string().uuid(),
+    pid: z.number().int().nonnegative(),
+    shell: z.string().min(1),
+    shellName: z.string().min(1),
+    cwd: z.string().min(1),
+    title: z.string().max(MAX_TITLE_LENGTH),
+    createdAt: z.number().int().nonnegative(),
+    clients: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const sessionsListResponseSchema = z
+  .object({ sessions: z.array(sessionListItemSchema) })
+  .strict();
+
 const inputMessageSchema = z
   .object({
     type: z.literal("input"),
@@ -120,6 +142,22 @@ const identifyMessageSchema = z
   })
   .strict();
 
+// Attach handshake. After the server sends the {type:"session"} frame the
+// client tells the manager whether this socket is caught up. `replay:true` asks
+// for the session's scrollback ring buffer (a tab switching to this PTY from a
+// different one — it reset its screen and needs the recent output); the server
+// sends it as one binary frame ahead of live fan-out. `replay:false` (a silent
+// reattach of the same PTY, or a brand-new spawn with no history) skips the
+// replay and goes straight to live output. Until this lands the socket stays
+// "pending" and receives no live fan-out, so no output is lost across the gap —
+// it all lives in the ring buffer and arrives via the replay.
+const readyMessageSchema = z
+  .object({
+    type: z.literal("ready"),
+    replay: z.boolean(),
+  })
+  .strict();
+
 export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   inputMessageSchema,
   resizeMessageSchema,
@@ -128,6 +166,7 @@ export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   caffeinateActivityGateInputMessageSchema,
   caffeinateBatteryThresholdInputMessageSchema,
   identifyMessageSchema,
+  readyMessageSchema,
 ]);
 
 const exitMessageSchema = z
@@ -152,10 +191,10 @@ const sessionMessageSchema = z
     pid: z.number().int().nonnegative(),
     cwd: z.string().min(1),
     title: z.string().max(MAX_TITLE_LENGTH),
-    // Server-side id for the live PTY. A reconnecting client carries it back
-    // as the `sid` query param on the WS url so the daemon can reattach the
-    // prior Session instead of spawning a fresh shell — see
-    // SessionReattachPool. Optional for back-compat with older clients.
+    // Server-side id for the live PTY. A reconnecting or switching client
+    // carries it back as the `sid` query param on the WS url so the daemon
+    // attaches to the live PTY instead of spawning a fresh shell. Optional
+    // for back-compat with older clients.
     id: z.string().uuid().optional(),
   })
   .strict();

@@ -21,6 +21,7 @@ import {
   MonitorCog,
   Plus,
   Search,
+  SquareTerminal,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -54,6 +55,8 @@ import { AutomationsModal } from "@/components/automations-modal";
 import { CommandPalette, type CommandItem } from "@/components/command-palette";
 import { DiffViewer } from "@/components/diff-viewer";
 import { KeepAwakeMenu, type CaffeinateMode } from "@/components/keep-awake-menu";
+import { SessionsButton } from "@/components/sessions-menu";
+import { SessionsModal } from "@/components/sessions-modal";
 import { SettingsMenu } from "@/components/settings-menu";
 import { WorktreesButton } from "@/components/worktrees-menu";
 import { WorktreesModal } from "@/components/worktrees-modal";
@@ -133,6 +136,7 @@ import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
 import { isDiffViewerShortcut } from "@/utils/is-diff-viewer-shortcut";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
+import { isSessionsShortcut } from "@/utils/is-sessions-shortcut";
 import { isWorktreesCreateShortcut } from "@/utils/is-worktrees-create-shortcut";
 import { isWorktreesShortcut } from "@/utils/is-worktrees-shortcut";
 import {
@@ -280,6 +284,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const terminalRef = useRef<XtermTerminal | null>(null);
   const terminalInitializedRef = useRef(false);
   const manualReconnectRef = useRef<(() => void) | null>(null);
+  const switchSessionRef = useRef<((sid: string) => void) | null>(null);
+  const liveSessionIdRef = useRef<string | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const refocusTerminalRef = useRef<(() => void) | null>(null);
   const pasteToTerminalRef = useRef<((text: string) => void) | null>(null);
@@ -316,12 +322,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isAutomationsOpen, setIsAutomationsOpen] = useState(false);
   const [isKeepAwakePopoverOpen, setIsKeepAwakePopoverOpen] = useState(false);
+  const [isSessionsOpen, setIsSessionsOpen] = useState(false);
   const [automations, setAutomations] = useState<AutomationWithNextRun[] | null>(null);
   const toggleAutomationsRef = useRef<(() => void) | null>(null);
   const [isWorktreesOpen, setIsWorktreesOpen] = useState(false);
   const [worktreeCreateError, setWorktreeCreateError] = useState<string | null>(null);
   const openWorktreesRef = useRef<(() => void) | null>(null);
   const toggleWorktreesRef = useRef<(() => void) | null>(null);
+  const toggleSessionsRef = useRef<(() => void) | null>(null);
   const createWorktreeRef = useRef<
     ((options: CreateWorktreeOptions, openAfter: boolean) => Promise<boolean>) | null
   >(null);
@@ -333,14 +341,17 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   const isSettingsPopoverOpenRef = useRef(false);
   const isAutomationsOpenRef = useRef(false);
   const isWorktreesOpenRef = useRef(false);
+  const isSessionsOpenRef = useRef(false);
   const isToolbarVisible =
     isToolbarHovered ||
     isSettingsPopoverOpen ||
     isAutomationsOpen ||
     isKeepAwakePopoverOpen ||
+    isSessionsOpen ||
     isWorktreesOpen;
   isSettingsPopoverOpenRef.current = isSettingsPopoverOpen;
   isAutomationsOpenRef.current = isAutomationsOpen;
+  isSessionsOpenRef.current = isSessionsOpen;
   isWorktreesOpenRef.current = isWorktreesOpen;
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultState>({
@@ -461,20 +472,27 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     let lastTitle = "";
     let socket: WebSocket | null = null;
     // Server-side PTY id (sent in the {type:"session"} message). Preserved
-    // across reconnects and forwarded as `?sid=` so the daemon can reattach
-    // the parked PTY instead of spawning a fresh shell — see
-    // SessionReattachPool. Cleared on genuine shell exit (markShellDead) so
-    // the dead session is never reattached on a manual Reconnect.
+    // across reconnects and forwarded as `?sid=` so the daemon can attach to
+    // the live PTY instead of spawning a fresh shell. Cleared on genuine shell
+    // exit (markShellDead) so the dead session is never reattached on a manual
+    // Reconnect. Mirrored into liveSessionIdRef so the session picker can badge
+    // the PTY this tab is currently viewing and skip re-switching to it.
     let liveSessionId: string | null = null;
+    // Override sid for the next connect(): set by switchSession() so the next
+    // WebSocket opens against the picked PTY instead of the current one. The
+    // session-frame handler leaves liveSessionId alone until the new frame
+    // lands, so the new id compares unequal to the old one and the handler
+    // treats it as a switch (reset + scrollback replay).
+    let nextConnectSid: string | null = null;
     // Silent-reattach state: on a WS close while we still have a liveSessionId,
     // we skip the connection-lost marker/modal and try one quiet reconnect —
-    // the server's SessionReattachPool keeps the PTY alive across transient
-    // drops (portless teardown on wake, brief network blip). If the reconnect's
-    // session frame has the same id, the shell survived and the user sees
-    // nothing. If the id differs the grace elapsed and a fresh shell spawned —
-    // we surface that honestly with both markers. Cleared on session landing
-    // or on a second close (silent reconnect failed). Stashed close info is
-    // reused for the miss case so we don't lose the original code/reason.
+    // the daemon keeps the PTY alive across transient drops (portless teardown
+    // on wake, brief network blip). If the reconnect's session frame has the
+    // same id, the shell survived and the user sees nothing. If the id differs
+    // the shell exited while dormant and a fresh shell spawned — we surface
+    // that honestly with a marker. Cleared on session landing or on a second
+    // close (silent reconnect failed). Stashed close info is reused for the
+    // miss case so we don't lose the original code/reason.
     let reattachPending = false;
     let reattachCloseCode = 0;
     let reattachCloseReason = "";
@@ -914,6 +932,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         }
         return false;
       }
+      if (isSessionsShortcut(event, isMac)) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          toggleSessionsRef.current?.();
+        }
+        return false;
+      }
       if (isFindShortcut(event, isMac)) {
         if (event.type === "keydown") {
           event.preventDefault();
@@ -1040,6 +1065,10 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     const markShellDead = (exitCode: number | null) => {
       if (exited) return;
       exited = true;
+      // The PTY is gone — drop its id so a manual Reconnect spawns a fresh
+      // shell instead of trying to reattach to the dead one.
+      liveSessionId = null;
+      liveSessionIdRef.current = null;
       if (exitCode !== null && exitCode !== 0) {
         // Non-zero exit — surface immediately. The server's onExit deliberately
         // skips closeTab on non-clean codes so the tab stays as the failure mask.
@@ -1077,7 +1106,11 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
 
     const connect = () => {
       if (disposed) return;
-      const nextSocket = new WebSocket(buildWebSocketUrl(liveCwdRef.current, liveSessionId));
+      const connectSid = nextConnectSid;
+      nextConnectSid = null;
+      const nextSocket = new WebSocket(
+        buildWebSocketUrl(liveCwdRef.current, connectSid ?? liveSessionId),
+      );
       socket = nextSocket;
 
       nextSocket.binaryType = "arraybuffer";
@@ -1130,12 +1163,32 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         } else if (message.type === "session") {
           const wasReattachPending = reattachPending;
           const expectedSid = wasReattachPending ? liveSessionId : null;
+          const priorSessionId = liveSessionId;
           const stashedCloseCode = reattachCloseCode;
           const stashedCloseReason = reattachCloseReason;
           reattachPending = false;
           reattachCloseCode = 0;
           reattachCloseReason = "";
-          if (message.id) liveSessionId = message.id;
+          if (message.id) {
+            liveSessionId = message.id;
+            liveSessionIdRef.current = message.id;
+          }
+          // A switch (or a missed reattach that spawned a fresh shell): the
+          // new PTY is a different one than the tab was just viewing, so reset
+          // the terminal and ask the server to replay its scrollback before
+          // live fan-out begins. The replay lands as one binary frame right
+          // after this, so the screen shows the PTY's recent output instead
+          // of the prior PTY's stale content.
+          const isSwitch = priorSessionId !== null && message.id !== priorSessionId;
+          if (isSwitch) {
+            terminal.reset();
+            // A missed reattach (we were silently reconnecting to the prior
+            // PTY but the daemon gave us a fresh one) still surfaces the
+            // original close info as a marker before the fresh prompt.
+            if (wasReattachPending && message.id !== expectedSid) {
+              terminal.write(formatConnectionLostMarker(stashedCloseCode, stashedCloseReason));
+            }
+          }
           setSessionInfo({
             shell: message.shell,
             shellName: message.shellName,
@@ -1147,21 +1200,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           applyIncomingTitle(message.title);
           removeRunQueryParam();
           removeInitialCommandQueryParam();
-          // Silent reattach succeeded: the server parked the PTY across the WS
-          // drop and ?sid= reattached to it. Same id, same pid — keep the
-          // screen exactly as the user left it. No markers, no modal: a
-          // mid-keystroke interactive CLI (vim, fzf, a REPL) continues
-          // uninterrupted, which is the whole point of the reattach pool.
-          if (expectedSid !== null && message.id === expectedSid) return;
-          // Reattach missed: the prior PTY was gone by the time the reconnect
-          // landed (grace expired, or the shell exited while parked), so the
-          // daemon spawned a fresh shell. Surface the stashed close info
-          // honestly so the user can tell where the prior shell ended and the
-          // fresh prompt began. No modal — the user's already at a usable
-          // prompt and can keep working.
-          if (expectedSid !== null) {
-            terminal.write(formatConnectionLostMarker(stashedCloseCode, stashedCloseReason));
-          }
+          // Attach handshake: tell the server whether this socket wants the
+          // scrollback replay (a switch) or is already caught up (a silent
+          // reattach of the same PTY, or a brand-new spawn with no history).
+          // The server holds live fan-out for pending sockets until this
+          // lands, so nothing is lost across the gap — it lives in the ring
+          // buffer and arrives via the replay.
+          send({ type: "ready", replay: isSwitch });
         } else if (message.type === "automations") {
           setAutomations(message.automations);
         } else if (message.type === "caffeinate") {
@@ -1217,14 +1262,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           console.warn(
             `[localterm] websocket closed: code=${event.code} reason=${JSON.stringify(event.reason)} wasClean=${event.wasClean}`,
           );
-          // Silent-reattach attempt: the server's SessionReattachPool holds
-          // the PTY across this drop, and on a successful reattach the user
-          // should see nothing — mid-keystroke interactive CLIs continue
-          // uninterrupted. We stash the close info and schedule a direct
-          // reconnect (bypassing the connection-lost/modal path that fires
-          // `exited = true`). If the silent reconnect itself closes before a
-          // session frame lands (daemon genuinely down), fall through to
-          // markConnectionLost with the stashed close info.
+          // Silent-reattach attempt: the daemon keeps the PTY alive across
+          // this drop, and on a successful reattach the user should see nothing
+          // — mid-keystroke interactive CLIs continue uninterrupted. We stash
+          // the close info and schedule a direct reconnect (bypassing the
+          // connection-lost/modal path that fires `exited = true`). If the
+          // silent reconnect itself closes before a session frame lands
+          // (daemon genuinely down), fall through to markConnectionLost with
+          // the stashed close info.
           if (liveSessionId && !reattachPending) {
             reattachPending = true;
             reattachCloseCode = event.code;
@@ -1287,6 +1332,20 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       }
       socket = null;
       connect();
+    };
+
+    // Switch this tab to a different live PTY (from the session picker). The
+    // current PTY detaches on the server and stays alive (dormant) so it stays
+    // in the picker; the next connect opens against the picked `?sid=`. We
+    // reuse the manual-reconnect reset (clear the dead-session mask, drop the
+    // stale exit state) and just seed the sid override first — the
+    // session-frame handler sees the new id differ from the old one and treats
+    // it as a switch (reset terminal + scrollback replay).
+    switchSessionRef.current = (sid: string) => {
+      if (disposed) return;
+      if (sid === liveSessionId) return;
+      nextConnectSid = sid;
+      manualReconnectRef.current?.();
     };
 
     connect();
@@ -1548,6 +1607,22 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     setIsKeepAwakePopoverOpen(open);
   }, []);
 
+  const handleSessionsOpenChange = useCallback((open: boolean) => {
+    setIsSessionsOpen(open);
+    if (open) {
+      setIsCommandPaletteOpen(false);
+      return;
+    }
+    if (toolbarHoverTimeoutRef.current !== null) {
+      window.clearTimeout(toolbarHoverTimeoutRef.current);
+    }
+    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
+      toolbarHoverTimeoutRef.current = null;
+      setIsToolbarHovered(false);
+    }, TOOLBAR_HIDE_DELAY_MS);
+    refocusTerminalRef.current?.();
+  }, []);
+
   useEffect(() => {
     if (!isSearchOpen) return;
     const input = searchInputRef.current;
@@ -1660,6 +1735,11 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     handleWorktreesOpenChange(!isWorktreesOpenRef.current);
   }, [handleWorktreesOpenChange]);
   toggleWorktreesRef.current = toggleWorktrees;
+
+  const toggleSessions = useCallback(() => {
+    handleSessionsOpenChange(!isSessionsOpenRef.current);
+  }, [handleSessionsOpenChange]);
+  toggleSessionsRef.current = toggleSessions;
 
   const openShellAt = useCallback((shellCwd: string, command?: string) => {
     window.open(buildNewTabUrl(shellCwd, command), "_blank", "noopener,noreferrer");
@@ -1915,6 +1995,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         action: () => handleWorktreesOpenChange(true),
       },
       {
+        id: "sessions",
+        label: "Sessions",
+        category: "Actions",
+        shortcut: `${togglePrefix}I`,
+        icon: <SquareTerminal className="size-3.5" />,
+        action: () => handleSessionsOpenChange(true),
+      },
+      {
         id: "worktrees-create",
         label: "Create git worktree",
         category: "Actions",
@@ -2013,6 +2101,8 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
     openSearchOverlay,
     openDiffViewer,
     handleAutomationsOpenChange,
+    handleWorktreesOpenChange,
+    handleSessionsOpenChange,
     handleCursorStyleChange,
     activeCursorBlink,
     handleCursorBlinkChange,
@@ -2184,6 +2274,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
                     isMac={isMac}
                   />
                   <WorktreesButton onOpen={() => handleWorktreesOpenChange(true)} isMac={isMac} />
+                  <SessionsButton onOpen={() => handleSessionsOpenChange(true)} isMac={isMac} />
                   {caffeinateSupported ? (
                     <KeepAwakeMenu
                       mode={caffeinateMode}
@@ -2353,6 +2444,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
         onDismissCreateError={() => setWorktreeCreateError(null)}
         onClose={() => handleWorktreesOpenChange(false)}
         onOpenShell={openShellAt}
+      />
+
+      <SessionsModal
+        open={isSessionsOpen}
+        liveSessionIdRef={liveSessionIdRef}
+        switchSessionRef={switchSessionRef}
+        onClose={() => handleSessionsOpenChange(false)}
       />
 
       <AlertDialog open={isModalOpen}>

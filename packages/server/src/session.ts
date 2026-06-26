@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -11,6 +12,7 @@ import {
   MAX_NOTIFICATION_LENGTH,
   MAX_PENDING_PARSE_BYTES,
   PTY_ENV_DENYLIST,
+  SESSION_SCROLLBACK_REPLAY_BYTES,
   TERM_TYPE,
 } from "./constants.js";
 // Titles are emitted on a dedicated `title` event so they travel as a separate
@@ -46,6 +48,7 @@ export class Session extends EventEmitter<SessionEvents> {
   readonly shell: string;
   readonly cwd: string;
   readonly createdAt: number;
+  readonly id: string;
 
   private readonly pty: IPty;
   private readonly shellName: string;
@@ -60,6 +63,12 @@ export class Session extends EventEmitter<SessionEvents> {
   private pixelResizeSupported: boolean | null = null;
   private hookCleanupPaths: string[] = [];
   private pendingParse = "";
+  // Scrollback ring buffer for attach-time replay. Appended on every PTY data
+  // event regardless of attached clients so a tab switching to this session
+  // lands on recent output instead of a blank screen. Bounded by byte cap;
+  // oldest chunks are dropped as new output arrives.
+  private readonly scrollbackChunks: string[] = [];
+  private scrollbackBytes = 0;
   private readonly foregroundWatcher: ForegroundWatcher;
   private readonly reportInitialCommandExit: boolean;
   private hasEmittedAutomationExit = false;
@@ -73,6 +82,7 @@ export class Session extends EventEmitter<SessionEvents> {
     this.currentCols = input.cols ?? DEFAULT_COLS;
     this.currentRows = input.rows ?? DEFAULT_ROWS;
     this.createdAt = Date.now();
+    this.id = randomUUID();
     this.reportInitialCommandExit = Boolean(input.initialCommand);
 
     const env: Record<string, string> = {};
@@ -127,6 +137,7 @@ export class Session extends EventEmitter<SessionEvents> {
 
     this.pty.onData((data) => {
       this.onPtyOutput(data);
+      this.appendScrollback(data);
       this.emit("output", data);
     });
 
@@ -258,6 +269,26 @@ export class Session extends EventEmitter<SessionEvents> {
     this.foregroundWatcher.dispose();
     this.cleanUpHookFiles();
     this.removeAllListeners();
+  }
+
+  // Concatenate the scrollback ring buffer for attach-time replay. Returned as
+  // one string so the server can UTF-8-encode it once and emit a single binary
+  // frame ahead of live fan-out.
+  snapshotScrollback(): string {
+    return this.scrollbackChunks.join("");
+  }
+
+  private appendScrollback(data: string): void {
+    if (!data) return;
+    this.scrollbackChunks.push(data);
+    this.scrollbackBytes += Buffer.byteLength(data, "utf8");
+    while (
+      this.scrollbackBytes > SESSION_SCROLLBACK_REPLAY_BYTES &&
+      this.scrollbackChunks.length > 1
+    ) {
+      const dropped = this.scrollbackChunks.shift();
+      if (dropped) this.scrollbackBytes -= Buffer.byteLength(dropped, "utf8");
+    }
   }
 
   private emitInitialMetadata(): void {

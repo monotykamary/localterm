@@ -5,7 +5,7 @@ import {
   COMMAND_PALETTE_PANEL_CLASSES,
   MODAL_PANEL_CLASSES,
 } from "@/lib/animation-classes";
-import { COMMAND_PALETTE_CLOSE_TRANSITION_MS } from "@/lib/constants";
+import { COMMAND_PALETTE_CLOSE_TRANSITION_MS, PALETTE_MODAL_MAX_HEIGHT_PX } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 export interface CommandItem {
@@ -307,12 +307,13 @@ export const CommandPalette = ({
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
         className={cn(
-          "relative z-10 flex max-h-[400px] w-[520px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl",
+          "relative z-10 flex w-[520px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl origin-top",
           MODAL_PANEL_CLASSES,
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
+        style={{ maxHeight: PALETTE_MODAL_MAX_HEIGHT_PX }}
       >
-        <div className="flex items-center border-b border-border/40 px-3">
+        <div className="flex items-center border-b border-border/40 px-4">
           <Search className="size-4 shrink-0 text-muted-foreground/60" />
           <input
             ref={inputRef}
@@ -330,13 +331,13 @@ export const CommandPalette = ({
             aria-expanded
             aria-haspopup="listbox"
             role="combobox"
-            className="h-10 w-full bg-transparent px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+            className="h-12 w-full bg-transparent px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
           />
         </div>
         <div
           id={listId}
           role="listbox"
-          className="flex-1 overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex-1 animate-in fade-in-0 duration-150 ease-snappy overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {filtered.length === 0 ? (
             <div className="px-2.5 py-6 text-center text-sm text-muted-foreground/70">
@@ -355,7 +356,7 @@ export const CommandPalette = ({
             ))
           )}
         </div>
-        <div className="flex items-center gap-3 border-t border-border/40 px-3 py-1.5 text-[10px] text-muted-foreground/60">
+        <div className="flex items-center gap-3 border-t border-border/40 px-4 py-1.5 text-[10px] text-muted-foreground/60">
           <KeyHint keys="↑↓" label="navigate" />
           <KeyHint keys="↵" label="run" />
           <KeyHint keys="esc" label="close" />

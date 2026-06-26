@@ -25,7 +25,7 @@ import type { CaffeinateMode } from "./types.js";
 export interface CaffeinateManagerOptions {
   controller: CaffeinateController;
   store: CaffeinatePreferencesStore;
-  // Live shell pids of every session (usually SessionRegistry.pids). Automatic
+  // Live shell pids of every session (usually SessionManager.pids). Automatic
   // mode only reacts to programs running under one of these.
   listSessionPids: () => number[];
   // Injectable process snapshot for tests; defaults to a real `ps` listing.

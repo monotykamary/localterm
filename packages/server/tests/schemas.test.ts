@@ -112,6 +112,16 @@ describe("clientToServerMessageSchema", () => {
     expect(clientToServerMessageSchema.safeParse({ type: "input" }).success).toBe(false);
     expect(clientToServerMessageSchema.safeParse({ type: "resize", cols: 80 }).success).toBe(false);
   });
+
+  it("parses the ready handshake with a replay flag", () => {
+    expect(clientToServerMessageSchema.safeParse({ type: "ready", replay: true }).success).toBe(
+      true,
+    );
+    expect(clientToServerMessageSchema.safeParse({ type: "ready", replay: false }).success).toBe(
+      true,
+    );
+    expect(clientToServerMessageSchema.safeParse({ type: "ready" }).success).toBe(false);
+  });
 });
 
 describe("serverToClientMessageSchema", () => {

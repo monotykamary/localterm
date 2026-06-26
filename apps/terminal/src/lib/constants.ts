@@ -40,6 +40,12 @@ export const FAVICON_READY_DEBOUNCE_MS = 750;
 export const FAVICON_DEAD_OPACITY = 0.35;
 
 export const COMMAND_PALETTE_CLOSE_TRANSITION_MS = 150;
+// Shared max height for the top-anchored palette-style overlays (command
+// palette + sessions modal) so the two open at the same height and don't jump
+// when one replaces the other. 400px mirrors the original command-palette cap
+// (a handful of grouped commands + a footer); the sessions modal virtualizes
+// its list so many shells scroll inside the same box.
+export const PALETTE_MODAL_MAX_HEIGHT_PX = 400;
 
 export const DIFF_VIEWER_CLOSE_TRANSITION_MS = 150;
 // Delay before reacting to a server git-dirty signal in the open diff viewer.
@@ -74,6 +80,15 @@ export const WORKTREES_LIST_ROW_HEIGHT_PX = 56;
 // ~84px of vertical room). Preserves the original min-h-32 (8rem) comfort.
 export const WORKTREES_MESSAGE_BLOCK_MIN_HEIGHT_PX = 128;
 export const WORKTREES_MODAL_MAX_HEIGHT_REM = 40;
+
+export const SESSIONS_MODAL_CLOSE_TRANSITION_MS = 150;
+// Each session row is a single-line command-palette-style option (icon + title
+// + right detail), matching COMMAND_ITEM_CLASSES' py-2 text-sm height.
+export const SESSIONS_LIST_ROW_HEIGHT_PX = 36;
+// Polled while the sessions modal is open so the list reflects attaches,
+// detaches, and grace reaps in near-realtime. Short enough to feel live, long
+// enough to avoid hammering the daemon on an idle open.
+export const SESSIONS_POLL_INTERVAL_MS = 1500;
 
 export const TOOLBAR_HIDE_DELAY_MS = 200;
 export const TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS = 1500;

@@ -82,6 +82,8 @@ export {
   resetAutomationInputSchema,
   scheduleInputSchema,
   serverToClientMessageSchema,
+  sessionListItemSchema,
+  sessionsListResponseSchema,
   updateAutomationInputSchema,
 } from "./schemas.js";
 export type {
@@ -127,6 +129,8 @@ export type {
   CreateWorktreeInput,
   ResetAutomationInput,
   ServerToClientMessage,
+  SessionListItem,
+  SessionListResponse,
   TriggerInput,
   UpdateAutomationInput,
 } from "./types.js";

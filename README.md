@@ -5,7 +5,7 @@
 
 Your terminal should just be a browser tab.
 
-Run `npx @monotykamary/localterm@latest start` and every browser tab is one shell. Open a new tab to spawn another. Close the tab to kill it. That's the whole product.
+Run `npx @monotykamary/localterm@latest start` and every browser tab is one shell. Open a new tab to spawn another. Close a tab and its shell waits in the session switcher (top-right) for a short grace window — switch back to it in that window, or it's reaped. That's the whole product.
 
 ![demo](https://www.localterm.dev/demo.png)
 
@@ -35,13 +35,18 @@ localterm start
 
 ## Usage
 
-The mental model is **shell = browser tab**:
+The mental model is **shell = browser tab**, but a tab is just a view onto a shell that outlives it for a grace window:
 
-- **New tab** → new shell
-- **Close tab** → shell dies immediately
-- **Reload tab** → fresh shell (the prior one is gone)
+- **New tab** → new shell (one authority spawns it)
+- **Close tab** → the shell detaches and waits (dormant) in the session switcher (top-right) for ~30s; reattach in that window (from this tab or another joining alongside) or it's reaped — no zombies
+- **Reload tab** → fresh shell for this tab (the prior one waits in the switcher like any closed tab)
+- **Switch** → the session switcher re-points this tab at any live shell; the one you left detaches and waits its grace window
 
-Reloads and connection drops spawn a fresh shell (auto-reconnect is built in for transport failures). If you want a long-lived shell that survives reloads, run `tmux` _inside_ localterm.
+Transient connection drops silently reattach to the same shell (auto-reconnect is built in for transport failures). A shell nobody is viewing dies within the grace window; kill the ones you're done with sooner from the switcher. If you want a shell that survives a full page reload in the _same_ tab, run `tmux` _inside_ localterm.
+
+### Sessions
+
+The session switcher (top-right, or <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>I</kbd>) lists every live shell — the one this tab is viewing, others attached in different tabs, and dormant ones waiting out their grace window. Click a row to switch this tab onto that shell; hover a row to kill it. Search by title, path, or shell. It's also in the command palette (<kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd> → Sessions).
 
 ## CLI
 
@@ -118,7 +123,7 @@ npx skills add monotykamary/localterm
 - By default, binds loopback (`127.0.0.1`) and enforces loopback `Host`/`Origin` headers to defeat DNS-rebinding and cross-origin attacks.
 - To share the daemon across machines, prefer `localterm install`'s Tailscale step — it surfaces the daemon on your tailnet at `https://<node>.ts.net` over a real Let's Encrypt cert, on an end-to-end-encrypted WireGuard mesh, with no port exposed to the public internet.
 - Pass `-H 0.0.0.0` (or any non-loopback address) to expose the server on all network interfaces. In this mode, `Host`/`Origin` must be from a private network (RFC 1918, CGNAT/Tailscale `100.64.127.x`, link-local, `*.localhost`) and WebSocket source IPs are filtered to private ranges — only use on trusted networks.
-- One PTY per WebSocket. Closing the tab kills the shell — no orphaned processes.
+- One PTY per WebSocket. Closing a tab detaches — the shell waits in the session switcher for a grace window (~30s) and is reaped if nobody reattaches; kill it sooner from the switcher.
 
 ## Resources & Contributing Back
 

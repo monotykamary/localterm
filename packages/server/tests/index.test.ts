@@ -148,11 +148,24 @@ describe("createServer WS lifecycle", () => {
     }
   });
 
-  it("unregisters session on WS close", async () => {
+  it("keeps the PTY alive (dormant) on WS close", async () => {
     const { socket } = await connectAndCollect(server.port);
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(server.registry.size()).toBe(1);
     await closeWs(socket);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // Closing the tab detaches; the shell parks (dormant) for the grace
+    // window so another tab can re-attach to it from the session picker.
+    expect(server.registry.size()).toBe(1);
+    const list = (await (await fetch(`http://127.0.0.1:${server.port}/api/sessions`)).json()) as {
+      sessions: { id: string }[];
+    };
+    expect(list.sessions).toHaveLength(1);
+    const killResponse = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/${list.sessions[0].id}`,
+      { method: "DELETE" },
+    );
+    expect(killResponse.ok).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(server.registry.size()).toBe(0);
   });
@@ -314,11 +327,11 @@ describe("createServer WS lifecycle", () => {
     expect(typeof sid).toBe("string");
     expect(server.registry.size()).toBe(1);
 
-    // Drop the WS. The PTY stays parked behind `sid` for the grace window —
-    // see SessionReattachPool.
+    // Drop the WS. The PTY detaches and stays alive (dormant) behind `sid` —
+    // see SessionManager.
     await closeWs(first.socket);
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(server.registry.size()).toBe(0);
+    expect(server.registry.size()).toBe(1);
 
     // Reconnect with the matching sid: the daemon re-attaches the parked PTY
     // instead of spawning a fresh shell, so the pid matches and the same id
@@ -376,5 +389,63 @@ describe("createServer WS lifecycle", () => {
     } finally {
       await closeWs(result.socket);
     }
+  });
+
+  it("fans output out to every client attached to the same PTY", async () => {
+    const connectWithSid = async (
+      sid: string | null,
+    ): Promise<{ socket: WebSocket; session: { id?: string; pid: number } }> => {
+      const url = sid
+        ? `ws://127.0.0.1:${server.port}/ws?sid=${encodeURIComponent(sid)}`
+        : `ws://127.0.0.1:${server.port}/ws`;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("ws connect timeout")), 10_000);
+        const socket = new WebSocket(url);
+        socket.binaryType = "arraybuffer";
+        socket.addEventListener("message", function listener(event) {
+          const parsed = normalizeMessage(event as WebSocket.MessageEvent);
+          if (
+            parsed &&
+            typeof parsed === "object" &&
+            (parsed as Record<string, unknown>).type === "session"
+          ) {
+            clearTimeout(timer);
+            socket.removeEventListener("message", listener);
+            resolve({ socket, session: parsed as { id?: string; pid: number } });
+          }
+        });
+        socket.addEventListener("error", () => {
+          clearTimeout(timer);
+          reject(new Error("ws error"));
+        });
+      });
+    };
+
+    const first = await connectWithSid(null);
+    const sid = first.session.id!;
+    first.socket.send(JSON.stringify({ type: "ready", replay: false }));
+
+    // A second tab attaches to the same live PTY by id.
+    const second = await connectWithSid(sid);
+    expect(second.session.id).toBe(sid);
+    expect(second.session.pid).toBe(first.session.pid);
+    second.socket.send(JSON.stringify({ type: "ready", replay: false }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    first.socket.send(JSON.stringify({ type: "input", data: "echo FANOUT_MARKER_42\n" }));
+    const matchesMarker = (message: unknown): boolean =>
+      Boolean(
+        message &&
+        typeof message === "object" &&
+        (message as Record<string, unknown>).type === "output" &&
+        String((message as { data?: string }).data).includes("FANOUT_MARKER_42"),
+      );
+    await Promise.all([
+      waitForMessage(first.socket, matchesMarker),
+      waitForMessage(second.socket, matchesMarker),
+    ]);
+
+    await closeWs(first.socket);
+    await closeWs(second.socket);
   });
 });

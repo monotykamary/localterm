@@ -167,15 +167,38 @@ export const OUTPUT_BATCH_WINDOW_MS = 2;
 // trips its own write error and shows "Shell ended" with no idea why.
 export const WS_HEARTBEAT_INTERVAL_MS = 20_000;
 export const WS_HEARTBEAT_TIMEOUT_MS = 60_000;
-// How long a PTY survives after its WS closes (transient reconnect window).
-// Sized to cover the browser's reconnect cycle plus wake-from-sleep latency
-// when the WS was dropped by a proxy (portless's two-socket pipe tears down
-// on either side's close/error/end during wake, surfacing as 1006 before the
-// client even tries to reconnect). Within this window a fresh WS opening
-// with the matching `?sid=` re-attaches to the live PTY instead of spawning
-// a new shell; past it the PTY is killed and the next connect spawns fresh.
+// Per-session scrollback ring buffer, appended continuously from the PTY's
+// output regardless of how many clients are attached (including zero). When a
+// tab switches to this PTY it requests the buffer via the {type:"ready"}
+// handshake and the server replays it as one binary frame, so the landing
+// screen shows recent output instead of a blank terminal. The attached
+// client's own xterm scrollback remains the long-term history; this is only
+// the "what you'd see right now" snapshot for a fresh attach. Capped per
+// session — at MAX_CONCURRENT_SESSIONS the worst case is this × the cap.
+export const SESSION_SCROLLBACK_REPLAY_BYTES = 256 * 1024;
+// How long a PTY with zero attached clients stays alive before being reaped.
+// One authority (the tab that spawned it, or another joining via the picker)
+// keeps a shell alive by subscribing; when the last subscriber leaves the
+// shell gets this long to be re-attached — a transient WS drop, a switch in
+// progress, a reconnect after wake — before it's killed. Past it the next
+// connect spawns a fresh shell. This bounds zombie shells: a shell nobody is
+// viewing dies within the window, not after a long idle timeout. Sized for
+// the browser's reconnect/switch cycle plus wake-from-sleep latency when the
+// WS was dropped by a proxy (portless's two-socket pipe tears down on either
+// side's close/error/end during wake, surfacing as 1006 before the client
+// even tries to reconnect).
 export const SESSION_GRACE_MS = 30_000;
-// Query param a reconnecting client carries to reattach its prior PTY.
+// How long a freshly-attached client stays "pending" — its live output is
+// buffered per-client until it sends {type:"ready", replay} (the localterm
+// client does this within milliseconds of the session frame, so its scrollback
+// replay lands before live fan-out for a clean switch). A back-compat client
+// that never sends ready (and never sends input) is auto-promoted after this
+// window with a buffered-output flush so it still receives its output — no
+// output is ever lost. Sized generously vs the client's synchronous send yet
+// well under any user-perceptible delay.
+export const SESSION_PENDING_PROMOTE_TIMEOUT_MS = 100;
+// Query param a reconnecting or switching client carries to attach to a live
+// PTY by id instead of spawning a fresh shell.
 export const SESSION_ID_QUERY_PARAM = "sid";
 // Query param an automation-run tab carries so the server can claim the run
 // (single-use) and pair the WS with the CDP target that opened it.

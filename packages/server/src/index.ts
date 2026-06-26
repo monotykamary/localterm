@@ -33,13 +33,8 @@ import {
   HTTP_STATUS_CREATED,
   HTTP_STATUS_NOT_FOUND,
   MAX_AUTOMATIONS,
-  MAX_CONCURRENT_SESSIONS,
-  MAX_OUTPUT_BYTES,
   MS_PER_MINUTE,
-  OUTPUT_BATCH_FLUSH_BYTES,
-  OUTPUT_BATCH_WINDOW_MS,
   SERVER_STOP_GRACE_MS,
-  SESSION_GRACE_MS,
   SESSION_ID_QUERY_PARAM,
   WS_BACKPRESSURE_THRESHOLD_BYTES,
   WS_CLOSE_BACKPRESSURE,
@@ -48,9 +43,6 @@ import {
   WS_HEARTBEAT_GRACE_MS,
   WS_HEARTBEAT_INTERVAL_MS,
   WS_HEARTBEAT_TIMEOUT_MS,
-  WS_OUTBOUND_DRAIN_POLL_MS,
-  WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES,
-  WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
   WS_READY_STATE_OPEN,
 } from "./constants.js";
 import { getDefaultShell } from "./default-shell.js";
@@ -66,14 +58,8 @@ import {
   getGitDiffFilePatch,
   getGitDiffFiles,
   getGitDiffSummary,
-  invalidateGitDiffCache,
   type GitDiffOptions,
 } from "./git-diff.js";
-import {
-  GitDiffWatcher,
-  GIT_DIFF_WATCHER_EVENT_NAMES,
-  type GitRefEventName,
-} from "./git-diff-watcher.js";
 import { HeartbeatStore } from "./heartbeat-store.js";
 import { parseCronExpression } from "./cron-expression.js";
 import { createGitWorktree, listGitWorktrees, removeGitWorktree } from "./git-worktrees.js";
@@ -87,10 +73,9 @@ import {
   updateWorktreeConfigInputSchema,
   worktreeIncludeFileInputSchema,
 } from "./schemas.js";
-import { Session } from "./session.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
-import { SessionReattachPool, generateSessionId } from "./session-reattach-pool.js";
-import { SessionRegistry } from "./session-registry.js";
+import { SessionManager, type AutomationContext, type ManagedSession } from "./session-manager.js";
+import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 import { resolveStaticAsset } from "./static-resolver.js";
 import { resolveImageAsset } from "./utils/resolve-image-asset.js";
 import { sweepStaleWorktrees } from "./utils/worktree-sweep.js";
@@ -172,7 +157,7 @@ export interface AutomationTabController {
 export interface RunningServer {
   port: number;
   host: string;
-  registry: SessionRegistry;
+  registry: SessionManager;
   /**
    * Update the announced surface origin automation-run tabs open at. Called by
    * the CLI once it has resolved the best surface from the bound port (tailnet
@@ -181,24 +166,6 @@ export interface RunningServer {
   setPublicUrl: (url: string | null) => void;
   stop: () => Promise<void>;
 }
-
-interface BroadcastSocket {
-  readyState: number;
-  // Accepts a UTF-8 JSON string for control frames (title, exit, etc.) or a
-  // raw Uint8Array<ArrayBuffer> for binary PTY output frames, which bypass JSON
-  // entirely — see sendOutputBytes/sendOutputBatchBytes. Matches the underlying
-  // WSContext.send signature from @hono/node-ws exactly so the ws argument from
-  // onOpen(ws) is assignable to this interface.
-  send: (raw: string | ArrayBuffer | Uint8Array<ArrayBuffer>) => void;
-  close: (code?: number, reason?: string) => void;
-  raw?: unknown;
-}
-
-const getRawBufferedAmount = (raw: unknown): number => {
-  if (!raw || typeof raw !== "object") return 0;
-  const candidate = Reflect.get(raw, "bufferedAmount");
-  return typeof candidate === "number" ? candidate : 0;
-};
 
 const callRawMethod = (raw: unknown, method: "ping" | "terminate"): boolean => {
   if (!raw || typeof raw !== "object") return false;
@@ -235,9 +202,9 @@ const extractRemoteAddress = (raw: unknown): string | null => {
   return typeof addr === "string" ? addr : null;
 };
 
-const safeSend = (ws: BroadcastSocket, payload: ServerToClientMessage) => {
+const safeSend = (ws: ClientSocket, payload: ServerToClientMessage) => {
   if (ws.readyState !== WS_READY_STATE_OPEN) return;
-  if (getRawBufferedAmount(ws.raw) > WS_BACKPRESSURE_THRESHOLD_BYTES) {
+  if (getBufferedAmount(ws) > WS_BACKPRESSURE_THRESHOLD_BYTES) {
     ws.close(WS_CLOSE_BACKPRESSURE, "backpressure");
     return;
   }
@@ -247,111 +214,6 @@ const safeSend = (ws: BroadcastSocket, payload: ServerToClientMessage) => {
     /* socket closed between readyState check and send */
   }
 };
-
-// Output frames travel as raw UTF-8 bytes, not JSON. JSON.stringify/parse on
-// terminal output is the dominant per-byte cost on the renderer main thread
-// (traced: ~36% of main-thread busy in steady-state cmatrix is JSON.parse of
-// {"type":"output","data":"..."}, scaling linearly with payload size because of
-// per-character escape scanning on both sides). PTY output is already bytes; the
-// server UTF-8-encodes the accumulated string batch once at flush and emits a
-// single binary frame. The client gets event.data as an ArrayBuffer and hands
-// it to OutputBatcher with no JSON.parse, no string roundtrip. Splits at
-// MAX_OUTPUT_BYTES as a safety cap on single-frame size (unreachable in
-// practice — OUTPUT_BATCH_FLUSH_BYTES=32KB flushes well below this).
-const sendOutputBytes = (ws: BroadcastSocket, bytes: Uint8Array<ArrayBuffer>) => {
-  if (ws.readyState !== WS_READY_STATE_OPEN) return;
-  if (getRawBufferedAmount(ws.raw) > WS_BACKPRESSURE_THRESHOLD_BYTES) {
-    ws.close(WS_CLOSE_BACKPRESSURE, "backpressure");
-    return;
-  }
-  try {
-    ws.send(bytes);
-  } catch {
-    /* socket closed between readyState check and send */
-  }
-};
-
-// Stateless UTF-8 encode + chunked send of the batch string. Shared by the
-// onOpen flush path (which additionally enforces per-session backpressure)
-// and the onClose/onError teardown paths (which don't — the socket is already
-// closing, so triggering a PTY pause would just stall the teardown).
-const sendOutputBatchBytes = (ws: BroadcastSocket, batch: string) => {
-  if (!batch) return;
-  const bytes = Buffer.from(batch, "utf8");
-  if (bytes.byteLength <= MAX_OUTPUT_BYTES) {
-    sendOutputBytes(ws, bytes);
-  } else {
-    for (let offset = 0; offset < bytes.byteLength; offset += MAX_OUTPUT_BYTES) {
-      sendOutputBytes(ws, bytes.subarray(offset, offset + MAX_OUTPUT_BYTES));
-    }
-  }
-};
-
-// Git metadata is per-repo, not per-tab. Two tabs in the same cwd share one
-// working tree, so a git-dirty signal from one tab — its shell's precmd OSC
-// hook, or its fs watcher on .git — must refresh every tab in that cwd, not
-// just the one whose shell produced the prompt. Without this, a git operation
-// run inside one of two side-by-side tabs updates only that tab; the sibling
-// stays stale until its own shell next renders a prompt (its precmd hook) or
-// its fs watcher happens to surface the change. The summary is pathscoped to
-// the cwd (`git diff` from a subdirectory lists only files under it), so the
-// coordinator is keyed by cwd, not by repo — tabs in different subdirectories
-// of the same repo get distinct summaries and never share.
-//
-// One coordinator per cwd also dedups the summary computation across concurrent
-// signals from sibling tabs: their independent fs watchers and prompt hooks all
-// funnel into a single in-flight pass (with one trailing pass after the burst
-// settles), and the result is broadcast to every subscribed socket.
-class GitDirtyCoordinator {
-  private inFlight = false;
-  private pending = false;
-  private readonly subscribers = new Set<BroadcastSocket>();
-
-  constructor(readonly cwd: string) {}
-
-  add(socket: BroadcastSocket): void {
-    this.subscribers.add(socket);
-  }
-
-  remove(socket: BroadcastSocket): void {
-    this.subscribers.delete(socket);
-  }
-
-  get isEmpty(): boolean {
-    return this.subscribers.size === 0;
-  }
-
-  signal(): void {
-    if (this.inFlight) {
-      this.pending = true;
-      return;
-    }
-    this.inFlight = true;
-    void this.run();
-  }
-
-  private readonly run = async (): Promise<void> => {
-    try {
-      // The working tree changed, so any cached full-diff pass for this cwd is
-      // stale — drop it before re-reading the summary so the viewer's next
-      // per-file fetch rebuilds against the new tree.
-      invalidateGitDiffCache(this.cwd);
-      const summary = await getGitDiffSummary(this.cwd);
-      const payload: ServerToClientMessage = { type: "git-diff-summary", summary };
-      for (const socket of this.subscribers) {
-        safeSend(socket, payload);
-      }
-    } catch {
-      /* transient git failure; the next signal retries */
-    } finally {
-      this.inFlight = false;
-      if (this.pending) {
-        this.pending = false;
-        this.signal();
-      }
-    }
-  };
-}
 
 export const createServer = async (options: ServerOptions = {}): Promise<RunningServer> => {
   const port = options.port ?? DEFAULT_PORT;
@@ -367,12 +229,36 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     );
   }
 
-  const registry = new SessionRegistry();
-  // PTY reattach pool: a WS close (portless teardown on wake, transient drop)
-  // parks the live Session here instead of killing it. The next WS open
-  // carrying the matching `?sid=` reattaches; a grace timer disposes
-  // abandoned PTYs whose client never comes back.
-  const reattachPool = new SessionReattachPool({ graceMs: SESSION_GRACE_MS });
+  // The session manager owns every live PTY for the daemon's lifetime. A PTY
+  // persists across client detach (closing a tab detaches instead of killing
+  // it) so the session picker can re-attach to it; it dies on shell exit, an
+  // explicit kill from the picker, or the dormant-idle sweep. Multiple clients
+  // may attach to one PTY and fan out output/resize to all of them. The hooks
+  // close over managers defined further below; they only fire at runtime
+  // (attach/detach/output/exit), so referencing the later consts here is safe.
+  const registry = new SessionManager({
+    sendControl: safeSend,
+    hooks: {
+      onOutputActivity: () => caffeinateManager.noteOutputActivity(),
+      onSessionActivity: () => caffeinateManager.pokeAuto(),
+      onSessionEvent: (event, cwd) => sessionEventManager.onSessionEvent(event, cwd),
+      onAutomationExit: (automationId, runId, exitCode) => {
+        automationStore.updateRun(automationId, runId, {
+          status: exitCode === 0 ? "completed" : "failed",
+          exitCode,
+          finishedAt: Date.now(),
+        });
+        broadcastAutomations();
+        closeRunTabIfRequested(automationId, runId);
+        folderWatchManager.notifyRunFinished(automationId);
+        sessionEventManager.notifyRunFinished(automationId);
+      },
+      onClientExit: (ws, exitCode) => {
+        const targetId = wsToTargetId.get(ws);
+        if (targetId && (exitCode === null || exitCode === 0)) void cdpClient?.closeTab(targetId);
+      },
+    },
+  });
   const app = new Hono();
   app.use("*", createNetworkPolicyMiddleware(host));
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
@@ -430,25 +316,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     batteryProbe: options.caffeinateBatteryProbe,
     hasRecentOutput: (pids, withinMs) => registry.hasRecentOutput(pids, withinMs),
   });
-  const clientSockets = new Set<BroadcastSocket>();
-  // One GitDirtyCoordinator per cwd, shared by every tab whose session is in
-  // that cwd. A tab subscribes on open and resubscribes on every `cd`; a
-  // git-dirty signal from any tab in the cwd broadcasts the recomputed summary
-  // to all of them. Emptied coordinators are dropped so a cwd no tab is in
-  // holds no watcher state.
-  const gitDirtyCoordinatorsByCwd = new Map<string, GitDirtyCoordinator>();
-  const coordinatorForCwd = (cwd: string): GitDirtyCoordinator => {
-    const key = path.resolve(cwd);
-    let coordinator = gitDirtyCoordinatorsByCwd.get(key);
-    if (!coordinator) {
-      coordinator = new GitDirtyCoordinator(key);
-      gitDirtyCoordinatorsByCwd.set(key, coordinator);
-    }
-    return coordinator;
-  };
-  const releaseGitDirtyCoordinator = (coordinator: GitDirtyCoordinator): void => {
-    if (coordinator.isEmpty) gitDirtyCoordinatorsByCwd.delete(coordinator.cwd);
-  };
+  const clientSockets = new Set<ClientSocket>();
+  // CDP target paired with each WS via the {type:"identify"} handshake, so the
+  // manager's onClientExit hook can drive closeTab on a clean shell exit for
+  // that specific socket. Per-WS (a CDP target belongs to one page); cleared
+  // on detach.
+  const wsToTargetId = new Map<ClientSocket, string>();
   const cdpBackgroundTabsDisabled = process.env.LOCALTERM_DISABLE_CDP_TABS === "1";
   // One persistent CDP socket for the daemon's lifetime — opened once at start
   // (below), so the user clears the browser's remote-debugging prompt a single
@@ -664,6 +537,18 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   const api = new Hono();
   api.get("/health", (context) => context.json({ ok: true, sessions: registry.size() }));
+
+  // The session picker: every live PTY (attached or dormant), so a tab can
+  // switch to one by id or kill one it no longer wants. `clients` is the count
+  // of attached sockets — 0 marks a dormant shell left behind by a closed tab,
+  // which is exactly the row the picker exists to surface.
+  api.get("/sessions", (context) => context.json({ sessions: registry.list() }));
+
+  api.delete("/sessions/:id", (context) => {
+    const killed = registry.kill(context.req.param("id"));
+    if (!killed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json({ ok: true });
+  });
 
   // Same validation as the WS `?cwd=` param: must exist and be a directory.
   // No path containment check — this daemon already hands out unrestricted
@@ -1071,41 +956,18 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   app.get(
     "/ws",
     upgradeWebSocket((context) => {
-      let session: Session | null = null;
-      let activeWs: BroadcastSocket | null = null;
+      let activeWs: ClientSocket | null = null;
       let claimedRunId: string | null = null;
-      // Server-side id for the live PTY attached to this WS. Sent to the
-      // client in the {type:"session"} message so a reconnect carries it back
-      // as `?sid=` and the daemon reattaches the parked Session instead of
-      // spawning a fresh shell. Cleared on genuine shell exit (no reattach).
+      // Server-side id of the PTY this WS is attached to. Sent to the client in
+      // the {type:"session"} frame so a reconnect or switch carries it back as
+      // `?sid=` and the manager attaches to the live PTY instead of spawning.
       let sessionId: string | null = null;
-      // Persisted across park/reattach so onClose/onError can re-park the
-      // automation-run context (the run-tracker claim is single-use, so we
-      // can't re-derive automationId/runId from `?run=` on reconnect).
-      let automationId: string | null = null;
-      // The CDP targetId this WS socket was paired with via the
-      // `{type:"identify"}` handshake (page's ambient token →
-      // CdpClient.findTargetIdForToken). Set on identify; drives closeTab on
-      // clean shell exit. Stays null when no CDP is reachable, the token raced
-      // (page opened before the CdpClient observed it), or the page never
-      // re-identified.
-      let claimedTargetId: string | null = null;
-      // The per-cwd git-dirty coordinator this socket is currently subscribed
-      // to. Lives in this outer scope (not onOpen's) so the shared
-      // `releaseSessionFromSocket` finalization — called by both onClose and
-      // onError — can unsubscribe it. Moves whenever the session's cwd changes.
-      let gitDirtyCoordinator: GitDirtyCoordinator | null = null;
-      let drainPollTimer: NodeJS.Timeout | null = null;
+      // The managed session this socket is attached to (null after detach). The
+      // manager owns the PTY's listeners, fan-out, and lifecycle; this reference
+      // is only for the heartbeat's pid label.
+      let managed: ManagedSession | null = null;
       let heartbeatTimer: NodeJS.Timeout | null = null;
       let stopHeartbeat: (() => void) | null = null;
-      let outputBatch = "";
-      let outputBatchTimer: NodeJS.Timeout | null = null;
-
-      const stopDrainPoll = () => {
-        if (drainPollTimer === null) return;
-        clearInterval(drainPollTimer);
-        drainPollTimer = null;
-      };
 
       const stopHeartbeatChecks = () => {
         if (heartbeatTimer !== null) {
@@ -1128,39 +990,20 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
         }
       };
       // Single-shot finalization shared by onClose/onError (ws fires error then
-      // close on a transport failure; without this guard both would try to
-      // dispose/park the same Session). Parks a still-live PTY behind `sid` so
-      // a reconnecting client with `?sid=` can reattach; disposes on genuine
-      // shell exit, when no sid was minted, or when the session is already
-      // gone.
+      // close on a transport failure; without this guard both would detach
+      // twice). Detaches this socket from its PTY — the PTY itself stays alive
+      // (dormant if this was the last client) so the session picker can
+      // re-attach to it. The manager disposes the PTY on shell exit or kill.
       let sessionFinalized = false;
       const releaseSessionFromSocket = () => {
-        if (sessionFinalized) return;
-        if (!session) return;
+        if (sessionFinalized || !activeWs) return;
         sessionFinalized = true;
-        const live = session;
-        registry.unregister(live);
-        caffeinateManager.pokeAuto();
-        if (!live.isExited && sessionId) {
-          reattachPool.park(live, {
-            sid: sessionId,
-            claimedRunId,
-            claimedTargetId,
-            automationId,
-          });
-        } else {
-          live.dispose();
-        }
-        // Unsubscribe from the per-cwd git-dirty coordinator so a closed
-        // tab stops receiving (and stops keeping alive) broadcasts for its
-        // former cwd. `activeWs` is the socket this coordinator was added
-        // under; it's nulled below, so capture it first.
-        if (gitDirtyCoordinator && activeWs) {
-          gitDirtyCoordinator.remove(activeWs);
-          releaseGitDirtyCoordinator(gitDirtyCoordinator);
-          gitDirtyCoordinator = null;
-        }
-        session = null;
+        const ws = activeWs;
+        registry.detach(ws);
+        wsToTargetId.delete(ws);
+        clientSockets.delete(ws);
+        releaseRunTabHandle();
+        managed = null;
         activeWs = null;
       };
 
@@ -1192,35 +1035,22 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               return;
             }
           }
-          if (registry.size() >= MAX_CONCURRENT_SESSIONS) {
-            ws.close(WS_CLOSE_CAPACITY_REACHED, "session capacity reached");
-            return;
-          }
-          clientSockets.add(ws);
-          // Claims are single-use: a reload of a ?run= tab gets a plain shell
-          // in the same cwd instead of re-running the scheduled command.
-          const claimedRun = requestedRunId ? automationRunTracker.claim(requestedRunId) : null;
-          if (claimedRun) claimedRunId = claimedRun.runId;
-          // Reattach: if the WS carries a `?sid=` for a PTY the pool still has
-          // parked (transient drop — portless teardown on wake, brief network
-          // blip), rebind the live Session to this socket instead of spawning
-          // a new shell. A `claim()` miss (grace expired, or shell exited while
-          // parked) falls through to the spawn path.
-          const parked = requestedSid ? reattachPool.claim(requestedSid) : null;
-          const isReattach = parked !== null;
-          let liveSession: Session;
-          if (parked) {
-            liveSession = parked.session;
-            sessionId = parked.sid;
-            claimedRunId = parked.claimedRunId;
-            claimedTargetId = parked.claimedTargetId;
-            automationId = parked.automationId;
-            // Re-register so the live PTY counts toward MAX_CONCURRENT_SESSIONS
-            // and caffeinate's ps-tree walk again. park() unregistered it on
-            // the prior WS close; if we skipped this, a transient drop would
-            // leave the PTY off the books until the next reconnect.
-            registry.register(liveSession);
+          // Reattach if `?sid=` names a PTY the manager still has live (a
+          // transient drop, or a switch from the session picker). A miss
+          // (shell exited while dormant, killed, or reaped by the idle
+          // sweep) falls through to a fresh spawn.
+          const attached = requestedSid ? registry.attach(ws, requestedSid) : null;
+          if (attached) {
+            managed = attached;
+            sessionId = attached.id;
           } else {
+            if (registry.atCapacity()) {
+              ws.close(WS_CLOSE_CAPACITY_REACHED, "session capacity reached");
+              return;
+            }
+            // Claims are single-use: a reload of a ?run= tab gets a plain
+            // shell in the same cwd instead of re-running the scheduled command.
+            const claimedRun = requestedRunId ? automationRunTracker.claim(requestedRunId) : null;
             let sessionCwd = requestedCwd;
             if (claimedRun) {
               try {
@@ -1229,39 +1059,32 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
                 /* automation cwd vanished since creation; fall back to default */
               }
             }
-            const freshSession = new Session({
-              cwd: sessionCwd,
-              initialCommand: claimedRun?.command ?? requestedInitialCommand,
-            });
-            liveSession = freshSession;
-            sessionId = generateSessionId();
-            if (claimedRun) automationId = claimedRun.automationId;
-            registry.register(freshSession);
-          }
-          session = liveSession;
-
-          const automationRunId = claimedRunId;
-          const isAutomationSession = automationId !== null;
-          if (isAutomationSession && !isReattach) {
-            automationStore.updateRun(automationId as string, automationRunId as string, {
-              status: "running",
-              startedAt: Date.now(),
-            });
-            broadcastAutomations();
-          }
-          if (isAutomationSession) {
-            liveSession.on("automation-exit", (exitCode: number) => {
-              automationStore.updateRun(automationId as string, automationRunId as string, {
-                status: exitCode === 0 ? "completed" : "failed",
-                exitCode,
-                finishedAt: Date.now(),
+            const automation: AutomationContext | undefined = claimedRun
+              ? { automationId: claimedRun.automationId, runId: claimedRun.runId }
+              : undefined;
+            const spawned = registry.spawnAndAttach(
+              ws,
+              { cwd: sessionCwd, initialCommand: claimedRun?.command ?? requestedInitialCommand },
+              automation,
+            );
+            if (!spawned) {
+              ws.close(WS_CLOSE_CAPACITY_REACHED, "session capacity reached");
+              return;
+            }
+            managed = spawned;
+            sessionId = spawned.id;
+            if (claimedRun) {
+              claimedRunId = claimedRun.runId;
+              automationStore.updateRun(claimedRun.automationId, claimedRun.runId, {
+                status: "running",
+                startedAt: Date.now(),
               });
               broadcastAutomations();
-              closeRunTabIfRequested(automationId as string, automationRunId as string);
-              folderWatchManager.notifyRunFinished(automationId as string);
-              sessionEventManager.notifyRunFinished(automationId as string);
-            });
+            }
           }
+          if (!managed) return;
+          clientSockets.add(ws);
+          const liveSession = managed.session;
 
           // Heartbeat. Without this, half-open sockets (laptop sleep, network
           // dropout) never surface as a `close` event and the daemon keeps
@@ -1275,9 +1098,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           // sleep but the loopback socket itself never dropped), we send one
           // fresh ping and wait through WS_HEARTBEAT_GRACE_MS for a pong before
           // terminating. A live socket pongs inside the grace window; a truly
-          // half-open one stays silent and terminates on the next tick. This
-          // avoids killing sessions that survived a brief laptop sleep, while
-          // still tearing down genuinely dead sockets within ~one extra tick.
+          // half-open one stays silent and terminates on the next tick.
           let lastPongAt = Date.now();
           let pendingPingAt = 0;
           stopHeartbeat = onRawEvent(ws.raw, "pong", () => {
@@ -1308,174 +1129,6 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             heartbeatTimer.unref?.();
           }
 
-          // Outbound flow control. When the WS buffer climbs past the high
-          // water mark we pause the PTY (OS pipe back-pressure stops the
-          // child process producing more output) and start polling for the
-          // buffer to drain back below the low water mark. This way bursty
-          // output (`cat`, build logs, npm install) doesn't kill the
-          // connection — only a genuinely wedged receiver eventually trips
-          // the WS_BACKPRESSURE_THRESHOLD_BYTES emergency in safeSend.
-          const ensureDrainPoll = () => {
-            if (drainPollTimer !== null) return;
-            drainPollTimer = setInterval(() => {
-              if (!liveSession.isPaused) {
-                stopDrainPoll();
-                return;
-              }
-              if (getRawBufferedAmount(ws.raw) <= WS_OUTBOUND_RESUME_LOW_WATER_BYTES) {
-                liveSession.resume();
-                stopDrainPoll();
-              }
-            }, WS_OUTBOUND_DRAIN_POLL_MS);
-            drainPollTimer.unref?.();
-          };
-
-          // Drain-and-pause for the timer-driven and threshold flushes; the per-
-          // session backpressure pause check lives here (and only here — the
-          // onClose/onError teardown paths skip it via sendOutputBatchBytes
-          // directly).
-          const drainOutputBatch = (target: BroadcastSocket) => {
-            sendOutputBatchBytes(target, outputBatch);
-            outputBatch = "";
-            if (
-              !liveSession.isPaused &&
-              getRawBufferedAmount(target.raw) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES
-            ) {
-              liveSession.pause();
-              ensureDrainPoll();
-            }
-          };
-
-          const flushOutputBatch = () => {
-            outputBatchTimer = null;
-            drainOutputBatch(ws);
-          };
-
-          // Wire listeners so any emit from Session (current or future)
-          // reaches the client. Today node-pty's data/exit are async, but
-          // this guards against drift.
-          const onOutput = (data: string) => {
-            outputBatch += data;
-            registry.noteOutput(liveSession.pid);
-            caffeinateManager.noteOutputActivity();
-            if (outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
-              if (outputBatchTimer !== null) {
-                clearTimeout(outputBatchTimer);
-                outputBatchTimer = null;
-              }
-              flushOutputBatch();
-            } else if (outputBatchTimer === null) {
-              outputBatchTimer = setTimeout(flushOutputBatch, OUTPUT_BATCH_WINDOW_MS);
-            }
-          };
-          const onTitle = (title: string) => safeSend(ws, { type: "title", title });
-          const onCwd = (cwd: string) => safeSend(ws, { type: "cwd", cwd });
-          const onForeground = (process: string | null) => {
-            safeSend(ws, { type: "foreground", process });
-            // A foreground transition is the cheap signal that a recognized
-            // program may have started or stopped — nudge automatic detection.
-            caffeinateManager.pokeAuto();
-          };
-          const onNotification = (body: string) => safeSend(ws, { type: "notification", body });
-          const onExit = (code: number | null) => {
-            // Reliable closeTab on a clean shell exit for CDP-controlled tabs.
-            // closeTab drives the browser's own close path via CDP instead of
-            // relying on the client's window.close() — which often doesn't
-            // apply (Dia/Arc, or a tab the user opened by URL rather than via
-            // window.open) and strands the tab. Fire-and-forget onto the same
-            // closeQueue that serializes automation-run closes, so concurrent
-            // Ctrl+Ds across tabs never interleave and orphan targets.
-            // Skipped on non-zero exit codes so the dead-session mask surfaces
-            // the failure instead of closing the tab silently.
-            if (claimedTargetId && (code === null || code === 0)) {
-              void cdpClient?.closeTab(claimedTargetId);
-            }
-            if (outputBatchTimer !== null) {
-              clearTimeout(outputBatchTimer);
-              outputBatchTimer = null;
-            }
-            flushOutputBatch();
-            stopDrainPoll();
-            stopHeartbeatChecks();
-            gitDiffWatcher.dispose();
-            safeSend(ws, { type: "exit", code });
-            ws.close();
-          };
-
-          const gitDiffWatcher = new GitDiffWatcher();
-          // Subscribe this tab to the per-cwd git-dirty coordinator so a git
-          // change observed by any tab in the same cwd (its prompt hook or fs
-          // watcher) refreshes this tab too. The coordinator dedups the
-          // summary computation and broadcasts the result to every subscriber.
-          gitDirtyCoordinator = coordinatorForCwd(liveSession.cwd);
-          gitDirtyCoordinator.add(ws);
-          const signalGitDirty = (): void => {
-            const cwd = liveSession.lastEmittedCwd;
-            if (!cwd) return;
-            coordinatorForCwd(cwd).signal();
-          };
-
-          gitDiffWatcher.on("git-dirty", () => {
-            signalGitDirty();
-          });
-          const gitAutomationEvents: GitRefEventName[] = GIT_DIFF_WATCHER_EVENT_NAMES.filter(
-            (eventName): eventName is GitRefEventName => eventName !== "git-dirty",
-          );
-          for (const eventName of gitAutomationEvents) {
-            gitDiffWatcher.on(eventName, () => {
-              if (!isAutomationSession) {
-                sessionEventManager.onSessionEvent(eventName, liveSession.lastEmittedCwd);
-              }
-            });
-          }
-          gitDiffWatcher.start(liveSession.cwd);
-
-          // Automation-run sessions should not feed events into the session
-          // event manager — only user-driven sessions count.
-          liveSession.on("git-dirty", () => {
-            signalGitDirty();
-            if (!isAutomationSession) {
-              sessionEventManager.onSessionEvent("git-dirty", liveSession.lastEmittedCwd);
-            }
-          });
-          liveSession.on("cwd", (changedCwd: string) => {
-            gitDiffWatcher.stop();
-            gitDiffWatcher.start(changedCwd);
-            const nextCoordinator = coordinatorForCwd(changedCwd);
-            const current = gitDirtyCoordinator;
-            if (current && nextCoordinator !== current) {
-              current.remove(ws);
-              releaseGitDirtyCoordinator(current);
-              gitDirtyCoordinator = nextCoordinator;
-              nextCoordinator.add(ws);
-            }
-            if (!isAutomationSession) {
-              sessionEventManager.onSessionEvent("cwd", changedCwd);
-            }
-          });
-
-          liveSession.on("output", onOutput);
-          liveSession.on("title", onTitle);
-          liveSession.on("cwd", onCwd);
-          liveSession.on("foreground", (foregroundProcess: string | null) => {
-            onForeground(foregroundProcess);
-            if (!isAutomationSession) {
-              sessionEventManager.onSessionEvent("foreground", liveSession.lastEmittedCwd);
-            }
-          });
-          liveSession.on("notification", (body: string) => {
-            onNotification(body);
-            if (!isAutomationSession) {
-              sessionEventManager.onSessionEvent("notification", liveSession.lastEmittedCwd);
-            }
-          });
-          liveSession.on("exit", (code: number | null) => {
-            onExit(code);
-            if (!isAutomationSession && liveSession.lastEmittedCwd) {
-              sessionEventManager.onSessionEvent("exit", liveSession.lastEmittedCwd);
-            }
-          });
-
           safeSend(ws, {
             type: "session",
             shell: liveSession.shell,
@@ -1490,7 +1143,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           safeSend(ws, caffeinateStatePayload());
         },
         onMessage(event) {
-          if (!session) return;
+          if (!activeWs) return;
+          const ws = activeWs;
           let rawPayload: unknown;
           try {
             const raw = typeof event.data === "string" ? event.data : event.data.toString();
@@ -1501,7 +1155,20 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           const parsed = clientToServerMessageSchema.safeParse(rawPayload);
           if (!parsed.success) return;
           if (parsed.data.type === "input") {
-            session.write(parsed.data.data);
+            registry.writeInput(ws, parsed.data.data);
+          } else if (parsed.data.type === "resize") {
+            registry.resize(
+              ws,
+              parsed.data.cols,
+              parsed.data.rows,
+              parsed.data.pixelWidth,
+              parsed.data.pixelHeight,
+            );
+          } else if (parsed.data.type === "ready") {
+            // Attach handshake: the client has the {type:"session"} frame and
+            // says whether it wants the scrollback replay (a switch to a PTY
+            // it didn't already have on screen) before live fan-out begins.
+            registry.promote(ws, parsed.data.replay);
           } else if (parsed.data.type === "caffeinate-mode") {
             caffeinateManager.setMode(parsed.data.mode);
           } else if (parsed.data.type === "caffeinate-commands") {
@@ -1513,8 +1180,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           } else if (parsed.data.type === "identify") {
             // Ambient tab provenance: the page echoes the CDP-injected token so
             // we pair this socket with its targetId for closeTab on shell exit.
-            // `token:null` means injection hasn't landed yet (page opened its
-            // WS before the CdpClient observed it) — wait for the page to
+            // `token:null` means injection hasn't landed yet (page opened its WS
+            // before the CdpClient observed it) — wait for the page to
             // re-identify on the 'localterm-token' event rather than pairing
             // eagerly against a null token. We always ack the client either
             // way so its markShellDead path knows whether to fall back to
@@ -1522,63 +1189,34 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             const token = parsed.data.token;
             if (token !== null) {
               const targetId = cdpClient?.findTargetIdForToken(token);
-              if (targetId) claimedTargetId = targetId;
+              if (targetId) wsToTargetId.set(ws, targetId);
             }
-            if (activeWs) {
-              safeSend(activeWs, {
-                type: "cdp-controlled",
-                controlled: claimedTargetId !== null,
-              });
-            }
-          } else {
-            session.resize(
-              parsed.data.cols,
-              parsed.data.rows,
-              parsed.data.pixelWidth,
-              parsed.data.pixelHeight,
-            );
+            safeSend(ws, {
+              type: "cdp-controlled",
+              controlled: wsToTargetId.has(ws),
+            });
           }
         },
         onClose(event) {
-          if (outputBatchTimer !== null) {
-            clearTimeout(outputBatchTimer);
-            outputBatchTimer = null;
-          }
-          if (outputBatch && activeWs) {
-            sendOutputBatchBytes(activeWs, outputBatch);
-            outputBatch = "";
-          }
-          stopDrainPoll();
           stopHeartbeatChecks();
           // Most "the terminal randomly died" reports are actually the WS
           // closing for a reason we never surfaced; logging code+reason+
           // wasClean here makes the next incident a 1-line lookup in
           // ~/.localterm/server.log.
-          const pidLabel = session ? ` pid ${session.pid}` : "";
+          const pidLabel = managed ? ` pid ${managed.session.pid}` : "";
           console.info(
             `ws closed${pidLabel}: code=${event.code} reason=${JSON.stringify(event.reason)} wasClean=${event.wasClean}`,
           );
-          if (activeWs) clientSockets.delete(activeWs);
           releaseRunTabHandle();
           releaseSessionFromSocket();
         },
         onError(event) {
-          if (outputBatchTimer !== null) {
-            clearTimeout(outputBatchTimer);
-            outputBatchTimer = null;
-          }
-          if (outputBatch && activeWs) {
-            sendOutputBatchBytes(activeWs, outputBatch);
-            outputBatch = "";
-          }
-          stopDrainPoll();
           stopHeartbeatChecks();
           const errorValue =
             event && typeof event === "object" ? (Reflect.get(event, "error") ?? event) : event;
           const message = errorValue instanceof Error ? errorValue.message : String(errorValue);
-          const pidLabel = session ? ` pid ${session.pid}` : "";
+          const pidLabel = managed ? ` pid ${managed.session.pid}` : "";
           console.error(`ws error${pidLabel}: ${message}`);
-          if (activeWs) clientSockets.delete(activeWs);
           releaseRunTabHandle();
           releaseSessionFromSocket();
         },
@@ -1696,7 +1334,6 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     caffeinateManager.dispose();
     cdpClient?.close();
     registry.disposeAll();
-    reattachPool.disposeAll();
     // Forcibly tear down every WS first. node-pty + ws upgraded sockets
     // aren't tracked in http.Server's keep-alive set, so target.close() would
     // otherwise wait forever for them and the CLI's force-exit fallback would
@@ -1739,7 +1376,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 };
 
 export type { Session } from "./session.js";
-export type { SessionRegistry } from "./session-registry.js";
+export type {
+  SessionManager,
+  ManagedSession,
+  AutomationContext,
+  SessionListItem,
+} from "./session-manager.js";
 export { CaffeinateController } from "./caffeinate-controller.js";
 export type {
   CaffeinateControllerOptions,
