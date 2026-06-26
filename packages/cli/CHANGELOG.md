@@ -1,5 +1,12 @@
 # localterm
 
+## 2.15.1
+
+### Patch Changes
+
+- Restore the diff viewer open-file button's screen-reader-friendly aria-label ordering ("open <path> in neovim" for text, "open image <path>" for images), which the image-preview feature had flattened and which left two diff-viewer tests red on main.
+  - @monotykamary/localterm-server@2.15.1
+
 ## 2.15.0
 
 ### Minor Changes
