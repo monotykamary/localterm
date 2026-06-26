@@ -116,8 +116,6 @@ import {
 import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider";
 import { extractKeyboardModifiers } from "@/utils/extract-keyboard-modifiers";
 import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
-import { formatConnectionLostMarker } from "@/utils/format-connection-lost-marker";
-import { formatReconnectedMarker } from "@/utils/format-reconnected-marker";
 import { formatShellExitMarker } from "@/utils/format-shell-exit-marker";
 import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anchor";
@@ -486,14 +484,15 @@ export const Terminal = () => {
     // treats it as a switch (reset + scrollback replay).
     let nextConnectSid: string | null = null;
     // Silent-reattach state: on a WS close while we still have a liveSessionId,
-    // we skip the connection-lost marker/modal and try one quiet reconnect —
-    // the daemon keeps the PTY alive across transient drops (portless teardown
-    // on wake, brief network blip). If the reconnect's session frame has the
-    // same id, the shell survived and the user sees nothing. If the id differs
-    // the shell exited while dormant and a fresh shell spawned — we surface
-    // that honestly with a marker. Cleared on session landing or on a second
-    // close (silent reconnect failed). Stashed close info is reused for the
-    // miss case so we don't lose the original code/reason.
+    // we skip the connection-lost modal and try one quiet reconnect — the
+    // daemon keeps the PTY alive across transient drops (portless teardown on
+    // wake, brief network blip). If the reconnect's session frame has the same
+    // id the shell survived and the user sees nothing; if the id differs the
+    // shell was reaped while dormant and a fresh shell spawned (the session
+    // handler resets the terminal and replays its scrollback). Cleared on
+    // session landing or on a second close (silent reconnect failed). Stashed
+    // close info is reused for the failed-reconnect modal so we don't lose the
+    // original code/reason.
     let reattachPending = false;
     let reattachCloseCode = 0;
     let reattachCloseReason = "";
@@ -1101,7 +1100,6 @@ export const Terminal = () => {
       exited = true;
       resetFavicon();
       setTabFaviconState("dead");
-      terminal.write(formatConnectionLostMarker(closeCode, closeReason));
       document.title = titleForDeadSession(lastTitle);
       setExitInfo({ reason: "connection-lost", closeCode, closeReason, wasClean });
       setSessionInfo(null);
@@ -1164,11 +1162,7 @@ export const Terminal = () => {
         if (message.type === "title") {
           applyIncomingTitle(message.title);
         } else if (message.type === "session") {
-          const wasReattachPending = reattachPending;
-          const expectedSid = wasReattachPending ? liveSessionId : null;
           const priorSessionId = liveSessionId;
-          const stashedCloseCode = reattachCloseCode;
-          const stashedCloseReason = reattachCloseReason;
           reattachPending = false;
           reattachCloseCode = 0;
           reattachCloseReason = "";
@@ -1186,12 +1180,6 @@ export const Terminal = () => {
           const isSwitch = priorSessionId !== null && message.id !== priorSessionId;
           if (isSwitch) {
             terminal.reset();
-            // A missed reattach (we were silently reconnecting to the prior
-            // PTY but the daemon gave us a fresh one) still surfaces the
-            // original close info as a marker before the fresh prompt.
-            if (wasReattachPending && message.id !== expectedSid) {
-              terminal.write(formatConnectionLostMarker(stashedCloseCode, stashedCloseReason));
-            }
           }
           setSessionInfo({
             shell: message.shell,
@@ -1923,8 +1911,6 @@ export const Terminal = () => {
       if (healthy) {
         const terminal = terminalRef.current;
         if (terminal) {
-          terminal.write(formatReconnectedMarker(effectiveCursorStyle, activeCursorBlink));
-          terminal.refresh(0, terminal.rows - 1);
           terminal.focus();
         }
         manualReconnectRef.current?.();
@@ -1945,7 +1931,7 @@ export const Terminal = () => {
       cancelled = true;
       if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
-  }, [shouldAutoReconnect, effectiveCursorStyle, activeCursorBlink]);
+  }, [shouldAutoReconnect]);
 
   useEffect(() => {
     if (isModalOpen) {
