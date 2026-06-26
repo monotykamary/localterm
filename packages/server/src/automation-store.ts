@@ -10,12 +10,15 @@ import {
 import type {
   Automation,
   AutomationRunRecord,
+  AutomationTrigger,
   AutomationV1,
   AutomationV2,
   CreateAutomationInput,
   UpdateAutomationInput,
 } from "./types.js";
-import { normalizeScheduleInput, normalizeTriggerInput } from "./utils/compile-schedule.js";
+import { normalizeScheduleInput } from "./utils/compile-schedule.js";
+import { generateWebhookId } from "./utils/generate-webhook-id.js";
+import { normalizeTriggerInput } from "./utils/normalize-trigger.js";
 
 // A run is terminal once it has a definitive outcome; only those carry a
 // finishedAt when migrated from a v1 lastRun.
@@ -80,6 +83,18 @@ export class AutomationStore {
     return this.automations.find((automation) => automation.id === id) ?? null;
   }
 
+  // Lookup by webhook capability id — the route resolves an incoming
+  // /api/webhooks/<id> POST to its automation here. Returns null for an unknown
+  // or non-webhook automation (a stored webhook id is unique by construction).
+  getByWebhookId(webhookId: string): Automation | null {
+    return (
+      this.automations.find(
+        (automation) =>
+          automation.trigger.kind === "webhook" && automation.trigger.id === webhookId,
+      ) ?? null
+    );
+  }
+
   size(): number {
     return this.automations.length;
   }
@@ -89,7 +104,7 @@ export class AutomationStore {
     const automation: Automation = {
       id: randomUUID(),
       name: input.name,
-      trigger: normalizeTriggerInput(input.trigger),
+      trigger: this.finalizeTrigger(normalizeTriggerInput(input.trigger), null),
       cwd: input.cwd,
       command: input.command,
       enabled: input.enabled ?? true,
@@ -118,7 +133,9 @@ export class AutomationStore {
     const updated: Automation = {
       ...current,
       ...(patch.name !== undefined ? { name: patch.name } : {}),
-      ...(patch.trigger !== undefined ? { trigger: normalizeTriggerInput(patch.trigger) } : {}),
+      ...(patch.trigger !== undefined
+        ? { trigger: this.finalizeTrigger(normalizeTriggerInput(patch.trigger), current.trigger) }
+        : {}),
       ...(patch.cwd !== undefined ? { cwd: patch.cwd } : {}),
       ...(patch.command !== undefined ? { command: patch.command } : {}),
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
@@ -203,6 +220,29 @@ export class AutomationStore {
     this.automations[index] = updated;
     this.persist();
     return updated;
+  }
+
+  // finalizeTrigger completes a webhook trigger's id after the stateless
+  // normalizeTriggerInput proposes one. On a PATCH that keeps the webhook kind,
+  // the existing id is preserved so editing the command/name never rotates the
+  // URL configured in CI; on a create or a kind switch into webhook, the
+  // proposed id is kept unless it collides with an existing webhook (a
+  // near-impossibility at WEBHOOK_ID_BYTES, but guaranteed unique here so a
+  // stored id never routes ambiguously). Non-webhook triggers pass through.
+  private finalizeTrigger(
+    normalized: AutomationTrigger,
+    existing: AutomationTrigger | null,
+  ): AutomationTrigger {
+    if (normalized.kind !== "webhook") return normalized;
+    if (existing?.kind === "webhook") return { ...normalized, id: existing.id };
+    const existingIds = new Set(
+      this.automations.flatMap((automation) =>
+        automation.trigger.kind === "webhook" ? [automation.trigger.id] : [],
+      ),
+    );
+    let id = normalized.id;
+    while (existingIds.has(id)) id = generateWebhookId();
+    return { ...normalized, id };
   }
 
   private load(): void {

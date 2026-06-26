@@ -49,6 +49,7 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
   - `{kind:"watch", recursive, filter?}` — fires when the automation's `cwd` changes (native filesystem events, no polling).
   - `{kind:"event", events: [...]}` — fires when a localterm session emits a named event matching `cwd` (session-scoped).
     See [references/triggers.md](references/triggers.md) for the full schedule-shape table (`hourly`/`weekly`/`monthly`/`cron`/…), git-event taxonomy, watch filter/debounce/grace semantics, and the cron escape-hatch details.
+  - `{kind:"webhook"}` — fires when an external POST hits `/api/webhooks/<id>`. The `id` is a server-generated capability token (Discord-style: anyone with the URL can fire it); it is returned in the created automation's `trigger.id` and preserved across PATCHes that keep the webhook kind. The POST body is ignored — `command`/`cwd` are fixed at create time, so a webhook is a pure signal like schedule/watch/event.
 
 - `cwd` — absolute path; must exist and be a directory on the daemon's machine
   (validated at create/update time).
@@ -68,8 +69,8 @@ For run-tab mechanics (background CDP vs. opener fallback, `LOCALTERM_DISABLE_CD
 
 ```bash
 # List (each item adds computed nextRunAt epoch-ms (null when disabled/finished
-# or a watch/event trigger), a derived `cron` string (null for watch/event), the capped
-# `runs` history, and a back-compat `lastRun`)
+# or a watch/event/webhook trigger), a derived `cron` string (null for
+# watch/event/webhook), the capped `runs` history, and a back-compat `lastRun`)
 curl -s "$BASE/automations"
 
 # Create
@@ -143,6 +144,21 @@ curl -s -X POST "$BASE/automations" \
 # → 201 {"automation":{"id":"…","trigger":{"kind":"event","events":["notification"]},…}}
 # Fires when any command in this directory does: printf '\e]9;deploy-complete\a'
 
+# Create a webhook automation (id is server-generated; the body is ignored on fire)
+curl -s -X POST "$BASE/automations" \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "deploy on CI ping",
+    "trigger": { "kind": "webhook" },
+    "cwd": "/Users/me/project",
+    "command": "git pull && pnpm deploy",
+    "enabled": true,
+    "limit": { "kind": "forever" }
+  }'
+# → 201 {"automation":{"id":"…","trigger":{"kind":"webhook","id":"<token>"},…}}
+# Anyone with the URL can fire it: POST $BASE/webhooks/<token>  → 202 {"accepted":true}
+# Duplicate/in-flight POSTs coalesce into one run; counts toward the limit.
+
 # Update any subset of fields (pass a `trigger` to change the schedule/watch/event)
 curl -s -X PATCH "$BASE/automations/<id>" \
   -H 'content-type: application/json' \
@@ -166,7 +182,10 @@ curl -s -X POST "$BASE/automations/<id>/reset"
 or `404 {"error":"not_found"}` for unknown ids. `automation_finished` is returned
 when a PATCH tries to re-enable a finished automation — reset it instead. On
 `invalid_cwd`, confirm the directory exists on the daemon's machine and retry with
-an absolute path.
+an absolute path. The webhook endpoint (`POST /webhooks/:id`) returns `202
+{"accepted":true}` on a valid+active id, `404 {"error":"not_found"}` for an
+unknown id, and `409 {"error":"automation_not_active"}` when the automation is
+disabled or finished.
 
 ### Playbook
 

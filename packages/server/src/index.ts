@@ -22,11 +22,14 @@ import {
   AUTOMATION_RUN_QUERY_PARAM,
   AUTOMATION_WATCH_DEBOUNCE_MS,
   AUTOMATION_WATCH_POST_RUN_GRACE_MS,
+  AUTOMATION_WEBHOOK_DEBOUNCE_MS,
   DEFAULT_HOST,
   DEFAULT_PORT,
   FRIENDLY_HOSTNAME,
   GIT_MAX_REF_LENGTH,
+  HTTP_STATUS_ACCEPTED,
   HTTP_STATUS_BAD_REQUEST,
+  HTTP_STATUS_CONFLICT,
   HTTP_STATUS_CREATED,
   HTTP_STATUS_NOT_FOUND,
   MAX_AUTOMATIONS,
@@ -55,6 +58,7 @@ import { shellPathForUserShell } from "./utils/shell-path.js";
 import { ServerErrorException, serverError } from "./errors.js";
 import { FolderWatchManager } from "./folder-watch-manager.js";
 import { SessionEventManager } from "./session-event-manager.js";
+import { WebhookTriggerManager } from "./webhook-trigger-manager.js";
 import {
   getGitBranchInfo,
   getGitBranchPr,
@@ -95,13 +99,10 @@ import {
   writeWorktreeIncludeFile,
 } from "./utils/worktree-include-file.js";
 import { WorktreeConfigStore } from "./worktree-config-store.js";
-import {
-  compileSchedule,
-  compileScheduleAll,
-  normalizeTriggerInput,
-} from "./utils/compile-schedule.js";
+import { compileSchedule, compileScheduleAll } from "./utils/compile-schedule.js";
 import { computeNextAutomationRunAt } from "./utils/compute-next-automation-run-at.js";
 import { isLocaltermTabUrl } from "./utils/is-localterm-tab-url.js";
+import { normalizeTriggerInput } from "./utils/normalize-trigger.js";
 import { enumerateMissedOccurrences } from "./utils/reconcile-downtime.js";
 import type {
   Automation,
@@ -404,6 +405,17 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     getAutomation: (automationId) => automationStore.get(automationId),
   });
   const syncSessionEventListeners = () => sessionEventManager.sync(automationStore.list());
+  // Webhook triggers: a POST to /api/webhooks/:id arms a trailing debounce per
+  // automation (coalesces duplicate delivery) with an in-flight overlap guard.
+  // Stateless vs the watch/event managers — nothing to arm, so no sync().
+  const webhookTriggerManager = new WebhookTriggerManager({
+    debounceMs: AUTOMATION_WEBHOOK_DEBOUNCE_MS,
+    isRunInFlight: (automationId) => {
+      const status = automationStore.get(automationId)?.runs[0]?.status;
+      return status === "launched" || status === "running";
+    },
+    getAutomation: (automationId) => automationStore.get(automationId),
+  });
   const heartbeatStore = new HeartbeatStore(path.join(stateDirectory, "daemon-heartbeat.json"));
   const caffeinateController = options.caffeinateController ?? new CaffeinateController();
   const caffeinatePreferencesStore = new CaffeinatePreferencesStore(
@@ -554,7 +566,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // launches never count and are allowed even on a finished/disabled automation.
   const tryLaunch = (
     automation: Automation,
-    trigger: "schedule" | "manual" | "watch" | "event",
+    trigger: "schedule" | "manual" | "watch" | "event" | "webhook",
   ): PendingAutomationRun | null => {
     if (trigger !== "manual") {
       const current = automationStore.get(automation.id);
@@ -946,7 +958,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // separately).
   const isValidTriggerInput = (trigger: TriggerInput): boolean => {
     const normalized = normalizeTriggerInput(trigger);
-    if (normalized.kind === "watch" || normalized.kind === "event") return true;
+    if (normalized.kind === "watch" || normalized.kind === "event" || normalized.kind === "webhook")
+      return true;
     const crons = compileScheduleAll(normalized.schedule);
     return crons.length > 0 && crons.every((cron) => parseCronExpression(cron) !== null);
   };
@@ -1030,6 +1043,26 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     syncFolderWatchers();
     syncSessionEventListeners();
     return context.json({ automation: toAutomationWithNextRun(automation, new Date()) });
+  });
+
+  // Fire a webhook-triggered automation. The :id is the automation's webhook
+  // capability token (Discord-style: anyone with the URL can fire it). The body
+  // is intentionally ignored — the command/cwd are fixed at create time, so a
+  // webhook is a pure signal like schedule/watch/event. The network policy
+  // middleware already gates this to the bound surface (loopback, or any
+  // private host on a tailnet/non-loopback bind, which covers tailscale's
+  // 100.64.0.0/10 CGNAT range), so a POST from another tailnet device reaches
+  // it with no extra wiring. Always 2xx on a valid+active id so a CI retry
+  // loop never amplifies: duplicates inside the debounce window coalesce, and a
+  // POST while a run is in flight is silently dropped (both return 202).
+  api.post("/webhooks/:id", (context) => {
+    const automation = automationStore.getByWebhookId(context.req.param("id"));
+    if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    if (!automation.enabled || automation.lifecycle === "finished") {
+      return context.json({ error: "automation_not_active" }, HTTP_STATUS_CONFLICT);
+    }
+    webhookTriggerManager.trigger(automation);
+    return context.json({ accepted: true }, HTTP_STATUS_ACCEPTED);
   });
 
   api.notFound((context) => context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND));
@@ -1613,6 +1646,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   sessionEventManager.on("due", (automation) => {
     tryLaunch(automation, "event");
   });
+  webhookTriggerManager.on("due", (automation) => {
+    tryLaunch(automation, "webhook");
+  });
   automationScheduler.on("tick", (now) => {
     // Liveness heartbeat for downtime detection on the next boot.
     heartbeatStore.write(now.getTime());
@@ -1656,6 +1692,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const stop = async () => {
     automationScheduler.dispose();
     folderWatchManager.dispose();
+    webhookTriggerManager.dispose();
     caffeinateManager.dispose();
     cdpClient?.close();
     registry.disposeAll();

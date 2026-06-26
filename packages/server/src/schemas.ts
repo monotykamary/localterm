@@ -10,6 +10,7 @@ import {
   MAX_AUTOMATION_NAME_LENGTH,
   MAX_AUTOMATION_TIMES_PER_DAY,
   MAX_AUTOMATION_WATCH_FILTER_LENGTH,
+  MAX_WEBHOOK_ID_LENGTH,
   MAX_CAFFEINATE_COMMAND_LENGTH,
   MAX_CAFFEINATE_COMMANDS,
   MAX_COLS,
@@ -551,7 +552,10 @@ export const automationScheduleSchema = z.discriminatedUnion("kind", [
 // polled; an "event" trigger fires when a localterm session emits a named
 // event (git-commit, git-checkout, notification, cwd, foreground, exit) whose cwd matches
 // the automation's cwd or is inside it. `recursive` watches the whole subtree.
-// Only schedule triggers carry a cron / next-run.
+// A "webhook" trigger fires when an external POST hits /api/webhooks/<id> —
+// the id is a server-generated capability token (single-segment, url-safe),
+// Discord-style: anyone with the URL can fire the automation. Only schedule
+// triggers carry a cron / next-run.
 // Session events that can drive an event-triggered automation. These are the
 // user-selectable events; internal signals such as `git-dirty` are deliberately
 // excluded because they are too coarse for automation triggers.
@@ -593,6 +597,16 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
       events: z.array(automationSessionEventSchema).min(1),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("webhook"),
+      id: z
+        .string()
+        .min(1)
+        .max(MAX_WEBHOOK_ID_LENGTH)
+        .regex(/^[A-Za-z0-9_-]+$/),
+    })
+    .strict(),
 ]);
 
 // Create/update accept either the structured schedule or a legacy bare cron
@@ -604,8 +618,10 @@ export const scheduleInputSchema = z.union([
 ]);
 
 // Trigger as accepted on the wire: the schedule payload accepts the legacy bare
-// cron string too, `recursive` is optional (defaults true at the store), and
-// the event trigger accepts one or more session event names.
+// cron string too, `recursive` is optional (defaults true at the store), the
+// event trigger accepts one or more session event names, and the webhook
+// trigger carries no client input — the id is server-generated on create and
+// preserved across PATCHes that keep the webhook kind.
 export const triggerInputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("schedule"), schedule: scheduleInputSchema }).strict(),
   z
@@ -621,6 +637,7 @@ export const triggerInputSchema = z.discriminatedUnion("kind", [
       events: z.array(automationSessionEventSchema).min(1),
     })
     .strict(),
+  z.object({ kind: z.literal("webhook") }).strict(),
 ]);
 
 export const automationRunLimitSchema = z.discriminatedUnion("kind", [
@@ -661,7 +678,7 @@ export const automationRunRecordSchema = z
     finishedAt: z.number().int().nonnegative().nullable(),
     status: automationRunStatusSchema,
     exitCode: z.number().int().nullable(),
-    trigger: z.enum(["schedule", "manual", "watch", "event"]),
+    trigger: z.enum(["schedule", "manual", "watch", "event", "webhook"]),
     // false for manual + skipped; true for scheduled + watch launches.
     countsTowardLimit: z.boolean(),
   })

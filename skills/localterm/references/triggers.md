@@ -1,6 +1,6 @@
 # Automation triggers
 
-An automation's `trigger` is a tagged union on `kind`. This reference covers all three kinds in full: the schedule-shape table, the git/event taxonomy, and watch debounce/filter semantics. For the field-level summary, see [SKILL.md](../SKILL.md#automations).
+An automation's `trigger` is a tagged union on `kind`. This reference covers all four kinds in full: the schedule-shape table, the git/event taxonomy, watch debounce/filter semantics, and webhook capability-URL semantics. For the field-level summary, see [SKILL.md](../SKILL.md#automations).
 
 ## `{kind:"schedule", schedule}` — time-based
 
@@ -61,3 +61,11 @@ Git events are detected by watching the repository's `.git` directory. The opera
 | `exit`         | a shell session in a matching directory closes                                                                           |
 
 For "notify on push" workflows, use `git-fetch` or a custom `notification` event from your own hook — localterm cannot detect a bare `git push` from the local repository because push updates the remote, not local refs. Operation detection is best-effort; for guaranteed signals, use `{kind:"event", events:["notification"]}` and have your scripts emit `OSC 9` as the signal.
+
+## `{kind:"webhook"}` — external HTTP
+
+Fires when an external POST hits `/api/webhooks/<id>`. The `id` is a server-generated capability token (128-bit, base64url): the client sends `{kind:"webhook"}` with **no** id at create time, and the server returns the id in `trigger.id`. The id is preserved across PATCHes that keep the webhook kind (so editing the command/name never rotates the URL configured in CI) and is guaranteed unique across all automations. Anyone with the URL can fire the automation — Discord-style — so treat the URL as a secret.
+
+The POST body is **ignored**: `command` and `cwd` are fixed at create time, so a webhook is a pure signal like schedule/watch/event (no payload templating, no injection surface). A burst of POSTs is debounced (trailing edge, ~500ms) into a single run, and no new run starts while a previous one is still in-flight. Webhook triggers have no `cron`/`nextRunAt` (both `null`).
+
+Responses: `202 {"accepted":true}` on a valid+active id (always 2xx so a CI retry loop never amplifies — duplicates coalesce, in-flight POSTs are silently dropped), `404 {"error":"not_found"}` for an unknown id, `409 {"error":"automation_not_active"}` when disabled/finished. The network policy middleware gates the endpoint to the bound surface: loopback-only on a loopback bind, or any private host (incl. tailscale's `100.64.0.0/10` CGNAT range) on a non-loopback bind — so a POST from another tailnet device reaches it with no extra wiring.

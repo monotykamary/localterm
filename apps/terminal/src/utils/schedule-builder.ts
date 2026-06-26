@@ -2,6 +2,7 @@ import type {
   AutomationSchedule,
   AutomationSessionEvent,
   AutomationTrigger,
+  TriggerInput,
 } from "@monotykamary/localterm-server/protocol";
 
 // The friendly-builder frequencies. "weekdays"/"weekends" are the
@@ -300,7 +301,7 @@ export const SESSION_EVENTS: AutomationSessionEvent[] = Object.keys(
 
 const defaultEventNames = (): AutomationSessionEvent[] => ["git-commit"];
 
-export const buildTriggerFromForm = (form: TriggerFormState): AutomationTrigger =>
+export const buildTriggerFromForm = (form: TriggerFormState): TriggerInput =>
   form.triggerType === "watch"
     ? {
         kind: "watch",
@@ -309,7 +310,9 @@ export const buildTriggerFromForm = (form: TriggerFormState): AutomationTrigger 
       }
     : form.triggerType === "event"
       ? { kind: "event", events: form.eventNames }
-      : { kind: "schedule", schedule: buildScheduleFromForm(form.schedule) };
+      : form.triggerType === "webhook"
+        ? { kind: "webhook" }
+        : { kind: "schedule", schedule: buildScheduleFromForm(form.schedule) };
 
 // Map a stored trigger back onto the form fields so editing reopens on the
 // matching trigger type (the inactive side keeps sensible defaults).
@@ -330,13 +333,21 @@ export const recognizeTriggerForm = (trigger: AutomationTrigger): TriggerFormSta
           watchFilter: "",
           eventNames: trigger.events,
         }
-      : {
-          triggerType: "schedule",
-          schedule: recognizeScheduleForm(trigger.schedule),
-          watchRecursive: true,
-          watchFilter: "",
-          eventNames: defaultEventNames(),
-        };
+      : trigger.kind === "webhook"
+        ? {
+            triggerType: "webhook",
+            schedule: defaultScheduleForm(),
+            watchRecursive: true,
+            watchFilter: "",
+            eventNames: defaultEventNames(),
+          }
+        : {
+            triggerType: "schedule",
+            schedule: recognizeScheduleForm(trigger.schedule),
+            watchRecursive: true,
+            watchFilter: "",
+            eventNames: defaultEventNames(),
+          };
 
 const eventTriggerLabel = (events: AutomationSessionEvent[]): string => {
   if (events.length === 0) return "On no events";
@@ -353,4 +364,6 @@ export const triggerLabel = (trigger: AutomationTrigger): string =>
     ? `When files change${trigger.filter ? ` matching ${trigger.filter}` : ""}${trigger.recursive ? " · subfolders" : ""}`
     : trigger.kind === "event"
       ? eventTriggerLabel(trigger.events)
-      : scheduleLabel(trigger.schedule);
+      : trigger.kind === "webhook"
+        ? "On a webhook"
+        : scheduleLabel(trigger.schedule);

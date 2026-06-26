@@ -5,9 +5,9 @@ import {
   compileSchedule,
   compileScheduleAll,
   normalizeScheduleInput,
-  normalizeTriggerInput,
   recognizePreset,
 } from "../src/utils/compile-schedule.js";
+import { normalizeTriggerInput } from "../src/utils/normalize-trigger.js";
 
 const setsEqual = (a: ReadonlySet<number>, b: ReadonlySet<number>) =>
   a.size === b.size && [...a].every((value) => b.has(value));
@@ -152,5 +152,15 @@ describe("normalizeTriggerInput", () => {
       kind: "watch",
       recursive: false,
     });
+  });
+
+  it("materializes a webhook trigger with a server-generated id", () => {
+    const normalized = normalizeTriggerInput({ kind: "webhook" });
+    expect(normalized).toMatchObject({ kind: "webhook" });
+    if (normalized.kind === "webhook") {
+      expect(typeof normalized.id).toBe("string");
+      expect(normalized.id.length).toBeGreaterThan(0);
+      expect(normalized.id).toMatch(/^[A-Za-z0-9_-]+$/);
+    }
   });
 });

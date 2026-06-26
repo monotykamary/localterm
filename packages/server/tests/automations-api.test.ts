@@ -291,6 +291,114 @@ describe("automations REST API", () => {
     }
   }, 30_000);
 
+  const webhookIdOf = (automation: { trigger: { kind: string; id?: string } }): string => {
+    if (automation.trigger.kind === "webhook" && automation.trigger.id) {
+      return automation.trigger.id;
+    }
+    throw new Error("automation is not a webhook trigger");
+  };
+  const webhookUrl = (id: string) =>
+    `http://127.0.0.1:${testContext.server.port}/api/webhooks/${id}`;
+
+  it("creates a webhook automation with a server-generated id", async () => {
+    const { status, body } = await request("POST", "", {
+      name: "on webhook",
+      trigger: { kind: "webhook" },
+      cwd: os.tmpdir(),
+      command: "true",
+    });
+    expect(status).toBe(201);
+    const automation = automationWithNextRunSchema.parse(body.automation);
+    expect(automation.trigger.kind).toBe("webhook");
+    expect(webhookIdOf(automation).length).toBeGreaterThan(0);
+    expect(automation.cron).toBeNull();
+    expect(automation.nextRunAt).toBeNull();
+  });
+
+  it("fires a webhook automation on POST /api/webhooks/:id and counts it toward the limit", async () => {
+    const created = await request("POST", "", {
+      name: "on webhook",
+      trigger: { kind: "webhook" },
+      cwd: os.tmpdir(),
+      command: "true",
+      limit: { kind: "count", max: 1 },
+    });
+    expect(created.status).toBe(201);
+    const automation = automationWithNextRunSchema.parse(created.body.automation);
+    const response = await fetch(webhookUrl(webhookIdOf(automation)), { method: "POST" });
+    expect(response.status).toBe(202);
+    await vi.waitFor(
+      async () => {
+        const [listed] = (await request("GET", "")).body.automations as Array<
+          Record<string, unknown>
+        >;
+        expect(listed.runCount).toBe(1);
+        expect(listed.lifecycle).toBe("finished");
+      },
+      { timeout: 5_000, interval: 50 },
+    );
+    expect(testContext.openedUrls).toHaveLength(1);
+    const [listed] = (await request("GET", "")).body.automations as Array<Record<string, unknown>>;
+    const runs = listed.runs as Array<Record<string, unknown>>;
+    expect(runs[0]).toMatchObject({ trigger: "webhook", countsTowardLimit: true });
+  }, 15_000);
+
+  it("coalesces a burst of webhook POSTs into a single run", async () => {
+    const created = await request("POST", "", {
+      name: "on webhook",
+      trigger: { kind: "webhook" },
+      cwd: os.tmpdir(),
+      command: "true",
+    });
+    const automation = automationWithNextRunSchema.parse(created.body.automation);
+    const url = webhookUrl(webhookIdOf(automation));
+    await Promise.all(Array.from({ length: 5 }, () => fetch(url, { method: "POST" })));
+    await vi.waitFor(
+      async () => {
+        const [listed] = (await request("GET", "")).body.automations as Array<
+          Record<string, unknown>
+        >;
+        expect(listed.runCount).toBe(1);
+      },
+      { timeout: 5_000, interval: 50 },
+    );
+    expect(testContext.openedUrls).toHaveLength(1);
+  }, 15_000);
+
+  it("preserves the webhook id when re-sending a webhook trigger on PATCH", async () => {
+    const created = await request("POST", "", {
+      name: "on webhook",
+      trigger: { kind: "webhook" },
+      cwd: os.tmpdir(),
+      command: "true",
+    });
+    const automation = automationWithNextRunSchema.parse(created.body.automation);
+    const originalId = webhookIdOf(automation);
+    const patched = await request("PATCH", `/${automation.id}`, {
+      trigger: { kind: "webhook" },
+    });
+    const patchedAutomation = automationWithNextRunSchema.parse(patched.body.automation);
+    expect(webhookIdOf(patchedAutomation)).toBe(originalId);
+  });
+
+  it("returns 404 for an unknown webhook id", async () => {
+    const response = await fetch(webhookUrl("does-not-exist"), { method: "POST" });
+    expect(response.status).toBe(404);
+  });
+
+  it("returns 409 for a disabled webhook automation", async () => {
+    const created = await request("POST", "", {
+      name: "on webhook",
+      trigger: { kind: "webhook" },
+      cwd: os.tmpdir(),
+      command: "true",
+    });
+    const automation = automationWithNextRunSchema.parse(created.body.automation);
+    await request("PATCH", `/${automation.id}`, { enabled: false });
+    const response = await fetch(webhookUrl(webhookIdOf(automation)), { method: "POST" });
+    expect(response.status).toBe(409);
+  });
+
   it("rejects a structured schedule that cannot compile to valid cron", async () => {
     const { body } = await request("POST", "", {
       ...createInput(),

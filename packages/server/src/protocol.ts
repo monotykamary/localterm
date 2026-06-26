@@ -127,6 +127,7 @@ export type {
   CreateWorktreeInput,
   ResetAutomationInput,
   ServerToClientMessage,
+  TriggerInput,
   UpdateAutomationInput,
 } from "./types.js";
 export { compileSchedule, compileScheduleAll } from "./utils/compile-schedule.js";

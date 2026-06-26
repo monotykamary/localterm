@@ -158,6 +158,12 @@ describe("buildTriggerFromForm", () => {
       ),
     ).toEqual({ kind: "event", events: ["notification", "cwd"] });
   });
+
+  it("builds a webhook trigger without a client-supplied id", () => {
+    expect(buildTriggerFromForm(withTrigger({ triggerType: "webhook" }))).toEqual({
+      kind: "webhook",
+    });
+  });
 });
 
 describe("recognizeTriggerForm", () => {
@@ -175,6 +181,16 @@ describe("recognizeTriggerForm", () => {
     for (const trigger of triggers) {
       expect(buildTriggerFromForm(recognizeTriggerForm(trigger))).toEqual(trigger);
     }
+  });
+
+  // A webhook trigger does not round-trip its id: the id is server-owned
+  // (generated on create, preserved on PATCH), so the form carries only the
+  // kind and buildTriggerFromForm omits the id. Verify the form type mapping in
+  // isolation instead.
+  it("recognizes a webhook trigger onto the webhook form type", () => {
+    expect(recognizeTriggerForm({ kind: "webhook", id: "abc" })).toMatchObject({
+      triggerType: "webhook",
+    });
   });
 });
 
@@ -201,5 +217,9 @@ describe("triggerLabel", () => {
     expect(triggerLabel({ kind: "event", events: ["notification"] })).toBe(
       "On Shell notification (OSC 9)",
     );
+  });
+
+  it("labels a webhook trigger", () => {
+    expect(triggerLabel({ kind: "webhook", id: "abc" })).toBe("On a webhook");
   });
 });

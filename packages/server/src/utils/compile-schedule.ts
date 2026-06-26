@@ -11,7 +11,7 @@
 // firing schedule never changes.
 
 import { parseCronExpression, type ParsedCronExpression } from "../cron-expression.js";
-import type { AutomationSchedule, AutomationTrigger, TriggerInput } from "../types.js";
+import type { AutomationSchedule } from "../types.js";
 import { memoBy } from "./memo-by.js";
 
 const WEEKDAYS_CRON_DOW = "1-5";
@@ -176,17 +176,3 @@ export const normalizeScheduleInput = (input: AutomationSchedule | string): Auto
   const trimmed = input.trim();
   return recognizePreset(trimmed) ?? { kind: "cron", expression: trimmed };
 };
-
-// The trigger-level counterpart of normalizeScheduleInput: default watch's
-// `recursive`, and normalize a schedule trigger's payload (recognizing a bare
-// cron string as a friendly preset).
-export const normalizeTriggerInput = (trigger: TriggerInput): AutomationTrigger =>
-  trigger.kind === "watch"
-    ? {
-        kind: "watch",
-        recursive: trigger.recursive ?? true,
-        ...(trigger.filter ? { filter: trigger.filter } : {}),
-      }
-    : trigger.kind === "event"
-      ? { kind: "event", events: trigger.events }
-      : { kind: "schedule", schedule: normalizeScheduleInput(trigger.schedule) };

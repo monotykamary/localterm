@@ -49,6 +49,7 @@ import {
   AUTOMATIONS_SIDEBAR_WIDTH_PX,
   AUTOMATIONS_SORT_DEFAULT,
   AUTOMATIONS_SORT_STORAGE_KEY,
+  COPY_FEEDBACK_MS,
   RECENT_RUNS_LIMIT,
 } from "@/lib/constants";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -167,7 +168,9 @@ const RunRow = ({ run, nowMs }: { run: AutomationRunRecord; nowMs: number }) => 
               ? "on change"
               : run.trigger === "event"
                 ? "on event"
-                : "scheduled"}
+                : run.trigger === "webhook"
+                  ? "on webhook"
+                  : "scheduled"}
       </span>
       <span className="shrink-0 text-muted-foreground/70 tabular-nums">
         {formatRelativeTime(runTimestamp(run), nowMs)}
@@ -683,7 +686,10 @@ export const AutomationsModal = ({
     form.name.trim().length > 0 &&
     form.command.trim().length > 0 &&
     form.cwd.trim().length > 0 &&
-    (form.triggerType === "watch" || form.triggerType === "event" || isScheduleValid) &&
+    (form.triggerType === "watch" ||
+      form.triggerType === "event" ||
+      form.triggerType === "webhook" ||
+      isScheduleValid) &&
     (form.limitMode === "forever" ||
       (form.limitMax >= 1 && form.limitMax <= AUTOMATION_RUN_LIMIT_MAX));
 
@@ -1004,6 +1010,23 @@ const AutomationDetail = ({
   onReset: () => void;
 }) => {
   const finished = lifecycleBadge(automation.lifecycle);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+  const webhookUrl =
+    automation.trigger.kind === "webhook" && typeof window !== "undefined"
+      ? `${window.location.origin}/api/webhooks/${automation.trigger.id}`
+      : null;
+  const copyWebhookUrl = useCallback(() => {
+    if (!webhookUrl) return;
+    void navigator.clipboard
+      .writeText(webhookUrl)
+      .then(() => {
+        setCopiedWebhook(true);
+        window.setTimeout(() => setCopiedWebhook(false), COPY_FEEDBACK_MS);
+      })
+      .catch(() => {
+        /* clipboard permission denied; user can still select + copy manually */
+      });
+  }, [webhookUrl]);
   return (
     <div className="flex flex-col gap-3 p-4">
       <div className="flex items-start justify-between gap-2">
@@ -1066,6 +1089,23 @@ const AutomationDetail = ({
               {automation.cron}
             </span>
           ) : null}
+          {webhookUrl ? (
+            <span className="flex items-center gap-1">
+              <span
+                className="min-w-0 truncate font-mono text-[10px] text-muted-foreground/70"
+                title={webhookUrl}
+              >
+                {webhookUrl}
+              </span>
+              <button
+                type="button"
+                className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
+                onClick={copyWebhookUrl}
+              >
+                {copiedWebhook ? "copied" : "copy"}
+              </button>
+            </span>
+          ) : null}
         </div>
         <div className="flex flex-col gap-0.5">
           <span className={SECTION_LABEL_CLASSES}>Next run</span>
@@ -1080,9 +1120,13 @@ const AutomationDetail = ({
                   ? automation.enabled
                     ? "On event"
                     : "Paused"
-                  : automation.nextRunAt !== null
-                    ? formatRelativeTime(automation.nextRunAt, nowMs)
-                    : "Paused"}
+                  : automation.trigger.kind === "webhook"
+                    ? automation.enabled
+                      ? "On webhook"
+                      : "Paused"
+                    : automation.nextRunAt !== null
+                      ? formatRelativeTime(automation.nextRunAt, nowMs)
+                      : "Paused"}
           </span>
         </div>
         <div className="flex flex-col gap-0.5">
@@ -1225,6 +1269,7 @@ const AutomationForm = ({
           { id: "schedule", label: "On a schedule" },
           { id: "watch", label: "When a folder changes" },
           { id: "event", label: "On a session event" },
+          { id: "webhook", label: "On a webhook" },
         ]}
         ariaLabel="trigger type"
         placeholder="Trigger"
@@ -1276,6 +1321,14 @@ const AutomationForm = ({
           <span className="text-[10px] text-muted-foreground">
             Runs the command when the directory changes — no polling. Won't start a new run while
             one is still going; counts toward the run limit.
+          </span>
+        </div>
+      ) : form.triggerType === "webhook" ? (
+        <div className="flex flex-col gap-2">
+          <span className="text-[10px] text-muted-foreground">
+            Fires the command when a POST hits the automation's webhook URL. The URL is generated
+            when you save — copy it from the automation's detail view. Anyone with the URL can fire
+            it; won't start a new run while one is still going; counts toward the run limit.
           </span>
         </div>
       ) : (
@@ -1437,7 +1490,9 @@ const RecentRunsView = ({
                     ? "watch"
                     : run.trigger === "event"
                       ? "event"
-                      : "scheduled"}
+                      : run.trigger === "webhook"
+                        ? "webhook"
+                        : "scheduled"}
               </span>
               <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
                 {formatRelativeTime(runTimestamp(run), nowMs)}
@@ -1535,9 +1590,13 @@ const AutomationListPopover = ({
                         ? automation.enabled
                           ? "listening"
                           : "paused"
-                        : automation.nextRunAt !== null
-                          ? formatRelativeTime(automation.nextRunAt, nowMs)
-                          : "paused"}
+                        : automation.trigger.kind === "webhook"
+                          ? automation.enabled
+                            ? "on webhook"
+                            : "paused"
+                          : automation.nextRunAt !== null
+                            ? formatRelativeTime(automation.nextRunAt, nowMs)
+                            : "paused"}
                 </span>
               </button>
             );
@@ -1693,9 +1752,13 @@ const AutomationSidebar = ({
                             ? automation.enabled
                               ? "listening"
                               : "paused"
-                            : automation.nextRunAt !== null
-                              ? formatRelativeTime(automation.nextRunAt, nowMs)
-                              : "paused"}
+                            : automation.trigger.kind === "webhook"
+                              ? automation.enabled
+                                ? "on webhook"
+                                : "paused"
+                              : automation.nextRunAt !== null
+                                ? formatRelativeTime(automation.nextRunAt, nowMs)
+                                : "paused"}
                     </span>
                   </span>
                 </button>

@@ -211,6 +211,8 @@ export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "[0:0:
 
 export const HTTP_STATUS_NOT_FOUND = 404;
 export const HTTP_STATUS_BAD_REQUEST = 400;
+export const HTTP_STATUS_ACCEPTED = 202;
+export const HTTP_STATUS_CONFLICT = 409;
 
 // Git diff endpoints. The summary endpoint is polled by the browser every few
 // seconds, so every limit here exists to keep one poll cheap and to keep a
@@ -369,6 +371,20 @@ export const AUTOMATION_WATCH_POST_RUN_GRACE_MS = 1_000;
 // Trailing-edge: the timer resets on every matching event and fires once the
 // session settles.
 export const AUTOMATION_EVENT_DEBOUNCE_MS = 500;
+// Quiet period after a webhook POST before a webhook-triggered automation
+// fires. Coalesces duplicate delivery (a CI retry, an LB double-fire) into a
+// single run. Trailing-edge: the timer resets on every POST and fires once the
+// burst settles. An in-flight guard separately drops a POST that arrives while
+// a prior run is still launching/running.
+export const AUTOMATION_WEBHOOK_DEBOUNCE_MS = 500;
+// Entropy in a webhook capability id. 128 bits — the standard for unguessable
+// capability URLs; well above the ~80-bit threshold for resistance against a
+// determined attacker. Emitted as base64url (url-safe, no padding).
+export const WEBHOOK_ID_BYTES = 16;
+// Upper bound on a stored webhook id's length. A WEBHOOK_ID_BYTES id encodes to
+// 22 base64url chars; the slack accommodates a future format change without a
+// migration.
+export const MAX_WEBHOOK_ID_LENGTH = 64;
 // Covers schedules that only fire on Feb 29 (the rarest valid cron target).
 export const CRON_NEXT_OCCURRENCE_SCAN_LIMIT_DAYS = 1466;
 export const MAX_AUTOMATION_EXIT_CODE_DIGITS = 4;
