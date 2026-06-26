@@ -221,7 +221,11 @@ const resolveOpenFileAction = (
   file: GitDiffFileMeta,
   onOpenInEditor: ((filePath: string) => void) | undefined,
   onOpenImage: ((filePath: string) => void) | undefined,
-): { handler: (filePath: string) => void; label: string; ariaLabel: (path: string) => string } | null => {
+): {
+  handler: (filePath: string) => void;
+  label: string;
+  ariaLabel: (path: string) => string;
+} | null => {
   const image = isImagePath(file.path);
   const handler = image ? onOpenImage : onOpenInEditor;
   if (!handler) return null;
