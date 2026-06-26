@@ -1,5 +1,0 @@
----
-"@monotykamary/localterm": patch
----
-
-Columnize the session-list row metadata so a changing age no longer shifts the surrounding text across rows. The shell/pid/age detail was a single text span, so the age — the only piece that changes over time (`5m ago` → `59m ago` → `1h ago`) — moved the whole block, and since each row has a different age every row's text sat at a different x. Split it into right-anchored columns: the age gets its own fixed right-aligned column flush to the action slot, so a longer/shorter age only slides within that column and never drags the shell name, pid, or status pill; the pid is its own right-aligned column; the shell name stays content-width so it still hugs the pill and grows leftward for long names. Drop the `·` separators (right-aligning values inside fixed columns left a gap after each dot) and use the column gap instead, so the slack reads as spacing rather than a broken separator. The whole meta group stays right-justified against the action, and the title's flex-1 truncation absorbs the remaining slack on the left.
