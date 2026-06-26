@@ -110,6 +110,30 @@ describe("SessionManager no-clients grace", () => {
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
 
+  it("keeps a dormant PTY alive while a foreground program runs quietly (alive-quiet)", async () => {
+    manager = createManager(50);
+    const ws = createFakeSocket();
+    const spawned = manager.spawnAndAttach(ws, shellInput);
+    expect(spawned).not.toBeNull();
+    if (!spawned) return;
+    manager.detach(ws);
+
+    // Output has gone quiet but a foreground program is still running — the
+    // favicon would be blue (alive-quiet), not grey. The grace reap must spare
+    // it so a closed tab never kills a quiet-but-running command.
+    manager.markIdleForTest(spawned.id);
+    manager.markForegroundForTest(spawned.id);
+    await wait(150);
+    expect(manager.size()).toBe(1);
+    expect(spawned.session.isExited).toBe(false);
+
+    // Foreground program exits → only output idleness is left (ready) → reaped.
+    manager.markForegroundForTest(spawned.id, false);
+    await wait(150);
+    expect(manager.size()).toBe(0);
+    expect(spawned.session.isExited).toBe(true);
+  }, 10_000);
+
   it("returns null when attaching to an unknown id (caller spawns fresh)", () => {
     manager = createManager(60_000);
     const ws = createFakeSocket();

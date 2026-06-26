@@ -192,7 +192,8 @@ export const SESSION_GRACE_MS = 30_000;
 // session list (recent output = running, a foreground process but quiet =
 // alive-quiet, idle = ready) AND to gate the grace reap: a dormant session
 // with output still arriving is kept alive — never reaped mid-command — and
-// is only eligible once output has gone quiet for this long. Matches the
+// is only eligible once output has gone quiet for this long and no foreground
+// program is running. Matches the
 // client's favicon-ready debounce (the same "no activity → grey" signal that
 // turns the tab's favicon blue/grey), so the session list's row color and the
 // grace decision read from the same source of truth.

@@ -73,10 +73,11 @@ export interface ManagedSession {
   lastOutputAt: number;
   hasForeground: boolean;
   // No-clients grace timer: armed when the last subscriber detaches, cancelled
-  // when any subscriber re-attaches. On fire, re-checks activity — if output is
-  // still arriving (a build, a long command) it reschedules so a dormant shell
-  // is never reaped mid-stream; only a truly idle one (no output within the
-  // activity window, no clients) is reaped.
+  // when any subscriber re-attaches. On fire, re-checks activity — if the shell
+  // is still doing something (output arriving, or a foreground program alive
+  // though quiet) it reschedules so a dormant shell is never reaped mid-stream;
+  // only a truly idle one (no recent output, no foreground program, no clients)
+  // is reaped.
   graceTimer: NodeJS.Timeout | null;
   parkedAt: number | null;
 }
@@ -174,16 +175,30 @@ export class SessionManager {
     }));
   }
 
-  // Test-only: pause the PTY and backdate its last output past the activity
-  // window so the grace reap is eligible. A real /bin/sh keeps emitting its
-  // prompt (which would reschedule the grace forever); pausing stops new output
-  // and backdating makes the existing recency read as idle. Production code
-  // never needs this — a live shell's actual output recency drives the reap.
+  // Test-only: force the idle/ready state so the grace reap is eligible.
+  // Pauses the PTY (a real /bin/sh keeps emitting its prompt, which would
+  // reschedule the grace forever), backdates last output past the activity
+  // window, and clears any foreground program, so computeState() reads "ready"
+  // regardless of what the foreground watcher reports. Production code never
+  // needs this — a live shell's actual output recency and foreground status
+  // drive the reap.
   markIdleForTest(id: string): void {
     const managed = this.sessions.get(id);
     if (!managed) return;
     managed.session.pause();
     managed.lastOutputAt = 0;
+    managed.hasForeground = false;
+  }
+
+  // Test-only: mark a foreground program as running (or clear it) so the grace
+  // reap's alive-quiet path can be exercised without racing a real shell's
+  // process-group introspection (pty.process is transient during spawn and
+  // load-sensitive). Pair with markIdleForTest to model a quiet-but-running
+  // shell. Production code never needs this.
+  markForegroundForTest(id: string, running = true): void {
+    const managed = this.sessions.get(id);
+    if (!managed) return;
+    managed.hasForeground = running;
   }
 
   spawn(input: SpawnPtyInput, automation?: AutomationContext): ManagedSession | null {
@@ -646,12 +661,14 @@ export class SessionManager {
     managed.graceTimer = setTimeout(() => {
       managed.graceTimer = null;
       managed.parkedAt = null;
-      // Re-check on fire: if output is still arriving (a build, a long command
-      // running in a dormant shell), reschedule so we never reap mid-stream. The
-      // shell still dies on a real idle (no output within the activity window, no
-      // clients), which is the same "no activity" signal that turns the tab's
-      // favicon grey.
-      if (Date.now() - managed.lastOutputAt < SESSION_ACTIVITY_WINDOW_MS) {
+      // Re-check on fire: reschedule while the shell is still doing something —
+      // output still arriving (running), or a foreground program still alive
+      // though quiet (alive-quiet) — so a closed tab never kills a running
+      // command mid-stream, even after it's gone quiet. The shell only dies on
+      // a real idle (ready: no recent output and no foreground program, no
+      // clients), the same "no activity" signal that turns the tab's favicon
+      // grey.
+      if (this.computeState(managed) !== "ready") {
         this.startGrace(managed);
         return;
       }
