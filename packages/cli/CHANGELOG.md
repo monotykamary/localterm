@@ -1,5 +1,13 @@
 # localterm
 
+## 2.16.1
+
+### Patch Changes
+
+- Keep active dormant PTYs alive and color sessions by activity. A dormant shell (no attached clients) that's still producing output — a build, a long command — is no longer reaped mid-stream: the grace timer re-checks on fire and reschedules while output is recent, so only a truly idle shell (quiet long enough that the tab favicon would be grey) is reaped. This is the same output-recency signal the client's favicon uses, now driving both the session-list row color and the reap decision. Each row's terminal icon is colored by a favicon-equivalent state (running / alive-quiet / ready), computed server-side and added to the session-list schema.
+- Updated dependencies
+  - @monotykamary/localterm-server@2.16.1
+
 ## 2.16.0
 
 ### Minor Changes
