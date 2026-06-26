@@ -33,12 +33,15 @@ describe("SessionManager no-clients grace", () => {
     manager?.disposeAll();
   });
 
-  it("reaps a PTY whose last subscriber detaches and doesn't re-attach in time", async () => {
+  it("reaps an idle PTY whose last subscriber detaches and doesn't re-attach in time", async () => {
     manager = createManager(50);
     const ws = createFakeSocket();
     const spawned = manager.spawnAndAttach(ws, shellInput);
     expect(spawned).not.toBeNull();
     if (!spawned) return;
+    // A real /bin/sh keeps emitting its prompt, which would reschedule the
+    // grace forever; force idle so the reap is eligible.
+    manager.markIdleForTest(spawned.id);
     expect(manager.size()).toBe(1);
     expect(manager.list()[0]?.clients).toBe(1);
 
@@ -75,9 +78,34 @@ describe("SessionManager no-clients grace", () => {
     expect(manager.size()).toBe(1);
     expect(spawned.session.isExited).toBe(false);
 
-    // Now the joining tab leaves too; a fresh grace starts and reaps it.
+    // Now the joining tab leaves too; a fresh grace starts. Mark idle so the
+    // real shell's prompt output doesn't reschedule the reap.
     manager.detach(joining);
+    manager.markIdleForTest(sid);
     await wait(150);
+    expect(manager.size()).toBe(0);
+    expect(spawned.session.isExited).toBe(true);
+  }, 10_000);
+
+  it("keeps a dormant PTY alive while it's still producing output", async () => {
+    manager = createManager(40);
+    const ws = createFakeSocket();
+    const spawned = manager.spawnAndAttach(ws, shellInput);
+    expect(spawned).not.toBeNull();
+    if (!spawned) return;
+    manager.detach(ws);
+    // The shell keeps producing — keep refreshing lastOutputAt within the
+    // activity window across several grace intervals.
+    for (let tick = 0; tick < 5; tick++) {
+      await wait(20);
+      manager.noteOutput(spawned.session.pid);
+    }
+    await wait(10);
+    expect(manager.size()).toBe(1);
+    expect(spawned.session.isExited).toBe(false);
+    // Output goes quiet → the next grace fires and reaps.
+    manager.markIdleForTest(spawned.id);
+    await wait(120);
     expect(manager.size()).toBe(0);
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
@@ -87,4 +115,19 @@ describe("SessionManager no-clients grace", () => {
     const ws = createFakeSocket();
     expect(manager.attach(ws, "00000000-0000-0000-0000-000000000000")).toBeNull();
   });
+
+  it("reports the favicon-equivalent activity state on the session list", async () => {
+    manager = createManager(60_000);
+    const ws = createFakeSocket();
+    const spawned = manager.spawnAndAttach(ws, shellInput);
+    expect(spawned).not.toBeNull();
+    if (!spawned) return;
+    // A freshly-spawned shell just emitted its prompt — recent output → running.
+    const states = manager.list().map((entry) => entry.state);
+    expect(states).toContain("running");
+
+    manager.markIdleForTest(spawned.id);
+    // Idle with no foreground program → ready.
+    expect(manager.list()[0]?.state).toBe("ready");
+  }, 10_000);
 });

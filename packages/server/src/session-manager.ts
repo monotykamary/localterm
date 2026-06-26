@@ -4,6 +4,7 @@ import {
   MAX_OUTPUT_BYTES,
   OUTPUT_BATCH_FLUSH_BYTES,
   OUTPUT_BATCH_WINDOW_MS,
+  SESSION_ACTIVITY_WINDOW_MS,
   SESSION_GRACE_MS,
   SESSION_PENDING_PROMOTE_TIMEOUT_MS,
   WS_BACKPRESSURE_THRESHOLD_BYTES,
@@ -28,6 +29,15 @@ export interface AutomationContext {
   automationId: string;
   runId: string;
 }
+
+// Favicon-equivalent activity state, computed server-side from output recency
+// and foreground status. "running" = output within SESSION_ACTIVITY_WINDOW_MS
+// (the tab favicon turns green); "alive-quiet" = a foreground program is still
+// running but output has gone quiet (the favicon turns blue); "ready" = idle at
+// the shell prompt (the favicon turns grey). Surfaced on the session list so a
+// glance shows what's actively producing vs waiting, and gates the grace reap
+// so a quiet-but-running shell isn't reaped.
+export type SessionActivityState = "running" | "alive-quiet" | "ready";
 
 interface ManagedClient {
   ws: ClientSocket;
@@ -56,10 +66,17 @@ export interface ManagedSession {
   outputBatchTimer: NodeJS.Timeout | null;
   drainPollTimer: NodeJS.Timeout | null;
   gitWatcher: GitDiffWatcher;
+  // Last PTY output time + whether a foreground program is running, the inputs
+  // to computeState(). Mirrors the client's favicon activity tracking so the
+  // session list's row color and the grace reap decision read from the same
+  // "is this shell still doing something" signal.
+  lastOutputAt: number;
+  hasForeground: boolean;
   // No-clients grace timer: armed when the last subscriber detaches, cancelled
-  // when any subscriber re-attaches. Fires the PTY's disposal if nobody
-  // re-subscribes within SESSION_GRACE_MS. Null while the session has at least
-  // one client (or before its first attach).
+  // when any subscriber re-attaches. On fire, re-checks activity — if output is
+  // still arriving (a build, a long command) it reschedules so a dormant shell
+  // is never reaped mid-stream; only a truly idle one (no output within the
+  // activity window, no clients) is reaped.
   graceTimer: NodeJS.Timeout | null;
   parkedAt: number | null;
 }
@@ -153,7 +170,20 @@ export class SessionManager {
       title: managed.session.currentTitle || managed.session.initialDocumentTitle,
       createdAt: managed.createdAt,
       clients: managed.clients.size,
+      state: this.computeState(managed),
     }));
+  }
+
+  // Test-only: pause the PTY and backdate its last output past the activity
+  // window so the grace reap is eligible. A real /bin/sh keeps emitting its
+  // prompt (which would reschedule the grace forever); pausing stops new output
+  // and backdating makes the existing recency read as idle. Production code
+  // never needs this — a live shell's actual output recency drives the reap.
+  markIdleForTest(id: string): void {
+    const managed = this.sessions.get(id);
+    if (!managed) return;
+    managed.session.pause();
+    managed.lastOutputAt = 0;
   }
 
   spawn(input: SpawnPtyInput, automation?: AutomationContext): ManagedSession | null {
@@ -170,6 +200,8 @@ export class SessionManager {
       outputBatchTimer: null,
       drainPollTimer: null,
       gitWatcher: new GitDiffWatcher(),
+      lastOutputAt: Date.now(),
+      hasForeground: false,
       graceTimer: null,
       parkedAt: null,
     };
@@ -378,6 +410,7 @@ export class SessionManager {
 
   private onSessionOutput(managed: ManagedSession, data: string): void {
     managed.outputBatch += data;
+    managed.lastOutputAt = Date.now();
     this.noteOutput(managed.session.pid);
     this.hooks.onOutputActivity();
     if (managed.outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
@@ -485,6 +518,7 @@ export class SessionManager {
       if (!managed.automation) this.hooks.onSessionEvent("cwd", cwd);
     });
     session.on("foreground", (process: string | null) => {
+      managed.hasForeground = process !== null;
       this.broadcast(managed, { type: "foreground", process });
       this.hooks.onSessionActivity();
       if (!managed.automation && session.lastEmittedCwd) {
@@ -612,6 +646,15 @@ export class SessionManager {
     managed.graceTimer = setTimeout(() => {
       managed.graceTimer = null;
       managed.parkedAt = null;
+      // Re-check on fire: if output is still arriving (a build, a long command
+      // running in a dormant shell), reschedule so we never reap mid-stream. The
+      // shell still dies on a real idle (no output within the activity window, no
+      // clients), which is the same "no activity" signal that turns the tab's
+      // favicon grey.
+      if (Date.now() - managed.lastOutputAt < SESSION_ACTIVITY_WINDOW_MS) {
+        this.startGrace(managed);
+        return;
+      }
       this.tearDown(managed);
       this.hooks.onSessionActivity();
     }, this.graceMs);
@@ -624,6 +667,15 @@ export class SessionManager {
       managed.graceTimer = null;
     }
     managed.parkedAt = null;
+  }
+
+  // The favicon-equivalent state, computed from the same signals the client's
+  // favicon uses (recent output → running; a foreground program but quiet →
+  // alive-quiet; idle → ready). Surfaced on the session list so the row icon
+  // colors match the tab the user is looking at.
+  private computeState(managed: ManagedSession): SessionActivityState {
+    if (Date.now() - managed.lastOutputAt < SESSION_ACTIVITY_WINDOW_MS) return "running";
+    return managed.hasForeground ? "alive-quiet" : "ready";
   }
 
   private coordinatorForCwd(cwd: string): GitDirtyCoordinator {
@@ -650,4 +702,5 @@ export interface SessionListItem {
   title: string;
   createdAt: number;
   clients: number;
+  state: SessionActivityState;
 }

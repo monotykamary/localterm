@@ -84,6 +84,7 @@ export {
   serverToClientMessageSchema,
   sessionListItemSchema,
   sessionsListResponseSchema,
+  sessionActivityStateSchema,
   updateAutomationInputSchema,
 } from "./schemas.js";
 export type {
@@ -131,6 +132,7 @@ export type {
   ServerToClientMessage,
   SessionListItem,
   SessionListResponse,
+  SessionActivityState,
   TriggerInput,
   UpdateAutomationInput,
 } from "./types.js";

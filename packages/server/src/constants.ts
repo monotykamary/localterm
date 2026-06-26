@@ -188,6 +188,15 @@ export const SESSION_SCROLLBACK_REPLAY_BYTES = 256 * 1024;
 // side's close/error/end during wake, surfacing as 1006 before the client
 // even tries to reconnect).
 export const SESSION_GRACE_MS = 30_000;
+// Output recency used to compute a session's favicon-equivalent state for the
+// session list (recent output = running, a foreground process but quiet =
+// alive-quiet, idle = ready) AND to gate the grace reap: a dormant session
+// with output still arriving is kept alive — never reaped mid-command — and
+// is only eligible once output has gone quiet for this long. Matches the
+// client's favicon-ready debounce (the same "no activity → grey" signal that
+// turns the tab's favicon blue/grey), so the session list's row color and the
+// grace decision read from the same source of truth.
+export const SESSION_ACTIVITY_WINDOW_MS = 750;
 // How long a freshly-attached client stays "pending" — its live output is
 // buffered per-client until it sends {type:"ready", replay} (the localterm
 // client does this within milliseconds of the session frame, so its scrollback

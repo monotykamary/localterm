@@ -23,7 +23,10 @@ import {
   SESSIONS_POLL_INTERVAL_MS,
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import type { SessionListItem } from "@monotykamary/localterm-server/protocol";
+import type {
+  SessionActivityState,
+  SessionListItem,
+} from "@monotykamary/localterm-server/protocol";
 import { fetchSessions, killSession } from "@/utils/fetch-sessions";
 import { formatRelativeTime } from "@/utils/format-relative-time";
 
@@ -87,27 +90,23 @@ interface SessionOptionProps {
   onKill: () => void;
 }
 
-// Status pill: "active" when a client is attached, "orphaned" when the shell
-// is dormant (no viewers, waiting out its grace window). Sits between the
-// title and the meta so a glance across the list shows what's live vs about
-// to be reaped.
-const StatusPill = ({ session, isCurrent }: { session: SessionListItem; isCurrent: boolean }) => {
-  const isOrphaned = session.clients === 0;
-  return (
-    <span
-      className={cn(
-        "shrink-0 rounded-full px-1.5 py-px text-[9px] font-medium uppercase tracking-wide",
-        isCurrent
-          ? "bg-foreground/15 text-foreground"
-          : isOrphaned
-            ? "bg-transparent text-muted-foreground/70 ring-1 ring-foreground/10"
-            : "bg-foreground/10 text-foreground/70",
-      )}
-    >
-      {isCurrent ? "current" : isOrphaned ? "orphaned" : "active"}
-    </span>
-  );
+// Favicon-equivalent colors, tuned for the session list's darker
+// foreground/10 row surface (the favicon fills sit on a near-black tab bar).
+// running ≈ the green favicon; alive-quiet ≈ the blue favicon; ready ≈ the
+// grey favicon. Picked for contrast on the list, not byte-matched to the SVG.
+const ICON_COLOR_FOR_STATE: Record<SessionActivityState, string> = {
+  running: "hsl(142 60% 50%)",
+  "alive-quiet": "hsl(200 70% 58%)",
+  ready: "hsl(220 8% 55%)",
 };
+
+const SessionIcon = ({ state }: { state: SessionActivityState }) => (
+  <SquareTerminal
+    className="size-3.5"
+    aria-hidden="true"
+    style={{ color: ICON_COLOR_FOR_STATE[state] }}
+  />
+);
 
 // Trailing slot is a fixed 20px box whether it holds a Check (current), a
 // Spinner (killing), or a kill button — so the title/meta never shift as the
@@ -137,11 +136,8 @@ const SessionOption = ({
       isCurrent && "cursor-default",
     )}
   >
-    <span className="shrink-0 text-muted-foreground/70">
-      <SquareTerminal className="size-3.5" aria-hidden="true" />
-    </span>
+    <SessionIcon state={session.state} />
     <span className="min-w-0 flex-1 truncate text-left">{session.title || session.cwd}</span>
-    <StatusPill session={session} isCurrent={isCurrent} />
     <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/60">
       {session.shellName} · pid {session.pid} · {formatRelativeTime(session.createdAt, nowMs)}
     </span>

@@ -41,9 +41,13 @@ export const healthSchema = z
 
 // One row in the session picker: a live PTY the user can attach to. `clients`
 // is the count of currently-attached sockets (0 = dormant — alive but no one
-// viewing it, the row the picker exists to surface). The current tab matches on
-// `id` against the session frame it received, so it can badge itself and skip
-// re-attaching to the PTY it's already on.
+// viewing it, the row the picker exists to surface). `state` is the
+// favicon-equivalent activity (running = recent output, alive-quiet = a
+// foreground program but quiet, ready = idle) so the row icon colors match the
+// tab the user is looking at and gate the grace reap. The current tab matches
+// on `id` against the session frame it received.
+export const sessionActivityStateSchema = z.enum(["running", "alive-quiet", "ready"]);
+
 export const sessionListItemSchema = z
   .object({
     id: z.string().uuid(),
@@ -54,6 +58,7 @@ export const sessionListItemSchema = z
     title: z.string().max(MAX_TITLE_LENGTH),
     createdAt: z.number().int().nonnegative(),
     clients: z.number().int().nonnegative(),
+    state: sessionActivityStateSchema,
   })
   .strict();
 
