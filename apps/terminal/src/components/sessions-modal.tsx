@@ -108,6 +108,29 @@ const SessionIcon = ({ state }: { state: SessionActivityState }) => (
   />
 );
 
+// Attachment pill: "current" when this tab is the one viewing it, "active"
+// when a client is attached (in another tab), "orphaned" when the shell is
+// dormant (no viewers, waiting out its grace window). Distinct from the
+// icon's activity color (running/quiet/idle) — the pill says who's looking,
+// the icon says what the shell is doing.
+const StatusPill = ({ session, isCurrent }: { session: SessionListItem; isCurrent: boolean }) => {
+  const isOrphaned = session.clients === 0;
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded-full px-1.5 py-px text-[9px] font-medium uppercase tracking-wide",
+        isCurrent
+          ? "bg-foreground/15 text-foreground"
+          : isOrphaned
+            ? "bg-transparent text-muted-foreground/70 ring-1 ring-foreground/10"
+            : "bg-foreground/10 text-foreground/70",
+      )}
+    >
+      {isCurrent ? "current" : isOrphaned ? "orphaned" : "active"}
+    </span>
+  );
+};
+
 // Trailing slot is a fixed 20px box whether it holds a Check (current), a
 // Spinner (killing), or a kill button — so the title/meta never shift as the
 // slot's content changes between rows or states.
@@ -138,6 +161,7 @@ const SessionOption = ({
   >
     <SessionIcon state={session.state} />
     <span className="min-w-0 flex-1 truncate text-left">{session.title || session.cwd}</span>
+    <StatusPill session={session} isCurrent={isCurrent} />
     <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/60">
       {session.shellName} · pid {session.pid} · {formatRelativeTime(session.createdAt, nowMs)}
     </span>
