@@ -221,12 +221,14 @@ const resolveOpenFileAction = (
   file: GitDiffFileMeta,
   onOpenInEditor: ((filePath: string) => void) | undefined,
   onOpenImage: ((filePath: string) => void) | undefined,
-): { handler: (filePath: string) => void; label: string } | null => {
+): { handler: (filePath: string) => void; label: string; ariaLabel: (path: string) => string } | null => {
   const image = isImagePath(file.path);
   const handler = image ? onOpenImage : onOpenInEditor;
   if (!handler) return null;
   if (!image && file.binary) return null;
-  return { handler, label: image ? "open image" : "open in neovim" };
+  return image
+    ? { handler, label: "open image", ariaLabel: (path) => `open image ${path}` }
+    : { handler, label: "open in neovim", ariaLabel: (path) => `open ${path} in neovim` };
 };
 
 const lineBackgroundClasses = (type: DiffLine["type"]): string => {
@@ -1978,7 +1980,7 @@ export const DiffViewer = ({
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => openFileAction.handler(selectedFile.path)}
-                        aria-label={`${openFileAction.label} ${selectedFile.path}`}
+                        aria-label={openFileAction.ariaLabel(selectedFile.path)}
                         title={openFileAction.label}
                         className="shrink-0 hover:text-foreground"
                       >
