@@ -1,5 +1,13 @@
 # localterm
 
+## 2.16.2
+
+### Patch Changes
+
+- Restore the current/active/orphaned attachment pills in the session list, alongside the activity-colored terminal icon. The pill says who's viewing (current/active/orphaned); the icon color says what the shell is doing (running/quiet/idle).
+- Updated dependencies
+  - @monotykamary/localterm-server@2.16.2
+
 ## 2.16.1
 
 ### Patch Changes
