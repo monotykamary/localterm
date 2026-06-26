@@ -4,6 +4,7 @@ import { Terminal } from "../../src/components/terminal";
 import {
   DEFAULT_TERMINAL_FONT_SIZE_PX,
   DEFAULT_TERMINAL_LINE_HEIGHT,
+  RECONNECT_DELAY_MS,
   TERMINAL_CURSOR_BLINK_STORAGE_KEY,
   TERMINAL_CURSOR_STYLE_STORAGE_KEY,
   TERMINAL_FONT_SIZE_MIN_PX,
@@ -1353,5 +1354,79 @@ describe("Terminal shell info", () => {
     expect(screen.getByText("fish")).toBeDefined();
     expect(screen.getByText("/opt/homebrew/bin/fish")).toBeDefined();
     expect(screen.getByText("54321")).toBeDefined();
+  });
+});
+
+describe("Terminal refresh reattach", () => {
+  const TEST_SID = "550e8400-e29b-41d4-a716-446655440000";
+  const fireSessionFrame = (ws: FakeWebSocketHandle | undefined, id: string) => {
+    ws?.fireOpen();
+    ws?.fireMessage({
+      type: "session",
+      shell: "/bin/zsh",
+      shellName: "zsh",
+      pid: 111,
+      cwd: "/tmp",
+      title: "zsh",
+      id,
+    });
+  };
+
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("persists the session id to ?sid= and reattaches to it after a remount", () => {
+    installFakeLocalStorage();
+    window.history.replaceState(null, "", "/?cwd=%2Ftmp");
+    const { unmount } = render(<Terminal />);
+    const firstWs = fakeWebSockets[0];
+    expect(firstWs).toBeDefined();
+
+    act(() => {
+      fireSessionFrame(firstWs, TEST_SID);
+    });
+
+    expect(new URL(window.location.href).searchParams.get("sid")).toBe(TEST_SID);
+    expect(firstWs?.send).toHaveBeenCalledWith(JSON.stringify({ type: "ready", replay: true }));
+
+    unmount();
+    render(<Terminal />);
+    const secondWs = fakeWebSockets[1];
+    expect(secondWs).toBeDefined();
+    expect(secondWs.url).toContain(`sid=${TEST_SID}`);
+
+    act(() => {
+      fireSessionFrame(secondWs, TEST_SID);
+    });
+
+    expect(secondWs?.send).toHaveBeenCalledWith(JSON.stringify({ type: "ready", replay: true }));
+  });
+
+  it("does not replay scrollback on a silent reattach of the same PTY", () => {
+    installFakeLocalStorage();
+    render(<Terminal />);
+    const firstWs = fakeWebSockets[0];
+    expect(firstWs).toBeDefined();
+
+    act(() => {
+      fireSessionFrame(firstWs, TEST_SID);
+    });
+    firstWs?.send.mockClear();
+
+    act(() => {
+      firstWs?.fireClose(1006, "", false);
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+
+    const secondWs = fakeWebSockets[1];
+    expect(secondWs).toBeDefined();
+    expect(secondWs.url).toContain(`sid=${TEST_SID}`);
+
+    act(() => {
+      fireSessionFrame(secondWs, TEST_SID);
+    });
+
+    expect(secondWs?.send).toHaveBeenCalledWith(JSON.stringify({ type: "ready", replay: false }));
   });
 });

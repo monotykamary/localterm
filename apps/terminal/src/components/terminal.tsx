@@ -145,6 +145,10 @@ import {
 } from "@/utils/remove-initial-command-query-param";
 import { removeRunQueryParam, RUN_QUERY_PARAM } from "@/utils/remove-run-query-param";
 import {
+  SESSION_ID_QUERY_PARAM,
+  syncSessionIdQueryParam,
+} from "@/utils/sync-session-id-query-param";
+import {
   loadStoredTerminalCursorBlink,
   storeTerminalCursorBlink,
   subscribeStoredTerminalCursorBlink,
@@ -228,22 +232,24 @@ const SEARCH_DECORATION_OPTIONS = {
 };
 
 const CWD_QUERY_PARAM = "cwd";
-const SESSION_ID_QUERY_PARAM = "sid";
 
 const buildWebSocketUrl = (cwdOverride?: string | null, sid?: string | null): string => {
   const url = new URL("/ws", window.location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  const cwd = cwdOverride ?? new URLSearchParams(window.location.search).get(CWD_QUERY_PARAM);
+  const params = new URLSearchParams(window.location.search);
+  const cwd = cwdOverride ?? params.get(CWD_QUERY_PARAM);
   if (cwd) url.searchParams.set(CWD_QUERY_PARAM, cwd);
-  const runId = new URLSearchParams(window.location.search).get(RUN_QUERY_PARAM);
+  const runId = params.get(RUN_QUERY_PARAM);
   if (runId) url.searchParams.set(RUN_QUERY_PARAM, runId);
-  if (sid) url.searchParams.set(SESSION_ID_QUERY_PARAM, sid);
+  // Fall back to the address bar's ?sid= (written by syncSessionIdQueryParam)
+  // when no explicit id is passed, so a full page refresh reattaches to the
+  // same live PTY instead of spawning a fresh shell.
+  const resolvedSid = sid ?? params.get(SESSION_ID_QUERY_PARAM);
+  if (resolvedSid) url.searchParams.set(SESSION_ID_QUERY_PARAM, resolvedSid);
   // Forward a transient initial command (a worktree's setup script) so the
   // server writes it to the PTY as if the user typed it — the install/env-copy
   // output is visible and the prompt returns when it finishes.
-  const initialCommand = new URLSearchParams(window.location.search).get(
-    INITIAL_COMMAND_QUERY_PARAM,
-  );
+  const initialCommand = params.get(INITIAL_COMMAND_QUERY_PARAM);
   if (initialCommand) url.searchParams.set(INITIAL_COMMAND_QUERY_PARAM, initialCommand);
   return url.toString();
 };
@@ -269,17 +275,12 @@ type ExitInfo =
       wasClean: boolean;
     };
 
-interface TerminalProps {
-  onModalOpenChange?: (open: boolean) => void;
-  onForegroundProcessChange?: (hasProcess: boolean) => void;
-}
-
 interface ResizeScrollRestoreState {
   anchor: TerminalScrollAnchor;
   frameId: number;
 }
 
-export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: TerminalProps = {}) => {
+export const Terminal = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XtermTerminal | null>(null);
   const terminalInitializedRef = useRef(false);
@@ -1066,9 +1067,11 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       if (exited) return;
       exited = true;
       // The PTY is gone — drop its id so a manual Reconnect spawns a fresh
-      // shell instead of trying to reattach to the dead one.
+      // shell instead of trying to reattach to the dead one, and clear the
+      // address-bar ?sid= so a refresh here never targets the dead PTY.
       liveSessionId = null;
       liveSessionIdRef.current = null;
+      syncSessionIdQueryParam(null);
       if (exitCode !== null && exitCode !== 0) {
         // Non-zero exit — surface immediately. The server's onExit deliberately
         // skips closeTab on non-clean codes so the tab stays as the failure mask.
@@ -1172,6 +1175,7 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           if (message.id) {
             liveSessionId = message.id;
             liveSessionIdRef.current = message.id;
+            syncSessionIdQueryParam(message.id);
           }
           // A switch (or a missed reattach that spawned a fresh shell): the
           // new PTY is a different one than the tab was just viewing, so reset
@@ -1201,12 +1205,14 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           removeRunQueryParam();
           removeInitialCommandQueryParam();
           // Attach handshake: tell the server whether this socket wants the
-          // scrollback replay (a switch) or is already caught up (a silent
-          // reattach of the same PTY, or a brand-new spawn with no history).
-          // The server holds live fan-out for pending sockets until this
-          // lands, so nothing is lost across the gap — it lives in the ring
-          // buffer and arrives via the replay.
-          send({ type: "ready", replay: isSwitch });
+          // scrollback replay (a switch, or a fresh page load onto a blank
+          // surface) or is already caught up (a silent reattach of the same
+          // PTY onto a surface that still holds its output). The server holds
+          // live fan-out for pending sockets until this lands, so nothing is
+          // lost across the gap — it lives in the ring buffer and arrives via
+          // the replay. A brand-new spawn has an empty ring buffer, so a
+          // fresh-load replay is a no-op there.
+          send({ type: "ready", replay: isSwitch || priorSessionId === null });
         } else if (message.type === "automations") {
           setAutomations(message.automations);
         } else if (message.type === "caffeinate") {
@@ -1226,7 +1232,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
           setGitDirtyVersion((version) => (version ?? 0) + 1);
         } else if (message.type === "foreground") {
           const nowHasProcess = message.process !== null;
-          onForegroundProcessChange?.(nowHasProcess);
           if (nowHasProcess) {
             hadForegroundThisCycle = true;
           } else if (faviconState === "alive-quiet") {
@@ -1320,7 +1325,6 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
       setSessionInfo(null);
       setConsecutiveFailures(0);
       setTabFaviconState("ready");
-      onForegroundProcessChange?.(false);
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -1944,14 +1948,13 @@ export const Terminal = ({ onModalOpenChange, onForegroundProcessChange }: Termi
   }, [shouldAutoReconnect, effectiveCursorStyle, activeCursorBlink]);
 
   useEffect(() => {
-    onModalOpenChange?.(isModalOpen);
     if (isModalOpen) {
       setIsCommandPaletteOpen(false);
       setIsDiffViewerOpen(false);
       setIsAutomationsOpen(false);
       setIsWorktreesOpen(false);
     }
-  }, [isModalOpen, onModalOpenChange]);
+  }, [isModalOpen]);
   const matchLabel =
     searchResults.resultCount === 0
       ? "0/0"
