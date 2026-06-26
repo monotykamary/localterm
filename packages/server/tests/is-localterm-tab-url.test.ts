@@ -38,37 +38,67 @@ describe("isLocaltermTabUrl", () => {
   describe("announced publicUrl surface", () => {
     it("matches a portless tab (no port) against a portless publicUrl", () => {
       expect(
-        isLocaltermTabUrl("https://localterm.localhost/?run=x", 3417, "127.0.0.1", "https://localterm.localhost"),
+        isLocaltermTabUrl(
+          "https://localterm.localhost/?run=x",
+          3417,
+          "127.0.0.1",
+          "https://localterm.localhost",
+        ),
       ).toBe(true);
     });
 
     it("normalises the https default port (:443) to the bare origin", () => {
       expect(
-        isLocaltermTabUrl("https://localterm.localhost:443/?run=x", 3417, "127.0.0.1", "https://localterm.localhost"),
+        isLocaltermTabUrl(
+          "https://localterm.localhost:443/?run=x",
+          3417,
+          "127.0.0.1",
+          "https://localterm.localhost",
+        ),
       ).toBe(true);
     });
 
     it("matches a tailnet tab against a tailnet publicUrl", () => {
       expect(
-        isLocaltermTabUrl("https://myhost.ts.net/?run=x", 3417, "127.0.0.1", "https://myhost.ts.net"),
+        isLocaltermTabUrl(
+          "https://myhost.ts.net/?run=x",
+          3417,
+          "127.0.0.1",
+          "https://myhost.ts.net",
+        ),
       ).toBe(true);
     });
 
     it("still matches the loopback form alongside a portless publicUrl", () => {
       expect(
-        isLocaltermTabUrl("http://localterm.localhost:3417/?run=x", 3417, "127.0.0.1", "https://localterm.localhost"),
+        isLocaltermTabUrl(
+          "http://localterm.localhost:3417/?run=x",
+          3417,
+          "127.0.0.1",
+          "https://localterm.localhost",
+        ),
       ).toBe(true);
     });
 
     it("rejects an unrelated origin even with a publicUrl set", () => {
       expect(
-        isLocaltermTabUrl("https://evil.com/?run=x", 3417, "127.0.0.1", "https://localterm.localhost"),
+        isLocaltermTabUrl(
+          "https://evil.com/?run=x",
+          3417,
+          "127.0.0.1",
+          "https://localterm.localhost",
+        ),
       ).toBe(false);
     });
 
     it("falls back to the loopback check when publicUrl is malformed", () => {
       expect(
-        isLocaltermTabUrl("http://localterm.localhost:3417/?run=x", 3417, "127.0.0.1", "ht!tp://:::"),
+        isLocaltermTabUrl(
+          "http://localterm.localhost:3417/?run=x",
+          3417,
+          "127.0.0.1",
+          "ht!tp://:::",
+        ),
       ).toBe(true);
     });
   });
