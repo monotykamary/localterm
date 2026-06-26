@@ -1,6 +1,6 @@
 {
   "name": "@monotykamary/localterm",
-  "version": "2.15.3",
+  "version": "2.16.0",
   "description": "A browser-based terminal: one browser tab is one PTY session. Friendly URL, persistent xterm.js front-end, hono + node-pty back-end.",
   "keywords": [
     "browser-terminal",
