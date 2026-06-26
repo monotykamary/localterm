@@ -1,5 +1,14 @@
 # localterm
 
+## 2.16.3
+
+### Patch Changes
+
+- 971bcf1: Reattach the live PTY on a tab refresh instead of spawning a fresh shell. The server already supported `?sid=` reattach (used by the session switcher and transient WS drops), but the client kept the session id only in memory and never wrote it to the URL — so a full page refresh (⌘R / F5) wiped it, opened a no-`sid` WebSocket, and the daemon spawned a new shell while the old PTY detached, sat dormant for the grace window, and got reaped. The session id is now mirrored into the address bar as `?sid=` (alongside the existing `?cwd=`) when a session frame lands, cleared on shell exit, and `buildWebSocketUrl` falls back to it on a fresh page load. The attach handshake also requests a scrollback replay when the surface is blank on a fresh load (`priorSessionId === null`), so a refresh onto a live PTY lands on its recent output instead of a blank screen — a no-op for a brand-new spawn, whose ring buffer is empty.
+- 971bcf1: Drop the redundant "leave site?" beforeunload guard. The prompt fired on tab close while a foreground program was running (vim, a build) to keep the user from killing the PTY. With daemon-side PTY multiplexing, closing a tab now detaches instead of killing — the shell survives the no-clients grace window and any tab can reattach from the session switcher (and, after the refresh-reattach change, via `?sid=` on reload). The guard's only remaining effect was an annoying confirmation dialog for a close that's no longer destructive, so it's removed along with the `onModalOpenChange`/`onForegroundProcessChange` props on `Terminal` that existed solely to feed it.
+- Updated dependencies [0aef8a5]
+  - @monotykamary/localterm-server@2.16.3
+
 ## 2.16.2
 
 ### Patch Changes
