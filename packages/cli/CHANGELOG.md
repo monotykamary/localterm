@@ -1,5 +1,15 @@
 # localterm
 
+## 2.15.0
+
+### Minor Changes
+
+- Add a "Ligatures" toggle to the terminal settings that fuses multi-character operators (->, =>, ===, !==, ...) into single glyphs via xterm's character-joiner API, with full Fira Code v6 parity: composable arrows and markdown rules of any length (-->, ====>, ---, ===), the letter pairs (fi, fj, Fl, Il, Tl, www), and hex/dimension literals (0xFF, 0xDEADBEEF, 1920x1080). A no-op on fonts without ligatures, so the toggle is safe across the whole font list.
+
+### Patch Changes
+
+- @monotykamary/localterm-server@2.15.0
+
 ## 2.14.0
 
 ### Patch Changes
