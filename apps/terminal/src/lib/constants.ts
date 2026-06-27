@@ -93,6 +93,23 @@ export const SESSIONS_LIST_ROW_HEIGHT_PX = 36;
 // enough to avoid hammering the daemon on an idle open.
 export const SESSIONS_POLL_INTERVAL_MS = 1500;
 
+// QR session-transfer modal: Share renders a QR of this tab's session URL for
+// another device to scan; Ingest scans another device's QR and switches this
+// tab to its session. Mirrors the other palette-style overlays' close timing.
+export const QR_MODAL_CLOSE_TRANSITION_MS = 150;
+// Edge length (px) of the rendered share-QR canvas — large enough to scan from
+// a phone, small enough to fit the modal.
+export const QR_CODE_SIZE_PX = 200;
+// Quiet-zone margin (QR modules) around the share QR so cameras lock on
+// without edge bleed.
+export const QR_CODE_MARGIN_MODULES = 2;
+// jsQR only runs this often against a captured frame, so the ingest loop stays
+// light instead of pegging a core at the display refresh rate.
+export const QR_SCAN_DECODE_INTERVAL_MS = 80;
+// Longest edge (px) handed to jsQR — camera frames downscale to this before
+// decoding so a 1080p stream isn't a multi-megapixel pass every frame.
+export const QR_SCAN_DECODE_MAX_EDGE_PX = 480;
+
 export const TOOLBAR_HIDE_DELAY_MS = 200;
 export const TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS = 1500;
 export const TOOLTIP_DELAY_MS = 300;

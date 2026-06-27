@@ -57,6 +57,8 @@ import { AutomationsModal } from "@/components/automations-modal";
 import { CommandPalette, type CommandItem } from "@/components/command-palette";
 import { DiffViewer } from "@/components/diff-viewer";
 import { KeepAwakeMenu, type CaffeinateMode } from "@/components/keep-awake-menu";
+import { QrButton } from "@/components/qr-button";
+import { QrModal } from "@/components/qr-modal";
 import { SessionsButton } from "@/components/sessions-menu";
 import { SessionsModal } from "@/components/sessions-modal";
 import { SettingsMenu } from "@/components/settings-menu";
@@ -333,6 +335,7 @@ export const Terminal = () => {
   const [isAutomationsOpen, setIsAutomationsOpen] = useState(false);
   const [isKeepAwakePopoverOpen, setIsKeepAwakePopoverOpen] = useState(false);
   const [isSessionsOpen, setIsSessionsOpen] = useState(false);
+  const [isQrOpen, setIsQrOpen] = useState(false);
   const [automations, setAutomations] = useState<AutomationWithNextRun[] | null>(null);
   const toggleAutomationsRef = useRef<(() => void) | null>(null);
   const [isWorktreesOpen, setIsWorktreesOpen] = useState(false);
@@ -384,7 +387,8 @@ export const Terminal = () => {
     isAutomationsOpen ||
     isKeepAwakePopoverOpen ||
     isSessionsOpen ||
-    isWorktreesOpen;
+    isWorktreesOpen ||
+    isQrOpen;
   isSettingsPopoverOpenRef.current = isSettingsPopoverOpen;
   isAutomationsOpenRef.current = isAutomationsOpen;
   isSessionsOpenRef.current = isSessionsOpen;
@@ -1848,6 +1852,22 @@ export const Terminal = () => {
     refocusTerminalRef.current?.();
   }, []);
 
+  const handleQrOpenChange = useCallback((open: boolean) => {
+    setIsQrOpen(open);
+    if (open) {
+      setIsCommandPaletteOpen(false);
+      return;
+    }
+    if (toolbarHoverTimeoutRef.current !== null) {
+      window.clearTimeout(toolbarHoverTimeoutRef.current);
+    }
+    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
+      toolbarHoverTimeoutRef.current = null;
+      setIsToolbarHovered(false);
+    }, TOOLBAR_HIDE_DELAY_MS);
+    refocusTerminalRef.current?.();
+  }, []);
+
   useEffect(() => {
     if (!isSearchOpen) return;
     const input = searchInputRef.current;
@@ -2559,23 +2579,16 @@ export const Terminal = () => {
                       onClose={refocusTerminalRef.current ?? undefined}
                     />
                   ) : null}
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    nativeButton={false}
-                    aria-label="open a new shell in a new browser tab"
-                    render={
-                      <a
-                        id="new-shell-link"
-                        href={newTabUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      />
-                    }
-                    className="hover:text-foreground"
-                  >
-                    <Plus />
-                  </Button>
+                  <a
+                    id="new-shell-link"
+                    href={newTabUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    className="sr-only"
+                  />
+                  <QrButton onOpen={() => handleQrOpenChange(true)} />
                 </div>
               </div>
               {isTouchDevice || (hasDiff && diffSummary !== null) || branchPrDisplayState ? (
@@ -2745,6 +2758,13 @@ export const Terminal = () => {
         previousSessionIdRef={previousSessionIdRef}
         switchSessionRef={switchSessionRef}
         onClose={() => handleSessionsOpenChange(false)}
+      />
+
+      <QrModal
+        open={isQrOpen}
+        liveSessionIdRef={liveSessionIdRef}
+        switchSessionRef={switchSessionRef}
+        onClose={() => handleQrOpenChange(false)}
       />
 
       <AlertDialog open={isModalOpen}>
