@@ -1,5 +1,12 @@
 # localterm
 
+## 2.20.2
+
+### Patch Changes
+
+- Updated dependencies [16f28b7]
+  - @monotykamary/localterm-server@2.20.2
+
 ## 2.20.1
 
 ### Patch Changes
