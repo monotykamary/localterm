@@ -1,5 +1,22 @@
 # localterm
 
+## 2.17.0
+
+### Minor Changes
+
+- Surface the CDP background-tab path (no focus steal, closeable automation run tabs) across the first-time install UX so a user can tell whether it's on and how to enable it:
+
+  - `/api/health` reports the daemon's persistent CDP socket state as a `cdp` field (`{ connected, browser? } | null`).
+  - `localterm start` prints a `cdp:` line — background tabs via the detected browser, or the OS opener with a pointer to `localterm install`.
+  - `localterm status` prints the CDP mode (background + closeable via CDP / OS opener / disabled).
+  - `localterm install` runs a CDP probe step alongside the portless and tailscale checks, with the `--remote-debugging-port=9222` hint.
+  - The automations modal locks `Close tab when finished` off with an amber warning when no debug-enabled Chromium is connected, instead of letting the setting save as a silent no-op.
+
+### Patch Changes
+
+- Updated dependencies
+  - @monotykamary/localterm-server@2.17.0
+
 ## 2.16.5
 
 ### Patch Changes
