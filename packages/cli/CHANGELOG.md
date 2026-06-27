@@ -1,5 +1,15 @@
 # localterm
 
+## 2.17.3
+
+### Patch Changes
+
+- Mobile touch + on-screen-keyboard UX fixes: stop glide-scroll from
+  popping the keyboard (inputmode="none" guard + visualViewport
+  keyboard-hide detection), strip autofill strips from search inputs,
+  make menus scroll on mobile, and add coarse-pointer detection.
+  - @monotykamary/localterm-server@2.17.3
+
 ## 2.17.2
 
 ### Patch Changes
