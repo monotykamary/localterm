@@ -29,41 +29,16 @@ import type {
 } from "@monotykamary/localterm-server/protocol";
 import { fetchSessions, killSession } from "@/utils/fetch-sessions";
 import { formatRelativeTime } from "@/utils/format-relative-time";
+import { resolveInitialSessionIndex } from "@/utils/resolve-initial-session-index";
+import { sortSessions } from "@/utils/sort-sessions";
 
 interface SessionsModalProps {
   open: boolean;
   liveSessionIdRef: RefObject<string | null>;
+  previousSessionIdRef: RefObject<string | null>;
   switchSessionRef: RefObject<((sid: string) => void) | null>;
   onClose: () => void;
 }
-
-const matchesQuery = (session: SessionListItem, normalizedQuery: string): boolean => {
-  if (!normalizedQuery) return true;
-  return (
-    session.title.toLowerCase().includes(normalizedQuery) ||
-    session.cwd.toLowerCase().includes(normalizedQuery) ||
-    session.shellName.toLowerCase().includes(normalizedQuery)
-  );
-};
-
-// Keep the current session pinned to the top even while searching, so a
-// filtered list never loses track of "where am I now". Live (attached) shells
-// come next, then dormant by recency.
-const sortSessions = (
-  sessions: SessionListItem[],
-  currentId: string | null,
-  normalizedQuery: string,
-): SessionListItem[] =>
-  [...sessions]
-    .filter((session) => matchesQuery(session, normalizedQuery))
-    .sort((a, b) => {
-      if (a.id === currentId) return -1;
-      if (b.id === currentId) return 1;
-      const aAttached = a.clients > 0 ? 0 : 1;
-      const bAttached = b.clients > 0 ? 0 : 1;
-      if (aAttached !== bAttached) return aAttached - bAttached;
-      return b.createdAt - a.createdAt;
-    });
 
 const KeyHint = ({ keys, label }: { keys: string; label: string }) => (
   <span className="flex items-center gap-1">
@@ -219,6 +194,7 @@ const SessionOption = ({
 export const SessionsModal = ({
   open,
   liveSessionIdRef,
+  previousSessionIdRef,
   switchSessionRef,
   onClose,
 }: SessionsModalProps) => {
@@ -232,6 +208,9 @@ export const SessionsModal = ({
   const [killingId, setKillingId] = useState<string | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Latched on open so the picker applies its initial highlight (the last
+  // switched session) once the list lands, not on every poll refresh.
+  const openSelectionPendingRef = useRef(false);
 
   const refresh = useCallback(async () => {
     const fetched = await fetchSessions();
@@ -253,6 +232,7 @@ export const SessionsModal = ({
       setMounted(true);
       setQuery("");
       setActiveIndex(0);
+      openSelectionPendingRef.current = true;
       const frame = requestAnimationFrame(() => {
         setSettled(true);
         searchInputRef.current?.focus();
@@ -305,6 +285,18 @@ export const SessionsModal = ({
   useEffect(() => {
     setActiveIndex((prev) => (ordered.length === 0 ? 0 : Math.min(prev, ordered.length - 1)));
   }, [ordered.length]);
+
+  // On open, jump the highlight to the last switched session (the shell this
+  // tab viewed before the current) so opening the picker and pressing Enter
+  // quick-switches back, alt-tab style. Applies once per open — after the
+  // list lands — not on every poll refresh or query change.
+  useEffect(() => {
+    if (!open || !openSelectionPendingRef.current || ordered.length === 0) return;
+    openSelectionPendingRef.current = false;
+    setActiveIndex(
+      resolveInitialSessionIndex(ordered, previousSessionIdRef.current, liveSessionIdRef.current),
+    );
+  }, [open, ordered]);
 
   useEffect(() => {
     if (!open) {

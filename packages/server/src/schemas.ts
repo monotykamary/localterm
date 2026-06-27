@@ -58,8 +58,9 @@ export const healthSchema = z
 // viewing it, the row the picker exists to surface). `state` is the
 // favicon-equivalent activity (running = recent output, alive-quiet = a
 // foreground program but quiet, ready = idle) so the row icon colors match the
-// tab the user is looking at and gate the grace reap. The current tab matches
-// on `id` against the session frame it received.
+// tab the user is looking at and gate the grace reap. `lastOutputAt` is the
+// last PTY output time, exposed so the picker can sort by recency of activity.
+// The current tab matches on `id` against the session frame it received.
 export const sessionActivityStateSchema = z.enum(["running", "alive-quiet", "ready"]);
 
 export const sessionListItemSchema = z
@@ -71,6 +72,7 @@ export const sessionListItemSchema = z
     cwd: z.string().min(1),
     title: z.string().max(MAX_TITLE_LENGTH),
     createdAt: z.number().int().nonnegative(),
+    lastOutputAt: z.number().int().nonnegative(),
     clients: z.number().int().nonnegative(),
     state: sessionActivityStateSchema,
   })

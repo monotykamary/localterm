@@ -53,18 +53,16 @@ describe("runStatus", () => {
     vi.spyOn(state, "readPort").mockReturnValue(3417);
     vi.spyOn(state, "isAlive").mockReturnValue(true);
     vi.spyOn(state, "readHost").mockReturnValue("127.0.0.1");
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            ok: true,
-            sessions: 2,
-            cdp: { connected: true, browser: "Google Chrome" },
-          }),
-          { headers: { "content-type": "application/json" } },
-        ),
-      );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          sessions: 2,
+          cdp: { connected: true, browser: "Google Chrome" },
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
     await runStatus();
     expect(fetchSpy).toHaveBeenCalledWith("http://127.0.0.1:3417/api/health");
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("running"));

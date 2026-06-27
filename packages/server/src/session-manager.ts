@@ -170,6 +170,7 @@ export class SessionManager {
       cwd: managed.session.lastEmittedCwd || managed.session.cwd,
       title: managed.session.currentTitle || managed.session.initialDocumentTitle,
       createdAt: managed.createdAt,
+      lastOutputAt: managed.lastOutputAt,
       clients: managed.clients.size,
       state: this.computeState(managed),
     }));
@@ -725,6 +726,7 @@ export interface SessionListItem {
   cwd: string;
   title: string;
   createdAt: number;
+  lastOutputAt: number;
   clients: number;
   state: SessionActivityState;
 }

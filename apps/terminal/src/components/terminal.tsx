@@ -285,6 +285,10 @@ export const Terminal = () => {
   const manualReconnectRef = useRef<(() => void) | null>(null);
   const switchSessionRef = useRef<((sid: string) => void) | null>(null);
   const liveSessionIdRef = useRef<string | null>(null);
+  // The session this tab was viewing immediately before the current one — the
+  // "last switched" shell. Recorded on every switch so the session picker can
+  // open with it highlighted for an alt-tab-style Enter quick-switch.
+  const previousSessionIdRef = useRef<string | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const refocusTerminalRef = useRef<(() => void) | null>(null);
   const pasteToTerminalRef = useRef<((text: string) => void) | null>(null);
@@ -1204,6 +1208,9 @@ export const Terminal = () => {
           reattachCloseCode = 0;
           reattachCloseReason = "";
           if (message.id) {
+            if (priorSessionId !== null && message.id !== priorSessionId) {
+              previousSessionIdRef.current = priorSessionId;
+            }
             liveSessionId = message.id;
             liveSessionIdRef.current = message.id;
             syncSessionIdQueryParam(message.id);
@@ -2516,6 +2523,7 @@ export const Terminal = () => {
       <SessionsModal
         open={isSessionsOpen}
         liveSessionIdRef={liveSessionIdRef}
+        previousSessionIdRef={previousSessionIdRef}
         switchSessionRef={switchSessionRef}
         onClose={() => handleSessionsOpenChange(false)}
       />
