@@ -58,8 +58,19 @@ const isSingleCellPrintable = (chunk: string): boolean => {
   return (code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff);
 };
 
+// A cursor-moving control (arrow, backspace, Ctrl-U, Enter, Tab, Ctrl-C) starts
+// with a C0 control byte or DEL. Such a keystroke moves the shell's logical
+// cursor without a matching xterm cursor move from us (we don't predict
+// controls), so the two desync until the control's echo arrives.
+const isControlChunk = (chunk: string): boolean => {
+  const code = chunk.charCodeAt(0) ?? 0x100;
+  return code < 0x20 || code === 0x7f;
+};
+
 const nextEma = (prev: number | null, sample: number): number =>
-  prev === null ? sample : prev * (1 - LOCAL_ECHO_RTT_EMA_ALPHA) + sample * LOCAL_ECHO_RTT_EMA_ALPHA;
+  prev === null
+    ? sample
+    : prev * (1 - LOCAL_ECHO_RTT_EMA_ALPHA) + sample * LOCAL_ECHO_RTT_EMA_ALPHA;
 
 // Client-side predictive echo for high-latency links (a tailnet over a DERP
 // relay, a phone on cellular). Each printable keystroke is written to xterm in
@@ -83,10 +94,12 @@ export class LocalEcho {
 
   private enabled = DEFAULT_TERMINAL_LOCAL_ECHO;
   private pending = "";
-  private lastInputMs = 0;
+  private lastInputMs = -1_000_000;
   private emaRttMs: number | null = null;
   private lastRttSampleMs = 0;
   private probeSendMs: number | null = null;
+  private probeInFlight = false;
+  private suspended = false;
   private cooldownUntilMs = 0;
   private timeoutHandle: number | null = null;
 
@@ -107,24 +120,43 @@ export class LocalEcho {
       return;
     }
     const now = performance.now();
-    if (now < this.cooldownUntilMs || !this.isSafeState() || !isSingleCellPrintable(chunk)) {
+    const burstStart = now - this.lastInputMs > LOCAL_ECHO_BURST_IDLE_MS;
+    if (burstStart) {
+      this.probeInFlight = false;
+      this.suspended = false;
+    }
+    this.lastInputMs = now;
+    if (isControlChunk(chunk)) {
+      // A cursor-moving control leaves xterm's cursor out of sync with the
+      // shell's logical cursor until its echo arrives. Suspend prediction so
+      // the next printable doesn't render at the wrong column; the control's
+      // echo resyncs the geometry and clears the suspension.
+      this.suspended = true;
       this.send(chunk);
       return;
     }
-    if (this.pending.length >= LOCAL_ECHO_PENDING_MAX_CHARS) {
+    if (
+      now < this.cooldownUntilMs ||
+      this.suspended ||
+      !this.isSafeState() ||
+      !isSingleCellPrintable(chunk) ||
+      this.pending.length >= LOCAL_ECHO_PENDING_MAX_CHARS
+    ) {
       this.send(chunk);
       return;
     }
-    const decision = this.decide(now);
+    const decision = this.decide(now, burstStart);
     if (decision === "skip") {
       this.send(chunk);
       return;
     }
-    if (decision === "probe") this.probeSendMs = now;
+    if (decision === "probe") {
+      this.probeSendMs = now;
+      this.probeInFlight = true;
+    }
     this.terminal.write(DIM_ON + chunk + DIM_OFF);
     this.send(chunk);
     this.pending += chunk;
-    this.lastInputMs = now;
     this.rearmTimeout();
   };
 
@@ -132,7 +164,12 @@ export class LocalEcho {
   // the bytes to write to xterm. Passthrough when nothing is pending keeps the
   // common (non-predicting) path at zero cost.
   reconcile = (bytes: Uint8Array): Uint8Array => {
-    if (this.pending.length === 0) return bytes;
+    if (this.pending.length === 0) {
+      // Real output with nothing predicted: the terminal's geometry is
+      // authoritative, so a prior control's echo has resynced the cursor.
+      this.suspended = false;
+      return bytes;
+    }
     const real = decoder.decode(bytes);
     const total = this.pending.length;
     const matched = commonPrefixLength(real, this.pending);
@@ -141,6 +178,7 @@ export class LocalEcho {
       this.emaRttMs = nextEma(this.emaRttMs, now - this.probeSendMs);
       this.lastRttSampleMs = now;
       this.probeSendMs = null;
+      this.probeInFlight = false;
     }
     // The real output bytes are passed through verbatim so a multi-byte UTF-8
     // char split across frames still assembles correctly in xterm; only the
@@ -165,11 +203,17 @@ export class LocalEcho {
       // Mismatch: real diverges mid-span or opens with an escape (a reprinting
       // shell). Erase the dim span and let the real output author the line.
       this.pending = "";
+      this.probeSendMs = null;
+      this.probeInFlight = false;
       prefix = BACKSPACE.repeat(total) + SPACE.repeat(total) + BACKSPACE.repeat(total);
       suffix = "";
     }
-    if (this.pending.length === 0) this.cancelTimeout();
-    else this.rearmTimeout();
+    if (this.pending.length === 0) {
+      this.suspended = false;
+      this.cancelTimeout();
+    } else {
+      this.rearmTimeout();
+    }
     return suffix.length === 0
       ? concatBytes(encoder.encode(prefix), bytes)
       : concatBytes(encoder.encode(prefix), bytes, encoder.encode(suffix));
@@ -185,6 +229,8 @@ export class LocalEcho {
     this.terminal.write(BACKSPACE.repeat(total) + SPACE.repeat(total) + BACKSPACE.repeat(total));
     this.pending = "";
     this.probeSendMs = null;
+    this.probeInFlight = false;
+    this.suspended = false;
     this.cancelTimeout();
   };
 
@@ -195,11 +241,15 @@ export class LocalEcho {
   // "probe" predicts the first keystroke of an idle burst to (re)measure RTT
   // when the estimate is unknown or stale; "predict" runs once the link is known
   // slow; "skip" passes through (fast link, or still measuring).
-  private decide = (now: number): "probe" | "predict" | "skip" => {
-    const burstStart = now - this.lastInputMs > LOCAL_ECHO_BURST_IDLE_MS;
-    const rttStale =
-      this.emaRttMs === null || now - this.lastRttSampleMs > LOCAL_ECHO_RTT_STALE_MS;
+  private decide = (now: number, burstStart: boolean): "probe" | "predict" | "skip" => {
+    const rttStale = this.emaRttMs === null || now - this.lastRttSampleMs > LOCAL_ECHO_RTT_STALE_MS;
     if (burstStart && rttStale) return "probe";
+    // A probe is in flight (first keystroke of a burst, echo not yet back):
+    // optimistically predict the rest of the burst. On a fast link the dim is
+    // overwritten within a frame (invisible); on a slow link it persists (the
+    // point). The gate still wins for spaced typing: once the probe's echo
+    // arrives and the RTT is known fast, subsequent bursts skip.
+    if (this.probeInFlight) return "predict";
     if (this.emaRttMs === null) return "skip";
     return this.emaRttMs > LOCAL_ECHO_THRESHOLD_MS ? "predict" : "skip";
   };
