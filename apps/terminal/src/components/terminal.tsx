@@ -439,9 +439,7 @@ export const Terminal = () => {
   const [activeCursorBlink, setActiveCursorBlink] = useState<boolean>(
     initialCursorBlinkRef.current,
   );
-  const [activeLocalEcho, setActiveLocalEcho] = useState<boolean>(
-    initialLocalEchoRef.current,
-  );
+  const [activeLocalEcho, setActiveLocalEcho] = useState<boolean>(initialLocalEchoRef.current);
   const [activeScrollback, setActiveScrollback] = useState<number>(initialScrollbackRef.current);
   const [activeScrollOnUserInput, setActiveScrollOnUserInput] = useState<boolean>(
     initialScrollOnUserInputRef.current,

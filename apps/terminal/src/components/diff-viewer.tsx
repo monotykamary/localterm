@@ -1978,9 +1978,7 @@ export const DiffViewer = ({
                               <span className="text-muted-foreground/60">
                                 {selectedFileParts.directory}
                               </span>
-                              <span className="text-foreground">
-                                {selectedFileParts.basename}
-                              </span>
+                              <span className="text-foreground">{selectedFileParts.basename}</span>
                             </bdi>
                           </span>
                           <ChevronDown className="size-3 shrink-0" aria-hidden="true" />

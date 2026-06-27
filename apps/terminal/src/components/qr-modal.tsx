@@ -45,13 +45,7 @@ const STATUS_COPY: Record<QrScannerStatus, string> = {
   failed: "Couldn't start the camera.",
 };
 
-const ModeToggle = ({
-  mode,
-  onChange,
-}: {
-  mode: QrMode;
-  onChange: (mode: QrMode) => void;
-}) => (
+const ModeToggle = ({ mode, onChange }: { mode: QrMode; onChange: (mode: QrMode) => void }) => (
   <div
     role="tablist"
     aria-label="QR mode"
@@ -185,12 +179,7 @@ const IngestPanel = ({ videoRef, status }: IngestPanelProps) => {
   );
 };
 
-export const QrModal = ({
-  open,
-  liveSessionIdRef,
-  switchSessionRef,
-  onClose,
-}: QrModalProps) => {
+export const QrModal = ({ open, liveSessionIdRef, switchSessionRef, onClose }: QrModalProps) => {
   const [mounted, setMounted] = useState(false);
   const [settled, setSettled] = useState(false);
   const [mode, setMode] = useState<QrMode>("share");
@@ -255,10 +244,7 @@ export const QrModal = ({
       await navigator.clipboard.writeText(shareUrl);
       setHasCopiedShareUrl(true);
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = window.setTimeout(
-        () => setHasCopiedShareUrl(false),
-        COPY_FEEDBACK_MS,
-      );
+      copyTimerRef.current = window.setTimeout(() => setHasCopiedShareUrl(false), COPY_FEEDBACK_MS);
     } catch {
       /* clipboard blocked; the read-only field still allows a manual copy */
     }

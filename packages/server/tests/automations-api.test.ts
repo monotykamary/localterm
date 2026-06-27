@@ -710,10 +710,7 @@ describe("automation run tab surface", () => {
     };
   };
 
-  const makeServer = async (
-    publicUrl?: string | null,
-    localUrl?: string | null,
-  ): Promise<void> => {
+  const makeServer = async (publicUrl?: string | null, localUrl?: string | null): Promise<void> => {
     stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-surface-"));
     openedUrls = [];
     server = await createServer({

@@ -133,7 +133,8 @@ export class SessionManager {
     this.hooks = options.hooks;
     this.sendControl = options.sendControl;
     this.graceMs = options.graceMs ?? SESSION_GRACE_MS;
-    this.pendingPromoteTimeoutMs = options.pendingPromoteTimeoutMs ?? SESSION_PENDING_PROMOTE_TIMEOUT_MS;
+    this.pendingPromoteTimeoutMs =
+      options.pendingPromoteTimeoutMs ?? SESSION_PENDING_PROMOTE_TIMEOUT_MS;
   }
 
   size(): number {
@@ -279,10 +280,7 @@ export class SessionManager {
     // its scrollback replay still lands before live fan-out. `promote` always
     // sends `replay-end`, so even a slow link that auto-promotes with
     // `replay: false` can't deadlock the client in its replay window.
-    client.pendingTimer = setTimeout(
-      () => this.promote(ws, false),
-      this.pendingPromoteTimeoutMs,
-    );
+    client.pendingTimer = setTimeout(() => this.promote(ws, false), this.pendingPromoteTimeoutMs);
     client.pendingTimer.unref?.();
     this.hooks.onSessionActivity();
     return managed;

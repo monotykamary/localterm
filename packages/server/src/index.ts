@@ -519,7 +519,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     // `publicUrl` keeps the prior single-surface behavior. A bare origin (no
     // path) is the contract, so the `new URL` base rewrites any stray path and
     // searchParams encodes the id.
-    const runUrl = new URL(localOrigin ?? publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`);
+    const runUrl = new URL(
+      localOrigin ?? publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`,
+    );
     runUrl.searchParams.set(AUTOMATION_RUN_QUERY_PARAM, run.runId);
     void tabController
       .open(runUrl.href)

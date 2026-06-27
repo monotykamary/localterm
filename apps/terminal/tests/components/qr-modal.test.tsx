@@ -18,13 +18,7 @@ let mockScannerHandle: {
 } | null = null;
 
 vi.mock("../../src/hooks/use-qr-scanner", () => ({
-  useQrScanner: ({
-    enabled,
-    onDetect,
-  }: {
-    enabled: boolean;
-    onDetect: (data: string) => void;
-  }) => {
+  useQrScanner: ({ enabled, onDetect }: { enabled: boolean; onDetect: (data: string) => void }) => {
     mockScannerHandle = { enabled, onDetect };
     return { videoRef: { current: null }, status: "scanning" };
   },
@@ -53,13 +47,10 @@ const renderModal = (options: RenderOptions = {}) => {
 };
 
 beforeEach(() => {
-  vi.stubGlobal(
-    "requestAnimationFrame",
-    (callback: FrameRequestCallback) => {
-      callback(0);
-      return 0;
-    },
-  );
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callback(0);
+    return 0;
+  });
   vi.stubGlobal("cancelAnimationFrame", () => {});
   mockScannerHandle = null;
 });
