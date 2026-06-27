@@ -222,15 +222,14 @@ export const AUTOMATION_RUN_QUERY_PARAM = "run";
 // leaving a dead session hanging past one extra interval.
 export const WS_HEARTBEAT_GRACE_MS = 15_000;
 // Keepalive for the daemon's one persistent CDP WebSocket (browser tab control
-// for automations). Same wake-from-sleep failure mode as the PTY WS heartbeat
-// above: the loopback socket usually survives sleep with the OS, but the wall
-// clock jumps so a naive staleness check looks dead and the next automation
-// run reopens a fresh socket — re-triggering the browser's one-time
-// remote-debugging prompt the user already cleared at `start`. The heartbeat
-// probes liveness after a quiet window; a live-but-silent socket replies and
-// is reused (no reopen, no re-prompt), a truly dead one is torn down so the
-// next run reconnects instead of stalling `Target.createTarget` for the full
-// call timeout.
+// for automations). After a laptop sleep the browser is often suspended and
+// drops the debug WebSocket while the daemon's loopback socket still reads
+// OPEN — a half-open socket the next `Target.createTarget` call would stall
+// against for the full call timeout before the open-path catch closes it. The
+// heartbeat probes liveness after a quiet window so a dead-OPEN socket is
+// torn down proactively and the next run reconnects cleanly instead of paying
+// that stall; a socket that genuinely survived (still OPEN and the browser
+// still replies) is reused, avoiding a needless reopen.
 export const CDP_HEARTBEAT_INTERVAL_MS = 20_000;
 export const CDP_HEARTBEAT_TIMEOUT_MS = 60_000;
 export const FOREGROUND_POLL_INTERVAL_MS = 250;

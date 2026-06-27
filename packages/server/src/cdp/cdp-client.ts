@@ -465,16 +465,19 @@ export class CdpClient {
     return this.closeQueue;
   }
 
-  /** Background keepalive for the persistent socket. Mirrors the PTY WS
-   * heartbeat: a loopback CDP socket usually survives an OS sleep with the
-   * daemon, but the wall clock jumps during sleep so the quiet-window check
-   * looks stale on the first post-wake tick. Probing once (instead of tearing
-   * down on staleness alone) lets a live-but-silent socket prove it's still
-   * up and be *reused* — without this the next automation run reopens a fresh
-   * socket and re-triggers the browser's one-time remote-debugging prompt the
-   * user cleared at `start`. A probe that goes unanswered past the call
-   * timeout means the socket is genuinely half-open; it's torn down so the
-   * next `openBackgroundTab` reconnects instead of stalling `createTarget`. */
+  /** Background keepalive for the persistent socket. Its job is to detect a
+   * half-open socket during idle rather than discovering it on the next
+   * automation run: after a quiet window it probes liveness with a cheap
+   * `Target.getTargets` round-trip. The socket often still reads OPEN after a
+   * laptop sleep even though the browser was suspended and dropped the debug
+   * WS, so without the probe the next `Target.createTarget` call stalls
+   * against it for the full call timeout before the open-path catch closes
+   * it. A probe that goes unanswered past that timeout tears the socket down
+   * now, and the next `openBackgroundTab` reconnects cleanly instead of
+   * paying that stall. When the socket genuinely survived the quiet period
+   * (still OPEN and the browser still replies), the probe reuses it and
+   * avoids a needless reopen. One probe at a time is fine — the interval is
+   * larger than the call timeout, so probes never overlap. */
   private startHeartbeat(): void {
     this.stopHeartbeat();
     this.lastReplyAt = Date.now();
