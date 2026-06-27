@@ -268,7 +268,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     },
   });
   const app = new Hono();
-  app.use("*", createNetworkPolicyMiddleware(host));
+  app.use(
+    "*",
+    createNetworkPolicyMiddleware(host, () => publicOrigin),
+  );
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
   wss.options.maxPayload = 256 * 1024;
 

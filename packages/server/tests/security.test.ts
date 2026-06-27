@@ -235,6 +235,65 @@ describe("createNetworkPolicyMiddleware (0.0.0.0 bind)", () => {
   });
 });
 
+describe("createNetworkPolicyMiddleware (announced publicUrl surface)", () => {
+  const tailnetHost = "toms-macbook-air.taild0936.ts.net";
+
+  // Mirrors the daemon: a loopback bind fronted by `tailscale serve`, whose
+  // Host the CLI resolved and handed to setPublicUrl as the live public origin.
+  const appWithSurface = (surface: string | null): Hono => {
+    const app = new Hono();
+    app.use(
+      "*",
+      createNetworkPolicyMiddleware("127.0.0.1", () => surface),
+    );
+    app.get("/probe", (context) => context.json({ ok: true }));
+    return app;
+  };
+
+  const probe = (app: Hono, host: string, origin?: string) =>
+    app.request("http://127.0.0.1/probe", {
+      headers: origin === undefined ? { host } : { host, origin },
+    });
+
+  it("allows the announced tailnet Host on a loopback bind", async () => {
+    const response = await probe(appWithSurface(`https://${tailnetHost}`), `${tailnetHost}:443`);
+    expect(response.status).toBe(200);
+  });
+
+  it("allows same-origin requests on the announced surface", async () => {
+    const response = await probe(
+      appWithSurface(`https://${tailnetHost}`),
+      `${tailnetHost}:443`,
+      `https://${tailnetHost}`,
+    );
+    expect(response.status).toBe(200);
+  });
+
+  it("rejects an unrelated DNS Host even with a surface set", async () => {
+    const response = await probe(appWithSurface(`https://${tailnetHost}`), "evil.example.com");
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects cross-origin from a public site on the announced surface", async () => {
+    const response = await probe(
+      appWithSurface(`https://${tailnetHost}`),
+      `${tailnetHost}:443`,
+      "https://evil.example.com",
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it("still rejects the tailnet Host when no surface is announced (default)", async () => {
+    const response = await probe(appWithSurface(null), `${tailnetHost}:443`);
+    expect(response.status).toBe(403);
+  });
+
+  it("ignores a malformed publicUrl (falls back to strict host check)", async () => {
+    const response = await probe(appWithSurface("not-a-url"), "evil.example.com");
+    expect(response.status).toBe(403);
+  });
+});
+
 describe("isAllowedSourceIp", () => {
   it("always allows connections when bound to loopback", () => {
     expect(isAllowedSourceIp("8.8.8.8", "127.0.0.1")).toBe(true);

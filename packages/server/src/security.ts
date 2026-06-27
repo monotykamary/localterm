@@ -102,20 +102,42 @@ export const loopbackMiddleware: MiddlewareHandler = async (context, next) => {
   await next();
 };
 
-export const createNetworkPolicyMiddleware = (bindHost: string): MiddlewareHandler => {
+const publicOriginHostname = (getPublicOrigin: () => string | null): string | null => {
+  const origin = getPublicOrigin();
+  if (!origin) return null;
+  try {
+    return new URL(origin).hostname;
+  } catch {
+    return null;
+  }
+};
+
+export const createNetworkPolicyMiddleware = (
+  bindHost: string,
+  getPublicOrigin: () => string | null = () => null,
+): MiddlewareHandler => {
   const loopbackBind = isLoopback(bindHost);
   const hostAllowed = loopbackBind ? isLoopback : isPrivateHost;
 
+  // `tailscale serve` (and any DNS-named reverse proxy on a private net) fronts
+  // the loopback daemon with a hostname that isPrivateHost can't validate — it's
+  // not an IP literal, and under userspace networking MagicDNS is unreachable
+  // from the host so it can't be resolved either. Trust instead the surface
+  // origin the CLI resolved from `tailscale status --json` Self.DNSName and set
+  // via setPublicUrl; read live so a post-bind setPublicUrl applies at once.
   return async (context, next) => {
+    const extraHost = publicOriginHostname(getPublicOrigin);
     const hostHeader = context.req.header("host");
     const hostname = stripPort(hostHeader);
-    if (!hostname || !hostAllowed(hostname)) {
+    const hostAccepted = !!hostname && (hostAllowed(hostname) || hostname === extraHost);
+    if (!hostAccepted) {
       return new Response("forbidden: host not allowed", { status: 403 });
     }
     const origin = context.req.header("origin");
     if (origin !== undefined) {
       const originHost = originHostname(origin);
-      if (!originHost || !hostAllowed(originHost)) {
+      const originAccepted = !!originHost && (hostAllowed(originHost) || originHost === extraHost);
+      if (!originAccepted) {
         return new Response("forbidden: cross-origin", { status: 403 });
       }
     }
