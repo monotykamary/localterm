@@ -199,6 +199,19 @@ export class SessionManager {
     managed.hasForeground = false;
   }
 
+  // Test-only: force output idleness (pause + backdate lastOutputAt) WITHOUT
+  // clearing hasForeground, so the grace reap's foreground gate is exercised
+  // against the real pty.process reading instead of being masked (markIdleForTest
+  // clears both, which hides the alias-mismatch regression). Pair with a wait
+  // long enough for the ForegroundWatcher to have ticked at least once.
+  // Production code never needs this.
+  markOutputIdleForTest(id: string): void {
+    const managed = this.sessions.get(id);
+    if (!managed) return;
+    managed.session.pause();
+    managed.lastOutputAt = 0;
+  }
+
   // Test-only: mark a foreground program as running (or clear it) so the grace
   // reap's alive-quiet path can be exercised without racing a real shell's
   // process-group introspection (pty.process is transient during spawn and

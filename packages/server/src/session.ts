@@ -32,6 +32,7 @@ import { parseOscAutomationExitFromChunk } from "./utils/parse-osc-automation-ex
 import { parseOscDirtyFromChunk } from "./utils/parse-osc-dirty.js";
 import { parseOscNotificationsFromChunk } from "./utils/parse-osc-notification.js";
 import { parseOscTitleFromChunk } from "./utils/parse-osc-title.js";
+import { confirmShellProcessName } from "./utils/shell-process-name.js";
 import { TerminalModeState } from "./utils/terminal-mode-state.js";
 import { terminalQueryResponder } from "./utils/terminal-query-responder.js";
 
@@ -54,6 +55,16 @@ export class Session extends EventEmitter<SessionEvents> {
 
   private readonly pty: IPty;
   private readonly shellName: string;
+  // Process names pty.process reports for the shell itself: the invoked
+  // basename and full path, plus the shell's alias name on macOS where they
+  // differ. On macOS node-pty reads kp_proc.p_comm, which an aliased shell
+  // overrides: /bin/sh is bash, so an idle /bin/sh reports "bash" — not the
+  // invoked basename "sh" — forever, which the original basename-only check
+  // misread as a running foreground program. The alias name is learned from
+  // the pty.process reading the first time the terminal's foreground group id
+  // (tpgid) confirms the shell is idle (see inferForegroundProcess), so it
+  // never absorbs a genuine program and never races a user-typed command.
+  private readonly shellProcessNames = new Set<string>();
   private currentCols: number;
   private currentRows: number;
   private exited = false;
@@ -87,6 +98,8 @@ export class Session extends EventEmitter<SessionEvents> {
     ensureSpawnHelperExecutable();
     this.shell = input.shell ?? getDefaultShell();
     this.shellName = path.basename(this.shell);
+    this.shellProcessNames.add(this.shellName);
+    this.shellProcessNames.add(this.shell);
     this.cwd = input.cwd ?? os.homedir();
     this.currentCols = input.cols ?? DEFAULT_COLS;
     this.currentRows = input.rows ?? DEFAULT_ROWS;
@@ -517,7 +530,28 @@ export class Session extends EventEmitter<SessionEvents> {
 
   private inferForegroundProcess(): string | null {
     const raw = this.pty.process?.trim() ?? "";
-    return raw && raw !== this.shellName ? raw : null;
+    if (!raw) return null;
+    if (this.shellProcessNames.has(raw)) return null;
+    // An unknown name is either the shell under an alias (idle /bin/sh reports
+    // "bash", not the invoked "sh") or a genuine foreground program. The
+    // terminal's foreground group id disambiguates without depending on the
+    // shell's proctitle timing: the shell is its own pgrp leader holding the
+    // terminal at idle (tpgid == pty.pid), a foreground program runs in its own
+    // group (tpgid != pty.pid). When tpgid confirms the shell is idle the
+    // current reading IS the shell's alias name — learn it (cached per shell
+    // path, see utils/shell-process-name.ts, so the sync ps runs at most once
+    // per aliased path) and report no foreground; otherwise the name is a real
+    // program, reported as foreground. macOS-only: Linux node-pty reads
+    // /proc/<pgrp>/cmdline (the invoked name, already in the set), so an unknown
+    // name there is just a foreground program.
+    if (process.platform === "darwin") {
+      const confirmed = confirmShellProcessName(this.shell, this.pty.pid, raw);
+      if (confirmed) {
+        this.shellProcessNames.add(confirmed);
+        if (confirmed === raw) return null;
+      }
+    }
+    return raw;
   }
 
   private cleanUpHookFiles(): void {
