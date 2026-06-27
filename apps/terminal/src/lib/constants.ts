@@ -19,6 +19,7 @@ export const TERMINAL_PADDING_MIN_PX = 0;
 export const TERMINAL_PADDING_MAX_PX = 48;
 export const TERMINAL_PADDING_STEP_PX = 1;
 export const DEFAULT_TERMINAL_CURSOR_BLINK = true;
+export const DEFAULT_TERMINAL_LOCAL_ECHO = true;
 export const DEFAULT_TERMINAL_SCROLL_ON_USER_INPUT = true;
 export const FALLBACK_TERMINAL_BACKGROUND_HEX = "#101010";
 export const DEFAULT_DOCUMENT_TITLE = "localterm";
@@ -144,6 +145,23 @@ export const TERMINAL_FONT_SIZE_STORAGE_KEY = "localterm:terminal-font-size";
 export const TERMINAL_LINE_HEIGHT_STORAGE_KEY = "localterm:terminal-line-height";
 export const TERMINAL_CURSOR_STYLE_STORAGE_KEY = "localterm:terminal-cursor-style";
 export const TERMINAL_CURSOR_BLINK_STORAGE_KEY = "localterm:terminal-cursor-blink";
+export const TERMINAL_LOCAL_ECHO_STORAGE_KEY = "localterm:terminal-local-echo";
+// Client-side predictive echo ("local echo") for high-latency links. A
+// measured round-trip time gates prediction on only when latency exceeds the
+// threshold, so a fast local surface never gets a per-keystroke dim flash. The
+// first keystroke of an idle burst probes the RTT when the estimate is unknown
+// or stale; later keystrokes predict only if the link is slow.
+export const LOCAL_ECHO_THRESHOLD_MS = 50;
+export const LOCAL_ECHO_BURST_IDLE_MS = 400;
+export const LOCAL_ECHO_RTT_STALE_MS = 10_000;
+export const LOCAL_ECHO_RTT_EMA_ALPHA = 0.3;
+export const LOCAL_ECHO_PENDING_MAX_CHARS = 64;
+// Watchdog for a misdetected no-echo prompt (e.g. a password read that slipped
+// past the foreground/buffer gate): unconfirmed predictions erase after this
+// window so typed text can never persist as visible dim output, and
+// prediction then cools down to let the real prompt state resettle.
+export const LOCAL_ECHO_TIMEOUT_MS = 1_000;
+export const LOCAL_ECHO_COOLDOWN_MS = 5_000;
 export const TERMINAL_SCROLLBACK_STORAGE_KEY = "localterm:terminal-scrollback";
 export const TERMINAL_SCROLL_ON_USER_INPUT_STORAGE_KEY = "localterm:terminal-scroll-on-user-input";
 export const TERMINAL_PADDING_X_STORAGE_KEY = "localterm:terminal-padding-x";

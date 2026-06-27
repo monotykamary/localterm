@@ -5,6 +5,7 @@ import type { TerminalSessionInfo } from "../../src/lib/terminal-session-info";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import {
   DEFAULT_TERMINAL_CURSOR_BLINK,
+  DEFAULT_TERMINAL_LOCAL_ECHO,
   DEFAULT_TERMINAL_LINE_HEIGHT,
   DEFAULT_TERMINAL_SCROLL_ON_USER_INPUT,
   TERMINAL_FONT_SIZE_MAX_PX,
@@ -23,6 +24,7 @@ interface SettingsMenuHarnessProps {
   initialLineHeight?: number;
   initialCursorStyle?: TerminalCursorStyle;
   initialCursorBlink?: boolean;
+  initialLocalEcho?: boolean;
   initialScrollback?: number;
   initialScrollOnUserInput?: boolean;
   initialThemeId?: string;
@@ -37,6 +39,7 @@ interface SettingsMenuHarnessProps {
   onCursorStyleChange?: (style: TerminalCursorStyle) => void;
   onCursorStylePreview?: (style: TerminalCursorStyle | null) => void;
   onCursorBlinkChange?: (blink: boolean) => void;
+  onLocalEchoChange?: (enabled: boolean) => void;
   onScrollbackChange?: (scrollback: number) => void;
   onScrollOnUserInputChange?: (scrollOnUserInput: boolean) => void;
   onPaddingXChange?: (paddingX: number) => void;
@@ -52,6 +55,7 @@ const renderSettingsMenu = ({
   initialLineHeight = DEFAULT_TERMINAL_LINE_HEIGHT,
   initialCursorStyle = DEFAULT_TERMINAL_CURSOR_STYLE,
   initialCursorBlink = DEFAULT_TERMINAL_CURSOR_BLINK,
+  initialLocalEcho = DEFAULT_TERMINAL_LOCAL_ECHO,
   initialScrollback = DEFAULT_TERMINAL_SCROLLBACK_LINES,
   initialScrollOnUserInput = DEFAULT_TERMINAL_SCROLL_ON_USER_INPUT,
   initialThemeId = "vesper",
@@ -66,6 +70,7 @@ const renderSettingsMenu = ({
   onCursorStyleChange = () => {},
   onCursorStylePreview,
   onCursorBlinkChange = () => {},
+  onLocalEchoChange = () => {},
   onScrollbackChange = () => {},
   onScrollOnUserInputChange = () => {},
   onPaddingXChange = () => {},
@@ -97,6 +102,8 @@ const renderSettingsMenu = ({
         onCursorStylePreview={onCursorStylePreview}
         cursorBlink={initialCursorBlink}
         onCursorBlinkChange={onCursorBlinkChange}
+        localEcho={initialLocalEcho}
+        onLocalEchoChange={onLocalEchoChange}
         scrollback={initialScrollback}
         onScrollbackChange={onScrollbackChange}
         scrollOnUserInput={initialScrollOnUserInput}
@@ -255,6 +262,19 @@ describe("SettingsMenu cursor blink switch", () => {
 
     expect(onCursorBlinkChange).toHaveBeenCalledTimes(1);
     expect(onCursorBlinkChange.mock.calls[0]?.[0]).toBe(false);
+  });
+});
+
+describe("SettingsMenu predictive typing switch", () => {
+  it("calls onLocalEchoChange with the toggled value", () => {
+    const onLocalEchoChange = vi.fn();
+    renderSettingsMenu({ initialLocalEcho: false, onLocalEchoChange });
+
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    fireEvent.click(screen.getByLabelText("toggle predictive typing"));
+
+    expect(onLocalEchoChange).toHaveBeenCalledTimes(1);
+    expect(onLocalEchoChange.mock.calls[0]?.[0]).toBe(true);
   });
 });
 

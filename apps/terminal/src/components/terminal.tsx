@@ -159,6 +159,12 @@ import {
   subscribeStoredTerminalCursorBlink,
 } from "@/utils/stored-terminal-cursor-blink";
 import {
+  loadStoredLocalEcho,
+  storeStoredLocalEcho,
+  subscribeStoredLocalEcho,
+} from "@/utils/stored-local-echo-enabled";
+import { LocalEcho } from "@/lib/local-echo";
+import {
   loadStoredTerminalCursorStyle,
   storeTerminalCursorStyle,
   subscribeStoredTerminalCursorStyle,
@@ -310,6 +316,9 @@ export const Terminal = () => {
   const initialLineHeightRef = useRef<number>(loadStoredTerminalLineHeight());
   const initialCursorStyleRef = useRef<TerminalCursorStyle>(loadStoredTerminalCursorStyle());
   const initialCursorBlinkRef = useRef<boolean>(loadStoredTerminalCursorBlink());
+  const initialLocalEchoRef = useRef<boolean>(loadStoredLocalEcho());
+  const activeLocalEchoRef = useRef<boolean>(initialLocalEchoRef.current);
+  const localEchoRef = useRef<LocalEcho | null>(null);
   const initialScrollbackRef = useRef<number>(loadStoredTerminalScrollback());
   const initialScrollOnUserInputRef = useRef<boolean>(loadStoredTerminalScrollOnUserInput());
   const initialPaddingXRef = useRef<number>(loadStoredTerminalPaddingX());
@@ -429,6 +438,9 @@ export const Terminal = () => {
   const effectiveCursorStyle = previewCursorStyle ?? activeCursorStyle;
   const [activeCursorBlink, setActiveCursorBlink] = useState<boolean>(
     initialCursorBlinkRef.current,
+  );
+  const [activeLocalEcho, setActiveLocalEcho] = useState<boolean>(
+    initialLocalEchoRef.current,
   );
   const [activeScrollback, setActiveScrollback] = useState<number>(initialScrollbackRef.current);
   const [activeScrollOnUserInput, setActiveScrollOnUserInput] = useState<boolean>(
@@ -1199,6 +1211,14 @@ export const Terminal = () => {
       }, RESIZE_DEBOUNCE_MS);
     };
 
+    const localEcho = new LocalEcho({
+      terminal,
+      send: (data) => send({ type: "input", data }),
+      isSafeState: () => !hasForegroundProcess && terminal.buffer.active.type === "normal",
+    });
+    localEcho.setEnabled(activeLocalEchoRef.current);
+    localEchoRef.current = localEcho;
+
     terminal.onData((data) => {
       // During a scrollback replay xterm re-emits responses to the stale query
       // requests in the ring buffer; dropping them here (instead of forwarding
@@ -1208,7 +1228,7 @@ export const Terminal = () => {
       // the user is not typing in the moment after a switch.
       if (suppressOutput) return;
       for (const chunk of chunkInputByCodeUnits(data, MAX_INPUT_BYTES)) {
-        send({ type: "input", data: chunk });
+        localEcho.handleInput(chunk);
       }
     });
     terminal.onResize(({ cols, rows }) => {
@@ -1331,7 +1351,8 @@ export const Terminal = () => {
             replayChunks.push(new Uint8Array(event.data));
             return;
           }
-          outputBatcher.pushBytes(new Uint8Array(event.data));
+          const bytes = new Uint8Array(event.data);
+          outputBatcher.pushBytes(localEcho.hasPending() ? localEcho.reconcile(bytes) : bytes);
           noteOutputActivity();
           return;
         }
@@ -1355,6 +1376,7 @@ export const Terminal = () => {
           inReplay = false;
           replayChunks = [];
           suppressOutput = false;
+          localEcho.flush();
           reattachPending = false;
           reattachCloseCode = 0;
           reattachCloseReason = "";
@@ -1484,6 +1506,7 @@ export const Terminal = () => {
         cdpControlled = false;
         if (disposed) return;
         if (exited) return;
+        localEcho.flush();
         if (wasEverConnected) {
           // Surface close metadata in DevTools so "the terminal randomly dies"
           // reports always come back with a concrete code/reason instead of
@@ -1611,6 +1634,8 @@ export const Terminal = () => {
         /* socket already closed */
       }
       socket = null;
+      localEcho.dispose();
+      localEchoRef.current = null;
       outputBatcher.detach();
       terminal.dispose();
       document.title = DEFAULT_DOCUMENT_TITLE;
@@ -1733,6 +1758,16 @@ export const Terminal = () => {
     terminal.options.cursorBlink = activeCursorBlink;
   }, [activeCursorBlink]);
 
+  useEffect(() => {
+    activeLocalEchoRef.current = activeLocalEcho;
+    localEchoRef.current?.setEnabled(activeLocalEcho);
+  }, [activeLocalEcho]);
+
+  const handleLocalEchoChange = useCallback((nextLocalEcho: boolean) => {
+    setActiveLocalEcho(nextLocalEcho);
+    storeStoredLocalEcho(nextLocalEcho);
+  }, []);
+
   const handleCursorBlinkChange = useCallback((nextCursorBlink: boolean) => {
     setActiveCursorBlink(nextCursorBlink);
     storeTerminalCursorBlink(nextCursorBlink);
@@ -1797,6 +1832,7 @@ export const Terminal = () => {
       subscribeStoredTerminalLineHeight(setActiveLineHeight),
       subscribeStoredTerminalCursorStyle(setActiveCursorStyle),
       subscribeStoredTerminalCursorBlink(setActiveCursorBlink),
+      subscribeStoredLocalEcho(setActiveLocalEcho),
       subscribeStoredTerminalScrollback(setActiveScrollback),
       subscribeStoredTerminalScrollOnUserInput(setActiveScrollOnUserInput),
       subscribeStoredTerminalPaddingX(setActivePaddingX),
@@ -2289,6 +2325,13 @@ export const Terminal = () => {
         action: () => handleCursorBlinkChange(!activeCursorBlink),
       },
       {
+        id: "local-echo",
+        label: "Predictive typing",
+        category: "Settings",
+        checked: activeLocalEcho,
+        action: () => handleLocalEchoChange(!activeLocalEcho),
+      },
+      {
         id: "scroll-on-input",
         label: "Pin to bottom on input",
         category: "Settings",
@@ -2348,6 +2391,8 @@ export const Terminal = () => {
     handleCursorStyleChange,
     activeCursorBlink,
     handleCursorBlinkChange,
+    activeLocalEcho,
+    handleLocalEchoChange,
     activeFontSize,
     handleFontSizeChange,
     activeScrollOnUserInput,
@@ -2520,6 +2565,8 @@ export const Terminal = () => {
                     onCursorStylePreview={setPreviewCursorStyle}
                     cursorBlink={activeCursorBlink}
                     onCursorBlinkChange={handleCursorBlinkChange}
+                    localEcho={activeLocalEcho}
+                    onLocalEchoChange={handleLocalEchoChange}
                     scrollback={activeScrollback}
                     onScrollbackChange={handleScrollbackChange}
                     scrollOnUserInput={activeScrollOnUserInput}

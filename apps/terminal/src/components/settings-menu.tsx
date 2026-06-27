@@ -57,6 +57,8 @@ interface SettingsMenuProps {
   onCursorStylePreview?: (style: TerminalCursorStyle | null) => void;
   cursorBlink: boolean;
   onCursorBlinkChange: (blink: boolean) => void;
+  localEcho: boolean;
+  onLocalEchoChange: (enabled: boolean) => void;
   scrollback: number;
   onScrollbackChange: (scrollback: number) => void;
   scrollOnUserInput: boolean;
@@ -145,6 +147,8 @@ export const SettingsMenu = ({
   onCursorStylePreview,
   cursorBlink,
   onCursorBlinkChange,
+  localEcho,
+  onLocalEchoChange,
   scrollback,
   onScrollbackChange,
   scrollOnUserInput,
@@ -420,6 +424,18 @@ export const SettingsMenu = ({
                 aria-label="toggle cursor blink"
                 checked={cursorBlink}
                 onCheckedChange={onCursorBlinkChange}
+              />
+            </div>
+          </Field>
+
+          <Field orientation="vertical" className="gap-1.5">
+            <FieldLabel className={SECTION_LABEL_CLASSES}>Typing</FieldLabel>
+            <div className="flex items-center justify-between gap-2">
+              <span className={ROW_LABEL_CLASSES}>Predictive typing</span>
+              <Switch
+                aria-label="toggle predictive typing"
+                checked={localEcho}
+                onCheckedChange={onLocalEchoChange}
               />
             </div>
           </Field>
