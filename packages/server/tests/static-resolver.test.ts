@@ -17,6 +17,7 @@ beforeAll(() => {
   writeFileSync(path.join(staticRoot, "app.js"), "console.log('app');");
   mkdirSync(path.join(staticRoot, "assets"), { recursive: true });
   writeFileSync(path.join(staticRoot, "assets", "logo.svg"), "<svg/>");
+  writeFileSync(path.join(staticRoot, "manifest.webmanifest"), "{}");
 
   secretPath = path.join(path.dirname(staticRoot), "secret.txt");
   secretBody = "DO_NOT_LEAK_TOKEN";
@@ -33,6 +34,11 @@ describe("resolveStaticAsset", () => {
   it("serves nested assets", () => {
     const asset = resolveStaticAsset(staticRoot, "/assets/logo.svg");
     expect(asset?.contentType).toBe("image/svg+xml");
+  });
+
+  it("serves the web app manifest with the manifest+json media type", () => {
+    const asset = resolveStaticAsset(staticRoot, "/manifest.webmanifest");
+    expect(asset?.contentType).toBe("application/manifest+json; charset=utf-8");
   });
 
   it("falls back to index.html for SPA routes (no extension)", () => {

@@ -2349,7 +2349,17 @@ export const Terminal = () => {
   }, []);
 
   return (
-    <div ref={rootRef} className="h-dvh w-dvw" style={{ background: pageBackground }}>
+    <div
+      ref={rootRef}
+      className="h-dvh w-dvw"
+      style={{
+        background: pageBackground,
+        paddingTop: "env(safe-area-inset-top, 0px)",
+        paddingRight: "env(safe-area-inset-right, 0px)",
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        paddingLeft: "env(safe-area-inset-left, 0px)",
+      }}
+    >
       <div className="relative h-full w-full">
         <div
           ref={containerRef}

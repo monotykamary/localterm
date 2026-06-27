@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { TOOLTIP_DELAY_MS } from "@/lib/constants";
 import { applyTabFavicon } from "./utils/apply-tab-favicon";
 import { loadGoogleFontsStylesheet } from "./utils/load-google-fonts-stylesheet";
+import { registerServiceWorker } from "./utils/register-service-worker";
 import "@fontsource/geist-mono/400.css";
 import "@fontsource/geist-mono/500.css";
 import "@fontsource/geist-mono/600.css";
@@ -18,6 +19,7 @@ import "./index.css";
 
 applyTabFavicon();
 loadGoogleFontsStylesheet();
+registerServiceWorker();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Root element not found");

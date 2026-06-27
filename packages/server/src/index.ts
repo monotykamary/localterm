@@ -1252,9 +1252,15 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       }
       const asset = resolveStaticAsset(staticRoot, requestPath);
       if (!asset) return context.text("not found", HTTP_STATUS_NOT_FOUND);
+      // The service worker and manifest must revalidate so a new build is
+      // picked up promptly; hashed /assets are immutable by name.
+      const noCache = requestPath === "/sw.js" || requestPath === "/manifest.webmanifest";
       return new Response(new Uint8Array(asset.body), {
         status: asset.status,
-        headers: { "content-type": asset.contentType },
+        headers: {
+          "content-type": asset.contentType,
+          ...(noCache ? { "cache-control": "no-cache" } : {}),
+        },
       });
     });
   }
