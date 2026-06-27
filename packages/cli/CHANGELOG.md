@@ -1,5 +1,19 @@
 # localterm
 
+## 2.20.1
+
+### Patch Changes
+
+- Fix predictive typing so it actually engages, and stop it desyncing after cursor moves.
+
+  The predictor shipped in 2.20.0 never activated for a typed burst: `lastInputMs` initialized to 0 so the first keystroke of a session wasn't a burst-start probe, and with RTT unknown every subsequent keystroke skipped — the feature was inert for normal fast typing. Initialize `lastInputMs` to the distant past so the first keystroke probes, and predict the rest of the burst optimistically while the probe's echo is in flight (the RTT gate still wins for spaced typing once the link is measured fast).
+
+  A cursor-moving control (arrow, backspace, Ctrl-U, Enter) leaves xterm's cursor out of sync with the shell's logical cursor until its echo arrives, so a char typed immediately after one would render at the wrong column for ~RTT. Add a `suspended` flag: controls suspend prediction; the control's echo resyncs the geometry and clears the suspension.
+
+  Add a model-based test harness that runs the real `LocalEcho` over a fake-timer link against a golden-model terminal and a simulated cooked-mode shell, then diffs the screen against the shell's ground truth. 12 scenarios cover plain / chunked / syntax-highlighting echo, backspace (end + mid-line), mid-line insert, Ctrl-U, the `read -s` password leak + watchdog, the RTT gate for spaced typing, and the disabled / TUI gates.
+
+  - @monotykamary/localterm-server@2.20.1
+
 ## 2.20.0
 
 ### Minor Changes
