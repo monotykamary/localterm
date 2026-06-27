@@ -6,6 +6,7 @@ import {
   type AutomationRunRecord,
   type AutomationSessionEvent,
   type AutomationWithNextRun,
+  type CdpHealth,
 } from "@monotykamary/localterm-server/protocol";
 import {
   CalendarClock,
@@ -58,6 +59,7 @@ import { computeAutomationsHeaderLayout } from "@/utils/compute-automations-head
 import { createAutomation } from "@/utils/create-automation";
 import { deleteAutomation } from "@/utils/delete-automation";
 import { fetchAutomations } from "@/utils/fetch-automations";
+import { fetchServerHealth, type ServerHealth } from "@/utils/fetch-server-health";
 import { formatRelativeTime } from "@/utils/format-relative-time";
 import { resetAutomation } from "@/utils/reset-automation";
 import {
@@ -492,6 +494,7 @@ export const AutomationsModal = ({
   const [sortBy, setSortBy] = useState<AutomationsSort>(loadSortFromStorage);
   const [search, setSearch] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [cdpHealth, setCdpHealth] = useState<ServerHealth | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
   const contentRowRef = useRef<HTMLDivElement | null>(null);
@@ -503,6 +506,11 @@ export const AutomationsModal = ({
     const fetched = await fetchAutomations();
     if (fetched) onAutomationsLoaded(fetched);
   }, [onAutomationsLoaded]);
+
+  const refreshCdpHealth = useCallback(async () => {
+    const fetched = await fetchServerHealth();
+    if (fetched) setCdpHealth(fetched);
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -530,12 +538,13 @@ export const AutomationsModal = ({
     }
     setNowMs(Date.now());
     void refreshAutomations();
+    void refreshCdpHealth();
     const tick = window.setInterval(
       () => setNowMs(Date.now()),
       AUTOMATIONS_RELATIVE_TIME_REFRESH_MS,
     );
     return () => window.clearInterval(tick);
-  }, [open, refreshAutomations]);
+  }, [open, refreshAutomations, refreshCdpHealth]);
 
   // Keep a valid selection across refreshes, falling back to the first item.
   useEffect(() => {
@@ -960,6 +969,7 @@ export const AutomationsModal = ({
                     scheduleValid={isScheduleValid}
                     nextPreviewAt={nextPreviewAt}
                     nowMs={nowMs}
+                    cdp={cdpHealth?.cdp ?? null}
                   />
                 ) : selected ? (
                   <AutomationDetail
@@ -1215,6 +1225,7 @@ const AutomationForm = ({
   scheduleValid,
   nextPreviewAt,
   nowMs,
+  cdp,
 }: {
   form: AutomationFormState;
   onChange: (next: AutomationFormState) => void;
@@ -1227,211 +1238,228 @@ const AutomationForm = ({
   scheduleValid: boolean;
   nextPreviewAt: number | null;
   nowMs: number;
-}) => (
-  <div className="flex flex-col gap-2.5 p-4">
-    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-      Name
-      <Input
-        value={form.name}
-        autoFocus
-        placeholder="nightly build"
-        aria-label="automation name"
-        className={FORM_INPUT_CLASSES}
-        onChange={(event) => onChange({ ...form, name: event.target.value })}
-      />
-    </label>
-    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-      Command
-      <Input
-        value={form.command}
-        placeholder="pnpm build"
-        aria-label="automation command"
-        className={cn(FORM_INPUT_CLASSES, "font-mono")}
-        onChange={(event) => onChange({ ...form, command: event.target.value })}
-      />
-    </label>
-    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-      Directory
-      <Input
-        value={form.cwd}
-        placeholder="/path/to/project"
-        aria-label="automation directory"
-        className={cn(FORM_INPUT_CLASSES, "font-mono")}
-        onChange={(event) => onChange({ ...form, cwd: event.target.value })}
-      />
-    </label>
-
-    <div className="flex flex-col gap-1.5">
-      <span className={SECTION_LABEL_CLASSES}>Trigger</span>
-      <SettingsSelect
-        value={form.triggerType}
-        items={[
-          { id: "schedule", label: "On a schedule" },
-          { id: "watch", label: "When a folder changes" },
-          { id: "event", label: "On a session event" },
-          { id: "webhook", label: "On a webhook" },
-        ]}
-        ariaLabel="trigger type"
-        placeholder="Trigger"
-        onValueChange={(next) => onChange({ ...form, triggerType: next as TriggerType })}
-      />
-      {form.triggerType === "schedule" ? (
-        <>
-          <ScheduleBuilder
-            schedule={form.schedule}
-            onChange={(schedule) => onChange({ ...form, schedule })}
-          />
-          <span className="text-[10px] tabular-nums text-muted-foreground">
-            {!scheduleValid
-              ? "invalid schedule"
-              : nextPreviewAt !== null
-                ? `next run ${formatRelativeTime(nextPreviewAt, nowMs)} · cron ${cronCaption}`
-                : `schedule never fires · cron ${cronCaption}`}
-          </span>
-        </>
-      ) : form.triggerType === "watch" ? (
-        <div className="flex flex-col gap-2">
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            File filter (optional)
-            <Input
-              value={form.watchFilter}
-              placeholder="*.mov"
-              aria-label="watch file filter"
-              className={cn(FORM_INPUT_CLASSES, "font-mono")}
-              onChange={(event) => onChange({ ...form, watchFilter: event.target.value })}
-            />
-            <span className="text-[10px] text-muted-foreground/60">
-              Only trigger when changed files match this glob (e.g. *.mov,
-              {"*.{mov,avi}"}). Leave empty to trigger on any change.
-            </span>
-          </label>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span className="flex flex-col">
-              Include subfolders
-              <span className="text-[10px] text-muted-foreground/60">
-                Watch the directory above and everything inside it.
-              </span>
-            </span>
-            <Switch
-              aria-label="include subfolders"
-              checked={form.watchRecursive}
-              onCheckedChange={(watchRecursive) => onChange({ ...form, watchRecursive })}
-            />
-          </div>
-          <span className="text-[10px] text-muted-foreground">
-            Runs the command when the directory changes — no polling. Won't start a new run while
-            one is still going; counts toward the run limit.
-          </span>
-        </div>
-      ) : form.triggerType === "webhook" ? (
-        <div className="flex flex-col gap-2">
-          <span className="text-[10px] text-muted-foreground">
-            Fires the command when a POST hits the automation's webhook URL. The URL is generated
-            when you save — copy it from the automation's detail view. Anyone with the URL can fire
-            it; won't start a new run while one is still going; counts toward the run limit.
-          </span>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <span className="text-xs text-muted-foreground">Events</span>
-          <EventTriggerSelector
-            selected={form.eventNames}
-            options={SESSION_EVENTS}
-            labels={SESSION_EVENT_LABELS}
-            descriptions={SESSION_EVENT_DESCRIPTIONS}
-            onChange={(eventNames) => onChange({ ...form, eventNames })}
-          />
-          <span className="text-[10px] text-muted-foreground">
-            {form.eventNames.length > 0
-              ? SESSION_EVENT_DESCRIPTIONS[form.eventNames[0]]
-              : "Select at least one event."}
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            Fires when any localterm session in this directory emits one of the selected events.
-            Won't start a new run while one is still going; counts toward the run limit.
-          </span>
-        </div>
-      )}
-    </div>
-
-    <div className="flex flex-col gap-1.5">
-      <span className={SECTION_LABEL_CLASSES}>Run limit</span>
-      <div className="flex items-center gap-2">
-        <SettingsSelect
-          value={form.limitMode}
-          items={[
-            { id: "forever", label: "Runs forever" },
-            { id: "count", label: "Stop after N runs" },
-          ]}
-          ariaLabel="run limit"
-          placeholder="Limit"
-          triggerClassName="w-44"
-          onValueChange={(next) =>
-            onChange({ ...form, limitMode: next === "count" ? "count" : "forever" })
-          }
+  cdp: CdpHealth;
+}) => {
+  // closeOnFinish only takes effect over CDP (the daemon closes the run tab via
+  // Target.closeTarget). With no connected browser it's a silent no-op, so the
+  // toggle is locked off rather than letting the user save a setting that does
+  // nothing — but a value already saved true stays editable so it can recover.
+  const closeOnFinishSupported = cdp?.connected === true;
+  const closeOnFinishDisabled = !closeOnFinishSupported && !form.closeOnFinish;
+  return (
+    <div className="flex flex-col gap-2.5 p-4">
+      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+        Name
+        <Input
+          value={form.name}
+          autoFocus
+          placeholder="nightly build"
+          aria-label="automation name"
+          className={FORM_INPUT_CLASSES}
+          onChange={(event) => onChange({ ...form, name: event.target.value })}
         />
-        {form.limitMode === "count" ? (
-          <NumberStepper
-            value={form.limitMax}
-            min={1}
-            max={AUTOMATION_RUN_LIMIT_MAX}
-            step={1}
-            ariaLabel="maximum runs"
-            decrementAriaLabel="fewer runs"
-            incrementAriaLabel="more runs"
-            onValueChange={(value) =>
-              onChange({
-                ...form,
-                limitMax: Math.min(AUTOMATION_RUN_LIMIT_MAX, Math.max(1, value)),
-              })
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+        Command
+        <Input
+          value={form.command}
+          placeholder="pnpm build"
+          aria-label="automation command"
+          className={cn(FORM_INPUT_CLASSES, "font-mono")}
+          onChange={(event) => onChange({ ...form, command: event.target.value })}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+        Directory
+        <Input
+          value={form.cwd}
+          placeholder="/path/to/project"
+          aria-label="automation directory"
+          className={cn(FORM_INPUT_CLASSES, "font-mono")}
+          onChange={(event) => onChange({ ...form, cwd: event.target.value })}
+        />
+      </label>
+
+      <div className="flex flex-col gap-1.5">
+        <span className={SECTION_LABEL_CLASSES}>Trigger</span>
+        <SettingsSelect
+          value={form.triggerType}
+          items={[
+            { id: "schedule", label: "On a schedule" },
+            { id: "watch", label: "When a folder changes" },
+            { id: "event", label: "On a session event" },
+            { id: "webhook", label: "On a webhook" },
+          ]}
+          ariaLabel="trigger type"
+          placeholder="Trigger"
+          onValueChange={(next) => onChange({ ...form, triggerType: next as TriggerType })}
+        />
+        {form.triggerType === "schedule" ? (
+          <>
+            <ScheduleBuilder
+              schedule={form.schedule}
+              onChange={(schedule) => onChange({ ...form, schedule })}
+            />
+            <span className="text-[10px] tabular-nums text-muted-foreground">
+              {!scheduleValid
+                ? "invalid schedule"
+                : nextPreviewAt !== null
+                  ? `next run ${formatRelativeTime(nextPreviewAt, nowMs)} · cron ${cronCaption}`
+                  : `schedule never fires · cron ${cronCaption}`}
+            </span>
+          </>
+        ) : form.triggerType === "watch" ? (
+          <div className="flex flex-col gap-2">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              File filter (optional)
+              <Input
+                value={form.watchFilter}
+                placeholder="*.mov"
+                aria-label="watch file filter"
+                className={cn(FORM_INPUT_CLASSES, "font-mono")}
+                onChange={(event) => onChange({ ...form, watchFilter: event.target.value })}
+              />
+              <span className="text-[10px] text-muted-foreground/60">
+                Only trigger when changed files match this glob (e.g. *.mov,
+                {"*.{mov,avi}"}). Leave empty to trigger on any change.
+              </span>
+            </label>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="flex flex-col">
+                Include subfolders
+                <span className="text-[10px] text-muted-foreground/60">
+                  Watch the directory above and everything inside it.
+                </span>
+              </span>
+              <Switch
+                aria-label="include subfolders"
+                checked={form.watchRecursive}
+                onCheckedChange={(watchRecursive) => onChange({ ...form, watchRecursive })}
+              />
+            </div>
+            <span className="text-[10px] text-muted-foreground">
+              Runs the command when the directory changes — no polling. Won't start a new run while
+              one is still going; counts toward the run limit.
+            </span>
+          </div>
+        ) : form.triggerType === "webhook" ? (
+          <div className="flex flex-col gap-2">
+            <span className="text-[10px] text-muted-foreground">
+              Fires the command when a POST hits the automation's webhook URL. The URL is generated
+              when you save — copy it from the automation's detail view. Anyone with the URL can
+              fire it; won't start a new run while one is still going; counts toward the run limit.
+            </span>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <span className="text-xs text-muted-foreground">Events</span>
+            <EventTriggerSelector
+              selected={form.eventNames}
+              options={SESSION_EVENTS}
+              labels={SESSION_EVENT_LABELS}
+              descriptions={SESSION_EVENT_DESCRIPTIONS}
+              onChange={(eventNames) => onChange({ ...form, eventNames })}
+            />
+            <span className="text-[10px] text-muted-foreground">
+              {form.eventNames.length > 0
+                ? SESSION_EVENT_DESCRIPTIONS[form.eventNames[0]]
+                : "Select at least one event."}
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              Fires when any localterm session in this directory emits one of the selected events.
+              Won't start a new run while one is still going; counts toward the run limit.
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className={SECTION_LABEL_CLASSES}>Run limit</span>
+        <div className="flex items-center gap-2">
+          <SettingsSelect
+            value={form.limitMode}
+            items={[
+              { id: "forever", label: "Runs forever" },
+              { id: "count", label: "Stop after N runs" },
+            ]}
+            ariaLabel="run limit"
+            placeholder="Limit"
+            triggerClassName="w-44"
+            onValueChange={(next) =>
+              onChange({ ...form, limitMode: next === "count" ? "count" : "forever" })
             }
           />
-        ) : null}
+          {form.limitMode === "count" ? (
+            <NumberStepper
+              value={form.limitMax}
+              min={1}
+              max={AUTOMATION_RUN_LIMIT_MAX}
+              step={1}
+              ariaLabel="maximum runs"
+              decrementAriaLabel="fewer runs"
+              incrementAriaLabel="more runs"
+              onValueChange={(value) =>
+                onChange({
+                  ...form,
+                  limitMax: Math.min(AUTOMATION_RUN_LIMIT_MAX, Math.max(1, value)),
+                })
+              }
+            />
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        Enabled
+        <Switch
+          aria-label="automation enabled"
+          checked={form.enabled}
+          onCheckedChange={(enabled) => onChange({ ...form, enabled })}
+        />
+      </div>
+
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span className="flex flex-col">
+          Close tab when finished
+          <span
+            className={
+              closeOnFinishSupported
+                ? "text-[10px] text-muted-foreground/60"
+                : "text-[10px] text-amber-400"
+            }
+          >
+            {closeOnFinishSupported
+              ? "Closes the run's tab once the command exits."
+              : "Needs a Chromium browser with remote debugging enabled — run tabs won't close until it's on."}
+          </span>
+        </span>
+        <Switch
+          aria-label="close tab when finished"
+          checked={form.closeOnFinish}
+          disabled={closeOnFinishDisabled}
+          onCheckedChange={(closeOnFinish) => onChange({ ...form, closeOnFinish })}
+        />
+      </div>
+
+      {saveError ? (
+        <p className="text-[10px] text-red-400">
+          Couldn't save — check the schedule and that the directory exists.
+        </p>
+      ) : null}
+
+      <Separator className="bg-border/40" />
+      <div className="flex items-center justify-end gap-1.5">
+        <Button variant="ghost" size="xs" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="secondary" size="xs" disabled={!isValid || isSaving} onClick={onSave}>
+          {isSaving ? <Spinner className="size-3" aria-label="saving" /> : null}
+          {form.id ? "Save" : "Create"}
+        </Button>
       </div>
     </div>
-
-    <div className="flex items-center justify-between text-xs text-muted-foreground">
-      Enabled
-      <Switch
-        aria-label="automation enabled"
-        checked={form.enabled}
-        onCheckedChange={(enabled) => onChange({ ...form, enabled })}
-      />
-    </div>
-
-    <div className="flex items-center justify-between text-xs text-muted-foreground">
-      <span className="flex flex-col">
-        Close tab when finished
-        <span className="text-[10px] text-muted-foreground/60">
-          Closes the run's tab once the command exits (needs a Chromium browser with remote
-          debugging).
-        </span>
-      </span>
-      <Switch
-        aria-label="close tab when finished"
-        checked={form.closeOnFinish}
-        onCheckedChange={(closeOnFinish) => onChange({ ...form, closeOnFinish })}
-      />
-    </div>
-
-    {saveError ? (
-      <p className="text-[10px] text-red-400">
-        Couldn't save — check the schedule and that the directory exists.
-      </p>
-    ) : null}
-
-    <Separator className="bg-border/40" />
-    <div className="flex items-center justify-end gap-1.5">
-      <Button variant="ghost" size="xs" onClick={onCancel}>
-        Cancel
-      </Button>
-      <Button variant="secondary" size="xs" disabled={!isValid || isSaving} onClick={onSave}>
-        {isSaving ? <Spinner className="size-3" aria-label="saving" /> : null}
-        {form.id ? "Save" : "Create"}
-      </Button>
-    </div>
-  </div>
-);
+  );
+};
 
 const RecentRunsView = ({
   runs,

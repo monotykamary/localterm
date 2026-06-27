@@ -183,7 +183,9 @@ const SessionOption = ({
     <span className="flex shrink-0 items-center gap-2 font-mono text-[10px] tabular-nums text-muted-foreground/60">
       <span>{session.shellName}</span>
       <span className="min-w-[3.5rem] text-right">pid {session.pid}</span>
-      <span className="min-w-[3rem] text-right">{formatRelativeTime(session.createdAt, nowMs)}</span>
+      <span className="min-w-[3rem] text-right">
+        {formatRelativeTime(session.createdAt, nowMs)}
+      </span>
     </span>
     {isCurrent ? (
       <span className={TRAILING_SLOT_CLASSES}>

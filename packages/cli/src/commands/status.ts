@@ -1,10 +1,18 @@
 import kleur from "kleur";
-import { healthSchema } from "@monotykamary/localterm-server";
+import { healthSchema, type CdpHealth } from "@monotykamary/localterm-server";
 import { getDirectUrl } from "../constants.js";
 import { cliError, exitCodeForCliError } from "../errors.js";
 import { clearPid, isAlive, readHost, readPid, readPort } from "../state.js";
 import { resolveDaemonUrl } from "../utils/portless.js";
 import { reportCliError } from "../utils/report-cli-error.js";
+
+const formatCdpStatusLine = (cdp: CdpHealth): string => {
+  if (cdp === null) return kleur.dim("disabled");
+  if (cdp.connected) {
+    return kleur.green(`background + closeable via ${cdp.browser ?? "Chromium"} (CDP)`);
+  }
+  return kleur.yellow("OS opener (no CDP — runs may foreground; close-on-finish off)");
+};
 
 export const runStatus = async (): Promise<void> => {
   const pid = readPid();
@@ -48,6 +56,7 @@ export const runStatus = async (): Promise<void> => {
     }
     console.log(`  raw:      ${kleur.dim(getDirectUrl(port, resolvedHost))}`);
     console.log(`  sessions: ${health.sessions}`);
+    console.log(`  cdp:      ${formatCdpStatusLine(health.cdp)}`);
   } catch (error) {
     const healthError = cliError.healthCheckFailed(
       pid,

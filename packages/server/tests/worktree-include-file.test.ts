@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { WORKTREEINCLUDE_FILENAME } from "../src/constants.js";
 import {
   readWorktreeIncludeFile,
@@ -38,6 +38,13 @@ const commitAll = (dir: string, message: string): void => {
   runGitSync(dir, ["add", "-A"]);
   runGitSync(dir, ["commit", "-m", message]);
 };
+
+// Every test here spawns real git (init/add/commit + a rev-parse via
+// readWorktreeIncludeFile); under turbo's parallel test load the default 5s
+// timeout trips on process scheduling contention. Match the sibling
+// git-spawning test files (git-worktrees, git-diff, worktree-sweep, …) which
+// all raise the timeout to 30s for the same reason.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 describe("readWorktreeIncludeFile", () => {
   it("returns exists: false when the repo has no .worktreeinclude", async () => {

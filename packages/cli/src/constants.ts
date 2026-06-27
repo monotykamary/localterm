@@ -24,6 +24,10 @@ export const TAILSCALE_BINARY_PATHS = [
 ] as const;
 export const TAILSCALE_HTTPS_SETTINGS_URL = "https://login.tailscale.com/admin/settings/features";
 export const TAILSCALE_DOWNLOAD_URL = "https://tailscale.com/download";
+// One-line how-to shown when no debug-enabled Chromium is detected. The
+// DevToolsActivePort file localterm reads is only written when the browser is
+// launched with this flag, so this is the universal, definitely-correct step.
+export const CDP_REMOTE_DEBUGGING_HINT = "launch your browser with --remote-debugging-port=9222";
 export const STOP_COMMAND = "npx @monotykamary/localterm@latest stop";
 export const DAEMON_CHILD_ENV_FLAG = "LOCALTERM_DAEMON_CHILD";
 export const RESTART_DAEMON_ENV_FLAG = "LOCALTERM_RESTART_DAEMON";

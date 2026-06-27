@@ -72,7 +72,22 @@ describe("AutomationsModal", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ automations: [] }), { status: 200 })),
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/health")) {
+          // CDP connected so the Close-on-finish toggle is editable; the guard
+          // locks it off when no debug-enabled browser is reachable.
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              sessions: 0,
+              cdp: { connected: true, browser: "Chrome" },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({ automations: [] }), { status: 200 });
+      }),
     );
   });
 
@@ -197,5 +212,24 @@ describe("AutomationsModal", () => {
       const body = JSON.parse(String(Reflect.get(postCalls[0][1] ?? {}, "body")));
       expect(body.closeOnFinish).toBe(true);
     });
+  });
+
+  it("warns close-on-finish needs remote debugging when no browser is connected", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/health")) {
+          return new Response(
+            JSON.stringify({ ok: true, sessions: 0, cdp: { connected: false } }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({ automations: [] }), { status: 200 });
+      }),
+    );
+    renderModal([]);
+    fireEvent.click(await screen.findByLabelText("new automation"));
+    expect(await screen.findByText(/won't close until it's on/)).toBeDefined();
   });
 });

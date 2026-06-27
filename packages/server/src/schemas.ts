@@ -32,10 +32,24 @@ import {
   WORKTREE_CONFIG_FILE_VERSION,
 } from "./constants.js";
 
+// Live state of the daemon's persistent CDP connection (browser tab control for
+// automations). `null` when the CDP path is disabled entirely (a caller injected
+// its own `tabController`, or `LOCALTERM_DISABLE_CDP_TABS=1`); otherwise whether
+// the one socket opened at `start` is currently attached, plus the browser it
+// attached to. Surfaces the CDP-less vs CDP mode to `localterm status` and the
+// automations UI so the user can tell whether run tabs background + close.
+export const cdpHealthSchema = z
+  .object({
+    connected: z.boolean(),
+    browser: z.string().optional(),
+  })
+  .nullable();
+
 export const healthSchema = z
   .object({
     ok: z.boolean(),
     sessions: z.number().int().nonnegative(),
+    cdp: cdpHealthSchema,
   })
   .strict();
 

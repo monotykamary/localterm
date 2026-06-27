@@ -10,12 +10,14 @@ import {
   PORTLESS_RESOLVE_TIMEOUT_MS,
   PORTLESS_SERVICE_TIMEOUT_MS,
   TAILSCALE_HTTPS_PORT,
+  CDP_REMOTE_DEBUGGING_HINT,
 } from "../constants.js";
 import { cliError, type CliError, exitCodeForCliError } from "../errors.js";
 import { getLaunchdPlistPath, getStateDirectory } from "../paths.js";
 import { cliEntry } from "../utils/cli-entry.js";
 import { isPortlessProxyLive } from "../utils/portless.js";
 import { configureTailscaleServe, removeTailscaleServe } from "../utils/tailscale.js";
+import { probeCdpAvailability } from "../utils/probe-cdp-availability.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 
 const execFileAsync = promisify(execFile);
@@ -190,6 +192,26 @@ const setupTailscaleServe = async (port: number): Promise<void> => {
   }
 };
 
+const reportCdpAvailability = async (): Promise<void> => {
+  console.log();
+  console.log(kleur.cyan("chromium  — background automation tabs (no focus steal, closeable)"));
+  const availability = await probeCdpAvailability();
+  if (availability.available) {
+    console.log(
+      kleur.green(
+        `  ✔ debug-enabled ${availability.browserName} detected — automation tabs open in the background`,
+      ),
+    );
+    return;
+  }
+  console.warn(
+    kleur.yellow(
+      "  ⚠ no debug-enabled Chromium detected — automation tabs open in the foreground (OS opener)",
+    ),
+  );
+  console.warn(kleur.dim(`    enable: ${CDP_REMOTE_DEBUGGING_HINT}`));
+};
+
 const validateLaunchAgentsDirectory = (): CliError | null => {
   const dir = path.dirname(getLaunchdPlistPath());
   if (!existsSync(dir)) {
@@ -271,6 +293,7 @@ export const runInstall = async (options: InstallOptions): Promise<void> => {
 
   await setupPortlessProxy();
   await setupTailscaleServe(options.port);
+  await reportCdpAvailability();
 };
 
 export const runUninstall = async (): Promise<void> => {

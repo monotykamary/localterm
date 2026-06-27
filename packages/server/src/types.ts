@@ -14,6 +14,7 @@ import type {
   automationV2Schema,
   automationWithNextRunSchema,
   caffeinateModeSchema,
+  cdpHealthSchema,
   clientToServerMessageSchema,
   createAutomationInputSchema,
   gitBaseSourceSchema,
@@ -73,6 +74,7 @@ export type ClientToServerMessage = z.infer<typeof clientToServerMessageSchema>;
 export type ServerToClientMessage = z.infer<typeof serverToClientMessageSchema>;
 
 export type CaffeinateMode = z.infer<typeof caffeinateModeSchema>;
+export type CdpHealth = z.infer<typeof cdpHealthSchema>;
 
 export type AutomationLastRunStatus = z.infer<typeof automationLastRunStatusSchema>;
 export type AutomationLastRun = z.infer<typeof automationLastRunSchema>;

@@ -39,6 +39,7 @@ import { pollForDaemonReady } from "../utils/poll-for-daemon-ready.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 import { announceResolvedUrl, resolveDaemonUrl } from "../utils/portless.js";
 import type { ResolveUrlResult } from "../utils/portless.js";
+import { probeCdpAvailability } from "../utils/probe-cdp-availability.js";
 import { runStartPreflight } from "../utils/run-start-preflight.js";
 import { sleep } from "../utils/sleep.js";
 import { spawnDaemon } from "../utils/spawn-daemon.js";
@@ -140,6 +141,19 @@ const runStartAsDaemon = async (options: StartOptions): Promise<void> => {
   process.exit(exitCodeForCliError(result.error));
 };
 
+const printCdpAvailabilityLine = async (): Promise<void> => {
+  const availability = await probeCdpAvailability();
+  if (availability.available) {
+    console.log(
+      `  cdp:      ${kleur.green("background tabs")} via ${availability.browserName} (no focus steal, closeable)`,
+    );
+    return;
+  }
+  console.log(
+    kleur.yellow("  cdp:      OS opener (no debug-enabled Chromium — see `localterm install`)"),
+  );
+};
+
 const printDaemonStartedBanner = async (port: number): Promise<ResolveUrlResult> => {
   const resolved = await resolveDaemonUrl(port);
   console.log(`${kleur.green("✔")} running at ${kleur.cyan(resolved.url)}`);
@@ -147,6 +161,7 @@ const printDaemonStartedBanner = async (port: number): Promise<ResolveUrlResult>
   for (const warning of resolved.warnings) {
     console.log(kleur.yellow(`  ⚠ ${warning}`));
   }
+  await printCdpAvailabilityLine();
   console.log(`  stop with ${kleur.bold(STOP_COMMAND)}`);
   return resolved;
 };
@@ -283,12 +298,14 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
     for (const warning of resolved.warnings) {
       console.log(kleur.yellow(`  ⚠ ${warning}`));
     }
+    await printCdpAvailabilityLine();
   } else {
     console.log(`${kleur.green("✔")} running at ${kleur.cyan(resolved.url)}`);
     announceResolvedUrl(resolved.url, resolved.surface);
     for (const warning of resolved.warnings) {
       console.log(kleur.yellow(`  ⚠ ${warning}`));
     }
+    await printCdpAvailabilityLine();
     console.log(`  press ${kleur.bold("Ctrl+C")} to stop`);
   }
 

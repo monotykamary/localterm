@@ -53,17 +53,28 @@ describe("runStatus", () => {
     vi.spyOn(state, "readPort").mockReturnValue(3417);
     vi.spyOn(state, "isAlive").mockReturnValue(true);
     vi.spyOn(state, "readHost").mockReturnValue("127.0.0.1");
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, sessions: 2 }), {
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            sessions: 2,
+            cdp: { connected: true, browser: "Google Chrome" },
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      );
     await runStatus();
     expect(fetchSpy).toHaveBeenCalledWith("http://127.0.0.1:3417/api/health");
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("running"));
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("pid:      12345"));
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("port:     3417"));
     expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("sessions: 2"));
+    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("cdp:      "));
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      expect.stringContaining("background + closeable via Google Chrome"),
+    );
   });
 
   it("falls back to 127.0.0.1 when host file is missing", async () => {
@@ -72,12 +83,41 @@ describe("runStatus", () => {
     vi.spyOn(state, "isAlive").mockReturnValue(true);
     vi.spyOn(state, "readHost").mockReturnValue(null);
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, sessions: 0 }), {
+      new Response(JSON.stringify({ ok: true, sessions: 0, cdp: { connected: false } }), {
         headers: { "content-type": "application/json" },
       }),
     );
     await runStatus();
     expect(fetchSpy).toHaveBeenCalledWith("http://127.0.0.1:3417/api/health");
+  });
+
+  it("prints the OS-opener fallback when CDP is not connected", async () => {
+    vi.spyOn(state, "readPid").mockReturnValue(12345);
+    vi.spyOn(state, "readPort").mockReturnValue(3417);
+    vi.spyOn(state, "isAlive").mockReturnValue(true);
+    vi.spyOn(state, "readHost").mockReturnValue("127.0.0.1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, sessions: 1, cdp: { connected: false } }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await runStatus();
+    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("OS opener"));
+  });
+
+  it("prints CDP disabled when the daemon reports no CDP path", async () => {
+    vi.spyOn(state, "readPid").mockReturnValue(12345);
+    vi.spyOn(state, "readPort").mockReturnValue(3417);
+    vi.spyOn(state, "isAlive").mockReturnValue(true);
+    vi.spyOn(state, "readHost").mockReturnValue("127.0.0.1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, sessions: 0, cdp: null }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await runStatus();
+    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("cdp:      "));
+    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("disabled"));
   });
 
   it("sets exitCode when health check fails", async () => {

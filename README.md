@@ -103,11 +103,13 @@ without portless.
 
 Schedule commands as server-managed jobs. When one is due, localterm opens a new browser tab in the automation's directory and runs the command in a fresh shell — the tab stays open afterwards so you can see that it ran and whether it succeeded. The tab opens in the **background** so a scheduled run never steals your focus (via the DevTools Protocol over a connection opened once at start when a Chromium browser has remote debugging on, otherwise the OS opener / macOS `open -g`; set `LOCALTERM_DISABLE_CDP_TABS=1` to force the fallback).
 
+Enable remote debugging by launching your browser with `--remote-debugging-port=9222` (e.g. `open -na "Google Chrome" --args --remote-debugging-port=9222`); localterm picks it up automatically on the next run. `localterm status` shows whether the daemon is currently connected via CDP, and `localterm install` checks for a debug-enabled browser as part of its setup checklist.
+
 - Open the full-screen panel from the top-right toolbar (calendar icon) or with <kbd>⌘J</kbd> / <kbd>Ctrl+J</kbd>.
 - Build schedules from friendly presets — daily, weekdays/weekends, specific days, multiple times a day, every N minutes/hours — with raw 5-field cron available as an advanced escape hatch. Evaluated in local time.
 - Or trigger on a **folder change** instead of a schedule — the job runs when its directory changes, detected via native filesystem events (no polling). Bursts are debounced into one run and a new run won't start while a previous one is still going, so a command that writes into the watched folder won't loop.
 - Cap a job with a run limit ("stop after N runs"); when reached it's marked **finished** and stays listed until you reset it. Or let it run forever.
-- Toggle **Close tab when finished** to have a run's tab close once its command exits (best-effort; needs the CDP background-tab path). Off by default — tabs stay open so you can see what ran.
+- Toggle **Close tab when finished** to have a run's tab close once its command exits (needs the CDP background-tab path; the toggle is locked off until a debug-enabled Chromium is connected). Off by default — tabs stay open so you can see what ran.
 - A **recent runs** view and a per-automation history show which runs succeeded, failed, were missed, or were **skipped** because the machine was asleep at that scheduled time (reconstructed when the daemon next starts).
 - Definitions persist in `~/.localterm/automations.json` (auto-migrated from older versions; a sibling `~/.localterm/daemon-heartbeat.json` records liveness for downtime detection); the daemon must be running for jobs to fire.
 - Everything is also available over HTTP at `/api/automations` (list/create/update/delete/run-now/reset).

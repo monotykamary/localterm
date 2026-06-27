@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
-import { createServer, type RunningServer } from "../src/index.js";
+import { createServer, healthSchema, type RunningServer } from "../src/index.js";
 import { WebSocket } from "ws";
 
 // Output frames arrive as binary (raw UTF-8 bytes) so the client can dispense
@@ -264,7 +264,34 @@ describe("createServer WS lifecycle", () => {
     const response = await fetch(`http://127.0.0.1:${server.port}/api/health`);
     expect(response.ok).toBe(true);
     const body = await response.json();
-    expect(body).toEqual({ ok: true, sessions: expect.any(Number) });
+    expect(body).toEqual({ ok: true, sessions: expect.any(Number), cdp: null });
+  });
+
+  it("reports the live CDP state as disabled when a tab controller is injected", async () => {
+    // The beforeEach server injects a tabController, so the daemon owns no
+    // CdpClient and the health field is null (the CDP path is off).
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/health`);
+    const parsed = healthSchema.parse(await response.json());
+    expect(parsed.cdp).toBeNull();
+  });
+
+  it("reports CDP as not connected when no debug-enabled browser is reachable", async () => {
+    const cdpLess = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      cdpDetect: async () => [],
+    });
+    try {
+      // Give the fire-and-forget connect() a beat to settle into its failed
+      // state (no candidates → establish() rejects → isConnected() stays false).
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const parsed = healthSchema.parse(
+        await (await fetch(`http://127.0.0.1:${cdpLess.port}/api/health`)).json(),
+      );
+      expect(parsed.cdp).toEqual({ connected: false });
+    } finally {
+      await cdpLess.stop();
+    }
   });
 
   it("cleans up all sessions on stop", async () => {

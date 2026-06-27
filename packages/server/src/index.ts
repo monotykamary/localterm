@@ -16,6 +16,7 @@ import { CaffeinateManager } from "./caffeinate-manager.js";
 import { CaffeinatePreferencesStore } from "./caffeinate-preferences-store.js";
 import type { SnapshotProcesses } from "./caffeinate-process-match.js";
 import { CdpClient } from "./cdp/cdp-client.js";
+import type { DetectedBrowser } from "./cdp/detect-chromium.js";
 import {
   AUTOMATION_EVENT_DEBOUNCE_MS,
   AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
@@ -122,6 +123,13 @@ export interface ServerOptions {
    * closeable).
    */
   tabController?: AutomationTabController;
+  /**
+   * Override how the daemon's persistent CDP client discovers debug-enabled
+   * Chromium browsers. Defaults to scanning known user-data dirs for a live
+   * DevToolsActivePort. Injectable so tests can drive the health endpoint's
+   * `cdp` field deterministically without a real browser on the machine.
+   */
+  cdpDetect?: () => Promise<DetectedBrowser[]>;
   /**
    * Override the keep-awake controller. Defaults to a `caffeinate -dims`-backed
    * controller, enabled only on macOS. Injectable so tests never hold a real
@@ -331,6 +339,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     options.tabController || cdpBackgroundTabsDisabled
       ? null
       : new CdpClient({
+          detect: options.cdpDetect,
           // Only page-type targets on the daemon's own origin get an ambient token
           // injected — unrelated tabs the user has open in their debugged browser
           // stay untouched. `actualPort` is bound by the http server's listen
@@ -536,7 +545,15 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   };
 
   const api = new Hono();
-  api.get("/health", (context) => context.json({ ok: true, sessions: registry.size() }));
+  api.get("/health", (context) =>
+    context.json({
+      ok: true,
+      sessions: registry.size(),
+      cdp: cdpClient
+        ? { connected: cdpClient.isConnected(), browser: cdpClient.connectedBrowser?.name }
+        : null,
+    }),
+  );
 
   // The session picker: every live PTY (attached or dormant), so a tab can
   // switch to one by id or kill one it no longer wants. `clients` is the count
@@ -1390,7 +1407,9 @@ export type {
 export type * from "./types.js";
 export { DEFAULT_HOST, DEFAULT_PORT, WS_CLOSE_BACKPRESSURE } from "./constants.js";
 export { isLoopbackHost, isPrivateHost, isAllowedSourceIp } from "./security.js";
-export { healthSchema } from "./schemas.js";
+export { healthSchema, cdpHealthSchema } from "./schemas.js";
+export { detectChromiumBrowsers } from "./cdp/detect-chromium.js";
+export type { BrowserCandidate, DetectedBrowser } from "./cdp/detect-chromium.js";
 export {
   ServerErrorException,
   formatServerError,
