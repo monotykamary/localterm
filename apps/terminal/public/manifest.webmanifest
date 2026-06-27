@@ -9,7 +9,6 @@
   "display_override": ["window-controls-overlay", "standalone"],
   "background_color": "#101010",
   "theme_color": "#101010",
-  "orientation": "any",
   "lang": "en",
   "dir": "auto",
   "categories": ["developer", "productivity", "utilities"],
