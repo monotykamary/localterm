@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
   Coffee,
+  Command,
   Copy,
   FileDiff,
   FolderGit2,
@@ -22,6 +23,7 @@ import {
   Plus,
   Search,
   SquareTerminal,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -68,6 +70,9 @@ import {
   DEAD_SESSION_TITLE_PREFIX,
   DEFAULT_DOCUMENT_TITLE,
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
+  TERMINAL_TAP_MOVEMENT_THRESHOLD_PX,
+  TERMINAL_KEYBOARD_HIDE_VIEWPORT_GROWTH_PX,
+  TERMINAL_VIEWPORT_WIDTH_STABLE_PX,
   ENTER_KEY_CODE,
   FALLBACK_TERMINAL_BACKGROUND_HEX,
   TERMINAL_FONT_SIZE_STEP_PX,
@@ -166,6 +171,7 @@ import {
   storeTerminalFontSize,
   subscribeStoredTerminalFontSize,
 } from "@/utils/stored-terminal-font-size";
+import { isCoarsePointer } from "@/utils/is-coarse-pointer";
 import {
   loadStoredTerminalLineHeight,
   storeTerminalLineHeight,
@@ -322,6 +328,7 @@ export const Terminal = () => {
   const toggleCommandPaletteRef = useRef<(() => void) | null>(null);
   const [searchOpenAttempt, setSearchOpenAttempt] = useState(0);
   const [isToolbarHovered, setIsToolbarHovered] = useState(false);
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isAutomationsOpen, setIsAutomationsOpen] = useState(false);
   const [isKeepAwakePopoverOpen, setIsKeepAwakePopoverOpen] = useState(false);
@@ -345,8 +352,34 @@ export const Terminal = () => {
   const isAutomationsOpenRef = useRef(false);
   const isWorktreesOpenRef = useRef(false);
   const isSessionsOpenRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const isActionsMenuOpenRef = useRef(false);
+  const isTouchDevice = useMemo(() => isCoarsePointer(), []);
+  useEffect(() => {
+    isActionsMenuOpenRef.current = isActionsMenuOpen;
+  }, [isActionsMenuOpen]);
+  useEffect(() => {
+    if (!isTouchDevice) return;
+    const root = rootRef.current;
+    const visualViewport = typeof window !== "undefined" ? window.visualViewport : undefined;
+    if (!root || !visualViewport) return;
+    const apply = () => {
+      root.style.height = `${visualViewport.height}px`;
+      root.style.transform = `translateY(${visualViewport.offsetTop}px)`;
+    };
+    apply();
+    visualViewport.addEventListener("resize", apply);
+    visualViewport.addEventListener("scroll", apply);
+    return () => {
+      visualViewport.removeEventListener("resize", apply);
+      visualViewport.removeEventListener("scroll", apply);
+      root.style.height = "";
+      root.style.transform = "";
+    };
+  }, [isTouchDevice]);
   const isToolbarVisible =
     isToolbarHovered ||
+    isActionsMenuOpen ||
     isSettingsPopoverOpen ||
     isAutomationsOpen ||
     isKeepAwakePopoverOpen ||
@@ -446,6 +479,15 @@ export const Terminal = () => {
   // the indicator stays visible while the action buttons collapse behind it and
   // expand on hover. A stale merged PR (null display state) doesn't count.
   const hasToolbarIndicator = hasDiff || branchPrDisplayState !== null;
+  const hasAmbientDiff = (hasDiff && diffSummary !== null) || branchPrDisplayState !== null;
+  const handleAmbientPress = useCallback(() => {
+    if (!isActionsMenuOpenRef.current) {
+      setIsActionsMenuOpen(true);
+      return;
+    }
+    if (hasAmbientDiff) openDiffViewerRef.current?.();
+    setIsActionsMenuOpen(false);
+  }, [hasAmbientDiff]);
 
   // A `git checkout` keeps the same cwd, so the cwd-keyed lease wouldn't notice.
   // The ambient summary carries the live branch; when it diverges from the branch
@@ -666,6 +708,111 @@ export const Terminal = () => {
     const searchResultsDisposable = searchAddon.onDidChangeResults(setSearchResults);
 
     terminal.open(container);
+
+    const helperTextArea = container.querySelector("textarea.xterm-helper-textarea");
+    if (helperTextArea instanceof HTMLTextAreaElement) {
+      helperTextArea.autocomplete = "off";
+      helperTextArea.setAttribute("autocapitalize", "off");
+      helperTextArea.setAttribute("autocorrect", "off");
+      helperTextArea.spellcheck = false;
+    }
+
+    let tapStartClientX = 0;
+    let tapStartClientY = 0;
+    let tapMovedBeyondThreshold = false;
+    const focusTerminalForInput = () => {
+      if (terminal.textarea) terminal.textarea.inputMode = "";
+      terminal.focus();
+    };
+    const handleTerminalTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        tapMovedBeyondThreshold = true;
+        return;
+      }
+      tapStartClientX = event.touches[0].clientX;
+      tapStartClientY = event.touches[0].clientY;
+      tapMovedBeyondThreshold = false;
+    };
+    const handleTerminalTouchMove = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        tapMovedBeyondThreshold = true;
+        return;
+      }
+      const movedPx = Math.hypot(
+        event.touches[0].clientX - tapStartClientX,
+        event.touches[0].clientY - tapStartClientY,
+      );
+      if (movedPx > TERMINAL_TAP_MOVEMENT_THRESHOLD_PX) {
+        tapMovedBeyondThreshold = true;
+      }
+    };
+    const handleTerminalTouchEnd = (event: TouchEvent) => {
+      if (tapMovedBeyondThreshold) {
+        event.preventDefault();
+        return;
+      }
+      focusTerminalForInput();
+    };
+    const tapListenerAbort = new AbortController();
+    if (isTouchDevice) {
+      // inputMode="none" on the helper textarea prevents the virtual keyboard
+      // opening on focus, so xterm's scroll-release / viewport-refocus can't
+      // pop it. A reactive blur-on-focus loses the race vs iOS's synchronous
+      // keyboard-open; the guard prevents it at focus time. Taps + explicit
+      // refocuses flip inputMode back to "" to allow typing.
+      const guardTextarea = () => {
+        if (terminal.textarea) terminal.textarea.inputMode = "none";
+      };
+      const blurAndGuardTextarea = () => {
+        if (terminal.textarea) {
+          terminal.textarea.blur();
+          terminal.textarea.inputMode = "none";
+        }
+      };
+      guardTextarea();
+      terminal.textarea?.addEventListener("blur", guardTextarea, {
+        signal: tapListenerAbort.signal,
+      });
+      // Keyboard-dismiss paths that DON'T blur the textarea (Android back,
+      // OSK hide-toggle, iOS swipe-down) leave it focused with inputMode="",
+      // so the next scroll's re-focus reopens the keyboard. visualViewport
+      // growing back (height up, width stable) is the cross-platform
+      // keyboard-hide signal — blur + re-guard there, resetting to the
+      // unfocused + guarded (cold) state.
+      const visualViewport = window.visualViewport;
+      if (visualViewport) {
+        let prevViewportHeight = visualViewport.height;
+        let prevViewportWidth = visualViewport.width;
+        const onViewportResize = () => {
+          const height = visualViewport.height;
+          const width = visualViewport.width;
+          const grew = height > prevViewportHeight + TERMINAL_KEYBOARD_HIDE_VIEWPORT_GROWTH_PX;
+          const widthStable =
+            Math.abs(width - prevViewportWidth) < TERMINAL_VIEWPORT_WIDTH_STABLE_PX;
+          if (grew && widthStable) blurAndGuardTextarea();
+          prevViewportHeight = height;
+          prevViewportWidth = width;
+        };
+        visualViewport.addEventListener("resize", onViewportResize, {
+          signal: tapListenerAbort.signal,
+        });
+      }
+      terminal.element?.addEventListener("touchstart", handleTerminalTouchStart, {
+        capture: true,
+        passive: true,
+        signal: tapListenerAbort.signal,
+      });
+      terminal.element?.addEventListener("touchmove", handleTerminalTouchMove, {
+        capture: true,
+        passive: true,
+        signal: tapListenerAbort.signal,
+      });
+      terminal.element?.addEventListener("touchend", handleTerminalTouchEnd, {
+        capture: true,
+        passive: false,
+        signal: tapListenerAbort.signal,
+      });
+    }
 
     const patchFitAddonScrollbarWidth = () => {
       if (!fitAddon.proposeDimensions) return;
@@ -1005,7 +1152,7 @@ export const Terminal = () => {
       document.title = titleForLiveSession(trimmed);
     };
 
-    refocusTerminalRef.current = () => terminal.focus();
+    refocusTerminalRef.current = focusTerminalForInput;
     // Routes through the normal paste pipeline (bracketed paste when the
     // foreground app enables it), so multi-line text lands in the prompt
     // without executing.
@@ -1453,6 +1600,7 @@ export const Terminal = () => {
       resetFavicon();
       document.removeEventListener("visibilitychange", onVisibilityChange);
       observer.disconnect();
+      tapListenerAbort.abort();
       try {
         socket?.close();
       } catch {
@@ -2201,7 +2349,7 @@ export const Terminal = () => {
   }, []);
 
   return (
-    <div className="h-dvh w-dvw" style={{ background: pageBackground }}>
+    <div ref={rootRef} className="h-dvh w-dvw" style={{ background: pageBackground }}>
       <div className="relative h-full w-full">
         <div
           ref={containerRef}
@@ -2239,21 +2387,32 @@ export const Terminal = () => {
               : `disconnected · code ${exitInfo.closeCode}`}
           </Badge>
         ) : null}
+        {isTouchDevice && isActionsMenuOpen ? (
+          <div
+            aria-hidden="true"
+            onClick={() => {
+              setIsActionsMenuOpen(false);
+            }}
+            className="absolute inset-0 z-[9]"
+          />
+        ) : null}
         <div
           className={cn(
             "absolute right-0 top-0 z-10 flex flex-col items-end pr-3 pt-1",
-            isToolbarVisible || isSearchOpen || hasToolbarIndicator
+            isToolbarVisible || isSearchOpen || hasToolbarIndicator || isTouchDevice
               ? "pointer-events-auto"
               : "pointer-events-none",
           )}
-          onMouseEnter={handleToolbarAreaEnter}
-          onMouseLeave={handleToolbarAreaLeave}
+          onMouseEnter={isTouchDevice ? undefined : handleToolbarAreaEnter}
+          onMouseLeave={isTouchDevice ? undefined : handleToolbarAreaLeave}
         >
           <div
             aria-hidden="true"
             className={cn(
               "pointer-events-auto mr-0.5 h-[2px] w-5 rounded-full bg-muted-foreground/25 transition-opacity duration-150",
-              isToolbarVisible || isSearchOpen || hasToolbarIndicator ? "opacity-0" : "opacity-100",
+              isToolbarVisible || isSearchOpen || hasToolbarIndicator || isTouchDevice
+                ? "opacity-0"
+                : "opacity-100",
             )}
           />
           {!isSearchOpen && (
@@ -2261,9 +2420,9 @@ export const Terminal = () => {
               role="toolbar"
               aria-label="terminal actions"
               className={cn(
-                "mt-1 flex items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md",
+                "mt-1 flex max-w-[calc(100dvw-1.5rem)] items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md",
                 "transition-[opacity,transform] duration-200 ease-snappy",
-                isToolbarVisible || hasToolbarIndicator
+                isToolbarVisible || hasToolbarIndicator || isTouchDevice
                   ? "translate-y-0 opacity-100"
                   : "pointer-events-none -translate-y-1 opacity-0",
               )}
@@ -2285,19 +2444,30 @@ export const Terminal = () => {
                   on hover via the 0fr -> 1fr grid-column transition. */}
               <div
                 className={cn(
-                  "grid",
-                  hasToolbarIndicator &&
+                  "grid min-w-0",
+                  (hasToolbarIndicator || isTouchDevice) &&
                     "transition-[grid-template-columns] duration-200 ease-snappy",
-                  hasToolbarIndicator && !isToolbarVisible ? "grid-cols-[0fr]" : "grid-cols-[1fr]",
+                  isTouchDevice
+                    ? isActionsMenuOpen
+                      ? "grid-cols-[1fr]"
+                      : "grid-cols-[0fr]"
+                    : hasToolbarIndicator && !isToolbarVisible
+                      ? "grid-cols-[0fr]"
+                      : "grid-cols-[1fr]",
                 )}
               >
                 <div
                   className={cn(
                     "flex min-w-0 items-center gap-0.5 overflow-hidden",
-                    hasToolbarIndicator && "transition-opacity duration-200 ease-snappy",
-                    hasToolbarIndicator && !isToolbarVisible
-                      ? "pointer-events-none opacity-0"
-                      : "opacity-100",
+                    (hasToolbarIndicator || isTouchDevice) &&
+                      "transition-opacity duration-200 ease-snappy",
+                    isTouchDevice
+                      ? isActionsMenuOpen
+                        ? "opacity-100"
+                        : "pointer-events-none opacity-0"
+                      : hasToolbarIndicator && !isToolbarVisible
+                        ? "pointer-events-none opacity-0"
+                        : "opacity-100",
                   )}
                 >
                   <SettingsMenu
@@ -2343,6 +2513,19 @@ export const Terminal = () => {
                   >
                     <Search />
                   </Button>
+                  {isTouchDevice ? (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => {
+                        toggleCommandPaletteRef.current?.();
+                      }}
+                      aria-label="command palette"
+                      className="hover:text-foreground"
+                    >
+                      <Command />
+                    </Button>
+                  ) : null}
                   <AutomationsButton
                     onOpen={() => handleAutomationsOpenChange(true)}
                     isMac={isMac}
@@ -2385,12 +2568,12 @@ export const Terminal = () => {
                   </Button>
                 </div>
               </div>
-              {(hasDiff && diffSummary !== null) || branchPrDisplayState ? (
-                <div className="flex items-center">
+              {isTouchDevice || (hasDiff && diffSummary !== null) || branchPrDisplayState ? (
+                <div className="flex shrink-0 items-center">
                   {hasDiff && diffSummary !== null ? (
                     <button
                       type="button"
-                      onClick={openDiffViewer}
+                      onClick={isTouchDevice ? handleAmbientPress : openDiffViewer}
                       aria-label={`view git diff: ${diffSummary.additions} additions, ${diffSummary.deletions} deletions${diffSummary.binaries > 0 ? `, ${diffSummary.binaries} binary files changed` : ""}`}
                       title={`${isMac ? "⌘" : "Ctrl+"}G`}
                       className="flex h-8 items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 font-mono text-xs tabular-nums outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
@@ -2412,7 +2595,7 @@ export const Terminal = () => {
                   {branchPr && branchPrDisplayState && BranchPrIcon ? (
                     <button
                       type="button"
-                      onClick={openDiffViewer}
+                      onClick={isTouchDevice ? handleAmbientPress : openDiffViewer}
                       aria-label={`view pull request diff: PR #${branchPr.number} (${PR_DISPLAY_STATE_LABELS[branchPrDisplayState]})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
                       title={`PR #${branchPr.number} (${PR_DISPLAY_STATE_LABELS[branchPrDisplayState]})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
                       className={cn(
@@ -2422,6 +2605,25 @@ export const Terminal = () => {
                     >
                       <BranchPrIcon className="size-3.5" aria-hidden="true" />
                       <span>#{branchPr.number}</span>
+                    </button>
+                  ) : null}
+                  {isTouchDevice && !hasAmbientDiff ? (
+                    <button
+                      type="button"
+                      onClick={handleAmbientPress}
+                      aria-label={
+                        isActionsMenuOpen ? "Hide terminal actions" : "Show terminal actions"
+                      }
+                      aria-expanded={isActionsMenuOpen}
+                      className="flex h-8 w-8 items-center justify-center rounded-[min(var(--radius-md),10px)] outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "size-4 transition-transform duration-200 ease-snappy",
+                          isActionsMenuOpen ? "rotate-180" : "rotate-0",
+                        )}
+                        aria-hidden="true"
+                      />
                     </button>
                   ) : null}
                 </div>
@@ -2437,6 +2639,10 @@ export const Terminal = () => {
               <InputGroupInput
                 ref={searchInputRef}
                 type="search"
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 value={searchQuery}
                 onChange={handleSearchInputChange}
                 onKeyDown={handleSearchKeyDown}
@@ -2467,6 +2673,9 @@ export const Terminal = () => {
                   aria-label="next match"
                 >
                   <ChevronDown />
+                </InputGroupButton>
+                <InputGroupButton size="icon-xs" onClick={closeSearch} aria-label="close find">
+                  <X />
                 </InputGroupButton>
               </InputGroupAddon>
             </InputGroup>

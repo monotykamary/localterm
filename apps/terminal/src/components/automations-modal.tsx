@@ -1564,6 +1564,10 @@ const AutomationListPopover = ({
       <div className="border-b border-border/40 px-2 py-1.5">
         <input
           type="text"
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search automations…"
@@ -1676,6 +1680,10 @@ const AutomationSidebar = ({
         />
         <input
           type="text"
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder="Search…"

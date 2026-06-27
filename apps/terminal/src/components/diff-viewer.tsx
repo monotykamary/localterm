@@ -2070,6 +2070,10 @@ const FileListPopover = ({ files, selectedPath, onSelect }: FileListPopoverProps
       <div className="border-b border-border/40 px-2 py-1.5">
         <input
           type="text"
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search files…"
@@ -2187,6 +2191,10 @@ const FileListSidebar = ({
         />
         <input
           type="text"
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search files…"

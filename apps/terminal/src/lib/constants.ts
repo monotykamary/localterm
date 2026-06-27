@@ -5,6 +5,9 @@ export const DEFAULT_TERMINAL_FONT_SIZE_PX = 13;
 export const TERMINAL_FONT_SIZE_MIN_PX = 9;
 export const TERMINAL_FONT_SIZE_MAX_PX = 24;
 export const TERMINAL_FONT_SIZE_STEP_PX = 1;
+export const TERMINAL_TAP_MOVEMENT_THRESHOLD_PX = 10;
+export const TERMINAL_KEYBOARD_HIDE_VIEWPORT_GROWTH_PX = 150;
+export const TERMINAL_VIEWPORT_WIDTH_STABLE_PX = 20;
 export const DEFAULT_TERMINAL_LINE_HEIGHT = 1.2;
 // xterm.js refuses lineHeight < 1 (throws "lineHeight cannot be less than 1").
 export const TERMINAL_LINE_HEIGHT_MIN = 1.0;

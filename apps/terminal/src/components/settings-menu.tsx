@@ -226,7 +226,7 @@ export const SettingsMenu = ({
         align="end"
         sideOffset={TOOLTIP_SIDE_OFFSET_PX}
         className={cn(
-          "w-64 gap-0 overflow-hidden p-3",
+          "w-64 max-h-[calc(100dvh-1.5rem)] gap-0 overflow-y-auto p-3",
           TRANSLUCENT_PANEL_CLASSES,
           PANEL_ANIMATION_CLASSES,
         )}

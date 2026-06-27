@@ -155,7 +155,7 @@ const SessionOption = ({
     <SessionIcon state={session.state} />
     <span className="min-w-0 flex-1 truncate text-left">{session.title || session.cwd}</span>
     <StatusPill session={session} isCurrent={isCurrent} />
-    <span className="flex shrink-0 items-center gap-2 font-mono text-[10px] tabular-nums text-muted-foreground/60">
+    <span className="hidden shrink-0 items-center gap-2 font-mono text-[10px] tabular-nums text-muted-foreground/60 sm:flex">
       <span>{session.shellName}</span>
       <span className="min-w-[3.5rem] text-right">pid {session.pid}</span>
       <span className="min-w-[3rem] text-right">
@@ -381,6 +381,10 @@ export const SessionsModal = ({
           <input
             ref={searchInputRef}
             autoFocus
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             type="text"
             value={query}
             onChange={(event) => setQuery(event.target.value)}

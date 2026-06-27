@@ -318,6 +318,10 @@ export const CommandPalette = ({
           <input
             ref={inputRef}
             autoFocus
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
