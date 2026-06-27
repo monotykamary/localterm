@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { serverToClientMessageSchema } from "../src/schemas.js";
 import { Session } from "../src/session.js";
+import { terminalQueryResponder } from "../src/utils/terminal-query-responder.js";
 
 const waitFor = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
   Promise.race([
@@ -226,4 +227,58 @@ describe("Session", () => {
     expect(session.isPaused).toBe(false);
     expect(() => session.resume()).not.toThrow();
   });
+
+  it("snapshotScrollback prepends the live mode-restore prefix and preserves non-DA queries", async () => {
+    const session = new Session({ shell: "/bin/sh" });
+    try {
+      await collectOutput(session, 10_000);
+      // Enter alt screen + enable mouse (tracked modes) and emit a DECRQM
+      // request — a query the DA1/DA2 responder does NOT handle. DA1/DA2 are
+      // removed at append time by the responder, so they never reach the ring
+      // buffer; other queries (DECRQM/OSC/DSR) stay in the raw replay and are
+      // dropped client-side by the replay suppression on `replay-end`.
+      session.write("printf '\\033[?1049h\\033[?1002h\\033[?2026$p'\n");
+      await collectOutput(session, 10_000);
+      const snapshot = session.snapshotScrollback();
+      // The restore prefix re-enters the alt screen and re-enables mouse before
+      // the replayed content, so a switch into this TUI keeps wheel scrolling in
+      // the TUI instead of the terminal scrollback.
+      expect(snapshot.startsWith("\x1b[?1002h\x1b[?1049h")).toBe(true);
+      // The DECRQM request stays in the raw replay: the server doesn't strip
+      // non-DA queries (the client suppresses xterm's response to them on
+      // replay), so this is independent of the responder's cache state.
+      expect(snapshot).toContain("\x1b[?2026$p");
+    } finally {
+      session.dispose();
+    }
+  }, 15_000);
+
+  it("answers DA1 from cache after capturing xterm's response via write (no round-trip)", async () => {
+    // Isolation: the responder is a process-global singleton, so reset to a
+    // cold cache for this case and restore (reset) in finally.
+    terminalQueryResponder.reset();
+    const session = new Session({ shell: "/bin/sh" });
+    try {
+      await collectOutput(session, 10_000);
+      // Simulate xterm's DA1 response flowing back through the input path
+      // (onData -> client -> server -> session.write). write() captures it.
+      session.write("\x1b[?62;4;9;22c");
+      // Now the shell emits a DA1 request as output. With the cache warm the
+      // request is removed from the output (xterm never sees it, never
+      // responds) and the cached response is written straight to the PTY.
+      const outputs: string[] = [];
+      session.on("output", (chunk) => outputs.push(chunk));
+      session.write("printf '\\033[cDONE'");
+      session.write("\n");
+      await collectOutput(session, 10_000);
+      const emitted = outputs.join("");
+      // The DA1 request (ESC [ c) is removed from the output stream.
+      expect(emitted).not.toContain("\x1b[c");
+      // The literal text after the request still lands.
+      expect(emitted).toContain("DONE");
+    } finally {
+      terminalQueryResponder.reset();
+      session.dispose();
+    }
+  }, 15_000);
 });

@@ -141,6 +141,25 @@ export const FONT_LOAD_PROBE_PX = 16;
 // double-capacity on demand until they fit into the reused backing store.
 export const OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES = 8 * 1024;
 
+// Visible-output flush threshold. Output at or below this size is flushed
+// synchronously in the WebSocket message handler (calling terminal.write
+// immediately) instead of being deferred to a requestAnimationFrame. A terminal
+// query a probing program emits (DA1/DSR/OSC/DECRQM from a shell prompt
+// plugin or a TUI resuming after a foreground program exits) must be parsed by
+// xterm.js and answered in the SAME task — otherwise the rAF deferral (~16ms
+// when visible, the dominant latency after the server's 2ms coalescing window)
+// pushes xterm's response past the probe's short read timeout, and the
+// response then sits in the PTY stdin and is read as typed garbage (e.g.
+// `62;4;9;22c` after closing a TUI switched to via the session picker).
+// xterm parses a write under this threshold within its 12ms synchronous
+// budget, so a sync flush answers the query with sub-frame latency. Large
+// buffers (sustained renders, `cat` of large files) exceed the threshold and
+// keep the rAF coalescing for throughput — the high-throughput path is
+// unchanged. The threshold covers interactive output (queries <1KB, TUI
+// redraws 3–6KB on a 120×40 terminal) while staying well under xterm's 12ms
+// parse budget, so sync flushing never spills to xterm's own async drain.
+export const OUTPUT_SYNC_FLUSH_MAX_BYTES = 8 * 1024;
+
 // Grace window after the last output chunk during which OutputBatcher holds a
 // self-requeuing requestAnimationFrame. Without an outstanding rAF, Chrome's
 // compositor flips `needsBeginFrame` to false the moment the main thread has no

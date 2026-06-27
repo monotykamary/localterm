@@ -905,6 +905,15 @@ const automationsMessageSchema = z
 // i.e. whether the daemon can reliably closeTab on shell exit. Drives the
 // client's markShellDead path: a CDP-controlled clean exit waits for the
 // server-driven close instead of front-running with window.close().
+// Marks the end of a scrollback replay. Sent after the replay binary frame(s)
+// (or immediately, when the snapshot was empty) so the client knows the replay
+// bytes have all landed and can write them as one suppressed block — dropping
+// xterm's responses to the stale query requests in the ring buffer so they
+// never reach the live PTY. Only sent when the client asked for a replay
+// (`ready { replay: true }`); a silent reattach (`replay: false`) gets none and
+// never enters the suppressed-replay window.
+const replayEndMessageSchema = z.object({ type: z.literal("replay-end") }).strict();
+
 const cdpControlledMessageSchema = z
   .object({
     type: z.literal("cdp-controlled"),
@@ -966,6 +975,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   automationsMessageSchema,
   caffeinateStateMessageSchema,
   cdpControlledMessageSchema,
+  replayEndMessageSchema,
 ]);
 
 export const gitDiffFileSchema = gitDiffFileMetaSchema

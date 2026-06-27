@@ -475,4 +475,66 @@ describe("createServer WS lifecycle", () => {
     await closeWs(first.socket);
     await closeWs(second.socket);
   });
+
+  it("sends a replay-end marker after the scrollback replay on a switch attach", async () => {
+    const connectWithSid = async (
+      sid: string | null,
+    ): Promise<{ socket: WebSocket; session: { id?: string; pid: number } }> => {
+      const url = sid
+        ? `ws://127.0.0.1:${server.port}/ws?sid=${encodeURIComponent(sid)}`
+        : `ws://127.0.0.1:${server.port}/ws`;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("ws connect timeout")), 10_000);
+        const socket = new WebSocket(url);
+        socket.binaryType = "arraybuffer";
+        socket.addEventListener("message", function listener(event) {
+          const parsed = normalizeMessage(event as WebSocket.MessageEvent);
+          if (
+            parsed &&
+            typeof parsed === "object" &&
+            (parsed as Record<string, unknown>).type === "session"
+          ) {
+            clearTimeout(timer);
+            socket.removeEventListener("message", listener);
+            resolve({ socket, session: parsed as { id?: string; pid: number } });
+          }
+        });
+        socket.addEventListener("error", () => {
+          clearTimeout(timer);
+          reject(new Error("ws error"));
+        });
+      });
+    };
+
+    // Tab A: spawn a shell and produce output so its ring buffer is non-empty.
+    const first = await connectWithSid(null);
+    const sid = first.session.id!;
+    first.socket.send(JSON.stringify({ type: "ready", replay: false }));
+    first.socket.send(JSON.stringify({ type: "input", data: "echo REPLAY_MARKER_7\n" }));
+    await waitForMessage(first.socket, (message) =>
+      Boolean(
+        message &&
+        typeof message === "object" &&
+        (message as Record<string, unknown>).type === "output" &&
+        String((message as { data?: string }).data).includes("REPLAY_MARKER_7"),
+      ),
+    );
+    // Tab B attaches to the same live PTY by id (a fresh load onto a live
+    // shell) and asks for the scrollback replay; the server must bracket the
+    // replay bytes with a replay-end marker so the client knows the replay
+    // has fully landed.
+    const second = await connectWithSid(sid);
+    expect(second.session.id).toBe(sid);
+    second.socket.send(JSON.stringify({ type: "ready", replay: true }));
+    const replayEnd = await waitForMessage(second.socket, (message) =>
+      Boolean(
+        message &&
+        typeof message === "object" &&
+        (message as Record<string, unknown>).type === "replay-end",
+      ),
+    );
+    expect(replayEnd).toEqual({ type: "replay-end" });
+    await closeWs(first.socket);
+    await closeWs(second.socket);
+  });
 });

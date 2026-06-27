@@ -38,6 +38,7 @@ interface FakeXtermHandle {
   customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null;
   customWheelEventHandler: ((event: WheelEvent) => boolean) | null;
   fireTitleChange: (title: string) => void;
+  fireData: (data: string) => void;
   getOptions: () => Record<string, unknown>;
   setBufferState: (state: { baseY: number; viewportY: number }) => void;
   scrollLines: ReturnType<typeof vi.fn>;
@@ -142,6 +143,7 @@ vi.mock("@xterm/xterm", () => {
     registerCharacterJoiner = vi.fn((_handler: (text: string) => [number, number][]) => 1);
     deregisterCharacterJoiner = vi.fn((_joinerId: number) => {});
     private titleListeners = new Set<(title: string) => void>();
+    private dataListeners = new Set<(data: string) => void>();
     private csiHandlers: FakeCsiHandlerEntry[] = [];
     private handle: FakeXtermHandle;
 
@@ -168,6 +170,9 @@ vi.mock("@xterm/xterm", () => {
         customWheelEventHandler: null,
         fireTitleChange: (title: string) => {
           for (const listener of this.titleListeners) listener(title);
+        },
+        fireData: (data: string) => {
+          for (const listener of this.dataListeners) listener(data);
         },
         getOptions: () => this.options,
         setBufferState: ({ baseY, viewportY }) => {
@@ -208,7 +213,10 @@ vi.mock("@xterm/xterm", () => {
     loadAddon = () => {};
     open = () => {};
     refresh = () => {};
-    onData = () => {};
+    onData = (handler: (data: string) => void) => {
+      this.dataListeners.add(handler);
+      return { dispose: () => this.dataListeners.delete(handler) };
+    };
     onResize = () => ({ dispose: () => {} });
     onScroll = () => ({ dispose: () => {} });
     onWriteParsed = () => ({ dispose: () => {} });
@@ -874,6 +882,57 @@ const installFakeLocalStorage = (initial: Record<string, string> = {}) => {
   };
   vi.stubGlobal("localStorage", fakeStorage);
 };
+
+describe("Terminal scrollback replay suppression", () => {
+  it("drops xterm's responses to replayed query requests so they never reach the PTY", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({
+        type: "session",
+        shell: "/bin/sh",
+        shellName: "sh",
+        pid: 1,
+        cwd: "/",
+        title: "sh",
+        id: "12345678-1234-4234-8234-123456789012",
+      });
+    });
+    // A fresh attach (no prior session) asks for the scrollback replay, which
+    // opens the suppressed-replay window.
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "ready", replay: true }),
+    );
+
+    // The replay arrives as a binary frame carrying a stale DA1 request
+    // (CSI c) the shell emitted once.
+    act(() => {
+      fakeWebSockets[0]?.fireMessage({ type: "output", data: "\x1b[c" });
+    });
+
+    // While the window is open, xterm's response to the replayed query must
+    // NOT be forwarded to the live PTY — the bounded replacement for
+    // server-side stripping: any response, any sequence, is dropped.
+    fakeWebSockets[0]?.send.mockClear();
+    act(() => {
+      fakeXterms[0]?.fireData("62;4;9;22c");
+    });
+    expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
+
+    // replay-end writes the buffered replay as one block and closes the window.
+    act(() => {
+      fakeWebSockets[0]?.fireMessage({ type: "replay-end" });
+    });
+
+    // After the window closes, xterm output flows to the PTY again.
+    act(() => {
+      fakeXterms[0]?.fireData("hello");
+    });
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "input", data: "hello" }),
+    );
+  });
+});
 
 describe("Terminal theme picker", () => {
   it("seeds xterm with the default Vesper theme when no preference is stored", () => {

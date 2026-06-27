@@ -502,6 +502,22 @@ export const Terminal = () => {
     // CDP-driven close time to land. Reset whenever the socket changes; the
     // next identify acks with the up-to-date value over the new WS.
     let cdpControlled = false;
+    // Suppressed-replay window. On a switch (or fresh load) the server replays
+    // the PTY's scrollback ring buffer as binary frames terminated by a
+    // `{type:"replay-end"}` marker. The raw bytes contain stale terminal
+    // query requests (DA/DSR/OSC/DECRQM) the shell emitted once; replaying them
+    // into a fresh xterm.js re-evaluates every request and makes xterm re-emit
+    // its response, which the onData handler would forward to the LIVE PTY as
+    // typed garbage (e.g. `62;4;9;22c` on every switch). Sanitizing the requests
+    // server-side is unbounded — every query variant must be enumerated — so
+    // instead the client buffers the replay frames and writes them as one
+    // block with onData suppressed, dropping every response regardless of
+    // sequence. `suppressOutput` gates onData; `inReplay` routes binary frames
+    // to the buffer instead of the live batcher; `replayChunks` holds them
+    // until `replay-end` lands.
+    let suppressOutput = false;
+    let inReplay = false;
+    let replayChunks: Uint8Array[] = [];
     let reconnectTimer: number | null = null;
     let resizeTimer: number | null = null;
     let faviconRunningTimer: number | null = null;
@@ -1029,6 +1045,13 @@ export const Terminal = () => {
     };
 
     terminal.onData((data) => {
+      // During a scrollback replay xterm re-emits responses to the stale query
+      // requests in the ring buffer; dropping them here (instead of forwarding
+      // to the live PTY) is the bounded fix for the switch-time leak. User
+      // keystrokes share onData and are dropped too, but the replay drain is
+      // short (a screenful parses inside xterm's 12ms synchronous budget) and
+      // the user is not typing in the moment after a switch.
+      if (suppressOutput) return;
       for (const chunk of chunkInputByCodeUnits(data, MAX_INPUT_BYTES)) {
         send({ type: "input", data: chunk });
       }
@@ -1146,6 +1169,13 @@ export const Terminal = () => {
         // emits every other message type as JSON text, so anything that isn't
         // an ArrayBuffer goes through the schema parser.
         if (isBinaryMessageData(event.data)) {
+          if (inReplay) {
+            // Buffer replay frames; they are written as one suppressed block
+            // when `replay-end` lands, so xterm's responses to the stale query
+            // requests never reach the live PTY.
+            replayChunks.push(new Uint8Array(event.data));
+            return;
+          }
           outputBatcher.pushBytes(new Uint8Array(event.data));
           noteOutputActivity();
           return;
@@ -1163,6 +1193,13 @@ export const Terminal = () => {
           applyIncomingTitle(message.title);
         } else if (message.type === "session") {
           const priorSessionId = liveSessionId;
+          // A new session frame means a fresh attach: drop any suppressed-replay
+          // window left open by a prior (possibly failed) attach — its replay
+          // is moot now, and an unbalanced window would leave onData suppressed
+          // (a dead terminal). Re-opened below if this attach wants a replay.
+          inReplay = false;
+          replayChunks = [];
+          suppressOutput = false;
           reattachPending = false;
           reattachCloseCode = 0;
           reattachCloseReason = "";
@@ -1180,6 +1217,13 @@ export const Terminal = () => {
           const isSwitch = priorSessionId !== null && message.id !== priorSessionId;
           if (isSwitch) {
             terminal.reset();
+            // xterm's reset() (RIS) does not clear coreService.isCursorHidden —
+            // only ?25h/?25l/softReset do — so a source PTY that hid the cursor
+            // leaves it hidden on the fresh surface. An empty target PTY sends
+            // no replay to re-establish its own cursor state, so the cursor stays
+            // invisible. Re-assert DECTCEM locally; the replay, if any, overrides
+            // with the target's own cursor state, and an empty replay keeps it on.
+            terminal.write("\x1b[?25h");
           }
           setSessionInfo({
             shell: message.shell,
@@ -1200,7 +1244,41 @@ export const Terminal = () => {
           // lost across the gap — it lives in the ring buffer and arrives via
           // the replay. A brand-new spawn has an empty ring buffer, so a
           // fresh-load replay is a no-op there.
-          send({ type: "ready", replay: isSwitch || priorSessionId === null });
+          const wantsReplay = isSwitch || priorSessionId === null;
+          if (wantsReplay) {
+            // Open the suppressed-replay window: buffer the replay frames and
+            // drop xterm's responses until `replay-end` writes them as one
+            // block. Cleared in the replay-end handler.
+            inReplay = true;
+            suppressOutput = true;
+            replayChunks = [];
+          }
+          send({ type: "ready", replay: wantsReplay });
+        } else if (message.type === "replay-end") {
+          // The server has finished sending the scrollback replay. Write the
+          // buffered frames as one block with onData suppressed so xterm's
+          // responses to the stale query requests in the ring buffer are
+          // dropped instead of forwarded to the live PTY. xterm parses the
+          // block asynchronously (its WriteBuffer drains in 12ms chunks), so
+          // keep onData suppressed until the drain completes (the write
+          // callback) — responses fire during the drain, live output is
+          // queued behind it in xterm's FIFO buffer and parses after the
+          // callback clears suppression. An empty replay (blank PTY) writes
+          // nothing and just clears the window.
+          const chunks = replayChunks;
+          inReplay = false;
+          replayChunks = [];
+          if (chunks.length === 0) {
+            suppressOutput = false;
+          } else {
+            const finishReplay = () => {
+              suppressOutput = false;
+              updateScrollbar();
+            };
+            for (let index = 0; index < chunks.length; index += 1) {
+              terminal.write(chunks[index], index === chunks.length - 1 ? finishReplay : undefined);
+            }
+          }
         } else if (message.type === "automations") {
           setAutomations(message.automations);
         } else if (message.type === "caffeinate") {

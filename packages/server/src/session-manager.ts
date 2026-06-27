@@ -293,7 +293,14 @@ export class SessionManager {
       clearTimeout(client.pendingTimer);
       client.pendingTimer = null;
     }
-    if (replay) this.sendScrollback(ws, entry.session);
+    if (replay) {
+      this.sendScrollback(ws, entry.session);
+      // Tell the client the replay bytes have all landed so it can write them as
+      // one suppressed block (dropping xterm's responses to the stale query
+      // requests in the ring buffer). Sent even when the snapshot was empty so
+      // the client always exits its suppressed-replay window.
+      this.sendControl(ws, { type: "replay-end" });
+    }
     for (const payload of client.pendingControl) this.sendControl(ws, payload);
     for (const bytes of client.pendingBytes) this.sendOutputBytes(ws, bytes);
     client.pendingControl = [];

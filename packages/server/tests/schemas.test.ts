@@ -131,6 +131,7 @@ describe("serverToClientMessageSchema", () => {
     expect(serverToClientMessageSchema.safeParse({ type: "title", title: "shell" }).success).toBe(
       true,
     );
+    expect(serverToClientMessageSchema.safeParse({ type: "replay-end" }).success).toBe(true);
   });
 
   // Output is NOT a JSON member of the union — the server emits it as a binary

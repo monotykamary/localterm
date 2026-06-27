@@ -32,6 +32,8 @@ import { parseOscAutomationExitFromChunk } from "./utils/parse-osc-automation-ex
 import { parseOscDirtyFromChunk } from "./utils/parse-osc-dirty.js";
 import { parseOscNotificationsFromChunk } from "./utils/parse-osc-notification.js";
 import { parseOscTitleFromChunk } from "./utils/parse-osc-title.js";
+import { TerminalModeState } from "./utils/terminal-mode-state.js";
+import { terminalQueryResponder } from "./utils/terminal-query-responder.js";
 
 interface SessionEvents {
   output: [data: string];
@@ -69,6 +71,13 @@ export class Session extends EventEmitter<SessionEvents> {
   // oldest chunks are dropped as new output arrives.
   private readonly scrollbackChunks: string[] = [];
   private scrollbackBytes = 0;
+  // Live DECSET/DECRST mode state (alt-screen, mouse, bracketed paste, cursor
+  // hide) updated from every PTY chunk. snapshotScrollback() prepends a
+  // restore prefix from this so a switch into a long-running TUI re-enters the
+  // alt screen and re-enables mouse even when the TUI's mode-set sequences
+  // have scrolled out of the 256KB replay window — otherwise the wheel scrolls
+  // xterm's scrollback instead of the TUI.
+  private readonly modeState = new TerminalModeState();
   private readonly foregroundWatcher: ForegroundWatcher;
   private readonly reportInitialCommandExit: boolean;
   private hasEmittedAutomationExit = false;
@@ -136,9 +145,20 @@ export class Session extends EventEmitter<SessionEvents> {
     });
 
     this.pty.onData((data) => {
-      this.onPtyOutput(data);
-      this.appendScrollback(data);
-      this.emit("output", data);
+      // Intercept DA1/DA2 identity queries: answer them from the cached xterm
+      // response instantly (in-process, no round-trip to xterm) and remove the
+      // request from the output so xterm never sees it and never responds.
+      // Without this the remote round-trip loses the race against a short read
+      // timeout or a process exit, orphaning the response in the PTY stdin as
+      // typed text (e.g. `62;4;9;22c`). Cold cache: the request round-trips to
+      // xterm as today and the response is captured in write(). The cleaned
+      // output (request removed) is what clients and the scrollback see, so the
+      // replay never carries a stale DA request either.
+      const { passthrough, responses } = terminalQueryResponder.interceptRequest(data);
+      for (const response of responses) this.pty.write(response);
+      this.onPtyOutput(passthrough);
+      this.appendScrollback(passthrough);
+      this.emit("output", passthrough);
     });
 
     this.pty.onExit(({ exitCode }) => {
@@ -203,6 +223,11 @@ export class Session extends EventEmitter<SessionEvents> {
 
   write(data: string): void {
     if (this.exited) return;
+    // xterm.js's responses to DA1/DA2 flow back through here (onData -> client
+    // -> server -> pty). Capture the first of each so the responder can answer
+    // subsequent probes instantly without a round-trip. See
+    // terminal-query-responder.ts for why the round-trip leaks.
+    terminalQueryResponder.captureResponse(data);
     this.pty.write(data);
   }
 
@@ -271,11 +296,22 @@ export class Session extends EventEmitter<SessionEvents> {
     this.removeAllListeners();
   }
 
-  // Concatenate the scrollback ring buffer for attach-time replay. Returned as
-  // one string so the server can UTF-8-encode it once and emit a single binary
-  // frame ahead of live fan-out.
+  // Concatenate the scrollback ring buffer for attach-time replay, prefixed
+  // with a restore of the PTY's live terminal modes (alt-screen, mouse,
+  // bracketed paste, cursor hide) so a switch into a long-running TUI re-enters
+  // the alt screen and re-enables mouse even when the TUI's mode-set sequences
+  // have scrolled out of the 256KB window — otherwise the wheel scrolls xterm's
+  // scrollback instead of the TUI. DA1/DA2 identity requests never reach the
+  // ring buffer: the TerminalQueryResponder removes them at append time and
+  // answers them live, so the replay can't re-trigger their responses. Other
+  // stale query requests (DSR/OSC/DECRQM) do remain in the raw bytes; the server
+  // doesn't sanitize those (enumerating every query variant is unbounded), so
+  // the client writes the whole replay as one suppressed block on
+  // `replay-end`, dropping xterm's responses to any of them — a bounded fix
+  // that covers any query, present or future. The join cost is paid here (read
+  // time, cold switch path) not on the hot output path.
   snapshotScrollback(): string {
-    return this.scrollbackChunks.join("");
+    return this.modeState.restorePrefix() + this.scrollbackChunks.join("");
   }
 
   private appendScrollback(data: string): void {
@@ -304,6 +340,8 @@ export class Session extends EventEmitter<SessionEvents> {
   private onPtyOutput(data: string): void {
     const combined = this.pendingParse + data;
     this.pendingParse = "";
+
+    this.modeState.update(combined);
 
     const osc7Path = parseOsc7FromChunk(combined);
     let cwdChanged = false;
