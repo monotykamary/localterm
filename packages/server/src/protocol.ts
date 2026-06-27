@@ -139,7 +139,6 @@ export type {
   UpdateAutomationInput,
 } from "./types.js";
 export { compileSchedule, compileScheduleAll } from "./utils/compile-schedule.js";
-export { detectChromiumBrowsers } from "./cdp/detect-chromium.js";
 export type { BrowserCandidate, DetectedBrowser } from "./cdp/detect-chromium.js";
 export { isImagePath } from "./utils/image-extensions.js";
 export type { ServerError, ServerErrorCode, ServerErrorKind } from "./errors.js";
