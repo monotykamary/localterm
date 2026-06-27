@@ -911,9 +911,12 @@ const automationsMessageSchema = z
 // (or immediately, when the snapshot was empty) so the client knows the replay
 // bytes have all landed and can write them as one suppressed block — dropping
 // xterm's responses to the stale query requests in the ring buffer so they
-// never reach the live PTY. Only sent when the client asked for a replay
-// (`ready { replay: true }`); a silent reattach (`replay: false`) gets none and
-// never enters the suppressed-replay window.
+// never reach the live PTY. Sent on every promote, not only `ready { replay:
+// true }`: the client opens its suppressed-replay window on the {session} frame
+// (before its {ready} can race back over a slow link), so a pending-timeout
+// auto-promote with `replay: false` must still send the marker or the client
+// deadlocks waiting for it. A client that never opened the window (a silent
+// reattach, or a back-compat reader) treats it as a no-op.
 const replayEndMessageSchema = z.object({ type: z.literal("replay-end") }).strict();
 
 const cdpControlledMessageSchema = z

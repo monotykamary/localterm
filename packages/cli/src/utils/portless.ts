@@ -49,6 +49,14 @@ export const isPortlessProxyLive = async (): Promise<boolean> => isProxyLive(443
 
 export interface ResolveUrlResult {
   url: string;
+  // Daemon-local origin automation-run tabs open at — portless
+  // `https://localterm.localhost` when the proxy is live, else the loopback
+  // `http://<friendly>:<port>`. Independent of `url` (the remote surface for
+  // mobile/browser-open) so a tailnet-fronted daemon still serves mobile on
+  // the tailnet URL while run tabs — which open in the daemon's own browser —
+  // never ride a flapping `tailscale serve` that would fail the tab load and
+  // the automation.
+  localUrl: string;
   surface: "tailnet" | "portless" | "loopback";
   warnings: string[];
 }
@@ -108,20 +116,44 @@ const ensurePortlessRoute = async (
 export const resolveDaemonUrl = async (port: number): Promise<ResolveUrlResult> => {
   const warnings: string[] = [];
 
-  const tailscaleRoute = await resolveTailscaleRoute(port);
-  if (tailscaleRoute.url) {
-    return { url: tailscaleRoute.url, surface: "tailnet", warnings };
-  }
-  const warning = tailscaleWarning(tailscaleRoute);
-  if (warning) warnings.push(warning);
+  // Resolve both surfaces in parallel — they probe independent binaries
+  // (`tailscale serve status` / `portless alias`), so concurrency doesn't race
+  // shared state and keeps startup at max() rather than sum() of the probes.
+  // `ensurePortlessRoute` always runs (even when tailnet fronts the daemon) so
+  // the portless alias is re-registered for the current bound port — without
+  // it the run tab's `https://localterm.localhost` wouldn't reach the daemon.
+  const [tailscaleRoute, portlessRoute] = await Promise.all([
+    resolveTailscaleRoute(port),
+    ensurePortlessRoute(port),
+  ]);
 
-  const portlessRoute = await ensurePortlessRoute(port);
-  if (portlessRoute.registered) {
-    return { url: portlessRoute.url, surface: "portless", warnings };
-  }
-  if (portlessRoute.warning) warnings.push(portlessRoute.warning);
+  const tailscaleWarningMessage = tailscaleWarning(tailscaleRoute);
+  if (tailscaleWarningMessage) warnings.push(tailscaleWarningMessage);
 
-  return { url: getFriendlyUrl(port), surface: "loopback", warnings };
+  const hasPortless = Boolean(portlessRoute.registered);
+
+  // Run tabs open in the daemon's own browser, so they prefer a daemon-local
+  // surface that never rides the tailnet: portless (HTTPS, local :443 alias)
+  // when the proxy is live, else the always-local loopback form.
+  const localUrl = hasPortless ? portlessRoute.url : getFriendlyUrl(port);
+
+  // The remote surface mobile/remote tabs and `--open` use: best-first tailnet
+  // → portless → loopback, unchanged from the single-surface resolution.
+  const url = tailscaleRoute.url ?? (hasPortless ? portlessRoute.url : getFriendlyUrl(port));
+  const surface: ResolveUrlResult["surface"] = tailscaleRoute.url
+    ? "tailnet"
+    : hasPortless
+      ? "portless"
+      : "loopback";
+
+  // Only surface the portless warning when portless is the intended REMOTE
+  // surface and it's unavailable — when tailnet fronts the daemon the run tab's
+  // loopback fallback is fine and the portless warning is just noise.
+  if (!tailscaleRoute.url && !hasPortless && portlessRoute.warning) {
+    warnings.push(portlessRoute.warning);
+  }
+
+  return { url, localUrl, surface, warnings };
 };
 
 export const announceResolvedUrl = (url: string, surface: ResolveUrlResult["surface"]): void => {

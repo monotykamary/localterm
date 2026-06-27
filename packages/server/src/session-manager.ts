@@ -96,6 +96,11 @@ interface SessionManagerOptions {
   // Override the no-clients grace window (default SESSION_GRACE_MS). Injectable
   // so a test can verify the reap path without waiting 30s.
   graceMs?: number;
+  // Override the pending-promote window (default SESSION_PENDING_PROMOTE_TIMEOUT_MS).
+  // Injectable so a test can verify the auto-promote path (and that it still
+  // sends `replay-end` so a slow client never deadlocks in its replay window)
+  // without waiting the full production timeout.
+  pendingPromoteTimeoutMs?: number;
 }
 
 // Owns every live PTY for the daemon's lifetime. A Session is created on spawn
@@ -122,11 +127,13 @@ export class SessionManager {
   private readonly hooks: SessionManagerHooks;
   private readonly sendControl: (ws: ClientSocket, payload: ServerToClientMessage) => void;
   private readonly graceMs: number;
+  private readonly pendingPromoteTimeoutMs: number;
 
   constructor(options: SessionManagerOptions) {
     this.hooks = options.hooks;
     this.sendControl = options.sendControl;
     this.graceMs = options.graceMs ?? SESSION_GRACE_MS;
+    this.pendingPromoteTimeoutMs = options.pendingPromoteTimeoutMs ?? SESSION_PENDING_PROMOTE_TIMEOUT_MS;
   }
 
   size(): number {
@@ -267,11 +274,14 @@ export class SessionManager {
     // Auto-promote a client that never sends {type:"ready"} — a back-compat
     // client (an older bundled terminal, or any plain WS reader) would otherwise
     // stay pending and never receive output. The localterm client sends ready
-    // within milliseconds of the session frame, well before this fires, so its
-    // scrollback replay still lands first.
+    // within milliseconds of the session frame; the window is sized to clear a
+    // mobile/tailscale RTT (often DERP-relayed) so its {ready} lands first and
+    // its scrollback replay still lands before live fan-out. `promote` always
+    // sends `replay-end`, so even a slow link that auto-promotes with
+    // `replay: false` can't deadlock the client in its replay window.
     client.pendingTimer = setTimeout(
       () => this.promote(ws, false),
-      SESSION_PENDING_PROMOTE_TIMEOUT_MS,
+      this.pendingPromoteTimeoutMs,
     );
     client.pendingTimer.unref?.();
     this.hooks.onSessionActivity();
@@ -285,6 +295,16 @@ export class SessionManager {
   // output bytes buffered while pending flush in order — so a tab switching
   // to this PTY lands on recent output instead of a blank screen, with no
   // live frame interleaving between replay and the buffered fan-out.
+  //
+  // `replay-end` is sent on EVERY promote (not just `replay: true`): the
+  // localterm client opens its suppressed-replay window on the {session}
+  // frame — before its {ready} reaches us — so a slow link whose pending
+  // timeout auto-promotes with `replay: false` would otherwise never send the
+  // marker the client is waiting on, deadlocking it on a blank screen with
+  // every output frame buffered client-side. The auto-promote's `replay-end`
+  // lets the client flush whatever it buffered (the pending bytes that raced
+  // ahead of the marker) and rejoin live fan-out. A client that didn't open the
+  // window (a silent reattach, or a back-compat reader) treats it as a no-op.
   promote(ws: ClientSocket, replay: boolean): void {
     const entry = this.wsToClient.get(ws);
     if (!entry) return;
@@ -296,12 +316,13 @@ export class SessionManager {
     }
     if (replay) {
       this.sendScrollback(ws, entry.session);
-      // Tell the client the replay bytes have all landed so it can write them as
-      // one suppressed block (dropping xterm's responses to the stale query
-      // requests in the ring buffer). Sent even when the snapshot was empty so
-      // the client always exits its suppressed-replay window.
-      this.sendControl(ws, { type: "replay-end" });
     }
+    // Tell the client the replay bytes have all landed so it can write them as
+    // one suppressed block (dropping xterm's responses to the stale query
+    // requests in the ring buffer). Sent on every promote — even when the
+    // snapshot was empty or replay wasn't requested — so the client always
+    // exits its suppressed-replay window and never deadlocks on a slow link.
+    this.sendControl(ws, { type: "replay-end" });
     for (const payload of client.pendingControl) this.sendControl(ws, payload);
     for (const bytes of client.pendingBytes) this.sendOutputBytes(ws, bytes);
     client.pendingControl = [];

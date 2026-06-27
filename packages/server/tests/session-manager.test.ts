@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import os from "node:os";
 import { SessionManager } from "../src/session-manager.js";
 import type { ClientSocket } from "../src/utils/ws-socket.js";
+import type { ServerToClientMessage } from "../src/types.js";
 
 const createFakeSocket = (): ClientSocket => ({
   readyState: 1,
@@ -154,4 +155,52 @@ describe("SessionManager no-clients grace", () => {
     // Idle with no foreground program → ready.
     expect(manager.list()[0]?.state).toBe("ready");
   }, 10_000);
+});
+
+describe("SessionManager pending promote", () => {
+  const noopHooks = {
+    onOutputActivity: () => {},
+    onSessionActivity: () => {},
+    onSessionEvent: () => {},
+    onAutomationExit: () => {},
+    onClientExit: () => {},
+  };
+  let manager: SessionManager;
+
+  afterEach(() => {
+    manager?.disposeAll();
+  });
+
+  it("sends replay-end on an auto-promote so a slow client never deadlocks in its replay window", async () => {
+    // The client opens its suppressed-replay window on the {session} frame —
+    // before its {ready} can race back over a slow (mobile / DERP-relayed)
+    // link. When the pending timeout auto-promotes with `replay: false` it
+    // must still send `replay-end`, or the client waits for a marker that
+    // never comes and buffers every output frame in `replayChunks` forever
+    // (a blank screen only a session-picker switch can recover).
+    const sentControl: ServerToClientMessage[] = [];
+    manager = new SessionManager({
+      pendingPromoteTimeoutMs: 40,
+      sendControl: (_ws, payload) => sentControl.push(payload),
+      hooks: noopHooks,
+    });
+    const ws = createFakeSocket();
+    manager.spawnAndAttach(ws, shellInput);
+    // Never send {ready} — the pending timer auto-promotes after 40ms.
+    await wait(120);
+    expect(sentControl).toContainEqual({ type: "replay-end" });
+  }, 10_000);
+
+  it("sends replay-end even when the client asks for no scrollback replay", () => {
+    const sentControl: ServerToClientMessage[] = [];
+    manager = new SessionManager({
+      pendingPromoteTimeoutMs: 60_000,
+      sendControl: (_ws, payload) => sentControl.push(payload),
+      hooks: noopHooks,
+    });
+    const ws = createFakeSocket();
+    manager.spawnAndAttach(ws, shellInput);
+    manager.promote(ws, false);
+    expect(sentControl).toContainEqual({ type: "replay-end" });
+  });
 });

@@ -204,9 +204,16 @@ export const SESSION_ACTIVITY_WINDOW_MS = 750;
 // replay lands before live fan-out for a clean switch). A back-compat client
 // that never sends ready (and never sends input) is auto-promoted after this
 // window with a buffered-output flush so it still receives its output — no
-// output is ever lost. Sized generously vs the client's synchronous send yet
-// well under any user-perceptible delay.
-export const SESSION_PENDING_PROMOTE_TIMEOUT_MS = 100;
+// output is ever lost. Must exceed the worst attach round-trip the client can
+// see: the {session} frame travels server→client and {ready} travels back, so
+// the timer races a full RTT, and a mobile tab fronted by `tailscale serve`
+// (often DERP-relayed) can see 200–400ms RTTs — 100ms auto-promoted first on a
+// slow link, and since the client had already opened its suppressed-replay
+// window on the {session} frame the replay-end it was waiting for never came
+// (the auto-promote skips the replay), deadlocking it on a blank screen.
+// 2s clears even a flaky relayed tailnet with room to spare while staying well
+// under any user-perceptible delay for the back-compat fallback.
+export const SESSION_PENDING_PROMOTE_TIMEOUT_MS = 2_000;
 // Query param a reconnecting or switching client carries to attach to a live
 // PTY by id instead of spawning a fresh shell.
 export const SESSION_ID_QUERY_PARAM = "sid";

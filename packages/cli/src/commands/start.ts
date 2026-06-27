@@ -286,12 +286,16 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
   writePid(process.pid, server.port, options.host);
 
   const resolved = await resolveDaemonUrl(server.port);
-  // Tell the daemon which surface to open automation-run tabs at. The CLI is
-  // the only place that resolves the best surface (tailnet / portless /
-  // loopback) from the bound port, so it must hand the result to the server —
-  // otherwise run tabs hardcode the loopback `http://<friendly>:<port>` form
-  // even when portless is fronting the daemon on `https://localterm.localhost`.
+  // Tell the daemon which surfaces to use. The CLI is the only place that
+  // resolves them from the bound port: `url` is the REMOTE surface mobile/
+  // remote tabs and `--open` use (and the network-policy host allowlist), while
+  // `localUrl` is the daemon-local surface automation-run tabs open at — run
+  // tabs open in the daemon's own browser, so they never ride a flapping
+  // tailnet that would fail the tab load and the automation. Both are handed to
+  // the server so run tabs land on the portless/loopback form even when the
+  // daemon is tailnet-fronted for mobile access.
   server.setPublicUrl(resolved.url);
+  server.setLocalUrl(resolved.localUrl);
   if (isRunningAsDaemonChild()) {
     console.log(`${kleur.green("✔")} daemon listening on ${resolved.url} (pid ${process.pid})`);
     announceResolvedUrl(resolved.url, resolved.surface);

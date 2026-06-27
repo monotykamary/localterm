@@ -17,26 +17,40 @@ const LOCALTERM_ORIGIN_HOSTNAMES: ReadonlySet<string> = new Set([
  * so this branch is belt-and-braces rather than load-bearing — but it keeps an
  * early targetCreated event from picking up a stale placeholder.
  *
- * `publicUrl` is the announced surface origin the CLI resolved (best-first:
- * tailnet `https://<node>.ts.net`, portless `https://localterm.localhost`, or
- * null for the bare loopback form). A candidate matches if its origin equals
- * it, so a tab opened at the portless URL (no port) or the tailnet URL (`:443`,
- * different host) is still recognised as ours — without this, ambient-token
- * injection and the CDP `closeTab`-on-exit path silently no-op on those
- * surfaces. Origin comparison normalises default ports, so `:443` and the bare
- * `https://` form both match.
+ * `publicUrl` is the announced REMOTE surface origin the CLI resolved
+ * (best-first: tailnet `https://<node>.ts.net`, portless
+ * `https://localterm.localhost`, or null for the bare loopback form) — the URL
+ * mobile/remote tabs reach the daemon through, and the one `localterm start
+ * --open` launches a local browser at. `localUrl` is the announced LOCAL
+ * surface the CLI resolved for automation-run tabs (portless, else loopback) —
+ * run tabs open in the daemon's own browser and a flapping tailnet would fail
+ * the tab load there, so they use a daemon-local origin even when `publicUrl`
+ * is the tailnet. A candidate matches if its origin equals either, so a tab
+ * opened at the portless run-tab URL (no port) is still recognised as ours
+ * alongside a tailnet `publicUrl` — without `localUrl`, ambient-token
+ * injection and the CDP `closeTab`-on-exit path silently no-op on run tabs when
+ * the daemon is tailnet-fronted. Origin comparison normalises default ports,
+ * so `:443` and the bare `https://` form both match.
  */
 export const isLocaltermTabUrl = (
   candidateUrl: string,
   port: number,
   bindHost: string,
   publicUrl?: string | null,
+  localUrl?: string | null,
 ): boolean => {
   if (publicUrl) {
     try {
       if (new URL(candidateUrl).origin === new URL(publicUrl).origin) return true;
     } catch {
-      /* malformed candidate or public URL — fall through to the loopback check */
+      /* malformed candidate or public URL — fall through to the local/loopback checks */
+    }
+  }
+  if (localUrl) {
+    try {
+      if (new URL(candidateUrl).origin === new URL(localUrl).origin) return true;
+    } catch {
+      /* malformed candidate or local URL — fall through to the loopback check */
     }
   }
   if (port === 0) return false;

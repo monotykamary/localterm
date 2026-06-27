@@ -710,7 +710,10 @@ describe("automation run tab surface", () => {
     };
   };
 
-  const makeServer = async (publicUrl?: string | null): Promise<void> => {
+  const makeServer = async (
+    publicUrl?: string | null,
+    localUrl?: string | null,
+  ): Promise<void> => {
     stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-surface-"));
     openedUrls = [];
     server = await createServer({
@@ -718,6 +721,7 @@ describe("automation run tab surface", () => {
       host: "127.0.0.1",
       stateDirectory,
       ...(publicUrl !== undefined ? { publicUrl } : {}),
+      ...(localUrl !== undefined ? { localUrl } : {}),
       tabController: {
         open: async (url) => {
           openedUrls.push(url);
@@ -762,6 +766,28 @@ describe("automation run tab surface", () => {
     const secondRunId = await triggerRun();
     expect(openedUrls).toEqual([
       `http://localterm.localhost:${server.port}/?run=${firstRunId}`,
+      `https://localterm.localhost/?run=${secondRunId}`,
+    ]);
+  });
+
+  it("opens the run tab at the localUrl instead of a tailnet publicUrl", async () => {
+    // Run tabs open in the daemon's own browser, where a flapping tailscale
+    // serve would fail the tab load and the automation — so they prefer the
+    // daemon-local surface even when the daemon is tailnet-fronted for mobile.
+    await makeServer("https://myhost.ts.net", "https://localterm.localhost");
+    const runId = await triggerRun();
+    expect(openedUrls).toEqual([`https://localterm.localhost/?run=${runId}`]);
+  });
+
+  it("honors setLocalUrl after the server is already running", async () => {
+    await makeServer("https://myhost.ts.net");
+    // First run opens at the tailnet publicUrl before the CLI hands over the
+    // local surface.
+    const firstRunId = await triggerRun();
+    server.setLocalUrl("https://localterm.localhost");
+    const secondRunId = await triggerRun();
+    expect(openedUrls).toEqual([
+      `https://myhost.ts.net/?run=${firstRunId}`,
       `https://localterm.localhost/?run=${secondRunId}`,
     ]);
   });

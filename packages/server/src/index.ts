@@ -105,16 +105,30 @@ export interface ServerOptions {
   staticRoot?: string | null;
   stateDirectory?: string;
   /**
-   * The announced surface origin automation-run tabs should open at — the URL
-   * the CLI resolved best-first (tailnet `https://<node>.ts.net`, portless
-   * `https://localterm.localhost`, or null for the bare loopback form). When
-   * set, `tryLaunch` opens run tabs at this origin instead of the hardcoded
-   * loopback `http://<friendly>:<port>`, and the CDP tab filter recognises it
-   * so ambient-token injection and `closeOnFinish` keep working behind the
-   * proxy. Updatable post-bind via `RunningServer.setPublicUrl` since the
+   * The announced REMOTE surface origin — the URL the CLI resolved best-first
+   * (tailnet `https://<node>.ts.net`, portless `https://localterm.localhost`,
+   * or null for the bare loopback form) for mobile/remote tabs and the
+   * `localterm start --open` browser. Drives the network-policy host allowlist
+   * so a tailnet-fronted daemon accepts the tailnet `Host`, and the CDP tab
+   * filter so ambient-token injection and `closeOnFinish` keep working behind
+   * the proxy. Updatable post-bind via `RunningServer.setPublicUrl` since the
    * bound port (and thus the loopback fallback) isn't known until `listen`.
    */
   publicUrl?: string | null;
+  /**
+   * The announced LOCAL surface origin automation-run tabs should open at — a
+   * daemon-local origin the CLI resolved (portless `https://localterm.localhost`,
+   * else the bare loopback `http://<friendly>:<port>`) that doesn't depend on
+   * the tailnet. Run tabs open in the daemon's own debugged browser, where a
+   * flapping `tailscale serve` (laptop wake, DERP relay, cert renewal) would
+   * fail the tab load — and the automation — so they prefer a local surface
+   * even when `publicUrl` is the tailnet. Also recognised by the CDP tab
+   * filter so `closeOnFinish` keeps working on the portless run-tab URL.
+   * Updatable post-bind via `RunningServer.setLocalUrl`. Falls back to
+   * `publicUrl` (then the loopback default) when unset, preserving the prior
+   * single-surface behavior for callers that only set `publicUrl`.
+   */
+  localUrl?: string | null;
   /**
    * Override how automation run tabs are opened and closed. When provided, the
    * caller owns tab control and the built-in CDP background-tab path is
@@ -167,11 +181,18 @@ export interface RunningServer {
   host: string;
   registry: SessionManager;
   /**
-   * Update the announced surface origin automation-run tabs open at. Called by
-   * the CLI once it has resolved the best surface from the bound port (tailnet
-   * / portless / loopback); null resets to the loopback default.
+   * Update the announced REMOTE surface origin (mobile/remote tabs + the
+   * `--open` browser + the network-policy host allowlist). Called by the CLI
+   * once it has resolved the best surface from the bound port (tailnet /
+   * portless / loopback); null resets to the loopback default.
    */
   setPublicUrl: (url: string | null) => void;
+  /**
+   * Update the announced LOCAL surface origin automation-run tabs open at.
+   * Called by the CLI post-bind with the daemon-local surface (portless /
+   * loopback); null resets to the `publicUrl` (then loopback) fallback.
+   */
+  setLocalUrl: (url: string | null) => void;
   stop: () => Promise<void>;
 }
 
@@ -351,7 +372,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           // the resolved port rather than the pre-bind placeholder. `publicOrigin`
           // is read live for the same reason — set post-bind via setPublicUrl.
           tabUrlFilter: (candidateUrl: string) =>
-            isLocaltermTabUrl(candidateUrl, actualPort, host, publicOrigin),
+            isLocaltermTabUrl(candidateUrl, actualPort, host, publicOrigin, localOrigin),
         });
   const tabController: AutomationTabController = options.tabController ?? {
     open: async (url: string) => {
@@ -378,14 +399,25 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // Maps a run id -> the tab handle that ran it, so we can close the tab when
   // the command finishes (only set when the opener returned a closeable handle).
   const runTabHandles = new Map<string, string>();
-  // Announced surface origin for automation-run tabs (tailnet / portless / null
-  // = loopback). A `let` rather than a const so the CLI can swap it in after
+  // Announced REMOTE surface origin for mobile/remote tabs + the `--open`
+  // browser + the network-policy host allowlist (tailnet / portless / null =
+  // loopback). A `let` rather than a const so the CLI can swap it in after
   // `listen` resolves the bound port and surface; `tryLaunch` and the CDP
   // `tabUrlFilter` read it live, so a post-bind `setPublicUrl` takes effect
   // for runs and token injection without re-wiring either closure.
   let publicOrigin: string | null = options.publicUrl ?? null;
   const setPublicUrl = (url: string | null): void => {
     publicOrigin = url;
+  };
+  // Announced LOCAL surface origin automation-run tabs open at — a daemon-local
+  // origin (portless / loopback) that doesn't ride the tailnet, so a flapping
+  // `tailscale serve` can't fail the run-tab load and the automation. Read live
+  // by `tryLaunch` and the CDP `tabUrlFilter` for the same reason as
+  // `publicOrigin`; falls back to `publicOrigin` (then the loopback default)
+  // when unset so a caller that only set `publicUrl` keeps the prior behavior.
+  let localOrigin: string | null = options.localUrl ?? null;
+  const setLocalUrl = (url: string | null): void => {
+    localOrigin = url;
   };
 
   // Project the newest run as the legacy `lastRun` for back-compat clients.
@@ -478,11 +510,16 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     // watching its folder promptly instead of waiting for the next mutation.
     syncFolderWatchers();
     syncSessionEventListeners();
-    // Open the run tab at the announced surface origin when the CLI resolved
-    // one (tailnet / portless), else the loopback form. The CLI sets this post-
-    // bind via setPublicUrl; a bare origin (no path) is the contract, so the
-    // `new URL` base rewrites any stray path and searchParams encodes the id.
-    const runUrl = new URL(publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`);
+    // Open the run tab at the announced LOCAL surface origin when the CLI
+    // resolved one (portless / loopback) — run tabs open in the daemon's own
+    // debugged browser, where a flapping `tailscale serve` (laptop wake, DERP
+    // relay, cert renewal) would fail the tab load and the automation, so they
+    // never ride the tailnet even when `publicOrigin` is the tailnet URL. Fall
+    // back to `publicOrigin` (then the loopback form) so a caller that only set
+    // `publicUrl` keeps the prior single-surface behavior. A bare origin (no
+    // path) is the contract, so the `new URL` base rewrites any stray path and
+    // searchParams encodes the id.
+    const runUrl = new URL(localOrigin ?? publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`);
     runUrl.searchParams.set(AUTOMATION_RUN_QUERY_PARAM, run.runId);
     void tabController
       .open(runUrl.href)
@@ -1398,7 +1435,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     });
   };
 
-  return { port: actualPort, host, registry, setPublicUrl, stop };
+  return { port: actualPort, host, registry, setPublicUrl, setLocalUrl, stop };
 };
 
 export type { Session } from "./session.js";

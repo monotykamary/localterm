@@ -102,4 +102,46 @@ describe("isLocaltermTabUrl", () => {
       ).toBe(true);
     });
   });
+
+  describe("announced localUrl surface (run-tab origin)", () => {
+    it("matches a portless run tab against a portless localUrl even with a tailnet publicUrl", () => {
+      // Run tabs open at the daemon-local surface (portless) even when the
+      // daemon is tailnet-fronted for mobile access (publicUrl = tailnet). The
+      // CDP filter must still recognise the portless run tab so ambient-token
+      // injection and closeOnFinish keep working.
+      expect(
+        isLocaltermTabUrl(
+          "https://localterm.localhost/?run=x",
+          3417,
+          "127.0.0.1",
+          "https://myhost.ts.net",
+          "https://localterm.localhost",
+        ),
+      ).toBe(true);
+    });
+
+    it("matches a tailnet publicUrl tab alongside a portless localUrl", () => {
+      expect(
+        isLocaltermTabUrl(
+          "https://myhost.ts.net/?run=x",
+          3417,
+          "127.0.0.1",
+          "https://myhost.ts.net",
+          "https://localterm.localhost",
+        ),
+      ).toBe(true);
+    });
+
+    it("falls back to the loopback check when localUrl is malformed", () => {
+      expect(
+        isLocaltermTabUrl(
+          "http://localterm.localhost:3417/?run=x",
+          3417,
+          "127.0.0.1",
+          null,
+          "ht!tp://:::",
+        ),
+      ).toBe(true);
+    });
+  });
 });
