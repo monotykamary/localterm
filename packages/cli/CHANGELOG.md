@@ -1,5 +1,54 @@
 # localterm
 
+## 2.18.0
+
+### Minor Changes
+
+- f41f937: Make localterm a fully installable PWA with a maskable icon and an offline service worker.
+
+  The manifest previously held a single data-URI SVG icon and no service worker, so "Add to Home Screen" produced a Chrome-badged shortcut rather than an installable app. The manifest now references file-based icons — an SVG plus 192/512 PNGs declared `purpose: "any maskable"` — generated from a single `icon.svg` source via `pnpm generate:icons` (sharp). The full-bleed `#f4f4f5` background with a centered emerald `>_` sits inside the maskable safe zone with ~2.4 units of margin, so circular/squircle Android launchers apply their own shape and drop the Chrome badge, and iOS gets a clean `apple-touch-icon`.
+
+  A build-time service worker (`scripts/generate-sw.mjs` from `sw-template.js`, run as the last `build` step) precaches the app shell, all font subsets, the icons, and the manifest under a content-hashed version, serves navigations network-first with the cached shell as the offline fallback, bypasses `/api` and `/ws`, and purges stale caches on activation. Registered from the terminal only in production builds.
+
+  The manifest gains `id`, `lang`, `dir`, `categories`, and `launch_handler` (reuse existing window on relaunch), and `index.html` gains `apple-touch-icon`, `mobile-web-app-capable`, `apple-mobile-web-app-title`, and `application-name`. The app root is padded with `env(safe-area-inset-*)` so the terminal and toolbar clear phone notches and the home-indicator bar in standalone mode.
+
+  Server: the static resolver now serves `.webmanifest` as `application/manifest+json` (it was `application/octet-stream`, which strict browsers reject) and sends `cache-control: no-cache` for `/sw.js` and `/manifest.webmanifest` so a new build is detected promptly.
+
+### Patch Changes
+
+- faff5ca: Fix the blank git ambient overlay on mobile and two mobile layout overflows in the diff viewer and automations modal.
+
+  The ambient git-diff/PR overlay sometimes stayed blank on mobile while pi made changes, only recovering after a session switch back and forth. The per-cwd `GitDirtyCoordinator` only pushed a `git-diff-summary` when a `git-dirty` signal fired _after_ a client subscribed — there was no initial push on attach. So a freshly-attached tab (page load, reconnect, or a reattach whose fan-out already completed) never learned the current summary until the next `git-dirty` signal; on a flaky DERP-relayed link the user saw a blank overlay until a session switch's resize/prompt-redraw fired a `git-dirty`. The coordinator now caches the last computed summary and replays it to a new subscriber on `add` (the first subscriber with no cached summary triggers a fresh compute). The replay reuses the cache instead of invalidating, so a reattach no longer thrashes the diff viewer's per-file patch cache.
+
+  The automations modal's collapsed sidebar row kept the sort buttons (last-run / created / name) next to the select when the screen narrowed, but they don't fit on a phone. The row now drops them when collapsed — the select stays (and grows to fill the row, truncating long names) — and the sort/search controls remain available in the expanded sidebar. The select popover keeps its own search.
+
+  The diff viewer's selected-file row didn't truncate the file path: the path container lacked `min-w-0`, so a flex item wouldn't shrink below its content and `truncate` never engaged — long paths overflowed and pushed the external-link button and the +/- stats off-screen, and when truncation did engage it cut the tail (the basename) and showed the head. The path container now shrinks (`min-w-0 flex-1`) and the path is tail-truncated using the same `dir="rtl"` + `<bdi>` split the file-list popover already uses: the directory renders muted and the basename in the foreground, and when it overflows the head (directory) is cut with an ellipsis so the tail (basename) always stays visible. The dropdown trigger mirrors the popover rows (muted directory + foreground basename), and the rename display keeps the new path's tail visible. Tail-truncation is done in CSS (the browser's own layout engine, pixel-accurate against the user's chosen mono font) rather than measured with pretext, whose hardcoded font string wouldn't match a custom font.
+
+- 3eb93e0: Fix the blank-screen-on-refresh mobile regression and route automation run tabs at the daemon-local surface.
+
+  A freshly-attached WS client stays "pending" for `SESSION_PENDING_PROMOTE_TIMEOUT_MS` until it sends `{ready, replay}`, then the server flushes its scrollback replay + buffered output. The timeout was 100ms — shorter than a mobile/tailscale round-trip (often DERP-relayed at 200–400ms). The auto-promote fired before the client's `{ready, replay: true}` arrived, and since the auto-promote skips the scrollback it never sent the `replay-end` the client had already opened its suppressed-replay window for — so every output frame buffered client-side in `replayChunks` and never rendered, leaving a blank screen with a blinking cursor only a session-picker switch could recover. The timeout now clears a flaky relayed tailnet with room to spare (2s), and `promote` always sends `replay-end` (even on `replay: false`) so a slow link can never deadlock the client in its replay window. The timeout is injectable for tests.
+
+  Automation run tabs opened at the announced `publicUrl`, which `resolveDaemonUrl` picks tailnet-first — so a tailnet-fronted daemon opened run tabs at `https://<node>.ts.net`. Run tabs open in the daemon's own debugged browser, where a flapping `tailscale serve` (laptop wake, DERP relay, cert renewal) fails the tab load, the PTY never spawns, and the automation fails. The CLI now resolves a separate daemon-local `localUrl` (portless `https://localterm.localhost`, else loopback) and hands it to the server via a new `localUrl` option / `RunningServer.setLocalUrl`; `tryLaunch` opens run tabs at the local surface, and `isLocaltermTabUrl` recognises it so ambient-token injection and `closeOnFinish` keep working on the portless run-tab URL. The remote `publicUrl` (tailnet) still drives the network-policy host allowlist and `--open`, so a tailnet-fronted daemon still serves mobile on the tailnet URL — run tabs just never ride it. `ensurePortlessRoute` now always runs (in parallel with the tailscale probe) so the portless alias is re-registered for the current bound port even when tailnet fronts the daemon.
+
+- 8423e48: Keep the installed PWA portrait so it honors a portrait rotation lock.
+
+  The Web App Manifest's `orientation` member is an app-level policy with no
+  value meaning "follow the system rotation lock." The default (`"any"`,
+  applied whether the field is omitted or set explicitly) makes an installed
+  PWA (WebAPK) on Android rotate with the sensor and ignore the lock — which
+  is why localterm kept rotating despite a portrait lock. Setting
+  `orientation: "portrait"` constrains the WebAPK activity to portrait,
+  matching a portrait lock. This hardcodes portrait (it won't follow a
+  future landscape lock or allow landscape auto-rotate); for a terminal,
+  portrait is the conventional orientation. WebAPKs bake the manifest in at
+  install time, so remove the home-screen icon and re-add it after rebuilding
+  for the change to take effect.
+
+- Updated dependencies [faff5ca]
+- Updated dependencies [3eb93e0]
+- Updated dependencies [f41f937]
+  - @monotykamary/localterm-server@2.18.0
+
 ## 2.17.3
 
 ### Patch Changes
