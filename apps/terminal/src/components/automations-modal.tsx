@@ -919,10 +919,10 @@ export const AutomationsModal = ({
               >
                 <Popover>
                   <PopoverTrigger
-                    className="flex items-center gap-1 rounded-sm border border-border/50 px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5"
+                    className="flex min-w-0 flex-1 items-center gap-1 rounded-sm border border-border/50 px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5"
                     aria-label="select automation"
                   >
-                    <span className="truncate">{selected?.name ?? "Select…"}</span>
+                    <span className="min-w-0 flex-1 truncate">{selected?.name ?? "Select…"}</span>
                     <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
                   </PopoverTrigger>
                   <PopoverContent align="start" side="bottom" className="w-72 p-0">
@@ -937,23 +937,6 @@ export const AutomationsModal = ({
                     />
                   </PopoverContent>
                 </Popover>
-                <div className="ml-auto flex shrink-0 items-center gap-0.5">
-                  {(["last-run", "created", "name"] as const).map((value) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => handleSortChange(value)}
-                      className={cn(
-                        "rounded-sm px-1.5 py-0.5 text-[10px] transition-colors",
-                        sortBy === value
-                          ? "bg-foreground/10 text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {value === "last-run" ? "Last run" : value === "created" ? "Created" : "Name"}
-                    </button>
-                  ))}
-                </div>
               </div>
               <div className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
                 {mode !== "view" ? (

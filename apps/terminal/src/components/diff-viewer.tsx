@@ -1515,6 +1515,9 @@ export const DiffViewer = ({
   const openFileAction = selectedFile
     ? resolveOpenFileAction(selectedFile, onOpenInEditor, onOpenImage)
     : null;
+  const selectedFileParts = selectedFile
+    ? splitFilePath(selectedFile.path)
+    : { directory: "", basename: "" };
 
   const totals = useMemo(() => {
     let additions = 0;
@@ -1940,34 +1943,46 @@ export const DiffViewer = ({
                   <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-4 py-1.5 font-mono text-xs text-muted-foreground">
                     <span
                       className={cn(
-                        "transition-opacity duration-200 ease-snappy",
+                        "min-w-0 truncate transition-opacity duration-200 ease-snappy",
                         sidebarCollapsed ? "opacity-0 absolute pointer-events-none" : "opacity-100",
                       )}
+                      dir="rtl"
                       aria-hidden={sidebarCollapsed}
                     >
-                      {selectedFile.oldPath ? (
-                        <span className="truncate">
-                          {selectedFile.oldPath}
-                          <span className="text-muted-foreground/50"> → </span>
+                      <bdi>
+                        {selectedFile.oldPath ? (
+                          <>
+                            {selectedFile.oldPath}
+                            <span className="text-muted-foreground/50"> → </span>
+                            <span className="text-foreground">{selectedFile.path}</span>
+                          </>
+                        ) : (
                           <span className="text-foreground">{selectedFile.path}</span>
-                        </span>
-                      ) : (
-                        <span className="truncate text-foreground">{selectedFile.path}</span>
-                      )}
+                        )}
+                      </bdi>
                     </span>
                     <span
                       className={cn(
-                        "transition-opacity duration-200 ease-snappy",
+                        "min-w-0 flex-1 transition-opacity duration-200 ease-snappy",
                         sidebarCollapsed ? "opacity-100" : "opacity-0 absolute pointer-events-none",
                       )}
                       aria-hidden={!sidebarCollapsed}
                     >
                       <Popover>
                         <PopoverTrigger
-                          className="flex items-center gap-1 rounded-sm border border-border/50 px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5"
+                          className="flex w-full min-w-0 items-center gap-1 rounded-sm border border-border/50 px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5"
                           aria-label="select file"
                         >
-                          <span className="truncate">{selectedFile.path}</span>
+                          <span className="min-w-0 flex-1 truncate" dir="rtl">
+                            <bdi>
+                              <span className="text-muted-foreground/60">
+                                {selectedFileParts.directory}
+                              </span>
+                              <span className="text-foreground">
+                                {selectedFileParts.basename}
+                              </span>
+                            </bdi>
+                          </span>
                           <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
                         </PopoverTrigger>
                         <PopoverContent align="start" side="bottom" className="w-72 p-0">

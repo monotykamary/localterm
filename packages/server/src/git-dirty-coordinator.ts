@@ -1,5 +1,5 @@
 import { getGitDiffSummary, invalidateGitDiffCache } from "./git-diff.js";
-import type { ServerToClientMessage } from "./types.js";
+import type { GitDiffSummary, ServerToClientMessage } from "./types.js";
 import type { ClientSocket } from "./utils/ws-socket.js";
 
 // Git metadata is per-repo, not per-tab. Two tabs in the same cwd share one
@@ -20,6 +20,7 @@ import type { ClientSocket } from "./utils/ws-socket.js";
 export class GitDirtyCoordinator {
   private inFlight = false;
   private pending = false;
+  private lastSummary: GitDiffSummary | null = null;
   private readonly subscribers = new Set<ClientSocket>();
 
   constructor(
@@ -29,6 +30,20 @@ export class GitDirtyCoordinator {
 
   add(ws: ClientSocket): void {
     this.subscribers.add(ws);
+    // Replay the last computed summary so a newly-subscribed tab shows the
+    // ambient overlay immediately on connect/session switch instead of
+    // staying blank until the next git-dirty signal. The tree didn't change
+    // (the client just joined), so reuse the cache rather than invalidating
+    // — invalidating on every reattach would thrash the diff viewer's cache.
+    // The first subscriber (no cached summary yet) kicks off a fresh compute;
+    // later subscribers piggyback on that in-flight run (they're in the
+    // subscriber set, so its broadcast reaches them) instead of arming a
+    // redundant trailing recompute.
+    if (this.lastSummary) {
+      this.send(ws, { type: "git-diff-summary", summary: this.lastSummary });
+      return;
+    }
+    if (!this.inFlight) this.signal();
   }
 
   remove(ws: ClientSocket): void {
@@ -55,6 +70,7 @@ export class GitDirtyCoordinator {
       // per-file fetch rebuilds against the new tree.
       invalidateGitDiffCache(this.cwd);
       const summary = await getGitDiffSummary(this.cwd);
+      this.lastSummary = summary;
       const payload: ServerToClientMessage = { type: "git-diff-summary", summary };
       for (const ws of this.subscribers) {
         this.send(ws, payload);
