@@ -9,31 +9,47 @@ import { isCoarsePointer } from "./is-coarse-pointer";
 //
 // `modal={false}` on the Select removes the inert blocking so outside taps
 // dispatch normally; this hook then closes the select on a touch that lands
-// outside it. `touchstart` (not `pointerdown`) is the signal because it fires
-// before xterm's `preventDefault` and is the earliest reliable touch event.
-// `stopPropagation()` in the capture phase (window is the outermost, so this
-// runs first) keeps the tap from reaching xterm's touch handler — which would
-// otherwise call `focusTerminalForInput()` and pop the keyboard — so a
-// dismiss-tap is a pure "close the dropdown" gesture. Taps inside the select
-// content/trigger are left untouched for Base UI to handle.
+// outside it. Both `touchstart` and `touchend` are handled:
+//   - `touchstart` (capture, before xterm's own touchstart): `preventDefault`
+//     cancels the synthetic mouse events the tap would otherwise fire (so the
+//     terminal's click handler can't refocus and pop the keyboard), and
+//     `stopPropagation` keeps xterm and localterm's own touch handlers from
+//     seeing the tap.
+//   - `touchend` (capture): `stopPropagation` keeps the terminal's
+//     `focusTerminalForInput()` touchend handler from firing — that's the path
+//     that opens the keyboard on a dismiss tap. Stopping `touchstart` alone
+//     doesn't stop `touchend` (they're separate events), so without this the
+//     dropdown would close but the keyboard would still pop.
+// A single-finger dismiss is assumed: a flag marks the gesture started outside
+// the select, and the `touchend` handler clears it.
 export const useCloseSelectOnTouchOutside = (
   open: boolean,
   onOpenChange: (open: boolean) => void,
 ): void => {
   useEffect(() => {
     if (!open || !isCoarsePointer()) return;
+    let dismissGesture = false;
+    const isOutsideSelect = (target: EventTarget | null): boolean => {
+      if (!(target instanceof Element)) return true;
+      return !target.closest('[data-slot="select-content"], [data-slot="select-trigger"]');
+    };
     const handleTouchStart = (event: TouchEvent) => {
-      const target = event.target as Element | null;
-      if (
-        target instanceof Element &&
-        target.closest('[data-slot="select-content"], [data-slot="select-trigger"]')
-      ) {
-        return;
-      }
+      if (!isOutsideSelect(event.target)) return;
+      dismissGesture = true;
+      event.preventDefault();
       event.stopPropagation();
       onOpenChange(false);
     };
-    window.addEventListener("touchstart", handleTouchStart, { capture: true });
-    return () => window.removeEventListener("touchstart", handleTouchStart, { capture: true });
+    const handleTouchEnd = (event: TouchEvent) => {
+      if (!dismissGesture) return;
+      dismissGesture = false;
+      event.stopPropagation();
+    };
+    window.addEventListener("touchstart", handleTouchStart, { capture: true, passive: false });
+    window.addEventListener("touchend", handleTouchEnd, { capture: true });
+    return () => {
+      window.removeEventListener("touchstart", handleTouchStart, { capture: true });
+      window.removeEventListener("touchend", handleTouchEnd, { capture: true });
+    };
   }, [open, onOpenChange]);
 };

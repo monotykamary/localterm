@@ -163,9 +163,20 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
       setMounted(true);
       setForm(null);
       setFormError(null);
+      // Double rAF: the first frame paints the `data-closed` (opacity 0,
+      // scale 95) state, the second flips to `data-open` so the transition has
+      // a visible start point. A single rAF races — React batches the mount
+      // commit and the rAF callback can land before the `data-closed` frame
+      // paints, snapping the panel in with no animation. The other modals win
+      // this race by timing luck; this one doesn't (the extra `refresh()` fetch
+      // + more state shifts the schedule), so the double rAF makes it
+      // deterministic. The `panelRef.focus()` rides the second frame so the
+      // terminal's textarea releases focus before any field is interacted with.
       const frame = requestAnimationFrame(() => {
-        setSettled(true);
-        panelRef.current?.focus();
+        requestAnimationFrame(() => {
+          setSettled(true);
+          panelRef.current?.focus();
+        });
       });
       return () => cancelAnimationFrame(frame);
     }
