@@ -36,12 +36,14 @@ const worktreeAgeMs = (worktreePath: string, now: number): number | null => {
 
 // Removes stale, clean, auto-created worktrees so the shared worktrees dir
 // doesn't accumulate orphans. Returns the paths actually removed. The current
-// and main worktrees are never eligible; a dirty or too-new worktree is skipped
-// silently. Never throws — a worktree that fails to remove is simply not in the
-// returned list, so a sweep never breaks the list view that triggered it.
+// and main worktrees are never eligible; a dirty, too-new, or shell-occupied
+// worktree is skipped silently. Never throws — a worktree that fails to remove
+// is simply not in the returned list, so a sweep never breaks the list view
+// that triggered it.
 export const sweepStaleWorktrees = async (
   cwd: string,
   now: number = Date.now(),
+  isWorktreeBusy: (worktreePath: string) => boolean = () => false,
 ): Promise<{ removed: string[] }> => {
   const cutoff = WORKTREE_SWEEP_MAX_AGE_DAYS * MS_PER_DAY_MS;
 
@@ -61,6 +63,11 @@ export const sweepStaleWorktrees = async (
 
     const age = worktreeAgeMs(worktree.path, now);
     if (age === null || age < cutoff) continue;
+
+    // A shell still sitting in a stale worktree blocks the sweep too — same
+    // reason as the delete route. Checked before the git cleanliness spawn
+    // since it's an in-memory lookup.
+    if (isWorktreeBusy(worktree.path)) continue;
 
     if (!(await isClean(worktree.path))) continue;
 

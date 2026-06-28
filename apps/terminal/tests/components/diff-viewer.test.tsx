@@ -190,10 +190,14 @@ describe("DiffViewer", () => {
       expect.any(AbortSignal),
     );
 
-    expect(await screen.findByText("beta")).toBeTruthy();
+    expect(await screen.findByText("beta", {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.getByText("BETA")).toBeTruthy();
     expect(screen.getByText("@@ -1,3 +1,3 @@")).toBeTruthy();
-  });
+    // First-paint of the auto-selected patch is CPU-bound; under turbo's
+    // parallel cross-package run the findByText poll starves past its 1000ms
+    // default. The generous waitFor and test timeout absorb that without
+    // masking a real hang (isolation renders in <1s).
+  }, 10_000);
 
   it("shows a binary notice when a non-image binary file is selected", async () => {
     mockHappyPath();

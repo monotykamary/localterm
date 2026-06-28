@@ -184,6 +184,23 @@ export class SessionManager {
     }));
   }
 
+  // Every live PTY whose current cwd is inside `targetPath` (or equals it). A
+  // live PTY — attached, dormant (parked in the no-clients grace window), or
+  // running an automation — holds the worktree as its cwd; removing the
+  // worktree out from under it would break the shell, so the delete route and
+  // the stale-worktree sweep both refuse a worktree with any. The current cwd
+  // (lastEmittedCwd, falling back to the spawn cwd) is the signal: a shell
+  // that's `cd`'d out of the worktree no longer blocks removal. Reads from
+  // list() so it shares the same cwd the session picker shows.
+  sessionsInPath(targetPath: string): SessionListItem[] {
+    const resolvedTarget = path.resolve(targetPath);
+    const prefix = `${resolvedTarget}${path.sep}`;
+    return this.list().filter((session) => {
+      const cwd = path.resolve(session.cwd);
+      return cwd === resolvedTarget || cwd.startsWith(prefix);
+    });
+  }
+
   // Test-only: force the idle/ready state so the grace reap is eligible.
   // Pauses the PTY (a real /bin/sh keeps emitting its prompt, which would
   // reschedule the grace forever), backdates last output past the activity
