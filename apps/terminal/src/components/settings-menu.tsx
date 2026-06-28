@@ -1,4 +1,4 @@
-import { ChevronDown, Key, Settings } from "lucide-react";
+import { ChevronDown, Settings } from "lucide-react";
 import { useRef, useState, type CSSProperties } from "react";
 import { NumberStepper } from "@/components/number-stepper";
 import { SettingsSelect, type SettingsSelectItem } from "@/components/settings-select";
@@ -70,7 +70,6 @@ interface SettingsMenuProps {
   onNotificationsPermissionRequest: () => void;
   sessionInfo?: TerminalSessionInfo | null;
   onPopoverOpenChange?: (open: boolean) => void;
-  onSecretsOpen?: () => void;
   onClose?: () => void;
 }
 
@@ -163,7 +162,6 @@ export const SettingsMenu = ({
   onNotificationsPermissionRequest,
   sessionInfo,
   onPopoverOpenChange,
-  onSecretsOpen,
   onClose,
 }: SettingsMenuProps) => {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -402,39 +400,6 @@ export const SettingsMenu = ({
               className="h-7 px-2 font-mono text-xs"
               onChange={(event) => onDefaultCwdChange(event.target.value)}
             />
-          </Field>
-
-          <Separator className="bg-border/40" />
-
-          <Field orientation="vertical" className="gap-1.5">
-            <FieldLabel className={SECTION_LABEL_CLASSES}>Secrets</FieldLabel>
-            <Tooltip>
-              <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
-                Manage secrets
-              </TooltipTrigger>
-              <TooltipContent
-                side="bottom"
-                sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-                className="max-w-xs"
-              >
-                Store API keys in your macOS Keychain and grant them only to specific programs (pi,
-                claude, …) via PATH shims. localterm injects a secret into a program's process at
-                exec time, so the rest of the shell never sees it. Values are never sent back to the
-                browser after you save.
-              </TooltipContent>
-            </Tooltip>
-            <Button
-              variant="outline"
-              size="xs"
-              className="w-full justify-start"
-              onClick={() => {
-                onSecretsOpen?.();
-                onClose?.();
-              }}
-            >
-              <Key className="size-3.5 text-muted-foreground" aria-hidden="true" />
-              Open secret manager
-            </Button>
           </Field>
 
           <Separator className="bg-border/40" />

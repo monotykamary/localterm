@@ -62,6 +62,7 @@ import { PortsButton } from "@/components/ports-menu";
 import { PortsModal } from "@/components/ports-modal";
 import { QrButton } from "@/components/qr-button";
 import { QrModal } from "@/components/qr-modal";
+import { SecretsButton } from "@/components/secrets-menu";
 import { SecretsModal } from "@/components/secrets-modal";
 import { SessionsButton } from "@/components/sessions-menu";
 import { SessionsModal } from "@/components/sessions-modal";
@@ -437,7 +438,8 @@ export const Terminal = () => {
     isSessionsOpen ||
     isWorktreesOpen ||
     isPortsOpen ||
-    isQrOpen;
+    isQrOpen ||
+    isSecretsOpen;
   isSettingsPopoverOpenRef.current = isSettingsPopoverOpen;
   isKeepAwakePopoverOpenRef.current = isKeepAwakePopoverOpen;
   isAutomationsOpenRef.current = isAutomationsOpen;
@@ -2675,7 +2677,6 @@ export const Terminal = () => {
                     onNotificationsPermissionRequest={handleNotificationsPermissionRequest}
                     sessionInfo={sessionInfo}
                     onPopoverOpenChange={handleSettingsPopoverOpenChange}
-                    onSecretsOpen={() => setIsSecretsOpen(true)}
                     onClose={refocusTerminalRef.current ?? undefined}
                   />
                   <Button
@@ -2707,6 +2708,7 @@ export const Terminal = () => {
                   <WorktreesButton onOpen={() => handleWorktreesOpenChange(true)} isMac={isMac} />
                   <SessionsButton onOpen={() => handleSessionsOpenChange(true)} isMac={isMac} />
                   <PortsButton onOpen={() => handlePortsOpenChange(true)} />
+                  <SecretsButton onOpen={() => setIsSecretsOpen(true)} />
                   {caffeinateSupported ? (
                     <KeepAwakeMenu
                       mode={caffeinateMode}

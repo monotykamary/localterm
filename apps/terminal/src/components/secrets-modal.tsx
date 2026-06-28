@@ -18,15 +18,25 @@ interface SecretsModalProps {
   onClose: () => void;
 }
 
+// `originalName` distinguishes add (null) from edit (the existing name). The
+// name field is always editable: renaming an existing secret deletes the old
+// name's value (the backend has no value-move API — values are opaque to the
+// daemon) and creates the new one, so a rename requires re-entering the value.
 interface EditForm {
-  // null while adding a new secret; the existing name while editing (locked).
-  name: string | null;
+  originalName: string | null;
+  name: string;
   envVar: string;
   programs: string;
   value: string;
 }
 
-const EMPTY_FORM: EditForm = { name: null, envVar: "", programs: "", value: "" };
+const EMPTY_FORM: EditForm = {
+  originalName: null,
+  name: "",
+  envVar: "",
+  programs: "",
+  value: "",
+};
 
 const parsePrograms = (raw: string): string[] =>
   Array.from(
@@ -119,7 +129,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletingName, setDeletingName] = useState<string | null>(null);
-  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const listId = useId();
 
   const refresh = useCallback(async () => {
@@ -133,6 +143,11 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
     setSecrets(fetched.secrets);
   }, []);
 
+  // Mount/unmount + open/close animation mirrors the sessions/ports/worktrees
+  // modals: CSS transitions on data-open/data-closed with a settle window. The
+  // panel is focused on open so the terminal's textarea releases focus before
+  // any field is interacted with — without this xterm retains focus and
+  // steals keystrokes from the modal's inputs.
   useEffect(() => {
     if (open) {
       setMounted(true);
@@ -140,6 +155,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
       setFormError(null);
       const frame = requestAnimationFrame(() => {
         setSettled(true);
+        panelRef.current?.focus();
       });
       return () => cancelAnimationFrame(frame);
     }
@@ -170,12 +186,6 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, form, onClose]);
 
-  useEffect(() => {
-    if (form && form.name === null) {
-      nameInputRef.current?.focus();
-    }
-  }, [form]);
-
   const startAdd = () => {
     setFormError(null);
     setForm({ ...EMPTY_FORM });
@@ -184,6 +194,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   const startEdit = (secret: SecretEntryResponse) => {
     setFormError(null);
     setForm({
+      originalName: secret.name,
       name: secret.name,
       envVar: secret.envVar,
       programs: secret.programs.join(", "),
@@ -193,7 +204,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
 
   const handleSave = async () => {
     if (!form) return;
-    const name = (form.name ?? "").trim();
+    const name = form.name.trim();
     const envVar = form.envVar.trim();
     if (!name) {
       setFormError("Name is required.");
@@ -203,9 +214,20 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
       setFormError("Environment variable is required.");
       return;
     }
+    const isRename = form.originalName !== null && form.originalName !== name;
+    // Renaming changes the backend key; the daemon has no value-move API (it
+    // never reads secret values), so the old value is unreachable under the new
+    // name. Require a fresh value on rename, then delete the old name.
+    if (isRename && !form.value) {
+      setFormError("Enter a value for the new name — the key can't be moved.");
+      return;
+    }
     const programs = parsePrograms(form.programs);
     setSaving(true);
     setFormError(null);
+    if (isRename) {
+      await deleteSecret(form.originalName!);
+    }
     const result = await putSecret(name, {
       envVar,
       programs,
@@ -229,9 +251,10 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
 
   if (!mounted) return null;
   const isVisible = open && settled;
+  const isEditing = form !== null && form.originalName !== null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[14vh]">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]">
       <div
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
@@ -239,13 +262,15 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
         onClick={onClose}
       />
       <div
+        ref={panelRef}
         role="dialog"
         aria-label="manage secrets"
         aria-modal
+        tabIndex={-1}
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
         className={cn(
-          "relative z-10 flex w-[480px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl origin-top",
+          "relative z-10 flex w-[480px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl outline-none origin-top",
           MODAL_PANEL_CLASSES,
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
@@ -305,9 +330,8 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                         Name
                       </label>
                       <Input
-                        ref={nameInputRef}
-                        value={form.name ?? ""}
-                        disabled={form.name !== null}
+                        value={form.name}
+                        autoFocus
                         placeholder="anthropic-api-key"
                         aria-label="secret name"
                         onChange={(event) => setForm({ ...form, name: event.target.value })}
@@ -343,17 +367,22 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-                        {form.name !== null ? "New value (optional)" : "Value"}
+                        {isEditing ? "New value (optional)" : "Value"}
                       </label>
                       <Input
                         type="password"
                         value={form.value}
-                        placeholder={form.name !== null ? "Leave blank to keep current" : ""}
+                        placeholder={isEditing ? "Leave blank to keep current" : ""}
                         aria-label="secret value"
                         autoComplete="new-password"
                         onChange={(event) => setForm({ ...form, value: event.target.value })}
                         className="h-7 px-2 font-mono text-xs"
                       />
+                      {isEditing ? (
+                        <span className="text-[10px] text-muted-foreground/50">
+                          Renaming the name requires a new value (the key can't be moved).
+                        </span>
+                      ) : null}
                     </div>
                     {formError ? (
                       <div className="text-[11px] text-red-500 dark:text-red-400">{formError}</div>
