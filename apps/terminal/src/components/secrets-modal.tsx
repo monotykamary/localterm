@@ -8,7 +8,11 @@ import {
   COMMAND_PALETTE_PANEL_CLASSES,
   MODAL_PANEL_CLASSES,
 } from "@/lib/animation-classes";
-import { SECRETS_MODAL_CLOSE_TRANSITION_MS, SECRETS_MODAL_MAX_HEIGHT_PX } from "@/lib/constants";
+import {
+  SECRETS_BODY_MIN_HEIGHT_PX,
+  SECRETS_MODAL_CLOSE_TRANSITION_MS,
+  SECRETS_MODAL_MAX_HEIGHT_PX,
+} from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { SecretEntryResponse } from "@monotykamary/localterm-server/protocol";
 import { deleteSecret, fetchSecrets, putSecret } from "@/utils/fetch-secrets";
@@ -61,13 +65,15 @@ const deriveName = (envVar: string): string =>
 const SecretRow = ({
   secret,
   onEdit,
-  onDelete,
-  deleting,
+  onTrashClick,
+  isArmed,
+  isDeleting,
 }: {
   secret: SecretEntryResponse;
   onEdit: () => void;
-  onDelete: () => void;
-  deleting: boolean;
+  onTrashClick: () => void;
+  isArmed: boolean;
+  isDeleting: boolean;
 }) => (
   <div className="flex items-start gap-2 rounded-sm px-2.5 py-2 text-sm outline-none">
     <Key className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" aria-hidden="true" />
@@ -112,19 +118,24 @@ const SecretRow = ({
       >
         <Pencil className="size-3.5" aria-hidden="true" />
       </Button>
-      {deleting ? (
-        <Spinner className="size-3.5 shrink-0" aria-label={`deleting ${secret.name}`} />
-      ) : (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`delete ${secret.name}`}
-          onClick={onDelete}
-          className="text-muted-foreground hover:text-foreground"
-        >
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={isArmed ? `confirm delete ${secret.name}` : `delete ${secret.name}`}
+        disabled={isDeleting}
+        onClick={onTrashClick}
+        className={cn(
+          isArmed
+            ? "text-red-400 hover:text-red-400"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        {isDeleting ? (
+          <Spinner className="size-3.5 shrink-0" aria-label={`deleting ${secret.name}`} />
+        ) : (
           <Trash2 className="size-3.5" aria-hidden="true" />
-        </Button>
-      )}
+        )}
+      </Button>
     </div>
   </div>
 );
@@ -139,7 +150,10 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletingName, setDeletingName] = useState<string | null>(null);
+  const [armedDeleteName, setArmedDeleteName] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const bodyInnerRef = useRef<HTMLDivElement | null>(null);
+  const [bodyHeight, setBodyHeight] = useState(SECRETS_BODY_MIN_HEIGHT_PX);
   const listId = useId();
 
   const refresh = useCallback(async () => {
@@ -163,24 +177,15 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
       setMounted(true);
       setForm(null);
       setFormError(null);
-      // Double rAF: the first frame paints the `data-closed` (opacity 0,
-      // scale 95) state, the second flips to `data-open` so the transition has
-      // a visible start point. A single rAF races — React batches the mount
-      // commit and the rAF callback can land before the `data-closed` frame
-      // paints, snapping the panel in with no animation. The other modals win
-      // this race by timing luck; this one doesn't (the extra `refresh()` fetch
-      // + more state shifts the schedule), so the double rAF makes it
-      // deterministic. The `panelRef.focus()` rides the second frame so the
-      // terminal's textarea releases focus before any field is interacted with.
+      setArmedDeleteName(null);
       const frame = requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          setSettled(true);
-          panelRef.current?.focus();
-        });
+        setSettled(true);
+        panelRef.current?.focus();
       });
       return () => cancelAnimationFrame(frame);
     }
     setSettled(false);
+    setArmedDeleteName(null);
     if (mounted) {
       const timer = window.setTimeout(() => setMounted(false), SECRETS_MODAL_CLOSE_TRANSITION_MS);
       return () => window.clearTimeout(timer);
@@ -191,6 +196,25 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
     if (!open) return;
     void refresh();
   }, [open, refresh]);
+
+  // Measure the loaded body's natural height and transition to it so the panel
+  // expands smoothly from the loading reserve to the list (and re-expands when
+  // the form opens) instead of snapping in — mirrors the ports/sessions/
+  // worktrees height-reserved body. Measured (not computed from a row constant)
+  // because secret rows are variable-height (program tags wrap) and the form is
+  // inline. `useEffect` (after paint) so the reserve height paints first and the
+  // height transition has a start point; `scrollHeight` is layout-based so the
+  // concurrent fade-in doesn't skew the measure.
+  useEffect(() => {
+    if (hasError) {
+      setBodyHeight(SECRETS_BODY_MIN_HEIGHT_PX);
+      return;
+    }
+    if (secrets === null) return;
+    const el = bodyInnerRef.current;
+    if (!el) return;
+    setBodyHeight(el.scrollHeight);
+  }, [secrets, hasError, supported, form, formError]);
 
   // Escape closes (mirrors the other palette overlays); a visible form cancels
   // back to the list first so an accidental esc doesn't drop unsaved edits
@@ -263,7 +287,18 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
     void refresh();
   };
 
-  const handleDelete = async (name: string) => {
+  // Two-tap delete mirroring the worktrees modal: the first tap arms (icon
+  // turns red, aria-label becomes "confirm delete"), the second tap confirms.
+  // Tapping a different row's trash re-arms that one. Resets on close.
+  const handleTrashClick = (name: string) => {
+    if (armedDeleteName !== name) {
+      setArmedDeleteName(name);
+      return;
+    }
+    void confirmDelete(name);
+  };
+  const confirmDelete = async (name: string) => {
+    setArmedDeleteName(null);
     setDeletingName(name);
     const ok = await deleteSecret(name);
     setDeletingName(null);
@@ -302,163 +337,177 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
             <Key className="size-4 text-muted-foreground" aria-hidden="true" />
             Secrets
           </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="close"
-            className="hover:text-foreground"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
+          <div className="flex items-center gap-2">
+            {secrets === null && !hasError ? (
+              <Spinner className="size-3.5" aria-label="loading secrets" />
+            ) : secrets ? (
+              <span className="font-mono text-[10px] tabular-nums text-muted-foreground/60">
+                {secrets.length}
+              </span>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="close"
+              className="hover:text-foreground"
+              onClick={onClose}
+            >
+              <X />
+            </Button>
+          </div>
         </div>
 
         <div
           id={listId}
           className="flex-1 overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          {hasError ? (
-            <div className="flex flex-col items-center justify-center gap-3 px-2.5 py-6 text-sm text-muted-foreground/70">
-              Couldn't load secrets from the localterm daemon.
-              <Button variant="outline" size="xs" onClick={() => void refresh()}>
-                Retry
-              </Button>
-            </div>
-          ) : secrets === null ? (
-            <div className="flex items-center justify-center py-6">
-              <Spinner className="size-4" aria-label="loading secrets" />
-            </div>
-          ) : (
-            <>
-              <div className="px-2.5 pb-2 pt-1 text-[11px] leading-relaxed text-muted-foreground/60">
-                Stored in your macOS Keychain — never on disk. localterm injects a secret only into
-                the programs listed on its row, via a PATH shim, so{" "}
-                <code className="font-mono">ls</code> in the same tab never sees your keys.
+          <div
+            ref={bodyInnerRef}
+            className="relative overflow-hidden transition-[height] duration-150 ease-snappy"
+            style={{ height: bodyHeight }}
+          >
+            {hasError ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-2.5 text-sm text-muted-foreground/70">
+                Couldn't load secrets from the localterm daemon.
+                <Button variant="outline" size="xs" onClick={() => void refresh()}>
+                  Retry
+                </Button>
               </div>
-
-              {!supported ? (
-                <div className="mx-2.5 mb-2 rounded-sm border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
-                  Secret storage isn't supported on this server's platform (it uses macOS Keychain).
-                  Run the localterm daemon on a Mac to manage secrets here.
+            ) : secrets === null ? null : (
+              <div className="animate-in fade-in-0 duration-150 ease-snappy">
+                <div className="px-2.5 pb-2 pt-1 text-[11px] leading-relaxed text-muted-foreground/60">
+                  Stored in your macOS Keychain — never on disk. localterm injects a secret only
+                  into the programs listed on its row, via a PATH shim, so{" "}
+                  <code className="font-mono">ls</code> in the same tab never sees your keys.
                 </div>
-              ) : null}
 
-              {form ? (
-                <div className="m-1.5 rounded-sm border border-border/40 bg-muted/20 p-2.5">
-                  <div className="flex flex-col gap-2">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-                        Name
-                      </label>
-                      <Input
-                        value={form.name}
-                        name="localterm-secret-name"
-                        autoComplete="off"
-                        placeholder="auto from env var"
-                        aria-label="secret name"
-                        onChange={(event) => setForm({ ...form, name: event.target.value })}
-                        className="h-7 px-2 font-mono text-xs"
-                      />
-                      <span className="text-[10px] text-muted-foreground/50">
-                        Optional. Derived from the env var (e.g. ANTHROPIC_API_KEY →
-                        anthropic-api-key) if left blank.
-                      </span>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-                        Environment variable
-                      </label>
-                      <Input
-                        value={form.envVar}
-                        autoFocus
-                        name="localterm-secret-envvar"
-                        autoComplete="off"
-                        placeholder="ANTHROPIC_API_KEY"
-                        aria-label="environment variable name"
-                        onChange={(event) => setForm({ ...form, envVar: event.target.value })}
-                        className="h-7 px-2 font-mono text-xs"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-                        Programs
-                      </label>
-                      <Input
-                        value={form.programs}
-                        name="localterm-secret-programs"
-                        autoComplete="off"
-                        placeholder="pi, claude"
-                        aria-label="programs that receive this secret"
-                        onChange={(event) => setForm({ ...form, programs: event.target.value })}
-                        className="h-7 px-2 font-mono text-xs"
-                      />
-                      <span className="text-[10px] text-muted-foreground/50">
-                        Comma-separated binary names. A PATH shim wraps each one.
-                      </span>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-                        {isEditing ? "New value (optional)" : "Value"}
-                      </label>
-                      <Input
-                        type="password"
-                        value={form.value}
-                        name="localterm-secret-value"
-                        placeholder={isEditing ? "Leave blank to keep current" : ""}
-                        aria-label="secret value"
-                        autoComplete="new-password"
-                        onChange={(event) => setForm({ ...form, value: event.target.value })}
-                        className="h-7 px-2 font-mono text-xs"
-                      />
-                      {isEditing ? (
+                {!supported ? (
+                  <div className="mx-2.5 mb-2 rounded-sm border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
+                    Secret storage isn't supported on this server's platform (it uses macOS
+                    Keychain). Run the localterm daemon on a Mac to manage secrets here.
+                  </div>
+                ) : null}
+
+                {form ? (
+                  <div className="m-1.5 rounded-sm border border-border/40 bg-muted/20 p-2.5">
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+                          Name
+                        </label>
+                        <Input
+                          value={form.name}
+                          name="localterm-secret-name"
+                          autoComplete="off"
+                          placeholder="auto from env var"
+                          aria-label="secret name"
+                          onChange={(event) => setForm({ ...form, name: event.target.value })}
+                          className="h-7 px-2 font-mono text-xs"
+                        />
                         <span className="text-[10px] text-muted-foreground/50">
-                          Renaming the name requires a new value (the key can't be moved).
+                          Optional. Derived from the env var (e.g. ANTHROPIC_API_KEY →
+                          anthropic-api-key) if left blank.
                         </span>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+                          Environment variable
+                        </label>
+                        <Input
+                          value={form.envVar}
+                          autoFocus
+                          name="localterm-secret-envvar"
+                          autoComplete="off"
+                          placeholder="ANTHROPIC_API_KEY"
+                          aria-label="environment variable name"
+                          onChange={(event) => setForm({ ...form, envVar: event.target.value })}
+                          className="h-7 px-2 font-mono text-xs"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+                          Programs
+                        </label>
+                        <Input
+                          value={form.programs}
+                          name="localterm-secret-programs"
+                          autoComplete="off"
+                          placeholder="pi, claude"
+                          aria-label="programs that receive this secret"
+                          onChange={(event) => setForm({ ...form, programs: event.target.value })}
+                          className="h-7 px-2 font-mono text-xs"
+                        />
+                        <span className="text-[10px] text-muted-foreground/50">
+                          Comma-separated binary names. A PATH shim wraps each one.
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+                          {isEditing ? "New value (optional)" : "Value"}
+                        </label>
+                        <Input
+                          type="password"
+                          value={form.value}
+                          name="localterm-secret-value"
+                          placeholder={isEditing ? "Leave blank to keep current" : ""}
+                          aria-label="secret value"
+                          autoComplete="new-password"
+                          onChange={(event) => setForm({ ...form, value: event.target.value })}
+                          className="h-7 px-2 font-mono text-xs"
+                        />
+                        {isEditing ? (
+                          <span className="text-[10px] text-muted-foreground/50">
+                            Renaming the name requires a new value (the key can't be moved).
+                          </span>
+                        ) : null}
+                      </div>
+                      {formError ? (
+                        <div className="text-[11px] text-red-500 dark:text-red-400">
+                          {formError}
+                        </div>
                       ) : null}
-                    </div>
-                    {formError ? (
-                      <div className="text-[11px] text-red-500 dark:text-red-400">{formError}</div>
-                    ) : null}
-                    <div className="flex items-center justify-end gap-1.5 pt-1">
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => setForm(null)}
-                        disabled={saving}
-                      >
-                        Cancel
-                      </Button>
-                      <Button size="xs" onClick={() => void handleSave()} disabled={saving}>
-                        {saving ? <Spinner className="size-3.5" /> : "Save"}
-                      </Button>
+                      <div className="flex items-center justify-end gap-1.5 pt-1">
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => setForm(null)}
+                          disabled={saving}
+                        >
+                          Cancel
+                        </Button>
+                        <Button size="xs" onClick={() => void handleSave()} disabled={saving}>
+                          {saving ? <Spinner className="size-3.5" /> : "Save"}
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
 
-              {secrets.length === 0 && !form ? (
-                <div className="flex flex-col items-center justify-center gap-2 px-2.5 py-6 text-center text-sm text-muted-foreground/70">
-                  No secrets yet.
-                  {supported ? (
-                    <Button variant="outline" size="xs" onClick={startAdd}>
-                      <Plus className="size-3.5" aria-hidden="true" />
-                      Add a secret
-                    </Button>
-                  ) : null}
-                </div>
-              ) : (
-                secrets.map((secret) => (
-                  <SecretRow
-                    key={secret.name}
-                    secret={secret}
-                    onEdit={() => startEdit(secret)}
-                    onDelete={() => void handleDelete(secret.name)}
-                    deleting={deletingName === secret.name}
-                  />
-                ))
-              )}
-            </>
-          )}
+                {secrets.length === 0 && !form ? (
+                  <div className="flex flex-col items-center justify-center gap-2 px-2.5 py-6 text-center text-sm text-muted-foreground/70">
+                    No secrets yet.
+                    {supported ? (
+                      <Button variant="outline" size="xs" onClick={startAdd}>
+                        <Plus className="size-3.5" aria-hidden="true" />
+                        Add a secret
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : (
+                  secrets.map((secret) => (
+                    <SecretRow
+                      key={secret.name}
+                      secret={secret}
+                      onEdit={() => startEdit(secret)}
+                      onTrashClick={() => handleTrashClick(secret.name)}
+                      isArmed={armedDeleteName === secret.name}
+                      isDeleting={deletingName === secret.name}
+                    />
+                  ))
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center border-t border-border/40 px-4 py-1.5 text-[10px] text-muted-foreground/60">

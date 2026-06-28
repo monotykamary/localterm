@@ -129,6 +129,11 @@ export const QR_CODE_SIZE_PX = 200;
 // palette-style overlays; max height keeps the list scrollable on a phone.
 export const SECRETS_MODAL_CLOSE_TRANSITION_MS = 150;
 export const SECRETS_MODAL_MAX_HEIGHT_PX = 520;
+// Min height reserved for the secrets modal body while the list loads and for
+// the error block, so the panel opens at a stable size and the height
+// transition has a floor to grow from — mirrors the ports/sessions/worktrees
+// modals' message-block reservation.
+export const SECRETS_BODY_MIN_HEIGHT_PX = 112;
 // Quiet-zone margin (QR modules) around the share QR so cameras lock on
 // without edge bleed.
 export const QR_CODE_MARGIN_MODULES = 2;
