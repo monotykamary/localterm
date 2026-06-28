@@ -1,5 +1,21 @@
 # localterm-server
 
+## 2.25.1
+
+### Patch Changes
+
+- 6d8102e: Auto-close the desktop's share-QR modal once a mobile ingests it.
+
+  When a mobile device scans the desktop's share QR (or another tab joins via the session picker), the daemon now broadcasts a `peer-attached` control frame to the PTY's existing subscribers at attach time — before the joiner is added, so it isn't told about itself, and skipped on a fresh spawn's first attach (no peers to notify). The frame carries no payload: the recipients are, by construction, already attached to the session a peer joined.
+
+  The terminal's QR modal registers a handler while open that closes itself on `peer-attached`, but only in share mode — ingest is this tab scanning someone else's QR, so a peer joining our own session is unrelated to that and the scan stays uninterrupted. Before this the share QR stayed on screen after the handoff was already complete, so the desktop kept showing a live QR for a session it had just handed off.
+
+- 9f6135e: Hide the worktree trash action while a shell is still open in the worktree, instead of offering a delete the server would refuse.
+
+  The earlier active-PTY guard only armed the `DELETE /api/git/worktrees` route — it returns `409 active_pty` when any session's current cwd is inside the target worktree (attached, dormant in the no-clients grace window, or running an automation), and the stale-worktree sweep skips a shell-occupied worktree for the same reason. But the worktree **list** response carried no signal about which worktrees have live shells, so the modal always rendered the trash icon for any non-main / non-current worktree. A user could arm + confirm a delete that the server then refused with a 409, and — exactly as reported — the icon "appeared" for worktrees that did have a PTY sitting in them.
+
+  The fix makes the list expose the same signal the guard already trusts: each worktree now carries `activeSessionCount`, computed in the `GET /git/worktrees` route via `registry.sessionsInPath(path).length` — the exact call the delete route and the sweep use — so the UI's "can I delete this?" and the route's "will I allow it?" can never disagree. The modal hides the trash button when `activeSessionCount > 0` (the "open in new shell" / "open in…" buttons stay, so you can still open more shells there) and shows a count-aware blue **"in use"** badge ("in use" / "2 in use") with a "close them first to remove" tooltip, gated to `!isMain && !isCurrent` so its promise is only shown where it's true. The modal now polls the worktree list while open (`WORKTREES_POLL_INTERVAL_MS = 2000`, mirroring the sessions modal) so the badge and trash reflect a shell opened from the modal's own "open in new shell" button, a parked (closed-tab) PTY, or a kill from the session picker; the poll is silent so a transient daemon blip can't swap a good list for the error block. `listGitWorktrees` takes the counter as an optional callback (default `() => 0`) so the pure function stays unit-testable without a registry.
+
 ## 2.25.0
 
 ### Minor Changes

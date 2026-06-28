@@ -1,5 +1,13 @@
 # localterm
 
+## 2.25.1
+
+### Patch Changes
+
+- Updated dependencies [6d8102e]
+- Updated dependencies [9f6135e]
+  - @monotykamary/localterm-server@2.25.1
+
 ## 2.25.0
 
 ### Minor Changes
