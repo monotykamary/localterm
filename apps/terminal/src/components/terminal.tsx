@@ -20,6 +20,7 @@ import {
   FileDiff,
   FolderGit2,
   MonitorCog,
+  Network,
   Plus,
   Search,
   SquareTerminal,
@@ -57,6 +58,8 @@ import { AutomationsModal } from "@/components/automations-modal";
 import { CommandPalette, type CommandItem } from "@/components/command-palette";
 import { DiffViewer } from "@/components/diff-viewer";
 import { KeepAwakeMenu, type CaffeinateMode } from "@/components/keep-awake-menu";
+import { PortsButton } from "@/components/ports-menu";
+import { PortsModal } from "@/components/ports-modal";
 import { QrButton } from "@/components/qr-button";
 import { QrModal } from "@/components/qr-modal";
 import { SessionsButton } from "@/components/sessions-menu";
@@ -349,6 +352,7 @@ export const Terminal = () => {
   const toggleAutomationsRef = useRef<(() => void) | null>(null);
   const [isWorktreesOpen, setIsWorktreesOpen] = useState(false);
   const [worktreeCreateError, setWorktreeCreateError] = useState<string | null>(null);
+  const [isPortsOpen, setIsPortsOpen] = useState(false);
   const openWorktreesRef = useRef<(() => void) | null>(null);
   const toggleWorktreesRef = useRef<(() => void) | null>(null);
   const toggleSessionsRef = useRef<(() => void) | null>(null);
@@ -397,6 +401,7 @@ export const Terminal = () => {
     isKeepAwakePopoverOpen ||
     isSessionsOpen ||
     isWorktreesOpen ||
+    isPortsOpen ||
     isQrOpen;
   isSettingsPopoverOpenRef.current = isSettingsPopoverOpen;
   isAutomationsOpenRef.current = isAutomationsOpen;
@@ -1886,6 +1891,22 @@ export const Terminal = () => {
     refocusTerminalRef.current?.();
   }, []);
 
+  const handlePortsOpenChange = useCallback((open: boolean) => {
+    setIsPortsOpen(open);
+    if (open) {
+      setIsCommandPaletteOpen(false);
+      return;
+    }
+    if (toolbarHoverTimeoutRef.current !== null) {
+      window.clearTimeout(toolbarHoverTimeoutRef.current);
+    }
+    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
+      toolbarHoverTimeoutRef.current = null;
+      setIsToolbarHovered(false);
+    }, TOOLBAR_HIDE_DELAY_MS);
+    refocusTerminalRef.current?.();
+  }, []);
+
   const handleQrOpenChange = useCallback((open: boolean) => {
     setIsQrOpen(open);
     if (open) {
@@ -2279,6 +2300,13 @@ export const Terminal = () => {
         action: () => handleSessionsOpenChange(true),
       },
       {
+        id: "ports",
+        label: "Dev ports",
+        category: "Actions",
+        icon: <Network className="size-3.5" />,
+        action: () => handlePortsOpenChange(true),
+      },
+      {
         id: "worktrees-create",
         label: "Create git worktree",
         category: "Actions",
@@ -2386,6 +2414,7 @@ export const Terminal = () => {
     handleAutomationsOpenChange,
     handleWorktreesOpenChange,
     handleSessionsOpenChange,
+    handlePortsOpenChange,
     handleCursorStyleChange,
     activeCursorBlink,
     handleCursorBlinkChange,
@@ -2607,6 +2636,7 @@ export const Terminal = () => {
                   />
                   <WorktreesButton onOpen={() => handleWorktreesOpenChange(true)} isMac={isMac} />
                   <SessionsButton onOpen={() => handleSessionsOpenChange(true)} isMac={isMac} />
+                  <PortsButton onOpen={() => handlePortsOpenChange(true)} />
                   {caffeinateSupported ? (
                     <KeepAwakeMenu
                       mode={caffeinateMode}
@@ -2805,6 +2835,12 @@ export const Terminal = () => {
         isTouchDevice={isTouchDevice}
         onOpenNewShell={() => window.open(newTabUrl, "_blank", "noopener,noreferrer")}
         onClose={() => handleSessionsOpenChange(false)}
+      />
+
+      <PortsModal
+        open={isPortsOpen}
+        isTouchDevice={isTouchDevice}
+        onClose={() => handlePortsOpenChange(false)}
       />
 
       <QrModal

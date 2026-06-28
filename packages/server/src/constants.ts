@@ -450,3 +450,17 @@ export const MAX_TAB_TOKEN_LENGTH = 128;
 // mask. Generous vs. CLOSE_SETTLE_MS (100ms) + the queued close latency so
 // reliable CDP closes don't flash the mask.
 export const AMBIENT_TAB_CLOSE_DEADLINE_MS = 1_000;
+
+// Open dev ports: TCP listening sockets owned by processes descended from a
+// localterm session shell (a `vite`/`http-server`/`python -m http.server`
+// running inside a tab). Discovered by walking the process tree under each
+// session pid (ps) and intersecting it with `lsof`'s TCP-LISTEN table. The
+// ports modal polls the daemon for this list while open so it reflects a dev
+// server starting/stopping in near-realtime.
+export const TCP_PORT_MAX = 65_535;
+// `lsof -nP -iTCP -sTCP:LISTEN` enumerates every listening TCP socket on the
+// machine. It can be slow on a busy host and occasionally stalls, so the
+// snapshot is capped with a timeout + max buffer and degrades to an empty
+// list on any failure (the modal just shows nothing).
+export const LSOF_LISTEN_TIMEOUT_MS = 5_000;
+export const LSOF_LISTEN_MAX_BUFFER_BYTES = 8 * 1024 * 1024;

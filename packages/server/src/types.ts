@@ -35,6 +35,8 @@ import type {
   gitWorktreeResultSchema,
   gitWorktreeSchema,
   gitWorktreeBaseRefSchema,
+  listeningPortSchema,
+  listeningPortsResponseSchema,
   createWorktreeInputSchema,
   worktreeOpenInCommandSchema,
   worktreeRepoConfigFileSchema,
@@ -119,6 +121,8 @@ export type GitDiffSummary = z.infer<typeof gitDiffSummarySchema>;
 export type SessionListItem = z.infer<typeof sessionListItemSchema>;
 export type SessionListResponse = z.infer<typeof sessionsListResponseSchema>;
 export type SessionActivityState = z.infer<typeof sessionActivityStateSchema>;
+export type ListeningPort = z.infer<typeof listeningPortSchema>;
+export type ListeningPortsResponse = z.infer<typeof listeningPortsResponseSchema>;
 export type GitDiffFileMeta = z.infer<typeof gitDiffFileMetaSchema>;
 export type GitDiffFileListResponse = z.infer<typeof gitDiffFileListResponseSchema>;
 export type GitDiffFilePatch = z.infer<typeof gitDiffFilePatchSchema>;

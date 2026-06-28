@@ -93,6 +93,29 @@ export const SESSIONS_LIST_ROW_HEIGHT_PX = 36;
 // detaches, and grace reaps in near-realtime. Short enough to feel live, long
 // enough to avoid hammering the daemon on an idle open.
 export const SESSIONS_POLL_INTERVAL_MS = 1500;
+// Min height reserved for the sessions modal's error/empty block (a centered
+// message + Retry button, or a two-line empty hint) so the palette modal body
+// doesn't collapse while the message is on screen — mirrors the worktrees and
+// ports modals' message-block reservation, and gives the height transition a
+// stable floor to grow from on the way to a populated list.
+export const SESSIONS_MESSAGE_BLOCK_MIN_HEIGHT_PX = 112;
+
+// Open dev ports modal: mirrors the sessions modal's palette-style overlay and
+// close timing. Each poll runs `ps` + `lsof` on the daemon (heavier than the
+// sessions list's single read), so the interval is a touch longer to stay light
+// on an idle open while still surfacing a dev server starting/stopping live.
+export const PORTS_MODAL_CLOSE_TRANSITION_MS = 150;
+export const PORTS_POLL_INTERVAL_MS = 2000;
+// Each port row matches the sessions/command-palette single-line option
+// (py-2 text-sm = 36px), so the modal reuses the same per-row height to size
+// its height-reserved list container (no per-row measurement needed — a row's
+// title truncates to one line, so the height is stable).
+export const PORTS_LIST_ROW_HEIGHT_PX = SESSIONS_LIST_ROW_HEIGHT_PX;
+// Min height reserved for the ports modal's error/empty block (a centered
+// message + Retry button, or a two-line empty hint) so the palette modal body
+// doesn't collapse to zero while the message is on screen — mirrors the
+// worktrees modal's message-block reservation.
+export const PORTS_MESSAGE_BLOCK_MIN_HEIGHT_PX = 112;
 
 // QR session-transfer modal: Share renders a QR of this tab's session URL for
 // another device to scan; Ingest scans another device's QR and switches this

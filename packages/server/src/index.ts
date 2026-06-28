@@ -14,7 +14,10 @@ import type { BatteryProbe } from "./caffeinate-battery.js";
 import { CaffeinateController } from "./caffeinate-controller.js";
 import { CaffeinateManager } from "./caffeinate-manager.js";
 import { CaffeinatePreferencesStore } from "./caffeinate-preferences-store.js";
-import type { SnapshotProcesses } from "./caffeinate-process-match.js";
+import {
+  defaultSnapshotProcesses as defaultCaffeinateSnapshotProcesses,
+  type SnapshotProcesses,
+} from "./caffeinate-process-match.js";
 import { CdpClient } from "./cdp/cdp-client.js";
 import type { DetectedBrowser } from "./cdp/detect-chromium.js";
 import {
@@ -64,6 +67,12 @@ import {
 import { HeartbeatStore } from "./heartbeat-store.js";
 import { parseCronExpression } from "./cron-expression.js";
 import { createGitWorktree, listGitWorktrees, removeGitWorktree } from "./git-worktrees.js";
+import {
+  defaultSnapshotListeners,
+  isSessionDescendantPid,
+  listSessionListeningPorts,
+  type SnapshotListeners,
+} from "./listening-ports.js";
 import {
   clientToServerMessageSchema,
   createAutomationInputSchema,
@@ -162,6 +171,19 @@ export interface ServerOptions {
    * deterministically without shelling out.
    */
   caffeinateBatteryProbe?: BatteryProbe;
+  /**
+   * Override how the open-ports list walks the process tree under each session
+   * shell. Defaults to a real `ps` snapshot (shared with keep-awake's automatic
+   * mode). Injectable so tests can drive the tree deterministically without
+   * spawning processes.
+   */
+  portsSnapshotProcesses?: SnapshotProcesses;
+  /**
+   * Override how the open-ports list enumerates listening TCP sockets. Defaults
+   * to a real `lsof -nP -iTCP -sTCP:LISTEN` read. Injectable so tests can drive
+   * the ports modal deterministically without a real listener on the machine.
+   */
+  portsSnapshotListeners?: SnapshotListeners;
 }
 
 /** Opens and (optionally) closes the browser tab for an automation run. */
@@ -348,6 +370,14 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     batteryProbe: options.caffeinateBatteryProbe,
     hasRecentOutput: (pids, withinMs) => registry.hasRecentOutput(pids, withinMs),
   });
+  // Open dev ports: the daemon reads the process tree (ps) and the listening
+  // socket table (lsof) on demand while the ports modal is open. Both are
+  // injectable so tests can drive the list deterministically without a real
+  // listener; the tree snapshot defaults to the same `ps` read keep-awake's
+  // automatic mode uses (one shared subprocess per poll).
+  const portsSnapshotProcesses =
+    options.portsSnapshotProcesses ?? defaultCaffeinateSnapshotProcesses;
+  const portsSnapshotListeners = options.portsSnapshotListeners ?? defaultSnapshotListeners;
   const clientSockets = new Set<ClientSocket>();
   // CDP target paired with each WS via the {type:"identify"} handshake, so the
   // manager's onClientExit hook can drive closeTab on a clean shell exit for
@@ -606,6 +636,64 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   api.delete("/sessions/:id", (context) => {
     const killed = registry.kill(context.req.param("id"));
     if (!killed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json({ ok: true });
+  });
+
+  // Open dev ports: TCP listening sockets owned by processes descended from a
+  // localterm session shell (a dev server run inside a tab). The ports modal
+  // polls this while open so a dev server starting/stopping shows up live. The
+  // owning session is always live (the shell the dev server is a child of), so
+  // each row carries the session's title/cwd for the modal to badge without a
+  // second fetch.
+  api.get("/ports", async (context) => {
+    const sessions = registry.list();
+    const sessionPids = sessions.map((session) => session.pid);
+    const [snapshot, listeners] = await Promise.all([
+      portsSnapshotProcesses(),
+      portsSnapshotListeners(),
+    ]);
+    const sessionPorts = listSessionListeningPorts(sessionPids, snapshot, listeners);
+    const sessionByPid = new Map(sessions.map((session) => [session.pid, session]));
+    const ports = sessionPorts.flatMap((port) => {
+      const session = sessionByPid.get(port.sessionPid);
+      if (!session) return [];
+      return [
+        {
+          port: port.port,
+          address: port.address,
+          pid: port.pid,
+          processName: port.processName,
+          sessionId: session.id,
+          sessionTitle: session.title,
+          cwd: session.cwd,
+        },
+      ];
+    });
+    return context.json({ ports });
+  });
+
+  // Stop a dev server by killing the process that owns the listening socket.
+  // Re-verifies the pid still descends from a live session against a fresh
+  // snapshot before signalling, so a pid recycled after the dev server exited
+  // (the shell spawned a new, unrelated process that reused the number) can't
+  // be killed by a stale request. SIGTERM lets a dev server clean up; the modal
+  // refetches and the row disappears as the socket closes.
+  api.delete("/ports/:pid", async (context) => {
+    const pid = Number(context.req.param("pid"));
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return context.json({ error: "invalid_pid" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const snapshot = await portsSnapshotProcesses();
+    if (!isSessionDescendantPid(registry.pids(), pid, snapshot)) {
+      return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    }
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code === "ESRCH") return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+      return context.json({ error: "kill_failed" }, HTTP_STATUS_BAD_REQUEST);
+    }
     return context.json({ ok: true });
   });
 

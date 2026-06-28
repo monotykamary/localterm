@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { spawn } from "node:child_process";
 import { createServer, healthSchema, type RunningServer } from "../src/index.js";
+import type { ProcessSnapshotEntry } from "../src/caffeinate-process-match.js";
+import type { ListeningSocketEntry } from "../src/listening-ports.js";
 import { WebSocket } from "ws";
 
 // Output frames arrive as binary (raw UTF-8 bytes) so the client can dispense
@@ -536,5 +539,126 @@ describe("createServer WS lifecycle", () => {
     expect(replayEnd).toEqual({ type: "replay-end" });
     await closeWs(first.socket);
     await closeWs(second.socket);
+  });
+});
+
+describe("open dev ports API", () => {
+  let server: RunningServer;
+  let socket: WebSocket;
+  let sessionPid = 0;
+  let sessionId = "";
+  let fakeSnapshot: ProcessSnapshotEntry[];
+  let fakeListeners: ListeningSocketEntry[];
+
+  beforeEach(async () => {
+    // Snapshot/listener fakes are read live per request, so a test can mutate
+    // them between calls to model a dev server starting or a tree change.
+    fakeSnapshot = [];
+    fakeListeners = [];
+    server = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      tabController: { open: async () => null, close: async () => {} },
+      portsSnapshotProcesses: async () => fakeSnapshot,
+      portsSnapshotListeners: async () => fakeListeners,
+    });
+    const connected = await connectAndCollect(server.port);
+    socket = connected.socket;
+    const session = (await connected.waitForSession()) as { pid: number; id: string };
+    sessionPid = session.pid;
+    sessionId = session.id;
+  });
+
+  afterEach(async () => {
+    await closeWs(socket);
+    await server.stop();
+  });
+
+  it("lists listening sockets owned by descendants of a session shell", async () => {
+    fakeSnapshot = [
+      { pid: sessionPid, ppid: 1, command: "-zsh" },
+      { pid: 4242, ppid: sessionPid, command: "node vite" },
+    ];
+    fakeListeners = [{ pid: 4242, port: 5173, address: "*", processName: "node" }];
+
+    const body = (await (await fetch(`http://127.0.0.1:${server.port}/api/ports`)).json()) as {
+      ports: {
+        port: number;
+        address: string;
+        pid: number;
+        processName: string;
+        sessionId: string;
+        sessionTitle: string;
+        cwd: string;
+      }[];
+    };
+
+    expect(body.ports).toHaveLength(1);
+    expect(body.ports[0]).toEqual(
+      expect.objectContaining({
+        port: 5173,
+        address: "*",
+        pid: 4242,
+        processName: "node",
+        sessionId,
+      }),
+    );
+  });
+
+  it("returns an empty list when nothing is listening under a session", async () => {
+    fakeSnapshot = [{ pid: sessionPid, ppid: 1, command: "-zsh" }];
+    const body = (await (await fetch(`http://127.0.0.1:${server.port}/api/ports`)).json()) as {
+      ports: unknown[];
+    };
+    expect(body.ports).toEqual([]);
+  });
+
+  it("rejects a non-numeric pid on delete", async () => {
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/ports/abc`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("refuses to kill a pid that is not a session descendant", async () => {
+    fakeSnapshot = [{ pid: sessionPid, ppid: 1, command: "-zsh" }];
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/ports/5555`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(404);
+  });
+
+  it("refuses to kill a verified descendant whose pid no longer exists", async () => {
+    // The pid is in the tree (so it passes the descendant check) but no real
+    // process owns it — process.kill throws ESRCH, which the route maps to 404.
+    fakeSnapshot = [
+      { pid: sessionPid, ppid: 1, command: "-zsh" },
+      { pid: 3_000_000, ppid: sessionPid, command: "node vite" },
+    ];
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/ports/3000000`, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(404);
+  });
+
+  it("sends SIGTERM to a live descendant and returns ok", async () => {
+    // A real, killable child stands in for the dev server; add it to the tree
+    // as a child of the session shell so the descendant check passes.
+    const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    child.unref();
+    await new Promise((resolve) => {
+      if (child.pid) resolve(undefined);
+      else child.on("spawn", () => resolve(undefined));
+    });
+    fakeSnapshot = [
+      { pid: sessionPid, ppid: 1, command: "-zsh" },
+      { pid: child.pid as number, ppid: sessionPid, command: "sleep 30" },
+    ];
+    const exited = new Promise<void>((resolve) => child.on("exit", () => resolve()));
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/ports/${child.pid}`, {
+      method: "DELETE",
+    });
+    expect(response.ok).toBe(true);
+    await expect(exited).resolves.toBeUndefined();
   });
 });

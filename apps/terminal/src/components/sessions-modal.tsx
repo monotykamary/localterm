@@ -19,6 +19,7 @@ import {
 import {
   PALETTE_MODAL_MAX_HEIGHT_PX,
   SESSIONS_LIST_ROW_HEIGHT_PX,
+  SESSIONS_MESSAGE_BLOCK_MIN_HEIGHT_PX,
   SESSIONS_MODAL_CLOSE_TRANSITION_MS,
   SESSIONS_POLL_INTERVAL_MS,
 } from "@/lib/constants";
@@ -364,6 +365,17 @@ export const SessionsModal = ({
 
   const isVisible = open && settled;
 
+  // The list body lives in a height-reserved inner div (mirroring the worktrees
+  // and ports modals) so the palette panel opens at a stable height and grows
+  // smoothly to the list instead of flashing a centered spinner that then swaps
+  // for the list. During the initial load the body is empty with one row
+  // reserved; once the fetch lands the height transitions to the virtualized
+  // list's total size, and the content fades in.
+  const listHeightPx =
+    hasError || (sessions !== null && ordered.length === 0)
+      ? SESSIONS_MESSAGE_BLOCK_MIN_HEIGHT_PX
+      : Math.max(SESSIONS_LIST_ROW_HEIGHT_PX, virtualizer.getTotalSize());
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]">
       <div
@@ -409,7 +421,9 @@ export const SessionsModal = ({
             role="combobox"
             className="h-12 w-full bg-transparent px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
           />
-          {sessions ? (
+          {sessions === null && !hasError ? (
+            <Spinner className="size-3.5 shrink-0" aria-label="loading sessions" />
+          ) : sessions ? (
             <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/60">
               {sessions.length}
             </span>
@@ -419,77 +433,79 @@ export const SessionsModal = ({
           id="sessions-list"
           role="listbox"
           ref={listScrollRef}
-          className="flex-1 animate-in fade-in-0 duration-150 ease-snappy overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex-1 overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          {hasError ? (
-            <div className="flex flex-col items-center justify-center gap-3 px-2.5 py-6 text-sm text-muted-foreground/70">
-              Couldn't load sessions from the localterm daemon.
-              <Button variant="outline" size="xs" onClick={() => void refresh()}>
-                Retry
-              </Button>
-            </div>
-          ) : sessions === null ? (
-            <div className="flex items-center justify-center px-2.5 py-6">
-              <Spinner className="size-3.5" aria-label="loading sessions" />
-            </div>
-          ) : ordered.length === 0 ? (
-            <div className="px-2.5 py-6 text-center text-sm text-muted-foreground/70">
-              {query ? (
-                <>No sessions match “{query}”.</>
-              ) : (
-                <>
-                  No live shells. Open a new tab to start one.
-                  <span className="mt-1 block text-[11px] text-muted-foreground/60">
-                    A closed tab's shell waits here for ~30s before it's reaped.
-                  </span>
-                </>
-              )}
-            </div>
-          ) : (
-            <div
-              style={{
-                height: `${virtualizer.getTotalSize()}px`,
-                width: "100%",
-                position: "relative",
-              }}
-            >
-              {virtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
-                const session = ordered[virtualRow.index];
-                const isCurrent = session.id === currentId;
-                return (
-                  <div
-                    key={session.id}
-                    ref={virtualizer.measureElement}
-                    data-index={virtualRow.index}
-                    className="group"
-                    style={
-                      {
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${virtualRow.start}px)`,
-                      } satisfies CSSProperties
-                    }
-                  >
-                    <SessionOption
-                      session={session}
-                      optionId={`sessions-${session.id}`}
-                      isCurrent={isCurrent}
-                      isActive={virtualRow.index === activeIndex}
-                      nowMs={nowMs}
-                      isKilling={killingId === session.id}
-                      onSetActive={() => {
-                        if (virtualRow.index !== activeIndex) setActiveIndex(virtualRow.index);
-                      }}
-                      onSwitch={() => handleSwitch(session)}
-                      onKill={() => void handleConfirmKill(session)}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          <div
+            className="relative transition-[height] duration-150 ease-snappy"
+            style={{ height: listHeightPx }}
+          >
+            {hasError ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-2.5 text-sm text-muted-foreground/70">
+                Couldn't load sessions from the localterm daemon.
+                <Button variant="outline" size="xs" onClick={() => void refresh()}>
+                  Retry
+                </Button>
+              </div>
+            ) : sessions === null ? null : ordered.length === 0 ? (
+              <div className="animate-in fade-in-0 duration-150 ease-snappy absolute inset-0 flex flex-col items-center justify-center px-2.5 text-center text-sm text-muted-foreground/70">
+                {query ? (
+                  <>No sessions match “{query}”.</>
+                ) : (
+                  <>
+                    No live shells. Open a new tab to start one.
+                    <span className="mt-1 block text-[11px] text-muted-foreground/60">
+                      A closed tab's shell waits here for ~30s before it's reaped.
+                    </span>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div
+                className="animate-in fade-in-0 duration-150 ease-snappy"
+                style={{
+                  height: `${virtualizer.getTotalSize()}px`,
+                  width: "100%",
+                  position: "relative",
+                }}
+              >
+                {virtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
+                  const session = ordered[virtualRow.index];
+                  const isCurrent = session.id === currentId;
+                  return (
+                    <div
+                      key={session.id}
+                      ref={virtualizer.measureElement}
+                      data-index={virtualRow.index}
+                      className="group"
+                      style={
+                        {
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${virtualRow.start}px)`,
+                        } satisfies CSSProperties
+                      }
+                    >
+                      <SessionOption
+                        session={session}
+                        optionId={`sessions-${session.id}`}
+                        isCurrent={isCurrent}
+                        isActive={virtualRow.index === activeIndex}
+                        nowMs={nowMs}
+                        isKilling={killingId === session.id}
+                        onSetActive={() => {
+                          if (virtualRow.index !== activeIndex) setActiveIndex(virtualRow.index);
+                        }}
+                        onSwitch={() => handleSwitch(session)}
+                        onKill={() => void handleConfirmKill(session)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3 border-t border-border/40 px-4 py-1.5 text-[10px] text-muted-foreground/60">
           {isTouchDevice ? null : (

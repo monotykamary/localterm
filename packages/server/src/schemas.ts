@@ -29,6 +29,7 @@ import {
   MAX_WORKTREE_OPEN_IN_LABEL_LENGTH,
   MAX_WORKTREE_PR_NUMBER,
   MAX_WORKTREE_SETUP_SCRIPT_LENGTH,
+  TCP_PORT_MAX,
   WORKTREE_CONFIG_FILE_VERSION,
 } from "./constants.js";
 
@@ -80,6 +81,31 @@ export const sessionListItemSchema = z
 
 export const sessionsListResponseSchema = z
   .object({ sessions: z.array(sessionListItemSchema) })
+  .strict();
+
+// One row in the ports modal: a TCP listening socket owned by a process
+// descended from a localterm session shell (a dev server run inside a tab).
+// `pid` is the process holding the socket (the dev server, e.g. the `node`
+// running vite) — killing it stops the dev server and returns the shell to its
+// prompt. `address` is lsof's bind address (`*` for all interfaces, `127.0.0.1`
+// / `[::1]` for loopback). `sessionTitle`/`cwd` belong to the shell the dev server
+// descends from so the modal can badge the owning session without a second
+// fetch; a port's owning session is always live (the shell the dev server is a
+// child of).
+export const listeningPortSchema = z
+  .object({
+    port: z.number().int().min(1).max(TCP_PORT_MAX),
+    address: z.string().min(1),
+    pid: z.number().int().nonnegative(),
+    processName: z.string().min(1),
+    sessionId: z.string().uuid(),
+    sessionTitle: z.string().max(MAX_TITLE_LENGTH),
+    cwd: z.string().min(1),
+  })
+  .strict();
+
+export const listeningPortsResponseSchema = z
+  .object({ ports: z.array(listeningPortSchema) })
   .strict();
 
 const inputMessageSchema = z
