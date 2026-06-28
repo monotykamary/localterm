@@ -111,4 +111,26 @@ describe("sweepStaleWorktrees", () => {
       fs.rmSync(baseDir, { recursive: true, force: true });
     }
   });
+
+  it("keeps a stale clean worktree a shell is still open in", async () => {
+    const repo = makeTempDir();
+    initRepo(repo);
+    const baseDir = worktreesBaseDirFor(repo);
+    try {
+      const created = await createGitWorktree(repo, { baseRef: "head" });
+      backdateDir(created.path, 31);
+
+      // An active PTY on the worktree (modeled by the predicate) must block
+      // the sweep just like the manual delete — even though the worktree is
+      // old and clean.
+      const result = await sweepStaleWorktrees(repo, Date.now(), (p) => p === created.path);
+      expect(result.removed).toEqual([]);
+
+      const list = await listGitWorktrees(repo);
+      expect(list.worktrees.some((worktree) => worktree.path === created.path)).toBe(true);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
 });

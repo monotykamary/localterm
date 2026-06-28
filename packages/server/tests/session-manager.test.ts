@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vite-plus/test";
+import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import { SessionManager } from "../src/session-manager.js";
 import type { ClientSocket } from "../src/utils/ws-socket.js";
 import type { ServerToClientMessage } from "../src/types.js";
@@ -282,5 +284,105 @@ describe("SessionManager pending promote", () => {
     manager.spawnAndAttach(ws, shellInput);
     manager.promote(ws, false);
     expect(sentControl).toContainEqual({ type: "replay-end" });
+  });
+});
+
+describe("SessionManager sessionsInPath", () => {
+  let manager: SessionManager;
+
+  afterEach(() => {
+    manager?.disposeAll();
+  });
+
+  // A spawned PTY with no client is still "live" — it sits in the registry
+  // until killed or reaped, the same shape as a dormant PTY parked in the
+  // no-clients grace window. sessionsInPath reads the registry, so it covers
+  // attached, dormant, and automation PTYs alike.
+  it("reports a live PTY whose cwd is inside the target, and nothing for an unrelated path", () => {
+    manager = createManager(60_000);
+    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "wt-guard-"));
+    const siblingDir = fs.mkdtempSync(path.join(os.tmpdir(), "wt-sibling-"));
+    try {
+      const spawned = manager.spawn({ shell: "/bin/sh", cwd: worktreeDir });
+      expect(spawned).not.toBeNull();
+      if (!spawned) return;
+
+      const onWorktree = manager.sessionsInPath(worktreeDir);
+      expect(onWorktree).toHaveLength(1);
+      expect(onWorktree[0].id).toBe(spawned.id);
+      expect(manager.sessionsInPath(siblingDir)).toHaveLength(0);
+    } finally {
+      manager?.disposeAll();
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+      fs.rmSync(siblingDir, { recursive: true, force: true });
+    }
+  });
+
+  it("still reports a PTY that has detached and parked with no clients (dormant)", () => {
+    manager = createManager(60_000);
+    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "wt-dormant-"));
+    try {
+      const ws = createFakeSocket();
+      const spawned = manager.spawnAndAttach(ws, { shell: "/bin/sh", cwd: worktreeDir });
+      expect(spawned).not.toBeNull();
+      if (!spawned) return;
+
+      // Last client leaves → the PTY parks with no clients (dormant) for the
+      // grace window. It's still a live process the session picker can re-attach
+      // to, so a worktree removal must stay blocked.
+      manager.detach(ws);
+      expect(manager.size()).toBe(1);
+      expect(manager.sessionsInPath(worktreeDir)).toHaveLength(1);
+    } finally {
+      manager?.disposeAll();
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("matches a shell in a subdirectory of the worktree (containment)", () => {
+    manager = createManager(60_000);
+    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "wt-parent-"));
+    const subDir = path.join(worktreeDir, "sub");
+    fs.mkdirSync(subDir);
+    try {
+      const spawned = manager.spawn({ shell: "/bin/sh", cwd: subDir });
+      expect(spawned).not.toBeNull();
+      expect(manager.sessionsInPath(worktreeDir)).toHaveLength(1);
+    } finally {
+      manager?.disposeAll();
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not match a shell in the worktree for a sub-path of it", () => {
+    manager = createManager(60_000);
+    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "wt-child-"));
+    const subDir = path.join(worktreeDir, "sub");
+    fs.mkdirSync(subDir);
+    try {
+      const spawned = manager.spawn({ shell: "/bin/sh", cwd: worktreeDir });
+      expect(spawned).not.toBeNull();
+      expect(manager.sessionsInPath(subDir)).toHaveLength(0);
+    } finally {
+      manager?.disposeAll();
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not match a sibling whose name only shares a prefix", () => {
+    manager = createManager(60_000);
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "wt-prefix-"));
+    const target = path.join(base, "foo");
+    const sibling = path.join(base, "foobar");
+    fs.mkdirSync(target);
+    fs.mkdirSync(sibling);
+    try {
+      const spawned = manager.spawn({ shell: "/bin/sh", cwd: sibling });
+      expect(spawned).not.toBeNull();
+      expect(manager.sessionsInPath(target)).toHaveLength(0);
+    } finally {
+      manager?.disposeAll();
+      fs.rmSync(base, { recursive: true, force: true });
+    }
   });
 });

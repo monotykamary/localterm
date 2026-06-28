@@ -843,7 +843,13 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const cwd = resolveCwdQuery(context.req.query("cwd"));
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
     try {
-      return context.json(await sweepStaleWorktrees(cwd));
+      return context.json(
+        await sweepStaleWorktrees(
+          cwd,
+          Date.now(),
+          (worktreePath) => registry.sessionsInPath(worktreePath).length > 0,
+        ),
+      );
     } catch (error) {
       return context.json(
         { error: "git_failed", message: worktreeErrorMessage(error) },
@@ -886,6 +892,20 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
     const targetPath = resolveWorktreePath(cwd, context.req.query("path"));
     if (!targetPath) return context.json({ error: "invalid_path" }, HTTP_STATUS_BAD_REQUEST);
+    // A live shell sitting in the worktree (attached, dormant in the
+    // no-clients grace window, or running an automation) blocks removal —
+    // `git worktree remove` would pull the directory out from under the PTY.
+    const sessionsOnWorktree = registry.sessionsInPath(targetPath);
+    if (sessionsOnWorktree.length > 0) {
+      const count = sessionsOnWorktree.length;
+      return context.json(
+        {
+          error: "active_pty",
+          message: `${count} shell${count === 1 ? "" : "s"} still open in this worktree — close ${count === 1 ? "it" : "them"} first`,
+        },
+        HTTP_STATUS_CONFLICT,
+      );
+    }
     try {
       await removeGitWorktree(cwd, targetPath);
       return context.json({ ok: true });
