@@ -230,20 +230,21 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
     setStaticHeight(el.scrollHeight - virtualizer.getTotalSize());
   }, [secrets, hasError, supported, form, formError, virtualizer]);
 
-  // Escape closes (mirrors the other palette overlays); a visible form cancels
-  // back to the list first so an accidental esc doesn't drop unsaved edits
-  // silently.
+  // Escape closes (capture phase, winning over the terminal's own handling
+  // while the modal is up); a visible form cancels back to the list first so
+  // an accidental esc doesn't drop unsaved edits silently.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !mounted) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        if (form) setForm(null);
-        else onClose();
-      }
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (form) setForm(null);
+      else onClose();
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, form, onClose]);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [open, mounted, form, onClose]);
 
   const startAdd = () => {
     setFormError(null);

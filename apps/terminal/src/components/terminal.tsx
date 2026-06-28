@@ -19,6 +19,7 @@ import {
   Copy,
   FileDiff,
   FolderGit2,
+  Key,
   MonitorCog,
   Network,
   Plus,
@@ -1978,6 +1979,23 @@ export const Terminal = () => {
     refocusTerminalRef.current?.();
   }, []);
 
+  const handleSecretsOpenChange = useCallback((open: boolean) => {
+    setIsSecretsOpen(open);
+    if (open) {
+      setIsActionsMenuOpen(false);
+      setIsCommandPaletteOpen(false);
+      return;
+    }
+    if (toolbarHoverTimeoutRef.current !== null) {
+      window.clearTimeout(toolbarHoverTimeoutRef.current);
+    }
+    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
+      toolbarHoverTimeoutRef.current = null;
+      setIsToolbarHovered(false);
+    }, TOOLBAR_HIDE_DELAY_MS);
+    refocusTerminalRef.current?.();
+  }, []);
+
   const handleQrOpenChange = useCallback((open: boolean) => {
     setIsQrOpen(open);
     if (open) {
@@ -2399,6 +2417,13 @@ export const Terminal = () => {
         action: () => handlePortsOpenChange(true),
       },
       {
+        id: "secrets",
+        label: "Secrets",
+        category: "Actions",
+        icon: <Key className="size-3.5" />,
+        action: () => handleSecretsOpenChange(true),
+      },
+      {
         id: "worktrees-create",
         label: "Create git worktree",
         category: "Actions",
@@ -2507,6 +2532,7 @@ export const Terminal = () => {
     handleWorktreesOpenChange,
     handleSessionsOpenChange,
     handlePortsOpenChange,
+    handleSecretsOpenChange,
     handleCursorStyleChange,
     activeCursorBlink,
     handleCursorBlinkChange,
@@ -2726,7 +2752,7 @@ export const Terminal = () => {
                   <WorktreesButton onOpen={() => handleWorktreesOpenChange(true)} isMac={isMac} />
                   <SessionsButton onOpen={() => handleSessionsOpenChange(true)} isMac={isMac} />
                   <PortsButton onOpen={() => handlePortsOpenChange(true)} />
-                  <SecretsButton onOpen={() => setIsSecretsOpen(true)} />
+                  <SecretsButton onOpen={() => handleSecretsOpenChange(true)} />
                   {caffeinateSupported ? (
                     <KeepAwakeMenu
                       mode={caffeinateMode}
@@ -2933,7 +2959,7 @@ export const Terminal = () => {
         onClose={() => handlePortsOpenChange(false)}
       />
 
-      <SecretsModal open={isSecretsOpen} onClose={() => setIsSecretsOpen(false)} />
+      <SecretsModal open={isSecretsOpen} onClose={() => handleSecretsOpenChange(false)} />
 
       <QrModal
         open={isQrOpen}
