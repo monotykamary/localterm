@@ -48,6 +48,16 @@ const parsePrograms = (raw: string): string[] =>
     ),
   );
 
+// Derive a keychain label from the env var when the user leaves the name
+// blank: ANTHROPIC_API_KEY -> anthropic-api-key. Matches the server's
+// secretNameSchema (^[A-Za-z0-9][A-Za-z0-9_-]*$); returns the empty string if
+// the env var doesn't reduce to a valid name (so the caller still errors).
+const deriveName = (envVar: string): string =>
+  envVar
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
 const SecretRow = ({
   secret,
   onEdit,
@@ -204,14 +214,14 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
 
   const handleSave = async () => {
     if (!form) return;
-    const name = form.name.trim();
     const envVar = form.envVar.trim();
-    if (!name) {
-      setFormError("Name is required.");
-      return;
-    }
     if (!envVar) {
       setFormError("Environment variable is required.");
+      return;
+    }
+    const name = form.name.trim() || deriveName(envVar);
+    if (!name) {
+      setFormError("Enter a name or a valid environment variable to derive one from.");
       return;
     }
     const isRename = form.originalName !== null && form.originalName !== name;
@@ -332,11 +342,15 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                       <Input
                         value={form.name}
                         autoFocus
-                        placeholder="anthropic-api-key"
+                        placeholder="auto from env var"
                         aria-label="secret name"
                         onChange={(event) => setForm({ ...form, name: event.target.value })}
                         className="h-7 px-2 font-mono text-xs"
                       />
+                      <span className="text-[10px] text-muted-foreground/50">
+                        Optional. Derived from the env var (e.g. ANTHROPIC_API_KEY →
+                        anthropic-api-key) if left blank.
+                      </span>
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
