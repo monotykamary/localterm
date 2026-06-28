@@ -2802,6 +2802,8 @@ export const Terminal = () => {
         liveSessionIdRef={liveSessionIdRef}
         previousSessionIdRef={previousSessionIdRef}
         switchSessionRef={switchSessionRef}
+        isTouchDevice={isTouchDevice}
+        onOpenNewShell={() => window.open(newTabUrl, "_blank", "noopener,noreferrer")}
         onClose={() => handleSessionsOpenChange(false)}
       />
 

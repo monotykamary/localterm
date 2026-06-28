@@ -1,4 +1,4 @@
-import { Check, Search, SquareTerminal, X } from "lucide-react";
+import { Check, Plus, Search, SquareTerminal, X } from "lucide-react";
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import {
   useCallback,
@@ -37,6 +37,8 @@ interface SessionsModalProps {
   liveSessionIdRef: RefObject<string | null>;
   previousSessionIdRef: RefObject<string | null>;
   switchSessionRef: RefObject<((sid: string) => void) | null>;
+  isTouchDevice: boolean;
+  onOpenNewShell: () => void;
   onClose: () => void;
 }
 
@@ -196,6 +198,8 @@ export const SessionsModal = ({
   liveSessionIdRef,
   previousSessionIdRef,
   switchSessionRef,
+  isTouchDevice,
+  onOpenNewShell,
   onClose,
 }: SessionsModalProps) => {
   const [mounted, setMounted] = useState(false);
@@ -332,6 +336,11 @@ export const SessionsModal = ({
     await killSession(session.id);
     setKillingId(null);
     await refresh();
+  };
+
+  const handleOpenNewShell = () => {
+    onOpenNewShell();
+    onClose();
   };
 
   const handleSearchKeyDown = (event: React.KeyboardEvent) => {
@@ -483,10 +492,18 @@ export const SessionsModal = ({
           )}
         </div>
         <div className="flex items-center gap-3 border-t border-border/40 px-4 py-1.5 text-[10px] text-muted-foreground/60">
-          <KeyHint keys="↑↓" label="navigate" />
-          <KeyHint keys="↵" label="switch" />
-          <KeyHint keys="esc" label="close" />
-          <span className="ml-auto">
+          {isTouchDevice ? null : (
+            <>
+              <KeyHint keys="↑↓" label="navigate" />
+              <KeyHint keys="↵" label="switch" />
+              <KeyHint keys="esc" label="close" />
+            </>
+          )}
+          <span className="ml-auto flex items-center gap-2">
+            <Button variant="ghost" size="xs" onClick={handleOpenNewShell}>
+              <Plus aria-hidden="true" />
+              New shell
+            </Button>
             {ordered.length} {ordered.length === 1 ? "session" : "sessions"}
           </span>
         </div>
