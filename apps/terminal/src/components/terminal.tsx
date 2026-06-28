@@ -391,6 +391,7 @@ export const Terminal = () => {
   const isWorktreesOpenRef = useRef(false);
   const isSessionsOpenRef = useRef(false);
   const isPortsOpenRef = useRef(false);
+  const qrPeerAttachedRef = useRef<(() => void) | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const isTouchDevice = useMemo(() => isCoarsePointer(), []);
@@ -1550,6 +1551,8 @@ export const Terminal = () => {
           markShellDead(message.code);
         } else if (message.type === "cdp-controlled") {
           cdpControlled = message.controlled;
+        } else if (message.type === "peer-attached") {
+          qrPeerAttachedRef.current?.();
         }
       });
 
@@ -2934,6 +2937,7 @@ export const Terminal = () => {
         open={isQrOpen}
         liveSessionIdRef={liveSessionIdRef}
         switchSessionRef={switchSessionRef}
+        peerAttachedRef={qrPeerAttachedRef}
         onClose={() => handleQrOpenChange(false)}
       />
 

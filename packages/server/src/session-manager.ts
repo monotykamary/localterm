@@ -293,6 +293,12 @@ export class SessionManager {
     // Re-subscribing cancels the no-clients grace timer (if armed): the shell
     // has a viewer again, so it stays alive.
     this.cancelGrace(managed);
+    // Notify existing subscribers a peer joined (a mobile ingested this
+    // session's share QR) so a host can react — e.g. the desktop's QR modal
+    // auto-closes. Gated on existing clients so a fresh spawn's first attach
+    // stays silent, and fired before adding the joiner so it isn't told about
+    // itself. See peerAttachedMessageSchema for the frame's payload rationale.
+    if (managed.clients.size > 0) this.broadcast(managed, { type: "peer-attached" });
     const coordinator = this.coordinatorForCwd(managed.session.cwd);
     const client: ManagedClient = {
       ws,

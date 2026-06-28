@@ -31,6 +31,11 @@ interface QrModalProps {
   open: boolean;
   liveSessionIdRef: RefObject<string | null>;
   switchSessionRef: RefObject<((sid: string) => void) | null>;
+  // Invoked by the host when the server signals a peer attached to this PTY
+  // (a mobile ingested this tab's share QR). Registered only while the modal
+  // is open in share mode — ingest is this tab scanning someone else's QR, so
+  // a peer joining our session is unrelated to that and the scan stays put.
+  peerAttachedRef: RefObject<(() => void) | null>;
   onClose: () => void;
 }
 
@@ -179,7 +184,13 @@ const IngestPanel = ({ videoRef, status }: IngestPanelProps) => {
   );
 };
 
-export const QrModal = ({ open, liveSessionIdRef, switchSessionRef, onClose }: QrModalProps) => {
+export const QrModal = ({
+  open,
+  liveSessionIdRef,
+  switchSessionRef,
+  peerAttachedRef,
+  onClose,
+}: QrModalProps) => {
   const [mounted, setMounted] = useState(false);
   const [settled, setSettled] = useState(false);
   const [mode, setMode] = useState<QrMode>("share");
@@ -220,6 +231,14 @@ export const QrModal = ({ open, liveSessionIdRef, switchSessionRef, onClose }: Q
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!open || mode !== "share") return;
+    peerAttachedRef.current = onClose;
+    return () => {
+      peerAttachedRef.current = null;
+    };
+  }, [open, mode, onClose, peerAttachedRef]);
 
   const handleDetect = useCallback(
     (data: string) => {

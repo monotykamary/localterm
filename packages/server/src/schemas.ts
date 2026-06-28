@@ -952,6 +952,14 @@ const automationsMessageSchema = z
 // reattach, or a back-compat reader) treats it as a no-op.
 const replayEndMessageSchema = z.object({ type: z.literal("replay-end") }).strict();
 
+// A second client just attached to this PTY (a mobile ingested a desktop's
+// share QR, or another tab joined via the session picker). Broadcast to the
+// existing subscribers at attach time — before the joiner is added — so a
+// desktop showing this session's share QR can auto-close once a mobile takes
+// it over. Carries no payload: the recipients are, by construction, already
+// attached to the session a peer joined.
+const peerAttachedMessageSchema = z.object({ type: z.literal("peer-attached") }).strict();
+
 const cdpControlledMessageSchema = z
   .object({
     type: z.literal("cdp-controlled"),
@@ -1077,6 +1085,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   caffeinateStateMessageSchema,
   cdpControlledMessageSchema,
   replayEndMessageSchema,
+  peerAttachedMessageSchema,
 ]);
 
 export const gitDiffFileSchema = gitDiffFileMetaSchema

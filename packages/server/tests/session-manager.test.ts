@@ -287,6 +287,48 @@ describe("SessionManager pending promote", () => {
   });
 });
 
+describe("SessionManager peer-attached", () => {
+  const noopHooks = {
+    onOutputActivity: () => {},
+    onSessionEvent: () => {},
+    onAutomationExit: () => {},
+    onClientExit: () => {},
+    onSessionActivity: () => {},
+  };
+  let manager: SessionManager;
+
+  afterEach(() => {
+    manager?.disposeAll();
+  });
+
+  it("broadcasts peer-attached to existing clients when a second client attaches", () => {
+    const sent: { ws: ClientSocket; payload: ServerToClientMessage }[] = [];
+    manager = new SessionManager({
+      sendControl: (ws, payload) => sent.push({ ws, payload }),
+      hooks: noopHooks,
+    });
+    const first = createFakeSocket();
+    const spawned = manager.spawnAndAttach(first, shellInput);
+    expect(spawned).not.toBeNull();
+    if (!spawned) return;
+    // Model the desktop having caught up (it sent {ready} on its session
+    // frame long before a mobile ingests): promote it to live fan-out so the
+    // peer-attached broadcast reaches it via sendControl, not its pending
+    // queue.
+    manager.promote(first, false);
+    // A fresh spawn's first attach has no existing subscribers to notify.
+    expect(sent.filter((entry) => entry.payload.type === "peer-attached")).toEqual([]);
+
+    // A second tab joins the same live PTY (a mobile ingested the share QR).
+    const second = createFakeSocket();
+    manager.attach(second, spawned.id);
+    const peerAttached = sent.filter((entry) => entry.payload.type === "peer-attached");
+    expect(peerAttached).toHaveLength(1);
+    expect(peerAttached[0].ws).toBe(first);
+    expect(peerAttached[0].payload).toEqual({ type: "peer-attached" });
+  });
+});
+
 describe("SessionManager sessionsInPath", () => {
   let manager: SessionManager;
 

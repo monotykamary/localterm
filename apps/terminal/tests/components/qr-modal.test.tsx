@@ -34,16 +34,18 @@ interface RenderOptions {
 const renderModal = (options: RenderOptions = {}) => {
   const liveSessionIdRef = { current: options.liveSessionId ?? null };
   const switchSessionRef = { current: options.switchSession ?? null };
+  const peerAttachedRef: { current: (() => void) | null } = { current: null };
   const onClose = options.onClose ?? vi.fn();
   render(
     <QrModal
       open={options.open ?? true}
       liveSessionIdRef={liveSessionIdRef}
       switchSessionRef={switchSessionRef}
+      peerAttachedRef={peerAttachedRef}
       onClose={onClose}
     />,
   );
-  return { liveSessionIdRef, switchSessionRef, onClose };
+  return { liveSessionIdRef, switchSessionRef, peerAttachedRef, onClose };
 };
 
 beforeEach(() => {
@@ -126,5 +128,33 @@ describe("QrModal", () => {
     fireEvent.click(container.firstElementChild as HTMLElement);
 
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("closes the share modal when a peer attaches (mobile ingested the QR)", () => {
+    const onClose = vi.fn();
+    const { peerAttachedRef } = renderModal({ liveSessionId: "abc", onClose });
+
+    peerAttachedRef.current?.();
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the ingest modal open when a peer attaches", () => {
+    const onClose = vi.fn();
+    const { peerAttachedRef } = renderModal({ liveSessionId: "abc", onClose });
+    fireEvent.click(screen.getByRole("tab", { name: /ingest/i }));
+
+    peerAttachedRef.current?.();
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when a peer attaches while the modal is closed", () => {
+    const onClose = vi.fn();
+    const { peerAttachedRef } = renderModal({ open: false, liveSessionId: "abc", onClose });
+
+    peerAttachedRef.current?.();
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
