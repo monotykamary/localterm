@@ -342,6 +342,8 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                       <Input
                         value={form.name}
                         autoFocus
+                        name="localterm-secret-name"
+                        autoComplete="off"
                         placeholder="auto from env var"
                         aria-label="secret name"
                         onChange={(event) => setForm({ ...form, name: event.target.value })}
@@ -358,6 +360,8 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                       </label>
                       <Input
                         value={form.envVar}
+                        name="localterm-secret-envvar"
+                        autoComplete="off"
                         placeholder="ANTHROPIC_API_KEY"
                         aria-label="environment variable name"
                         onChange={(event) => setForm({ ...form, envVar: event.target.value })}
@@ -370,6 +374,8 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                       </label>
                       <Input
                         value={form.programs}
+                        name="localterm-secret-programs"
+                        autoComplete="off"
                         placeholder="pi, claude"
                         aria-label="programs that receive this secret"
                         onChange={(event) => setForm({ ...form, programs: event.target.value })}
@@ -386,6 +392,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                       <Input
                         type="password"
                         value={form.value}
+                        name="localterm-secret-value"
                         placeholder={isEditing ? "Leave blank to keep current" : ""}
                         aria-label="secret value"
                         autoComplete="new-password"
