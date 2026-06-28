@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Select,
   SelectContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/select";
 import { PANEL_ANIMATION_CLASSES, TRANSLUCENT_PANEL_CLASSES } from "@/lib/animation-classes";
 import { cn } from "@/lib/utils";
+import { useCloseSelectOnTouchOutside } from "@/utils/use-close-select-on-touch-outside";
 
 export interface SettingsSelectItem {
   id: string;
@@ -60,8 +61,26 @@ export const SettingsSelect = ({
   const mergedTriggerStyle = activeItem?.itemStyle
     ? { ...activeItem.itemStyle, ...triggerStyle }
     : triggerStyle;
+  // Track open state locally so the touch-outside hook applies to uncontrolled
+  // selects too (theme/cursor/scrollback don't pass `open`). The controlled
+  // caller's `open` wins when provided.
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isOpen = open ?? internalOpen;
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      setInternalOpen(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
+  useCloseSelectOnTouchOutside(isOpen, handleOpenChange);
   return (
-    <Select value={value} onValueChange={onValueChange} open={open} onOpenChange={onOpenChange}>
+    <Select
+      value={value}
+      onValueChange={onValueChange}
+      open={isOpen}
+      onOpenChange={handleOpenChange}
+    >
       <SelectTrigger
         size="sm"
         aria-label={ariaLabel}

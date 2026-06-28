@@ -341,7 +341,6 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                       </label>
                       <Input
                         value={form.name}
-                        autoFocus
                         name="localterm-secret-name"
                         autoComplete="off"
                         placeholder="auto from env var"
@@ -360,6 +359,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                       </label>
                       <Input
                         value={form.envVar}
+                        autoFocus
                         name="localterm-secret-envvar"
                         autoComplete="off"
                         placeholder="ANTHROPIC_API_KEY"
