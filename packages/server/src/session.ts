@@ -435,6 +435,25 @@ export class Session extends EventEmitter<SessionEvents> {
           `ZDOTDIR='${escapedZdotdir}'`,
           `source '${escapedZdotdir}/.zshrc' 2>/dev/null`,
           'ZDOTDIR="${__localterm_saved_zdotdir}"',
+          // zsh's PROMPT_SP (on by default) prints the EOL mark (bold+reverse %
+          // by default — the "white-background %") AND a fill-to-end-of-line
+          // space burst before each prompt when the prior line had no trailing
+          // newline. localterm's precmd/chpwd hooks emit OSC sequences with no
+          // newline, so PROMPT_SP fires on every prompt and zle's redraw
+          // normally erases both. localterm resizes xterm before the server's
+          // PTY catches up (async over a high-latency relay), so during a shell
+          // redraw — and especially at spawn, where the PTY starts at the wide
+          // DEFAULT_COLS while the mobile xterm is still its narrow viewport —
+          // the mark and the fill spaces (sized for the wider PTY) wrap in the
+          // narrower xterm and zle's clear-to-end-of-screen erases from the
+          // wrapped line, leaving the mark as a stray `%` and the spaces as a
+          // blank line above the prompt. Emptying PROMPT_EOL_MARK only kills the
+          // visible mark; the fill spaces still wrap. Disabling PROMPT_SP kills
+          // both. The cost is the standard non-zsh behavior: a command whose
+          // output lacks a trailing newline gets the prompt on the same line
+          // instead of a fresh one — fine here, since the only unterminated
+          // output in this setup is localterm's own OSC hooks (invisible).
+          "unsetopt PROMPT_SP",
           hookScript,
           "chpwd_functions=(${chpwd_functions[@]} __localterm_osc7_chpwd)",
           "__localterm_osc7_chpwd",

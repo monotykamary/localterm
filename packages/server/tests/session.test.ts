@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { existsSync } from "node:fs";
 import { serverToClientMessageSchema } from "../src/schemas.js";
 import { Session } from "../src/session.js";
 import { terminalQueryResponder } from "../src/utils/terminal-query-responder.js";
@@ -278,6 +279,37 @@ describe("Session", () => {
       expect(emitted).toContain("DONE");
     } finally {
       terminalQueryResponder.reset();
+      session.dispose();
+    }
+  }, 15_000);
+
+  it("zsh emits no PROMPT_SP mark or fill-to-EOL spaces (no mobile resize leak)", async () => {
+    // zsh-only fix; skip where zsh is absent (the bash hook has no equivalent).
+    if (!existsSync("/bin/zsh")) return;
+    const session = new Session({ shell: "/bin/zsh" });
+    try {
+      await collectOutput(session, 10_000);
+      const outputs: string[] = [];
+      session.on("output", (chunk) => outputs.push(chunk));
+      // An empty Enter and a command whose output lacks a trailing newline are
+      // the two paths that trigger zsh's PROMPT_SP: it prints the EOL mark
+      // (bold+reverse % by default — "white-background %") AND a fill-to-
+      // end-of-line space burst, then zle's redraw erases both. localterm resizes
+      // xterm before the server's PTY catches up (async over a high-latency
+      // relay), and at spawn the PTY starts at the wide DEFAULT_COLS while the
+      // mobile xterm is still its narrow viewport — so the mark and fill spaces
+      // (sized for the wider PTY) wrap in the narrower xterm and zle's clear-
+      // to-end-of-screen erases from the wrapped line, leaving the mark as a
+      // stray `%` and the spaces as a blank line above the prompt. The hook
+      // disables PROMPT_SP so neither is emitted. Emptying PROMPT_EOL_MARK alone
+      // is insufficient: the fill spaces still wrap.
+      session.write("\r");
+      session.write("printf 'partial-no-newline'\r");
+      await collectOutput(session, 10_000);
+      const emitted = outputs.join("");
+      expect(emitted).not.toContain("\x1b[7m%");
+      expect(emitted).not.toMatch(/ {10,}/);
+    } finally {
       session.dispose();
     }
   }, 15_000);
