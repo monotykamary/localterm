@@ -57,6 +57,10 @@ localterm status
 localterm restart
 localterm install [-p 3417] [-H 127.0.0.1]  # auto-start at login (macOS)
 localterm uninstall                              # remove auto-start service
+localterm secret list                            # per-program secrets (names + policy; never values)
+localterm secret get <name>                       # print a value (resolved from Keychain, not the daemon)
+localterm secret set <name> -e <VAR> [-p a,b] [-v <value>|-]  # -v - reads stdin
+localterm secret delete <name>
 ```
 
 State lives in `~/.localterm/` (PID, port, server log at `~/.localterm/server.log`).

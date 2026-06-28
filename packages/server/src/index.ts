@@ -1672,6 +1672,8 @@ export type * from "./types.js";
 export { DEFAULT_HOST, DEFAULT_PORT, WS_CLOSE_BACKPRESSURE } from "./constants.js";
 export { isLoopbackHost, isPrivateHost, isAllowedSourceIp } from "./security.js";
 export { healthSchema, cdpHealthSchema } from "./schemas.js";
+export { createDefaultSecretBackend } from "./secret-backend.js";
+export type { SecretBackend } from "./secret-backend.js";
 export { detectChromiumBrowsers } from "./cdp/detect-chromium.js";
 export type { BrowserCandidate, DetectedBrowser } from "./cdp/detect-chromium.js";
 export {

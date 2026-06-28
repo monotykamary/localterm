@@ -1,6 +1,6 @@
 ---
 name: localterm
-description: Drive the localterm daemon's HTTP API — schedule automations, set up event-driven triggers (git changes, shell notifications, directory changes), trigger runs, inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage automations in localterm, or to script against the localterm server.
+description: Drive the localterm daemon's HTTP API — schedule automations, set up event-driven triggers (git changes, shell notifications, directory changes), trigger runs, manage per-program secrets (Keychain-backed PATH shims), list/kill live sessions, inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage automations, secrets, or sessions in localterm, or to script against the localterm server.
 ---
 
 # localterm API
@@ -225,6 +225,10 @@ disabled or finished.
 
 ```bash
 curl -s "$BASE/health"                              # {"ok":true,"sessions":N}
+curl -s "$BASE/sessions"                          # live PTYs (attach by id or kill)
+curl -s "$BASE/secrets"                            # per-program secrets (names + policy; never values)
 curl -s "$BASE/git/diff-summary?cwd=/path/to/repo"  # {isRepo, files, additions, deletions, binaries}
 curl -s "$BASE/git/diff?cwd=/path/to/repo"          # full per-file unified patches
 ```
+
+For the sessions (`GET`/`DELETE /sessions/:id`) and secrets (`GET`/`PUT`/`DELETE /secrets/:name`) surfaces — including the security model (values never return over the API; use `localterm secret get` for that) and the PATH-shim injection mechanism — see [references/secrets-sessions.md](references/secrets-sessions.md). Secrets are also managed from the terminal via the `localterm secret list|get|set|delete` CLI.
