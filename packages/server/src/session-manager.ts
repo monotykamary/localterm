@@ -101,6 +101,10 @@ interface SessionManagerOptions {
   // sends `replay-end` so a slow client never deadlocks in its replay window)
   // without waiting the full production timeout.
   pendingPromoteTimeoutMs?: number;
+  // The per-program secret shims directory, injected into every spawned Session
+  // so the shell hook prepends the actual shims dir (matching where the daemon
+  // generates them), not a hardcoded home path.
+  shimsDir?: string;
 }
 
 // Owns every live PTY for the daemon's lifetime. A Session is created on spawn
@@ -128,6 +132,7 @@ export class SessionManager {
   private readonly sendControl: (ws: ClientSocket, payload: ServerToClientMessage) => void;
   private readonly graceMs: number;
   private readonly pendingPromoteTimeoutMs: number;
+  private readonly shimsDir?: string;
 
   constructor(options: SessionManagerOptions) {
     this.hooks = options.hooks;
@@ -135,6 +140,7 @@ export class SessionManager {
     this.graceMs = options.graceMs ?? SESSION_GRACE_MS;
     this.pendingPromoteTimeoutMs =
       options.pendingPromoteTimeoutMs ?? SESSION_PENDING_PROMOTE_TIMEOUT_MS;
+    this.shimsDir = options.shimsDir;
   }
 
   size(): number {
@@ -243,7 +249,7 @@ export class SessionManager {
   spawn(input: SpawnPtyInput, automation?: AutomationContext): ManagedSession | null {
     if (this.sessions.size >= MAX_CONCURRENT_SESSIONS) this.evictOldestDormant();
     if (this.sessions.size >= MAX_CONCURRENT_SESSIONS) return null;
-    const session = new Session(input);
+    const session = new Session(this.shimsDir ? { ...input, shimsDir: this.shimsDir } : input);
     const managed: ManagedSession = {
       session,
       id: session.id,

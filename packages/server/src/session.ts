@@ -8,10 +8,12 @@ import {
   COLORTERM_VALUE,
   DEFAULT_COLS,
   DEFAULT_ROWS,
+  LOCALTERM_STATE_DIRNAME,
   LOCALTERM_VALUE,
   MAX_NOTIFICATION_LENGTH,
   MAX_PENDING_PARSE_BYTES,
   PTY_ENV_DENYLIST,
+  SECRETS_SHIMS_DIRNAME,
   SESSION_SCROLLBACK_REPLAY_BYTES,
   TERM_TYPE,
 } from "./constants.js";
@@ -23,6 +25,7 @@ import {
 import { ensureSpawnHelperExecutable } from "./ensure-spawn-helper-executable.js";
 import { ForegroundWatcher } from "./foreground-watcher.js";
 import { getDefaultShell } from "./default-shell.js";
+import { shimPathPrependLine } from "./secret-shims.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
 import type { SpawnPtyInput } from "./types.js";
 import { formatWorkingDirectoryTitle } from "./utils/format-working-directory-title.js";
@@ -52,6 +55,7 @@ export class Session extends EventEmitter<SessionEvents> {
   readonly cwd: string;
   readonly createdAt: number;
   readonly id: string;
+  private readonly shimsDir: string | undefined;
 
   private readonly pty: IPty;
   private readonly shellName: string;
@@ -106,6 +110,7 @@ export class Session extends EventEmitter<SessionEvents> {
     this.createdAt = Date.now();
     this.id = randomUUID();
     this.reportInitialCommandExit = Boolean(input.initialCommand);
+    this.shimsDir = input.shimsDir;
 
     const env: Record<string, string> = {};
     const denied = new Set(PTY_ENV_DENYLIST);
@@ -428,6 +433,9 @@ export class Session extends EventEmitter<SessionEvents> {
         this.hookCleanupPaths.push(hookDir);
         const hookScript = this.zshOsc7ChpwdFunction();
         const userZdotdir = env.__LOCALTERM_ORIG_ZDOTDIR || env.ZDOTDIR || os.homedir();
+        const shimsPrepend = shimPathPrependLine(
+          this.shimsDir ?? path.join(os.homedir(), LOCALTERM_STATE_DIRNAME, SECRETS_SHIMS_DIRNAME),
+        );
         const escapedZdotdir = userZdotdir.replace(/'/g, "'\\''");
         const lines = [
           `source '${escapedZdotdir}/.zshenv' 2>/dev/null`,
@@ -435,6 +443,11 @@ export class Session extends EventEmitter<SessionEvents> {
           `ZDOTDIR='${escapedZdotdir}'`,
           `source '${escapedZdotdir}/.zshrc' 2>/dev/null`,
           'ZDOTDIR="${__localterm_saved_zdotdir}"',
+          // Prepend the secrets shims dir AFTER the user's .zshrc ran, so the
+          // shims reliably shadow the real binaries despite rc PATH
+          // manipulation (e.g. `export PATH=/opt/homebrew/bin:$PATH`). The line
+          // is a no-op when the shims dir is absent (feature not configured).
+          shimsPrepend,
           // zsh's PROMPT_SP (on by default) prints the EOL mark (bold+reverse %
           // by default — the "white-background %") AND a fill-to-end-of-line
           // space burst before each prompt when the prior line had no trailing
@@ -477,10 +490,16 @@ export class Session extends EventEmitter<SessionEvents> {
         const hookPath = path.join(hookDir, "bashrc");
         this.hookCleanupPaths.push(hookDir);
         const hookScript = this.bashOsc7Function();
+        const shimsPrepend = shimPathPrependLine(
+          this.shimsDir ?? path.join(os.homedir(), LOCALTERM_STATE_DIRNAME, SECRETS_SHIMS_DIRNAME),
+        );
         const lines = [
           "source /etc/bashrc 2>/dev/null",
           "source /etc/bash.bashrc 2>/dev/null",
           "source ~/.bashrc 2>/dev/null",
+          // Prepend the secrets shims dir AFTER the user's .bashrc ran (see the
+          // zsh case for why the ordering matters).
+          shimsPrepend,
           hookScript,
           'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt;__localterm_git_dirty"',
           "__localterm_osc7_prompt",

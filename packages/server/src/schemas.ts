@@ -10,6 +10,13 @@ import {
   MAX_AUTOMATION_NAME_LENGTH,
   MAX_AUTOMATION_TIMES_PER_DAY,
   MAX_AUTOMATION_WATCH_FILTER_LENGTH,
+  MAX_SECRET_ENV_VAR_LENGTH,
+  MAX_SECRET_NAME_LENGTH,
+  MAX_SECRET_PROGRAM_LENGTH,
+  MAX_SECRET_PROGRAMS,
+  MAX_SECRET_VALUE_LENGTH,
+  MAX_SECRETS,
+  SECRETS_FILE_VERSION,
   MAX_WEBHOOK_ID_LENGTH,
   MAX_CAFFEINATE_COMMAND_LENGTH,
   MAX_CAFFEINATE_COMMANDS,
@@ -984,6 +991,69 @@ export const caffeinatePreferencesFileSchema = z
       .max(CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT)
       .nullable(),
     commands: z.array(caffeinateCommandSchema).max(MAX_CAFFEINATE_COMMANDS),
+  })
+  .strict();
+
+// Per-program secret injection policy. `name` is the secret's identifier and
+// the Keychain item label (service `localterm:<name>`). `envVar` is the variable
+// the shim exports. `programs` are the binary names the shim shadows. Values
+// NEVER appear here — only in the backend — so the policy file is safe to read
+// and lists in the UI without leaking secrets. `hasValue` in the API response
+// is probed from the backend, not stored.
+export const secretNameSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, "must be alphanumeric with - or _")
+  .min(1)
+  .max(MAX_SECRET_NAME_LENGTH);
+export const secretEnvVarSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Z_][A-Z0-9_]*$/, "must be uppercase with _")
+  .min(1)
+  .max(MAX_SECRET_ENV_VAR_LENGTH);
+export const secretProgramSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9_.+-]+$/, "must be a valid program name")
+  .min(1)
+  .max(MAX_SECRET_PROGRAM_LENGTH);
+export const secretEntrySchema = z
+  .object({
+    name: secretNameSchema,
+    envVar: secretEnvVarSchema,
+    programs: z.array(secretProgramSchema).max(MAX_SECRET_PROGRAMS),
+  })
+  .strict();
+// The API response shape: an entry plus whether a value is stored in the backend.
+export const secretEntryResponseSchema = z
+  .object({
+    name: secretNameSchema,
+    envVar: secretEnvVarSchema,
+    programs: z.array(secretProgramSchema).max(MAX_SECRET_PROGRAMS),
+    hasValue: z.boolean(),
+  })
+  .strict();
+export const secretsListResponseSchema = z
+  .object({
+    supported: z.boolean(),
+    shimsDir: z.string(),
+    secrets: z.array(secretEntryResponseSchema).max(MAX_SECRETS),
+  })
+  .strict();
+// PUT /api/secrets/:name body. `value` is optional so a policy-only update
+// (changing envVar/programs) doesn't require re-entering the secret.
+export const secretSetInputSchema = z
+  .object({
+    envVar: secretEnvVarSchema,
+    programs: z.array(secretProgramSchema).max(MAX_SECRET_PROGRAMS),
+    value: z.string().min(1).max(MAX_SECRET_VALUE_LENGTH).optional(),
+  })
+  .strict();
+export const secretsFileSchema = z
+  .object({
+    version: z.literal(SECRETS_FILE_VERSION),
+    secrets: z.array(secretEntrySchema).max(MAX_SECRETS),
   })
   .strict();
 

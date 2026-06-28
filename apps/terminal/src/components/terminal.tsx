@@ -62,6 +62,7 @@ import { PortsButton } from "@/components/ports-menu";
 import { PortsModal } from "@/components/ports-modal";
 import { QrButton } from "@/components/qr-button";
 import { QrModal } from "@/components/qr-modal";
+import { SecretsModal } from "@/components/secrets-modal";
 import { SessionsButton } from "@/components/sessions-menu";
 import { SessionsModal } from "@/components/sessions-modal";
 import { SettingsMenu } from "@/components/settings-menu";
@@ -370,6 +371,7 @@ export const Terminal = () => {
   const [isWorktreesOpen, setIsWorktreesOpen] = useState(false);
   const [worktreeCreateError, setWorktreeCreateError] = useState<string | null>(null);
   const [isPortsOpen, setIsPortsOpen] = useState(false);
+  const [isSecretsOpen, setIsSecretsOpen] = useState(false);
   const openWorktreesRef = useRef<(() => void) | null>(null);
   const toggleWorktreesRef = useRef<(() => void) | null>(null);
   const togglePortsRef = useRef<(() => void) | null>(null);
@@ -2673,6 +2675,7 @@ export const Terminal = () => {
                     onNotificationsPermissionRequest={handleNotificationsPermissionRequest}
                     sessionInfo={sessionInfo}
                     onPopoverOpenChange={handleSettingsPopoverOpenChange}
+                    onSecretsOpen={() => setIsSecretsOpen(true)}
                     onClose={refocusTerminalRef.current ?? undefined}
                   />
                   <Button
@@ -2909,6 +2912,8 @@ export const Terminal = () => {
         isTouchDevice={isTouchDevice}
         onClose={() => handlePortsOpenChange(false)}
       />
+
+      <SecretsModal open={isSecretsOpen} onClose={() => setIsSecretsOpen(false)} />
 
       <QrModal
         open={isQrOpen}

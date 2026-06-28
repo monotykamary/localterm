@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { serverToClientMessageSchema } from "../src/schemas.js";
 import { Session } from "../src/session.js";
 import { terminalQueryResponder } from "../src/utils/terminal-query-responder.js";
@@ -313,4 +315,46 @@ describe("Session", () => {
       session.dispose();
     }
   }, 15_000);
+
+  it("prepends the secrets shims dir to PATH after the user's rc files", async () => {
+    // zsh-only; skip where zsh is absent. Verifies the Session threads the
+    // shimsDir from spawn input into the shell hook, which prepends it AFTER
+    // the user's .zshrc runs (so the shims reliably shadow the real binaries
+    // despite rc PATH manipulation). The prepend is gated on the dir existing.
+    if (!existsSync("/bin/zsh")) return;
+    const shimsDir = mkdtempSync(path.join(os.tmpdir(), "localterm-shim-path-"));
+    try {
+      const session = new Session({ shell: "/bin/zsh", shimsDir });
+      try {
+        // Wait specifically for the result marker (not a fixed stable window) so a
+        // slow shell can't make the collector resolve between the input echo
+        // (literal `${PATH}`) and the expanded result. [^$] skips the input
+        // echo; only the expanded result has no `$` between the markers.
+        const waitMarker = new Promise<string>((resolve, reject) => {
+          let buffer = "";
+          const timer = setTimeout(() => {
+            session.off("output", onData);
+            reject(new Error("PATH marker timeout"));
+          }, 15_000);
+          const onData = (chunk: string) => {
+            buffer += chunk;
+            const match = /XPATHX([^$]*?)XENDX/.exec(buffer);
+            if (match) {
+              clearTimeout(timer);
+              session.off("output", onData);
+              resolve(match[1]);
+            }
+          };
+          session.on("output", onData);
+        });
+        session.write('echo "XPATHX${PATH}XENDX"\r');
+        const pathValue = await waitMarker;
+        expect(pathValue.startsWith(`${shimsDir}:`)).toBe(true);
+      } finally {
+        session.dispose();
+      }
+    } finally {
+      rmSync(shimsDir, { recursive: true, force: true });
+    }
+  }, 20_000);
 });

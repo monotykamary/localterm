@@ -125,6 +125,10 @@ export const QR_MODAL_CLOSE_TRANSITION_MS = 150;
 // Edge length (px) of the rendered share-QR canvas — large enough to scan from
 // a phone, small enough to fit the modal.
 export const QR_CODE_SIZE_PX = 200;
+// Per-program secret injection manager. Close-transition mirrors the other
+// palette-style overlays; max height keeps the list scrollable on a phone.
+export const SECRETS_MODAL_CLOSE_TRANSITION_MS = 150;
+export const SECRETS_MODAL_MAX_HEIGHT_PX = 520;
 // Quiet-zone margin (QR modules) around the share QR so cameras lock on
 // without edge bleed.
 export const QR_CODE_MARGIN_MODULES = 2;

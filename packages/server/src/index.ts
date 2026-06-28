@@ -37,7 +37,10 @@ import {
   HTTP_STATUS_CREATED,
   HTTP_STATUS_NOT_FOUND,
   MAX_AUTOMATIONS,
+  MAX_SECRETS,
   MS_PER_MINUTE,
+  SECRETS_FILENAME,
+  SECRETS_SHIMS_DIRNAME,
   SERVER_STOP_GRACE_MS,
   SESSION_ID_QUERY_PARAM,
   WS_BACKPRESSURE_THRESHOLD_BYTES,
@@ -65,6 +68,9 @@ import {
   type GitDiffOptions,
 } from "./git-diff.js";
 import { HeartbeatStore } from "./heartbeat-store.js";
+import { createDefaultSecretBackend, type SecretBackend } from "./secret-backend.js";
+import { SecretStore } from "./secret-store.js";
+import { regenerateShims } from "./secret-shims.js";
 import { parseCronExpression } from "./cron-expression.js";
 import { createGitWorktree, listGitWorktrees, removeGitWorktree } from "./git-worktrees.js";
 import {
@@ -79,6 +85,8 @@ import {
   createWorktreeInputSchema,
   launchInputSchema,
   resetAutomationInputSchema,
+  secretEntrySchema,
+  secretSetInputSchema,
   updateAutomationInputSchema,
   updateWorktreeConfigInputSchema,
   worktreeIncludeFileInputSchema,
@@ -159,6 +167,12 @@ export interface ServerOptions {
    * power assertion.
    */
   caffeinateController?: CaffeinateController;
+  /**
+   * Override the per-program secret backend (macOS Keychain by default).
+   * Injectable so tests can drive secret storage without touching the real
+   * Keychain.
+   */
+  secretBackend?: SecretBackend;
   /**
    * Override how automatic-mode keep-awake inspects running processes. Defaults
    * to a real `ps` snapshot. Injectable so tests can drive automatic detection
@@ -287,7 +301,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // may attach to one PTY and fan out output/resize to all of them. The hooks
   // close over managers defined further below; they only fire at runtime
   // (attach/detach/output/exit), so referencing the later consts here is safe.
+  const stateDirectory = options.stateDirectory ?? path.join(os.homedir(), ".localterm");
+  const shimsDir = path.join(stateDirectory, SECRETS_SHIMS_DIRNAME);
   const registry = new SessionManager({
+    shimsDir,
     sendControl: safeSend,
     hooks: {
       onOutputActivity: () => caffeinateManager.noteOutputActivity(),
@@ -318,7 +335,6 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
   wss.options.maxPayload = 256 * 1024;
 
-  const stateDirectory = options.stateDirectory ?? path.join(os.homedir(), ".localterm");
   const automationStore = new AutomationStore(path.join(stateDirectory, "automations.json"));
   const automationRunTracker = new AutomationRunTracker();
   const automationScheduler = new AutomationScheduler(automationStore);
@@ -362,6 +378,18 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     path.join(stateDirectory, "caffeinate.json"),
   );
   const worktreeConfigStore = new WorktreeConfigStore(stateDirectory);
+  // Per-program secret injection: a backend (macOS Keychain on darwin) holds
+  // secret values; the policy (names + env var + programs, no values) lives in
+  // ~/.localterm/secrets.json. The daemon generates a PATH shim per program in
+  // ~/.localterm/shims; localterm's shell hook prepends the shims dir so the
+  // shims shadow the real binaries and inject the secret(s) at exec time.
+  const secretBackend = options.secretBackend ?? createDefaultSecretBackend();
+  const secretStore = new SecretStore({
+    filePath: path.join(stateDirectory, SECRETS_FILENAME),
+    shimsDir,
+  });
+  const syncSecretShims = () => regenerateShims(secretStore.list(), shimsDir, secretBackend);
+  syncSecretShims();
   const caffeinateManager = new CaffeinateManager({
     controller: caffeinateController,
     store: caffeinatePreferencesStore,
@@ -636,6 +664,86 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   api.delete("/sessions/:id", (context) => {
     const killed = registry.kill(context.req.param("id"));
     if (!killed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json({ ok: true });
+  });
+
+  // Per-program secret injection. The policy (which programs get which secret
+  // as which env var) is served as names only — VALUES are never returned over
+  // the network. The `/api/*` surface is gated by a network-origin check
+  // (loopback/tailnet), not a capability check, so serving values here would
+  // make them readable by any local process via curl. Values live in the
+  // backend (Keychain) and reach a program only through its generated shim at
+  // exec time. `hasValue` is probed from the backend so the UI can show
+  // whether a value is set without ever reading it into the response.
+  api.get("/secrets", async (context) => {
+    const entries = secretStore.list();
+    const withHasValue = await Promise.all(
+      entries.map(async (entry) => ({
+        name: entry.name,
+        envVar: entry.envVar,
+        programs: entry.programs,
+        hasValue: await secretBackend.has(entry.name),
+      })),
+    );
+    return context.json({ supported: secretBackend.supported, shimsDir, secrets: withHasValue });
+  });
+
+  api.put("/secrets/:name", async (context) => {
+    if (!secretBackend.supported) {
+      return context.json({ error: "unsupported" }, HTTP_STATUS_CONFLICT);
+    }
+    const name = context.req.param("name");
+    const nameParse = secretEntrySchema.shape.name.safeParse(name);
+    if (!nameParse.success) {
+      return context.json({ error: "invalid_name" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const parsed = secretSetInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) {
+      return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const existing = secretStore.get(name);
+    if (secretStore.list().length >= MAX_SECRETS && !existing) {
+      return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
+    }
+    if (parsed.data.value !== undefined) {
+      try {
+        await secretBackend.set(name, parsed.data.value);
+      } catch {
+        return context.json({ error: "backend" }, HTTP_STATUS_CONFLICT);
+      }
+    } else if (!existing) {
+      // Creating a new secret without a value leaves a policy row with nothing
+      // to inject; reject so the UI doesn't show a secret that never works.
+      return context.json({ error: "value_required" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const stored = secretStore.upsert({
+      name,
+      envVar: parsed.data.envVar,
+      programs: parsed.data.programs,
+    });
+    if (!stored) {
+      return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
+    }
+    syncSecretShims();
+    const hasValue = await secretBackend.has(name);
+    return context.json({
+      name: stored.name,
+      envVar: stored.envVar,
+      programs: stored.programs,
+      hasValue,
+    });
+  });
+
+  api.delete("/secrets/:name", async (context) => {
+    const name = context.req.param("name");
+    const nameParse = secretEntrySchema.shape.name.safeParse(name);
+    if (!nameParse.success) {
+      return context.json({ error: "invalid_name" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const removed = secretStore.delete(name);
+    if (!removed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    await secretBackend.delete(name);
+    syncSecretShims();
     return context.json({ ok: true });
   });
 

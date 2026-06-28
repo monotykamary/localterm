@@ -89,6 +89,10 @@ export {
   sessionsListResponseSchema,
   sessionActivityStateSchema,
   updateAutomationInputSchema,
+  secretEntrySchema,
+  secretEntryResponseSchema,
+  secretsListResponseSchema,
+  secretSetInputSchema,
 } from "./schemas.js";
 export type {
   Automation,
@@ -106,6 +110,10 @@ export type {
   CdpHealth,
   ClientToServerMessage,
   CreateAutomationInput,
+  SecretEntry,
+  SecretEntryResponse,
+  SecretsListResponse,
+  SecretSetInput,
   GitBaseSource,
   GitBranchInfo,
   GitBranchPr,

@@ -53,6 +53,10 @@ import type {
   sessionActivityStateSchema,
   triggerInputSchema,
   updateAutomationInputSchema,
+  secretEntrySchema,
+  secretEntryResponseSchema,
+  secretsListResponseSchema,
+  secretSetInputSchema,
 } from "./schemas.js";
 
 export interface SpawnPtyInput {
@@ -62,6 +66,11 @@ export interface SpawnPtyInput {
   cwd?: string;
   env?: Record<string, string>;
   initialCommand?: string;
+  // Directory of the per-program secret shims. The shell hook prepends it to PATH
+  // so the shims shadow the real binaries. Threaded from the daemon's actual
+  // stateDirectory (not a hardcoded home path) so an overridden stateDirectory
+  // keeps the hook and the generated shims in sync.
+  shimsDir?: string;
 }
 
 export interface PendingAutomationRun {
@@ -77,6 +86,11 @@ export type ServerToClientMessage = z.infer<typeof serverToClientMessageSchema>;
 
 export type CaffeinateMode = z.infer<typeof caffeinateModeSchema>;
 export type CdpHealth = z.infer<typeof cdpHealthSchema>;
+
+export type SecretEntry = z.infer<typeof secretEntrySchema>;
+export type SecretEntryResponse = z.infer<typeof secretEntryResponseSchema>;
+export type SecretsListResponse = z.infer<typeof secretsListResponseSchema>;
+export type SecretSetInput = z.infer<typeof secretSetInputSchema>;
 
 export type AutomationLastRunStatus = z.infer<typeof automationLastRunStatusSchema>;
 export type AutomationLastRun = z.infer<typeof automationLastRunSchema>;
