@@ -2524,6 +2524,8 @@ export const Terminal = () => {
               className={cn(
                 "mt-1 flex max-w-[calc(100dvw-1.5rem)] items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md",
                 "transition-[opacity,transform] duration-200 ease-snappy",
+                isTouchDevice &&
+                  "overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                 isToolbarVisible || hasToolbarIndicator || isTouchDevice
                   ? "translate-y-0 opacity-100"
                   : "pointer-events-none -translate-y-1 opacity-0",
@@ -2546,7 +2548,8 @@ export const Terminal = () => {
                   on hover via the 0fr -> 1fr grid-column transition. */}
               <div
                 className={cn(
-                  "grid min-w-0",
+                  "grid",
+                  isTouchDevice ? "shrink-0" : "min-w-0",
                   (hasToolbarIndicator || isTouchDevice) &&
                     "transition-[grid-template-columns] duration-200 ease-snappy",
                   isTouchDevice
