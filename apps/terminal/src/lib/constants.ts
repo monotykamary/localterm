@@ -145,6 +145,10 @@ export const SECRETS_MODAL_MAX_HEIGHT_PX = 520;
 // transition has a floor to grow from — mirrors the ports/sessions/worktrees
 // modals' message-block reservation.
 export const SECRETS_BODY_MIN_HEIGHT_PX = 112;
+// Estimated height of a secret row (icon + name + env var + program-tag line);
+// the virtualizer corrects each row to its measured height, so this only
+// sizes the first paint before measurement.
+export const SECRETS_LIST_ROW_HEIGHT_PX = 64;
 // Quiet-zone margin (QR modules) around the share QR so cameras lock on
 // without edge bleed.
 export const QR_CODE_MARGIN_MODULES = 2;

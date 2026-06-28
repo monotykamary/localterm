@@ -1,5 +1,6 @@
 import { Key, Pencil, Plus, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
@@ -10,6 +11,7 @@ import {
 } from "@/lib/animation-classes";
 import {
   SECRETS_BODY_MIN_HEIGHT_PX,
+  SECRETS_LIST_ROW_HEIGHT_PX,
   SECRETS_MODAL_CLOSE_TRANSITION_MS,
   SECRETS_MODAL_MAX_HEIGHT_PX,
 } from "@/lib/constants";
@@ -152,9 +154,9 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   const [deletingName, setDeletingName] = useState<string | null>(null);
   const [armedDeleteName, setArmedDeleteName] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const bodyInnerRef = useRef<HTMLDivElement | null>(null);
-  const [bodyHeight, setBodyHeight] = useState(SECRETS_BODY_MIN_HEIGHT_PX);
-  const listId = useId();
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [staticHeight, setStaticHeight] = useState(0);
 
   const refresh = useCallback(async () => {
     const fetched = await fetchSecrets();
@@ -197,24 +199,36 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
     void refresh();
   }, [open, refresh]);
 
-  // Measure the loaded body's natural height and transition to it so the panel
-  // expands smoothly from the loading reserve to the list (and re-expands when
-  // the form opens) instead of snapping in — mirrors the ports/sessions/
-  // worktrees height-reserved body. Measured (not computed from a row constant)
-  // because secret rows are variable-height (program tags wrap) and the form is
-  // inline. `useEffect` (after paint) so the reserve height paints first and the
-  // height transition has a start point; `scrollHeight` is layout-based so the
-  // concurrent fade-in doesn't skew the measure.
+  const secretsList = secrets ?? [];
+  const virtualizer = useVirtualizer({
+    count: secretsList.length,
+    getScrollElement: () => listScrollRef.current,
+    estimateSize: () => SECRETS_LIST_ROW_HEIGHT_PX,
+    overscan: 8,
+    getItemKey: (index) => secretsList[index].name,
+  });
+
+  // The list is virtualized with an explicit pixel height (the virtualizer's
+  // total), so the body height is computed: staticHeight + list total. The
+  // static content around the list — intro, unsupported banner, inline form,
+  // empty state — is variable-height, so it's measured here. The fade-in
+  // container holds both the static content and the list, so its scrollHeight
+  // is static + list total; subtracting the list total yields the static
+  // height. This mirrors the ports/sessions/worktrees height-reserved body:
+  // the panel opens at the reserve, then transitions to the computed height
+  // (and re-expands when the form opens) instead of snapping. `useEffect`
+  // (after paint) so the reserve paints first and the transition has a start
+  // point; `scrollHeight` is layout-based so the concurrent fade-in doesn't
+  // skew the measure.
   useEffect(() => {
-    if (hasError) {
-      setBodyHeight(SECRETS_BODY_MIN_HEIGHT_PX);
+    if (hasError || secrets === null) {
+      setStaticHeight(0);
       return;
     }
-    if (secrets === null) return;
-    const el = bodyInnerRef.current;
+    const el = contentRef.current;
     if (!el) return;
-    setBodyHeight(el.scrollHeight);
-  }, [secrets, hasError, supported, form, formError]);
+    setStaticHeight(el.scrollHeight - virtualizer.getTotalSize());
+  }, [secrets, hasError, supported, form, formError, virtualizer]);
 
   // Escape closes (mirrors the other palette overlays); a visible form cancels
   // back to the list first so an accidental esc doesn't drop unsaved edits
@@ -308,6 +322,11 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   if (!mounted) return null;
   const isVisible = open && settled;
   const isEditing = form !== null && form.originalName !== null;
+  const listTotal = secrets && !hasError ? virtualizer.getTotalSize() : 0;
+  const bodyHeight =
+    hasError || secrets === null || staticHeight === 0
+      ? SECRETS_BODY_MIN_HEIGHT_PX
+      : Math.max(SECRETS_BODY_MIN_HEIGHT_PX, staticHeight + listTotal);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]">
@@ -358,11 +377,10 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
         </div>
 
         <div
-          id={listId}
-          className="flex-1 overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          ref={listScrollRef}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           <div
-            ref={bodyInnerRef}
             className="relative overflow-hidden transition-[height] duration-150 ease-snappy"
             style={{ height: bodyHeight }}
           >
@@ -374,7 +392,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                 </Button>
               </div>
             ) : secrets === null ? null : (
-              <div className="animate-in fade-in-0 duration-150 ease-snappy">
+              <div ref={contentRef} className="animate-in fade-in-0 duration-150 ease-snappy">
                 <div className="px-2.5 pb-2 pt-1 text-[11px] leading-relaxed text-muted-foreground/60">
                   Stored in your macOS Keychain — never on disk. localterm injects a secret only
                   into the programs listed on its row, via a PATH shim, so{" "}
@@ -483,7 +501,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                   </div>
                 ) : null}
 
-                {secrets.length === 0 && !form ? (
+                {secretsList.length === 0 && !form ? (
                   <div className="flex flex-col items-center justify-center gap-2 px-2.5 py-6 text-center text-sm text-muted-foreground/70">
                     No secrets yet.
                     {supported ? (
@@ -493,18 +511,44 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                       </Button>
                     ) : null}
                   </div>
-                ) : (
-                  secrets.map((secret) => (
-                    <SecretRow
-                      key={secret.name}
-                      secret={secret}
-                      onEdit={() => startEdit(secret)}
-                      onTrashClick={() => handleTrashClick(secret.name)}
-                      isArmed={armedDeleteName === secret.name}
-                      isDeleting={deletingName === secret.name}
-                    />
-                  ))
-                )}
+                ) : null}
+                {secretsList.length > 0 ? (
+                  <div
+                    style={{
+                      height: `${virtualizer.getTotalSize()}px`,
+                      width: "100%",
+                      position: "relative",
+                    }}
+                  >
+                    {virtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
+                      const secret = secretsList[virtualRow.index];
+                      return (
+                        <div
+                          key={secret.name}
+                          ref={virtualizer.measureElement}
+                          data-index={virtualRow.index}
+                          style={
+                            {
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              width: "100%",
+                              transform: `translateY(${virtualRow.start}px)`,
+                            } satisfies CSSProperties
+                          }
+                        >
+                          <SecretRow
+                            secret={secret}
+                            onEdit={() => startEdit(secret)}
+                            onTrashClick={() => handleTrashClick(secret.name)}
+                            isArmed={armedDeleteName === secret.name}
+                            isDeleting={deletingName === secret.name}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
