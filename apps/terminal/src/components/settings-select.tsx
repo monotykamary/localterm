@@ -80,6 +80,7 @@ export const SettingsSelect = ({
       onValueChange={onValueChange}
       open={isOpen}
       onOpenChange={handleOpenChange}
+      modal={false}
     >
       <SelectTrigger
         size="sm"
