@@ -24,6 +24,15 @@ export class AutomationRunTracker {
     return run;
   }
 
+  // Attach resolved secret env to a pending run after the async backend
+  // resolution settles. No-op if the run was already claimed (single-use) or
+  // expired — the env is only consumed by `claim()` at WS spawn time.
+  setEnv(runId: string, env: Record<string, string>): void {
+    const run = this.pendingRuns.get(runId);
+    if (!run) return;
+    run.env = env;
+  }
+
   sweepExpired(now: number = Date.now()): PendingAutomationRun[] {
     const expired: PendingAutomationRun[] = [];
     for (const run of this.pendingRuns.values()) {

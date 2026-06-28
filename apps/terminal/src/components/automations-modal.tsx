@@ -7,6 +7,7 @@ import {
   type AutomationSessionEvent,
   type AutomationWithNextRun,
   type CdpHealth,
+  type SecretEntryResponse,
 } from "@monotykamary/localterm-server/protocol";
 import {
   CalendarClock,
@@ -36,6 +37,7 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { EventTriggerSelector } from "@/components/event-trigger-selector";
+import { SecretSelector } from "@/components/secret-selector";
 import { NumberStepper } from "@/components/number-stepper";
 import { SettingsSelect } from "@/components/settings-select";
 import {
@@ -59,6 +61,7 @@ import { computeAutomationsHeaderLayout } from "@/utils/compute-automations-head
 import { createAutomation } from "@/utils/create-automation";
 import { deleteAutomation } from "@/utils/delete-automation";
 import { fetchAutomations } from "@/utils/fetch-automations";
+import { fetchSecrets } from "@/utils/fetch-secrets";
 import { fetchServerHealth, type ServerHealth } from "@/utils/fetch-server-health";
 import { formatRelativeTime } from "@/utils/format-relative-time";
 import { resetAutomation } from "@/utils/reset-automation";
@@ -111,6 +114,7 @@ interface AutomationFormState {
   limitMode: "forever" | "count";
   limitMax: number;
   closeOnFinish: boolean;
+  requestedSecrets: string[];
 }
 
 const DEFAULT_LIMIT_MAX = 20;
@@ -135,6 +139,7 @@ const emptyForm = (defaultCwd: string | null): AutomationFormState => ({
   limitMode: "forever",
   limitMax: DEFAULT_LIMIT_MAX,
   closeOnFinish: false,
+  requestedSecrets: [],
 });
 
 const formForAutomation = (automation: AutomationWithNextRun): AutomationFormState => {
@@ -153,6 +158,7 @@ const formForAutomation = (automation: AutomationWithNextRun): AutomationFormSta
     limitMode: automation.limit.kind === "count" ? "count" : "forever",
     limitMax: automation.limit.kind === "count" ? automation.limit.max : DEFAULT_LIMIT_MAX,
     closeOnFinish: automation.closeOnFinish,
+    requestedSecrets: automation.requestedSecrets,
   };
 };
 
@@ -495,6 +501,7 @@ export const AutomationsModal = ({
   const [search, setSearch] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [cdpHealth, setCdpHealth] = useState<ServerHealth | null>(null);
+  const [secrets, setSecrets] = useState<SecretEntryResponse[] | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
   const contentRowRef = useRef<HTMLDivElement | null>(null);
@@ -510,6 +517,11 @@ export const AutomationsModal = ({
   const refreshCdpHealth = useCallback(async () => {
     const fetched = await fetchServerHealth();
     if (fetched) setCdpHealth(fetched);
+  }, []);
+
+  const refreshSecrets = useCallback(async () => {
+    const fetched = await fetchSecrets();
+    if (fetched) setSecrets(fetched.secrets);
   }, []);
 
   useEffect(() => {
@@ -539,12 +551,13 @@ export const AutomationsModal = ({
     setNowMs(Date.now());
     void refreshAutomations();
     void refreshCdpHealth();
+    void refreshSecrets();
     const tick = window.setInterval(
       () => setNowMs(Date.now()),
       AUTOMATIONS_RELATIVE_TIME_REFRESH_MS,
     );
     return () => window.clearInterval(tick);
-  }, [open, refreshAutomations, refreshCdpHealth]);
+  }, [open, refreshAutomations, refreshCdpHealth, refreshSecrets]);
 
   // Keep a valid selection across refreshes, falling back to the first item.
   useEffect(() => {
@@ -716,6 +729,7 @@ export const AutomationsModal = ({
           ? ({ kind: "count", max: form.limitMax } as const)
           : ({ kind: "forever" } as const),
       closeOnFinish: form.closeOnFinish,
+      requestedSecrets: form.requestedSecrets,
     };
     const saved = form.id ? await updateAutomation(form.id, input) : await createAutomation(input);
     setIsSaving(false);
@@ -953,6 +967,7 @@ export const AutomationsModal = ({
                     nextPreviewAt={nextPreviewAt}
                     nowMs={nowMs}
                     cdp={cdpHealth?.cdp ?? null}
+                    secrets={secrets}
                   />
                 ) : selected ? (
                   <AutomationDetail
@@ -1209,6 +1224,7 @@ const AutomationForm = ({
   nextPreviewAt,
   nowMs,
   cdp,
+  secrets,
 }: {
   form: AutomationFormState;
   onChange: (next: AutomationFormState) => void;
@@ -1222,6 +1238,7 @@ const AutomationForm = ({
   nextPreviewAt: number | null;
   nowMs: number;
   cdp: CdpHealth;
+  secrets: SecretEntryResponse[] | null;
 }) => {
   // closeOnFinish only takes effect over CDP (the daemon closes the run tab via
   // Target.closeTarget). With no connected browser it's a silent no-op, so the
@@ -1422,6 +1439,28 @@ const AutomationForm = ({
           disabled={closeOnFinishDisabled}
           onCheckedChange={(closeOnFinish) => onChange({ ...form, closeOnFinish })}
         />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className={SECTION_LABEL_CLASSES}>Secrets to expose</span>
+        {secrets === null ? (
+          <span className="text-[10px] text-muted-foreground/60">Loading secrets…</span>
+        ) : secrets.length === 0 ? (
+          <span className="text-[10px] text-muted-foreground/60">
+            No secrets configured. Add them in the secrets menu.
+          </span>
+        ) : (
+          <SecretSelector
+            selected={form.requestedSecrets}
+            options={secrets}
+            onChange={(requestedSecrets) => onChange({ ...form, requestedSecrets })}
+          />
+        )}
+        <span className="text-[10px] text-muted-foreground/60">
+          Selected secrets are injected as environment variables when this automation runs. Values
+          are resolved from the Keychain into the run’s environment and never travel over the
+          network. A secret deleted after you select it is skipped at run time.
+        </span>
       </div>
 
       {saveError ? (

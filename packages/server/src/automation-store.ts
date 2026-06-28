@@ -53,6 +53,7 @@ const migrateV1Automation = (v1: AutomationV1): Automation => {
     enabled: v1.enabled,
     limit: { kind: "forever" },
     closeOnFinish: false,
+    requestedSecrets: [],
     runCount: 0,
     lifecycle: "active",
     runs,
@@ -65,7 +66,7 @@ const migrateV1Automation = (v1: AutomationV1): Automation => {
 // schedule trigger; everything else carries over unchanged.
 const migrateV2Automation = (v2: AutomationV2): Automation => {
   const { schedule, ...rest } = v2;
-  return { ...rest, trigger: { kind: "schedule", schedule } };
+  return { ...rest, trigger: { kind: "schedule", schedule }, requestedSecrets: [] };
 };
 
 export class AutomationStore {
@@ -110,6 +111,7 @@ export class AutomationStore {
       enabled: input.enabled ?? true,
       limit: input.limit ?? { kind: "forever" },
       closeOnFinish: input.closeOnFinish ?? false,
+      requestedSecrets: input.requestedSecrets ?? [],
       runCount: 0,
       lifecycle: "active",
       runs: [],
@@ -140,6 +142,7 @@ export class AutomationStore {
       ...(patch.command !== undefined ? { command: patch.command } : {}),
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
       ...(patch.closeOnFinish !== undefined ? { closeOnFinish: patch.closeOnFinish } : {}),
+      ...(patch.requestedSecrets !== undefined ? { requestedSecrets: patch.requestedSecrets } : {}),
       limit,
       lifecycle,
       updatedAt: Date.now(),

@@ -79,6 +79,11 @@ export interface PendingAutomationRun {
   cwd: string;
   command: string;
   createdAt: number;
+  // Secret env vars resolved from the backend at launch time, injected into
+  // the run's PTY at spawn. Populated after `create()` once resolution settles;
+  // empty/undefined until then. Carried on the run (not resolved at claim
+  // time) because the WS `onOpen` spawn path is synchronous.
+  env?: Record<string, string>;
 }
 
 export type ClientToServerMessage = z.infer<typeof clientToServerMessageSchema>;

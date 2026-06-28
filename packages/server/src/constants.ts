@@ -93,6 +93,9 @@ export const MAX_SECRET_ENV_VAR_LENGTH = 64;
 export const MAX_SECRET_PROGRAMS = 32;
 export const MAX_SECRET_PROGRAM_LENGTH = 128;
 export const MAX_SECRET_VALUE_LENGTH = 8192;
+// Upper bound on the per-automation requested-secrets list. An automation names
+// exactly which secrets it needs; values are resolved from the backend and
+// injected into the run's PTY env at spawn, never over HTTP.
 // `security` is always at /usr/bin/security on darwin; baking the absolute path
 // into the generated shim means the shim doesn't depend on PATH lookup.
 export const SECURITY_BINARY_PATH = "/usr/bin/security";
@@ -383,6 +386,7 @@ export const MAX_AUTOMATIONS = 100;
 export const MAX_AUTOMATION_NAME_LENGTH = 120;
 export const MAX_AUTOMATION_COMMAND_LENGTH = 4096;
 export const MAX_CRON_EXPRESSION_LENGTH = 256;
+export const MAX_AUTOMATION_REQUESTED_SECRETS = 32;
 // v1 stored a raw cron string + a single lastRun. v2 stores a structured
 // schedule (with a derived cron computed on the fly), a run-count limit, a
 // lifecycle, and a capped run-history array. v3 wraps the schedule in a

@@ -10,6 +10,10 @@ Per-program secret injection. API keys live in the macOS Keychain (never plainte
 
 The `/api/*` surface is gated by a **network-origin** check (loopback/tailnet), not a capability check — any local process can reach it via `curl`. So the daemon **never** returns secret values over HTTP. The list response carries `hasValue` (probed from the Keychain without reading the value into memory) so a UI can show "set / no value" without ever exposing the secret. To read a value, use the CLI's `get` (which resolves from the Keychain directly, not the API) or the generated shim.
 
+The one place values _do_ reach a process other than the shimmed binary is **automations**: an automation may name secrets it needs, and the daemon resolves them into the run's PTY environment at spawn. This preserves the property above — the value goes Keychain → daemon → PTY env, never over HTTP. See [Automation secret exposure](#automation-secret-exposure) below.
+
+### Automation secret exposure
+
 ### Endpoints
 
 ```bash
@@ -92,6 +96,38 @@ exec "$_real" "$@"
 ```
 
 localterm's zsh/bash shell hook prepends the shims dir to PATH **after** the user's rc files run (so a later `export PATH=/opt/homebrew/bin:$PATH` in `.zshrc` can't shadow the shim), and strips the shims dir before resolving the real binary (no recursion). The secret exists only in the shimmed process's env, not the parent shell — `ls` in the same tab never sees `ANTHROPIC_API_KEY`.
+
+### Automation secret exposure
+
+Automations type an arbitrary shell `command` into a tab, so a secret in that tab's env can be exfiltrated. Exposure is therefore **per-automation, opt-in, and least-privilege**: each automation names exactly the secrets it needs via `requestedSecrets` (a list of secret **names** — the stable identifier, not the env var), and only those resolve into the run's PTY environment. An automation with `requestedSecrets: []` (the default) gets no secrets; a command alone can never reach a key the automation didn't explicitly request.
+
+Resolution happens at **launch time**, not claim time: when a run fires (schedule/watch/event/webhook/manual), the daemon resolves each named secret from the Keychain in parallel and stores the env on the pending run _before_ it opens the run tab. The WS that claims the run is therefore guaranteed to see the resolved env, and the synchronous spawn path just passes it through. Resolution is fail-closed on both ends:
+
+- **At create/update** — unknown secret names (typos, or deleted-before-you-saved) are rejected with `400 {"error":"invalid_secret"}`.
+- **At run time** — a name deleted after the automation was authored, or a secret with no value (locked Keychain / never set), is silently skipped; it never clobbers a pre-existing env var with an empty string.
+
+Values flow Keychain → daemon → PTY env and never cross the HTTP surface, so the network-origin gate on `/api/*` is not widened. The env lives only in the run's shell process (and its children, e.g. `node scripts/update-models.js`), not the parent daemon or any other tab.
+
+```bash
+# Grant an automation the keys it needs (names from `localterm secret list`)
+curl -s -X POST "$BASE/automations" \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "update all provider models",
+    "trigger": { "kind": "schedule", "schedule": { "kind": "daily", "hour": 2, "minute": 0 } },
+    "cwd": "/Users/me/open-source",
+    "command": "bash update-all-models.sh",
+    "requestedSecrets": ["neuralwatt_api_key","deepseek_api_key","moonshot_api_key"]
+  }'
+
+# Add or remove a secret from an existing automation (PATCH is replace-semantics
+# for the whole list — send the complete set you want)
+curl -s -X PATCH "$BASE/automations/<id>" \
+  -H 'content-type: application/json' \
+  -d '{ "requestedSecrets": ["neuralwatt_api_key","deepseek_api_key"] }'
+```
+
+A requested secret is resolved to its policy `envVar`, so renaming a secret's env var doesn't break automations that name it — only deleting the secret (by name) does, and that surfaces as a skipped var at run time, not a crash.
 
 ## Sessions
 

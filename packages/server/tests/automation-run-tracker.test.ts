@@ -12,6 +12,7 @@ const automation: Automation = {
   enabled: true,
   limit: { kind: "forever" },
   closeOnFinish: false,
+  requestedSecrets: [],
   runCount: 0,
   lifecycle: "active",
   runs: [],
@@ -41,6 +42,22 @@ describe("AutomationRunTracker", () => {
   it("returns null for unknown run ids", () => {
     const tracker = new AutomationRunTracker();
     expect(tracker.claim("missing")).toBeNull();
+  });
+
+  it("attaches secret env to a pending run that claim then surfaces", () => {
+    const tracker = new AutomationRunTracker();
+    const run = tracker.create(automation);
+    tracker.setEnv(run.runId, { NEURALWATT_API_KEY: "secret" });
+    expect(tracker.claim(run.runId)?.env).toEqual({ NEURALWATT_API_KEY: "secret" });
+  });
+
+  it("does not attach env to a run that was already claimed", () => {
+    const tracker = new AutomationRunTracker();
+    const run = tracker.create(automation);
+    tracker.claim(run.runId);
+    tracker.setEnv(run.runId, { NEURALWATT_API_KEY: "secret" });
+    // single-use: setEnv is a silent no-op after claim
+    expect(tracker.claim(run.runId)).toBeNull();
   });
 
   it("sweeps only expired runs", () => {

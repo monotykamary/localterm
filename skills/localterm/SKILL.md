@@ -42,7 +42,7 @@ don't depend on which surface the browser happens to use.
 
 ## Automations
 
-An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
+An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish, requestedSecrets}`:
 
 - `trigger` — what makes the automation run, a tagged union on `kind`:
   - `{kind:"schedule", schedule}` — time-based (the common case; `daily` is shown in the create examples below).
@@ -62,6 +62,7 @@ An automation is `{name, trigger, cwd, command, enabled, limit, closeOnFinish}`:
   history. Scheduled, watch, and event runs count toward the limit; manual `/run` never
   does.
 - `closeOnFinish` — defaults to `false` (the tab stays open). When `true`, the run's browser tab is closed once the command finishes. Only honored for CDP-opened tabs; silent no-op on the OS-opener fallback.
+- `requestedSecrets` — defaults to `[]` (the run gets no secrets). A list of secret **names** (by stable identifier, not env var) whose values are resolved from the Keychain and injected as env vars into the run's PTY at spawn. Per-automation, opt-in least-privilege: an automation gets exactly the secrets it named, nothing else. Unknown names are rejected at create/update time (catches typos); a name deleted after you selected it is skipped at run time (fail-closed). Values still never cross HTTP — resolution is Keychain → daemon → PTY env. See [references/secrets-sessions.md](references/secrets-sessions.md#automation-secret-exposure).
 
 For run-tab mechanics (background CDP vs. opener fallback, `LOCALTERM_DISABLE_CDP_TABS`), the run-status table (`launched`/`running`/`completed`/`failed`/`missed`/`skipped`), `runs`/`runCount`/`lifecycle`/`lastRun` shape, and `trigger` field values, see [references/run-states.md](references/run-states.md).
 

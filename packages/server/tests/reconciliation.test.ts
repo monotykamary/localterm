@@ -19,6 +19,7 @@ const automationWith = (schedule: AutomationSchedule): Automation => ({
   enabled: true,
   limit: { kind: "forever" },
   closeOnFinish: false,
+  requestedSecrets: [],
   runCount: 0,
   lifecycle: "active",
   runs: [],

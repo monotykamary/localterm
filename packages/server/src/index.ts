@@ -106,6 +106,7 @@ import { compileSchedule, compileScheduleAll } from "./utils/compile-schedule.js
 import { computeNextAutomationRunAt } from "./utils/compute-next-automation-run-at.js";
 import { isLocaltermTabUrl } from "./utils/is-localterm-tab-url.js";
 import { normalizeTriggerInput } from "./utils/normalize-trigger.js";
+import { buildAutomationSecretEnv } from "./utils/build-automation-secret-env.js";
 import { enumerateMissedOccurrences } from "./utils/reconcile-downtime.js";
 import type {
   Automation,
@@ -581,18 +582,37 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       localOrigin ?? publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`,
     );
     runUrl.searchParams.set(AUTOMATION_RUN_QUERY_PARAM, run.runId);
-    void tabController
-      .open(runUrl.href)
-      .then((handle) => {
+    // Resolve requested secrets before opening the run tab so the env is set on
+    // the pending run by the time the WS claims it. The claim happens only after
+    // the browser loads this tab, which is gated on the resolution below, so
+    // `onOpen` always sees the resolved env. The launch stays synchronous up to
+    // here — the pending run + "launched" history are already recorded, so the
+    // `isRunInFlight` overlap guard holds across the await. A secret-resolution
+    // error is logged but does not block the tab (the run still starts, just
+    // without the failed secret).
+    void (async () => {
+      try {
+        const secretEnv = await buildAutomationSecretEnv(
+          automation.requestedSecrets,
+          secretStore,
+          secretBackend,
+        );
+        automationRunTracker.setEnv(run.runId, secretEnv);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`failed to resolve secrets for automation "${automation.name}": ${message}`);
+      }
+      try {
+        const handle = await tabController.open(runUrl.href);
         // Remember the tab so `automation-exit` can close it if closeOnFinish.
         if (handle) runTabHandles.set(run.runId, handle);
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(
           `failed to open a browser tab for automation "${automation.name}": ${message}`,
         );
-      });
+      }
+    })();
     return run;
   };
 
@@ -1128,6 +1148,13 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   api.get("/automations", (context) => context.json({ automations: listAutomationsWithNextRun() }));
 
+  // Returns the requested-secret names that don't exist in the store — used to
+  // reject typos at create/update time so an automation never silently runs
+  // without a key it thinks it has. Names that exist but have no value set are
+  // allowed here (the runtime skips them fail-closed); only unknown names fail.
+  const unknownRequestedSecrets = (names: readonly string[]): string[] =>
+    names.filter((name) => !secretStore.get(name));
+
   api.post("/automations", async (context) => {
     const parsed = createAutomationInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
@@ -1139,6 +1166,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
     if (!resolveCwdQuery(parsed.data.cwd)) {
       return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    if (parsed.data.requestedSecrets !== undefined) {
+      const unknown = unknownRequestedSecrets(parsed.data.requestedSecrets);
+      if (unknown.length > 0)
+        return context.json({ error: "invalid_secret" }, HTTP_STATUS_BAD_REQUEST);
     }
     const automation = automationStore.create(parsed.data);
     broadcastAutomations();
@@ -1158,6 +1190,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
     if (parsed.data.cwd !== undefined && !resolveCwdQuery(parsed.data.cwd)) {
       return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    if (parsed.data.requestedSecrets !== undefined) {
+      const unknown = unknownRequestedSecrets(parsed.data.requestedSecrets);
+      if (unknown.length > 0)
+        return context.json({ error: "invalid_secret" }, HTTP_STATUS_BAD_REQUEST);
     }
     const existing = automationStore.get(context.req.param("id"));
     if (!existing) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
@@ -1341,7 +1378,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               : undefined;
             const spawned = registry.spawnAndAttach(
               ws,
-              { cwd: sessionCwd, initialCommand: claimedRun?.command ?? requestedInitialCommand },
+              {
+                cwd: sessionCwd,
+                initialCommand: claimedRun?.command ?? requestedInitialCommand,
+                env: claimedRun?.env,
+              },
               automation,
             );
             if (!spawned) {

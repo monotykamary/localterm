@@ -8,6 +8,7 @@ import {
   CAFFEINATE_PREFERENCES_FILE_VERSION,
   MAX_AUTOMATION_COMMAND_LENGTH,
   MAX_AUTOMATION_NAME_LENGTH,
+  MAX_AUTOMATION_REQUESTED_SECRETS,
   MAX_AUTOMATION_TIMES_PER_DAY,
   MAX_AUTOMATION_WATCH_FILTER_LENGTH,
   MAX_SECRET_ENV_VAR_LENGTH,
@@ -791,6 +792,17 @@ export const automationLastRunSchema = z
   })
   .strict();
 
+// Secret name validator, defined early: the automation stored shape below
+// references it for `requestedSecrets`, so it must initialize before that shape
+// is evaluated (zod reads the schema at object-literal time, so a forward
+// `const` reference would hit the temporal dead zone).
+export const secretNameSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, "must be alphanumeric with - or _")
+  .min(1)
+  .max(MAX_SECRET_NAME_LENGTH);
+
 // Stored shape (automations.json v3). No derived fields (cron/lastRun/nextRunAt
 // live only on the wire).
 const automationStoredShape = {
@@ -805,6 +817,10 @@ const automationStoredShape = {
   // (only honored for tabs opened via CDP). Defaults false → tab stays open.
   // Optional in the persisted shape so pre-existing v2 files load unchanged.
   closeOnFinish: z.boolean().default(false),
+  // Names of secrets to inject as env vars when this automation's run spawns.
+  // Resolved from the backend at launch and baked into the PTY env, never
+  // returned over HTTP. Defaults to [] so pre-existing v3 files load unchanged.
+  requestedSecrets: z.array(secretNameSchema).max(MAX_AUTOMATION_REQUESTED_SECRETS).default([]),
   runCount: z.number().int().nonnegative(),
   lifecycle: automationLifecycleSchema,
   runs: z.array(automationRunRecordSchema).max(AUTOMATION_RUN_HISTORY_CAP),
@@ -902,6 +918,7 @@ export const createAutomationInputSchema = z
     enabled: z.boolean().optional(),
     limit: automationRunLimitSchema.optional(),
     closeOnFinish: z.boolean().optional(),
+    requestedSecrets: z.array(secretNameSchema).max(MAX_AUTOMATION_REQUESTED_SECRETS).optional(),
   })
   .strict();
 
@@ -914,6 +931,7 @@ export const updateAutomationInputSchema = z
     enabled: z.boolean().optional(),
     limit: automationRunLimitSchema.optional(),
     closeOnFinish: z.boolean().optional(),
+    requestedSecrets: z.array(secretNameSchema).max(MAX_AUTOMATION_REQUESTED_SECRETS).optional(),
   })
   .strict();
 
@@ -1013,12 +1031,6 @@ export const caffeinatePreferencesFileSchema = z
 // NEVER appear here — only in the backend — so the policy file is safe to read
 // and lists in the UI without leaking secrets. `hasValue` in the API response
 // is probed from the backend, not stored.
-export const secretNameSchema = z
-  .string()
-  .trim()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, "must be alphanumeric with - or _")
-  .min(1)
-  .max(MAX_SECRET_NAME_LENGTH);
 export const secretEnvVarSchema = z
   .string()
   .trim()
