@@ -38,6 +38,7 @@ import {
   WORKTREES_MESSAGE_BLOCK_MIN_HEIGHT_PX,
   WORKTREES_MODAL_CLOSE_TRANSITION_MS,
   WORKTREES_MODAL_MAX_HEIGHT_REM,
+  WORKTREES_POLL_INTERVAL_MS,
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import {
@@ -71,7 +72,7 @@ const Badge = ({
   title,
 }: {
   children: React.ReactNode;
-  tone: "muted" | "amber" | "violet";
+  tone: "muted" | "amber" | "violet" | "blue";
   title?: string;
 }) => (
   <span
@@ -80,6 +81,7 @@ const Badge = ({
       "shrink-0 rounded border px-1 font-mono text-[10px] tabular-nums",
       tone === "amber" && "border-amber-400/40 bg-amber-400/5 text-amber-300",
       tone === "violet" && "border-violet-400/40 bg-violet-400/5 text-violet-300",
+      tone === "blue" && "border-blue-400/40 bg-blue-400/5 text-blue-300",
       tone === "muted" && "border-border/60 text-muted-foreground",
     )}
   >
@@ -136,6 +138,14 @@ const WorktreeRow = ({
           prunable
         </Badge>
       ) : null}
+      {!worktree.isMain && !worktree.isCurrent && worktree.activeSessionCount > 0 ? (
+        <Badge
+          tone="blue"
+          title={`${worktree.activeSessionCount} shell${worktree.activeSessionCount === 1 ? "" : "s"} open here — close ${worktree.activeSessionCount === 1 ? "it" : "them"} first to remove`}
+        >
+          {worktree.activeSessionCount === 1 ? "in use" : `${worktree.activeSessionCount} in use`}
+        </Badge>
+      ) : null}
       {worktree.isCurrent ? null : (
         <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/worktree:opacity-100">
           <Button
@@ -165,7 +175,7 @@ const WorktreeRow = ({
               </Button>
             ))
           )}
-          {worktree.isMain ? null : (
+          {worktree.isMain || worktree.activeSessionCount > 0 ? null : (
             <Button
               variant="ghost"
               size="icon-xs"
@@ -244,16 +254,22 @@ export const WorktreesModal = ({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!cwd) return;
-    const fetched = await fetchGitWorktrees(cwd);
-    if (!fetched) {
-      setHasError(true);
-      return;
-    }
-    setHasError(false);
-    setData(fetched);
-  }, [cwd]);
+  const refresh = useCallback(
+    async (silent = false) => {
+      if (!cwd) return;
+      const fetched = await fetchGitWorktrees(cwd);
+      if (!fetched) {
+        // A background poll that fails must not replace a good list with the
+        // error block — only user-initiated loads (open, manual refresh) surface
+        // the error. A successful poll still clears a stale error and recovers.
+        if (!silent) setHasError(true);
+        return;
+      }
+      setHasError(false);
+      setData(fetched);
+    },
+    [cwd],
+  );
 
   const refreshConfig = useCallback(async () => {
     if (!cwd) return;
@@ -304,6 +320,17 @@ export const WorktreesModal = ({
     void refreshConfig();
     void refreshIncludeFile();
   }, [open, refresh, refreshConfig, refreshIncludeFile, refreshCount]);
+
+  // Poll the worktree list while the modal is open so the per-worktree "in use"
+  // count — and the trash action that depends on it — tracks shells opened or
+  // closed while the modal is up, including one opened from this modal's own
+  // "open in new shell" button. Silent: a transient daemon blip won't swap a
+  // good list for the error block.
+  useEffect(() => {
+    if (!open) return;
+    const tick = window.setInterval(() => void refresh(true), WORKTREES_POLL_INTERVAL_MS);
+    return () => window.clearInterval(tick);
+  }, [open, refresh]);
 
   // Reset everything when the project changes so stale worktrees from another
   // repo never flash in on open.

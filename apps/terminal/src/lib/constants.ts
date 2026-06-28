@@ -90,6 +90,12 @@ export const WORKTREES_LIST_ROW_HEIGHT_PX = 56;
 // ~84px of vertical room). Preserves the original min-h-32 (8rem) comfort.
 export const WORKTREES_MESSAGE_BLOCK_MIN_HEIGHT_PX = 128;
 export const WORKTREES_MODAL_MAX_HEIGHT_REM = 40;
+// Polled while the worktrees modal is open so the per-worktree "in use" count
+// (and thus the trash action) reflects shells opened or closed — including one
+// opened from the modal's own "open in new shell" button. The count is the same
+// signal the delete route guards on, so the list stays consistent with the
+// guard without the client re-deriving it.
+export const WORKTREES_POLL_INTERVAL_MS = 2000;
 
 export const SESSIONS_MODAL_CLOSE_TRANSITION_MS = 150;
 // Each session row is a single-line command-palette-style option (icon + title

@@ -953,7 +953,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const cwd = resolveCwdQuery(context.req.query("cwd"));
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
     try {
-      return context.json(await listGitWorktrees(cwd));
+      return context.json(
+        await listGitWorktrees(cwd, (worktreePath) => registry.sessionsInPath(worktreePath).length),
+      );
     } catch (error) {
       return context.json(
         { error: "git_failed", message: worktreeErrorMessage(error) },

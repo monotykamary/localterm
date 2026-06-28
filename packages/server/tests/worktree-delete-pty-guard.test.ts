@@ -109,6 +109,16 @@ describe("worktree delete guard (active PTY)", () => {
     return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   };
 
+  const listWorktrees = async (): Promise<{
+    worktrees: Array<{ isMain: boolean; activeSessionCount: number }>;
+  }> => {
+    const url = `http://127.0.0.1:${server.port}/api/git/worktrees?cwd=${encodeURIComponent(repoDir)}`;
+    const response = await fetch(url);
+    return (await response.json()) as {
+      worktrees: Array<{ isMain: boolean; activeSessionCount: number }>;
+    };
+  };
+
   it("refuses to remove a worktree a shell is open in, including a parked one, then allows it once killed", async () => {
     const { socket, id } = await openShellIn(server.port, worktreeDir);
     try {
@@ -157,4 +167,48 @@ describe("worktree delete guard (active PTY)", () => {
     expect(removed.body).toEqual({ ok: true });
     expect(fs.existsSync(worktreeDir)).toBe(false);
   }, 10_000);
+
+  it("reports activeSessionCount per worktree so the client can hide the trash action while a shell is open", async () => {
+    // The daemon counts a shell against the worktree path git prints, which is
+    // realpath-resolved (git resolves symlinks; os.tmpdir() is itself a symlink on
+    // macOS, so the linked worktree prints as /private/var/...). Open the shell
+    // at that realpath so the spawn cwd lands under the same path the route
+    // feeds sessionsInPath — mirroring the client, which opens a shell at the
+    // worktree.path it received from the list.
+    const linkedWorktreePath = fs.realpathSync(worktreeDir);
+    const { socket, id } = await openShellIn(server.port, linkedWorktreePath);
+    try {
+      // Two worktrees in this fixture (main + the linked one). A live shell in
+      // the linked worktree counts 1 there and 0 on the main — the same signal
+      // the delete guard reads, so the UI's trash-visibility and the route's 409
+      // stay in sync.
+      const withShell = await listWorktrees();
+      const main = withShell.worktrees.find((worktree) => worktree.isMain);
+      const linked = withShell.worktrees.find((worktree) => !worktree.isMain);
+      expect(main?.activeSessionCount).toBe(0);
+      expect(linked?.activeSessionCount).toBe(1);
+
+      // Closing the tab parks the PTY (no clients, still a live process) — still
+      // counted as in use, matching the parked-shell branch of the delete guard.
+      await closeWs(socket);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const whileParked = await listWorktrees();
+      expect(whileParked.worktrees.find((worktree) => !worktree.isMain)?.activeSessionCount).toBe(
+        1,
+      );
+
+      // Kill the parked PTY; the worktree is no longer in use and the count drops to 0.
+      const killResponse = await fetch(`http://127.0.0.1:${server.port}/api/sessions/${id}`, {
+        method: "DELETE",
+      });
+      expect(killResponse.ok).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const afterKill = await listWorktrees();
+      expect(afterKill.worktrees.find((worktree) => !worktree.isMain)?.activeSessionCount).toBe(0);
+    } finally {
+      if (server.registry.size() > 0) {
+        await fetch(`http://127.0.0.1:${server.port}/api/sessions/${id}`, { method: "DELETE" });
+      }
+    }
+  }, 15_000);
 });
