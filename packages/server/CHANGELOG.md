@@ -1,5 +1,25 @@
 # localterm-server
 
+## 2.25.0
+
+### Minor Changes
+
+- 39a60f1: Add a per-program secret manager (Settings → Secrets) that stores API keys in the macOS Keychain and injects them only into the programs you list, via PATH shims — so `ls` in the same tab never sees your `ANTHROPIC_API_KEY`.
+
+  The motivation is the agentic-coding pattern of pasting API keys into `~/.zshrc` (or a sourced `~/.tune/.env`) in plaintext, where every shell — and every file-reading AI agent — gets every key. localterm now owns this itself: a modal (Settings → Secrets) manages a policy of `{ name, envVar, programs }` entries (names only — values never leave the Keychain and never return to the browser after you save). The daemon generates a self-contained POSIX shim per program in `~/.localterm/shims` that resolves the secret(s) and `exec`s the real binary, and localterm's zsh/bash shell hook prepends the shims dir to `PATH` **after** the user's rc files run — so the shims reliably shadow the real binaries despite rc PATH manipulation (`export PATH=/opt/homebrew/bin:$PATH`), the failure mode of a naive daemon-time PATH entry. The secret exists only in the shimmed program's process (per-process scoping), not the parent shell, matching the "which programs have access" model.
+
+  Values are never served over the daemon's HTTP `/api/*` surface: that surface is gated by a network-origin check (loopback/tailnet), not a capability check, so a `GET /api/secrets/:name` returning a value would be readable by any local process via `curl`. Instead, value resolution happens only in the shim at exec time, via the macOS `security` CLI (the same path the existing GitHub-token resolver uses). The HTTP routes carry names + the policy + a `hasValue` flag (probed from the Keychain without reading the value into memory) — enough for the UI to manage secrets without ever exposing them. Writes use `security add-generic-password -w <value>`, which passes the value as a CLI arg briefly visible to `ps` for the ~ms the `security` process lives — the standard `security`-CLI trade-off (it has no stdin path for the password); the value never touches disk.
+
+  The backend is an interface (`SecretBackend`), so the macOS Keychain implementation can be swapped for an encrypted-file backend (non-darwin, no Keychain) without touching the store, routes, or shim generator — the generator bakes the backend's resolution snippet into each shim. Only the Keychain backend ships in this release; the daemon reports `supported: false` and the UI shows a banner on platforms without it.
+
+  Secrets are also manageable from the terminal via `localterm secret list|get|set|delete`. `get` resolves the value from the Keychain directly (not through the daemon's HTTP API — preserving the "values never cross the network" property, and working with the daemon down), while `list`/`set`/`delete` go through the daemon's REST API. `set -v -` reads the value from stdin for the no-argv-exposure path. A `secrets-sessions.md` reference documents both the secrets and sessions REST surfaces (including the security model and the shim mechanism) and is linked from the `localterm` skill.
+
+- Settings is now a centered modal instead of a cramped toolbar popover, giving dense controls real room and making the long list of sections (theme, font, window, launch, notifications, cursor, typing, scrollback, shell) comfortable to scroll and tap on a phone. The panel is `w-[480px]` capped to `max-w-[calc(100vw-2rem)]` with a height-capped scrollable body, fades/scales in like the other palette overlays, and the terminal sits behind a backdrop while it's open.
+
+  This also retires a mobile bug: dropdowns (theme, font, cursor, scrollback selects) floated over the tappable terminal inside the old popover, so tapping outside a select to close it hit the terminal's touch handler and popped the on-screen keyboard. Inside the modal there's no terminal surface to mis-route a dismiss tap onto, and the programmatic refocus after an overlay closes no longer un-guards the helper textarea on touch — so the keyboard stays closed when you're just dismissing a dropdown.
+
+  The Secrets modal now animates its body in (height-reserved + fade, matching ports/sessions/worktrees) instead of flashing a centered spinner that swaps for the list, and its trash icon follows the worktrees modal's two-tap armed-delete pattern (tap to arm → red icon → tap again to confirm).
+
 ## 2.24.0
 
 ### Patch Changes
