@@ -93,6 +93,9 @@ export {
   secretEntryResponseSchema,
   secretsListResponseSchema,
   secretSetInputSchema,
+  processSchema,
+  processSetInputSchema,
+  processesListResponseSchema,
 } from "./schemas.js";
 export type {
   Automation,
@@ -114,6 +117,9 @@ export type {
   SecretEntryResponse,
   SecretsListResponse,
   SecretSetInput,
+  Process,
+  ProcessSetInput,
+  ProcessesListResponse,
   GitBaseSource,
   GitBranchInfo,
   GitBranchPr,

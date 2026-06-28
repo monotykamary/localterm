@@ -72,30 +72,35 @@ export const CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS = 15 * 60_000;
 export const CAFFEINATE_BATTERY_POLL_TIME_FRACTION = 2;
 export const CAFFEINATE_BATTERY_READ_TIMEOUT_MS = 2_000;
 
-// Per-program secret injection. Secret values live in a backend (macOS Keychain
+// Per-process secret injection. Secret values live in a backend (macOS Keychain
 // on darwin via `security`; an encrypted file for non-darwin is a later phase),
-// never in plaintext on disk. The policy — which programs get which secret as
-// which env var, secret NAMES ONLY, no values — lives in ~/.localterm/secrets.json.
-// The daemon generates a PATH shim per program in ~/.localterm/shims that
-// resolves the secret(s) and execs the real binary, so only the shimmed
-// program's process ever sees the value (per-process scoping, matching the
-// "which programs have access" model). localterm's shell hook prepends the
-// shims dir AFTER the user's rc files run, so the shims reliably shadow the
-// real binaries despite rc PATH manipulation (e.g. `export PATH=/opt/homebrew/bin:$PATH`).
-export const SECRETS_FILE_VERSION = 1;
+// never in plaintext on disk. A secret is an identity + the env var it exports
+// (name + envVar, stored in ~/.localterm/secrets.json). A process is a binary
+// name plus the secret names it should receive (stored in
+// ~/.localterm/processes.json) — the same multi-select model automations use
+// for their requestedSecrets. The daemon generates a PATH shim per process in
+// ~/.localterm/shims that resolves the secret(s) and execs the real binary, so
+// only the shimmed program's process ever sees the value (per-process scoping).
+// localterm's shell hook prepends the shims dir AFTER the user's rc files run,
+// so the shims reliably shadow the real binaries despite rc PATH manipulation
+// (e.g. `export PATH=/opt/homebrew/bin:$PATH`). Names (secret + process) are
+// immutable identities — a rename would be a delete+recreate, and a delete
+// cascades to strip the name from every automation's and process's
+// requestedSecrets, so an editable name would silently disconnect wiring.
+export const SECRETS_FILE_VERSION = 2;
 export const SECRETS_FILENAME = "secrets.json";
+export const PROCESSES_FILE_VERSION = 1;
+export const PROCESSES_FILENAME = "processes.json";
 export const SECRETS_SHIMS_DIRNAME = "shims";
 export const LOCALTERM_STATE_DIRNAME = ".localterm";
 export const SECRET_KEYCHAIN_SERVICE_PREFIX = "localterm:";
 export const MAX_SECRETS = 64;
+export const MAX_PROCESSES = 64;
 export const MAX_SECRET_NAME_LENGTH = 64;
 export const MAX_SECRET_ENV_VAR_LENGTH = 64;
-export const MAX_SECRET_PROGRAMS = 32;
-export const MAX_SECRET_PROGRAM_LENGTH = 128;
+export const MAX_PROCESS_NAME_LENGTH = 128;
+export const MAX_PROCESS_REQUESTED_SECRETS = 32;
 export const MAX_SECRET_VALUE_LENGTH = 8192;
-// Upper bound on the per-automation requested-secrets list. An automation names
-// exactly which secrets it needs; values are resolved from the backend and
-// injected into the run's PTY env at spawn, never over HTTP.
 // `security` is always at /usr/bin/security on darwin; baking the absolute path
 // into the generated shim means the shim doesn't depend on PATH lookup.
 export const SECURITY_BINARY_PATH = "/usr/bin/security";

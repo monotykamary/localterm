@@ -1,60 +1,21 @@
 import kleur from "kleur";
 import { createDefaultSecretBackend } from "@monotykamary/localterm-server";
 import { readFileSync } from "node:fs";
-import { readHost, readPort } from "../state.js";
+import { daemonBaseUrl, reportApiError, reportDaemonDown } from "../utils/daemon-api.js";
 
 interface SecretListItem {
   name: string;
   envVar: string;
-  programs: string[];
   hasValue: boolean;
 }
 
-const daemonBaseUrl = (): string => {
-  const port = readPort();
-  if (!port) throw new DaemonDownError();
-  const host = readHost() ?? "127.0.0.1";
-  return `http://${host}:${port}/api`;
-};
-
-class DaemonDownError extends Error {
-  constructor() {
-    super("localterm daemon is not running");
-  }
-}
-
-const reportDaemonDown = (): void => {
-  console.log(kleur.red("✗ localterm daemon is not running."));
-  console.log(kleur.dim("  start it with `localterm start`, then retry."));
-};
-
-const reportApiError = (status: number, body: string): void => {
-  console.log(kleur.red(`✗ daemon returned ${status}`));
-  try {
-    const parsed = JSON.parse(body) as { error?: string };
-    if (parsed.error) console.log(kleur.dim(`  ${parsed.error}`));
-  } catch {
-    if (body) console.log(kleur.dim(`  ${body}`));
-  }
-};
-
 const readStdinValue = (): string => readFileSync(0, "utf8").replace(/\r?\n$/, "");
 
-const parsePrograms = (raw: string | undefined): string[] => {
-  if (!raw) return [];
-  return Array.from(
-    new Set(
-      raw
-        .split(",")
-        .map((part) => part.trim())
-        .filter(Boolean),
-    ),
-  );
-};
-
-// `localterm secret list` — names + policy + whether a value is set. The
-// daemon never returns values over the loopback HTTP surface (it's
-// network-origin-gated, not capability-gated), so this lists names only.
+// `localterm secret list` — names + the env var each secret exports + whether a
+// value is set. The daemon never returns values over the loopback HTTP surface
+// (it's network-origin-gated, not capability-gated), so this lists names only.
+// Programs that receive a secret live on processes — list those with
+// `localterm process list`.
 const runList = async (): Promise<void> => {
   let base: string;
   try {
@@ -82,15 +43,12 @@ const runList = async (): Promise<void> => {
   }
   const nameWidth = Math.max(4, ...body.secrets.map((secret) => secret.name.length));
   const envWidth = Math.max(7, ...body.secrets.map((secret) => secret.envVar.length));
-  console.log(
-    `${"NAME".padEnd(nameWidth)}  ${"ENV VAR".padEnd(envWidth)}  ${"PROGRAMS".padEnd(12)}  VALUE`,
-  );
-  console.log(`${"─".repeat(nameWidth)}  ${"─".repeat(envWidth)}  ${"─".repeat(12)}  ─────`);
+  console.log(`${"NAME".padEnd(nameWidth)}  ${"ENV VAR".padEnd(envWidth)}  VALUE`);
+  console.log(`${"─".repeat(nameWidth)}  ${"─".repeat(envWidth)}  ─────`);
   for (const secret of body.secrets) {
-    const programs = secret.programs.join(",") || kleur.dim("(none)");
     const value = secret.hasValue ? kleur.green("set") : kleur.yellow("no value");
     console.log(
-      `${kleur.cyan(secret.name.padEnd(nameWidth))}  ${secret.envVar.padEnd(envWidth)}  ${programs}  ${value}`,
+      `${kleur.cyan(secret.name.padEnd(nameWidth))}  ${secret.envVar.padEnd(envWidth)}  ${value}`,
     );
   }
 };
@@ -120,17 +78,14 @@ const runGet = async (name: string): Promise<void> => {
   process.stdout.write(`${value}\n`);
 };
 
-// `localterm secret set <name> -e <VAR> [-p <a,b>] [-v <value>]` — upserts the
-// policy + value via the daemon (PUT /api/secrets/:name). The value transits to
-// the daemon once and is stored in the backend; never returned. `-v -` reads
-// the value from stdin (the secure path — no argv exposure to `ps`); omitting
-// `-v` is a policy-only update (the daemon rejects a value-less create).
-const runSet = async (options: {
-  name: string;
-  envVar: string;
-  programs?: string;
-  value?: string;
-}): Promise<void> => {
+// `localterm secret set <name> -e <VAR> [-v <value>]` — upserts the secret's
+// env var + value via the daemon (PUT /api/secrets/:name). The value transits to
+// the daemon once and is stored in the backend; never returned. `-v -` reads the
+// value from stdin (the secure path — no argv exposure to `ps`); omitting `-v`
+// is a policy-only update (the daemon rejects a value-less create). The name is
+// immutable; to rename, delete and recreate. Wire this secret to a binary with
+// `localterm process set`.
+const runSet = async (options: { name: string; envVar: string; value?: string }): Promise<void> => {
   if (!options.envVar) {
     console.log(kleur.red("✗ --env-var is required."));
     process.exitCode = 1;
@@ -153,7 +108,6 @@ const runSet = async (options: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       envVar: options.envVar,
-      programs: parsePrograms(options.programs),
       ...(value !== undefined ? { value } : {}),
     }),
   });
@@ -164,11 +118,7 @@ const runSet = async (options: {
   }
   const created = (await response.json()) as SecretListItem;
   console.log(kleur.green(`✓ saved '${created.name}' → ${created.envVar}`));
-  console.log(
-    kleur.dim(
-      `  programs: ${created.programs.join(", ") || "(none)"}  ·  value: ${created.hasValue ? "set" : "unchanged"}`,
-    ),
-  );
+  console.log(kleur.dim(`  value: ${created.hasValue ? "set" : "unchanged"}`));
 };
 
 // `localterm secret delete <name>` — removes the policy entry and the backend

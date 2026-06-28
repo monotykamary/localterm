@@ -13,10 +13,12 @@ import {
   MAX_AUTOMATION_WATCH_FILTER_LENGTH,
   MAX_SECRET_ENV_VAR_LENGTH,
   MAX_SECRET_NAME_LENGTH,
-  MAX_SECRET_PROGRAM_LENGTH,
-  MAX_SECRET_PROGRAMS,
   MAX_SECRET_VALUE_LENGTH,
   MAX_SECRETS,
+  MAX_PROCESS_NAME_LENGTH,
+  MAX_PROCESS_REQUESTED_SECRETS,
+  MAX_PROCESSES,
+  PROCESSES_FILE_VERSION,
   SECRETS_FILE_VERSION,
   MAX_WEBHOOK_ID_LENGTH,
   MAX_CAFFEINATE_COMMAND_LENGTH,
@@ -1025,29 +1027,23 @@ export const caffeinatePreferencesFileSchema = z
   })
   .strict();
 
-// Per-program secret injection policy. `name` is the secret's identifier and
-// the Keychain item label (service `localterm:<name>`). `envVar` is the variable
-// the shim exports. `programs` are the binary names the shim shadows. Values
-// NEVER appear here — only in the backend — so the policy file is safe to read
-// and lists in the UI without leaking secrets. `hasValue` in the API response
-// is probed from the backend, not stored.
+// Secret identity + the env var a shim exports it as. `name` is the secret's
+// identifier and the Keychain item label (service `localterm:<name>`) and the
+// join key processes/automations reference via requestedSecrets, so it is
+// immutable (see constants.ts). `envVar` is the variable the shim exports and is
+// editable. Values NEVER appear here — only in the backend — so the policy
+// file is safe to read and lists in the UI without leaking secrets. `hasValue`
+// in the API response is probed from the backend, not stored.
 export const secretEnvVarSchema = z
   .string()
   .trim()
   .regex(/^[A-Z_][A-Z0-9_]*$/, "must be uppercase with _")
   .min(1)
   .max(MAX_SECRET_ENV_VAR_LENGTH);
-export const secretProgramSchema = z
-  .string()
-  .trim()
-  .regex(/^[A-Za-z0-9_.+-]+$/, "must be a valid program name")
-  .min(1)
-  .max(MAX_SECRET_PROGRAM_LENGTH);
 export const secretEntrySchema = z
   .object({
     name: secretNameSchema,
     envVar: secretEnvVarSchema,
-    programs: z.array(secretProgramSchema).max(MAX_SECRET_PROGRAMS),
   })
   .strict();
 // The API response shape: an entry plus whether a value is stored in the backend.
@@ -1055,7 +1051,6 @@ export const secretEntryResponseSchema = z
   .object({
     name: secretNameSchema,
     envVar: secretEnvVarSchema,
-    programs: z.array(secretProgramSchema).max(MAX_SECRET_PROGRAMS),
     hasValue: z.boolean(),
   })
   .strict();
@@ -1067,11 +1062,10 @@ export const secretsListResponseSchema = z
   })
   .strict();
 // PUT /api/secrets/:name body. `value` is optional so a policy-only update
-// (changing envVar/programs) doesn't require re-entering the secret.
+// (changing envVar) doesn't require re-entering the secret.
 export const secretSetInputSchema = z
   .object({
     envVar: secretEnvVarSchema,
-    programs: z.array(secretProgramSchema).max(MAX_SECRET_PROGRAMS),
     value: z.string().min(1).max(MAX_SECRET_VALUE_LENGTH).optional(),
   })
   .strict();
@@ -1080,6 +1074,58 @@ export const secretsFileSchema = z
     version: z.literal(SECRETS_FILE_VERSION),
     secrets: z.array(secretEntrySchema).max(MAX_SECRETS),
   })
+  .strict();
+// Frozen v1 file shape — read only by the one-time migrator in
+// migrate-secrets-to-processes.ts. v1 stored the binary names a secret shims
+// directly on the entry (`programs`); v2 moved that wiring into processes.json
+// (a process names which secrets it receives). The migrator inverts `programs`
+// into processes and rewrites secrets.json without it.
+const secretEntryV1Schema = z
+  .object({
+    name: secretNameSchema,
+    envVar: secretEnvVarSchema,
+    programs: z
+      .array(z.string().min(1).max(MAX_PROCESS_NAME_LENGTH))
+      .max(MAX_PROCESS_REQUESTED_SECRETS),
+  })
+  .strict();
+export const secretsFileV1Schema = z
+  .object({
+    version: z.literal(1),
+    secrets: z.array(secretEntryV1Schema).max(MAX_SECRETS),
+  })
+  .strict();
+
+// A process is a binary name plus the secret names it should receive — the
+// same multi-select model automations use for requestedSecrets. `name` is the
+// shim filename (the binary the shim shadows), so it is immutable. The regex
+// matches the old secretProgramSchema verbatim so every program name that
+// validated pre-migration still validates as a process name post-migration.
+export const processNameSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9_.+-]+$/, "must be a valid program name")
+  .min(1)
+  .max(MAX_PROCESS_NAME_LENGTH);
+export const processSchema = z
+  .object({
+    name: processNameSchema,
+    requestedSecrets: z.array(secretNameSchema).max(MAX_PROCESS_REQUESTED_SECRETS).default([]),
+  })
+  .strict();
+export const processesFileSchema = z
+  .object({
+    version: z.literal(PROCESSES_FILE_VERSION),
+    processes: z.array(processSchema).max(MAX_PROCESSES),
+  })
+  .strict();
+export const processSetInputSchema = z
+  .object({
+    requestedSecrets: z.array(secretNameSchema).max(MAX_PROCESS_REQUESTED_SECRETS),
+  })
+  .strict();
+export const processesListResponseSchema = z
+  .object({ processes: z.array(processSchema).max(MAX_PROCESSES) })
   .strict();
 
 export const serverToClientMessageSchema = z.discriminatedUnion("type", [

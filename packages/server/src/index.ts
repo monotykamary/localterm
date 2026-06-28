@@ -37,8 +37,10 @@ import {
   HTTP_STATUS_CREATED,
   HTTP_STATUS_NOT_FOUND,
   MAX_AUTOMATIONS,
+  MAX_PROCESSES,
   MAX_SECRETS,
   MS_PER_MINUTE,
+  PROCESSES_FILENAME,
   SECRETS_FILENAME,
   SECRETS_SHIMS_DIRNAME,
   SERVER_STOP_GRACE_MS,
@@ -70,6 +72,7 @@ import {
 import { HeartbeatStore } from "./heartbeat-store.js";
 import { createDefaultSecretBackend, type SecretBackend } from "./secret-backend.js";
 import { SecretStore } from "./secret-store.js";
+import { ProcessStore } from "./process-store.js";
 import { regenerateShims } from "./secret-shims.js";
 import { parseCronExpression } from "./cron-expression.js";
 import { createGitWorktree, listGitWorktrees, removeGitWorktree } from "./git-worktrees.js";
@@ -87,6 +90,8 @@ import {
   resetAutomationInputSchema,
   secretEntrySchema,
   secretSetInputSchema,
+  processNameSchema,
+  processSetInputSchema,
   updateAutomationInputSchema,
   updateWorktreeConfigInputSchema,
   worktreeIncludeFileInputSchema,
@@ -107,6 +112,7 @@ import { computeNextAutomationRunAt } from "./utils/compute-next-automation-run-
 import { isLocaltermTabUrl } from "./utils/is-localterm-tab-url.js";
 import { normalizeTriggerInput } from "./utils/normalize-trigger.js";
 import { buildAutomationSecretEnv } from "./utils/build-automation-secret-env.js";
+import { migrateSecretsToProcesses } from "./utils/migrate-secrets-to-processes.js";
 import { enumerateMissedOccurrences } from "./utils/reconcile-downtime.js";
 import type {
   Automation,
@@ -379,17 +385,25 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     path.join(stateDirectory, "caffeinate.json"),
   );
   const worktreeConfigStore = new WorktreeConfigStore(stateDirectory);
-  // Per-program secret injection: a backend (macOS Keychain on darwin) holds
-  // secret values; the policy (names + env var + programs, no values) lives in
-  // ~/.localterm/secrets.json. The daemon generates a PATH shim per program in
+  // Per-process secret injection: a backend (macOS Keychain on darwin) holds
+  // secret values; a secret is an identity + the env var it exports
+  // (~/.localterm/secrets.json, names + env var only — never values), and a
+  // process is a binary name plus the secret names it should receive
+  // (~/.localterm/processes.json) — the same multi-select model automations use
+  // for requestedSecrets. The daemon generates a PATH shim per process in
   // ~/.localterm/shims; localterm's shell hook prepends the shims dir so the
   // shims shadow the real binaries and inject the secret(s) at exec time.
+  // The one-time migrator rewrites a pre-flip secrets.json (with `programs`) to
+  // the new shape + a processes.json before the stores load either file.
+  migrateSecretsToProcesses(stateDirectory);
   const secretBackend = options.secretBackend ?? createDefaultSecretBackend();
   const secretStore = new SecretStore({
     filePath: path.join(stateDirectory, SECRETS_FILENAME),
     shimsDir,
   });
-  const syncSecretShims = () => regenerateShims(secretStore.list(), shimsDir, secretBackend);
+  const processStore = new ProcessStore(path.join(stateDirectory, PROCESSES_FILENAME));
+  const syncSecretShims = () =>
+    regenerateShims(processStore.list(), secretStore.envVarByName(), shimsDir, secretBackend);
   syncSecretShims();
   const caffeinateManager = new CaffeinateManager({
     controller: caffeinateController,
@@ -687,12 +701,19 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     return context.json({ ok: true });
   });
 
-  // Per-program secret injection. The policy (which programs get which secret
+  // Returns the requested-secret names that don't exist in the store — used to
+  // reject typos at write time so an automation or process never silently runs
+  // without a key it thinks it has. Names that exist but have no value set are
+  // allowed here (the runtime skips them fail-closed); only unknown names fail.
+  const unknownRequestedSecrets = (names: readonly string[]): string[] =>
+    names.filter((name) => !secretStore.get(name));
+
+  // Per-process secret injection. The policy (which processes get which secret
   // as which env var) is served as names only — VALUES are never returned over
   // the network. The `/api/*` surface is gated by a network-origin check
   // (loopback/tailnet), not a capability check, so serving values here would
   // make them readable by any local process via curl. Values live in the
-  // backend (Keychain) and reach a program only through its generated shim at
+  // backend (Keychain) and reach a process only through its generated shim at
   // exec time. `hasValue` is probed from the backend so the UI can show
   // whether a value is set without ever reading it into the response.
   api.get("/secrets", async (context) => {
@@ -701,13 +722,18 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       entries.map(async (entry) => ({
         name: entry.name,
         envVar: entry.envVar,
-        programs: entry.programs,
         hasValue: await secretBackend.has(entry.name),
       })),
     );
     return context.json({ supported: secretBackend.supported, shimsDir, secrets: withHasValue });
   });
 
+  // Upsert a secret identity (name + envVar). The name is the keychain label and
+  // the join key processes/automations reference, so it is immutable — a PUT to
+  // an existing name only updates envVar (and optionally re-sets the value); a
+  // PUT to a new name creates it. `value` is optional on update so a policy-only
+  // edit (changing envVar) doesn't require re-entering the secret, but required
+  // on create so the UI never shows a secret that never works.
   api.put("/secrets/:name", async (context) => {
     if (!secretBackend.supported) {
       return context.json({ error: "unsupported" }, HTTP_STATUS_CONFLICT);
@@ -739,21 +765,27 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const stored = secretStore.upsert({
       name,
       envVar: parsed.data.envVar,
-      programs: parsed.data.programs,
     });
     if (!stored) {
       return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
     }
+    // An envVar change re-bakes every process shim that requests this secret.
     syncSecretShims();
     const hasValue = await secretBackend.has(name);
     return context.json({
       name: stored.name,
       envVar: stored.envVar,
-      programs: stored.programs,
       hasValue,
     });
   });
 
+  // Delete a secret's identity, its backend value, and every reference to it.
+  // Cascade strips the name from all automations' and processes' requestedSecrets
+  // so no container keeps a dangling name a run/shim would silently skip — the
+  // parity the automation path was missing (previously a delete left stale
+  // requestedSecrets on automations). Shims are rebuilt so the dropped secret's
+  // resolve snippet leaves every process shim, and automations are re-broadcast
+  // so open forms drop the stale name.
   api.delete("/secrets/:name", async (context) => {
     const name = context.req.param("name");
     const nameParse = secretEntrySchema.shape.name.safeParse(name);
@@ -763,6 +795,51 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const removed = secretStore.delete(name);
     if (!removed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     await secretBackend.delete(name);
+    const changedAutomations = automationStore.removeSecretFromAll(name);
+    processStore.removeSecretFromAll(name);
+    syncSecretShims();
+    if (changedAutomations) broadcastAutomations();
+    return context.json({ ok: true });
+  });
+
+  // Per-process secret wiring. A process is a binary name + the secret names it
+  // should receive (the same multi-select automations use). The shim generator
+  // builds one PATH shim per process that resolves its requested secrets and
+  // execs the real binary. requestedSecrets are validated against the secret
+  // store at write time so a process never references a name that doesn't
+  // exist (a secret deleted later is cascaded out of requestedSecrets by the
+  // delete route above). Names only over the wire — values never appear.
+  api.get("/processes", (context) => context.json({ processes: processStore.list() }));
+
+  api.put("/processes/:name", async (context) => {
+    const name = context.req.param("name");
+    const nameParse = processNameSchema.safeParse(name);
+    if (!nameParse.success) {
+      return context.json({ error: "invalid_name" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const parsed = processSetInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) {
+      return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const unknown = unknownRequestedSecrets(parsed.data.requestedSecrets);
+    if (unknown.length > 0) {
+      return context.json({ error: "invalid_secret" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const existing = processStore.get(name);
+    if (processStore.size() >= MAX_PROCESSES && !existing) {
+      return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
+    }
+    const stored = processStore.upsert({ name, requestedSecrets: parsed.data.requestedSecrets });
+    if (!stored) {
+      return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
+    }
+    syncSecretShims();
+    return context.json({ process: stored });
+  });
+
+  api.delete("/processes/:name", (context) => {
+    const removed = processStore.delete(context.req.param("name"));
+    if (!removed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     syncSecretShims();
     return context.json({ ok: true });
   });
@@ -1147,13 +1224,6 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   };
 
   api.get("/automations", (context) => context.json({ automations: listAutomationsWithNextRun() }));
-
-  // Returns the requested-secret names that don't exist in the store — used to
-  // reject typos at create/update time so an automation never silently runs
-  // without a key it thinks it has. Names that exist but have no value set are
-  // allowed here (the runtime skips them fail-closed); only unknown names fail.
-  const unknownRequestedSecrets = (names: readonly string[]): string[] =>
-    names.filter((name) => !secretStore.get(name));
 
   api.post("/automations", async (context) => {
     const parsed = createAutomationInputSchema.safeParse(await readJsonBody(context));

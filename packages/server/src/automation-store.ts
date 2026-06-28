@@ -160,6 +160,31 @@ export class AutomationStore {
     return true;
   }
 
+  // Cascade helper for secret deletion: strip `secretName` from every
+  // automation's requestedSecrets so a deleted secret leaves no dangling
+  // reference a run would silently skip. Persists only if something changed.
+  // The route calls broadcastAutomations() after so clients drop the stale
+  // name from their open automation forms. Pair with
+  // ProcessStore.removeSecretFromAll so a secret delete cleans up both
+  // containers that reference secret names.
+  removeSecretFromAll(secretName: string): boolean {
+    let changed = false;
+    const next = this.automations.map((automation) => {
+      if (!automation.requestedSecrets.includes(secretName)) return automation;
+      changed = true;
+      return {
+        ...automation,
+        requestedSecrets: automation.requestedSecrets.filter((name) => name !== secretName),
+        updatedAt: Date.now(),
+      };
+    });
+    if (changed) {
+      this.automations = next;
+      this.persist();
+    }
+    return changed;
+  }
+
   // Push a new run onto the newest-first history ring, trimming to the cap.
   appendRun(id: string, record: AutomationRunRecord): Automation | null {
     const index = this.automations.findIndex((automation) => automation.id === id);

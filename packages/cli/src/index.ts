@@ -1,6 +1,7 @@
 import { DEFAULT_HOST, DEFAULT_PORT } from "@monotykamary/localterm-server";
 import { Command } from "commander";
 import { runInstall, runUninstall } from "./commands/install.js";
+import { runProcessDelete, runProcessList, runProcessSet } from "./commands/process.js";
 import { runRestart } from "./commands/restart.js";
 import { runSecretDelete, runSecretGet, runSecretList, runSecretSet } from "./commands/secret.js";
 import { runStart } from "./commands/start.js";
@@ -88,10 +89,10 @@ program
 
 const secret = program
   .command("secret")
-  .description("manage per-program secrets (Keychain-backed)");
+  .description("manage secrets (Keychain-backed identities + env vars)");
 secret
   .command("list")
-  .description("list secrets (names + policy; never values)")
+  .description("list secrets (names + env var; never values)")
   .action(async () => {
     await runSecretList();
   });
@@ -103,15 +104,13 @@ secret
   });
 secret
   .command("set <name>")
-  .description("create or update a secret's policy and value")
+  .description("create or update a secret's env var and value")
   .requiredOption("-e, --env-var <var>", "environment variable to inject")
-  .option("-p, --programs <list>", "comma-separated programs to wrap with a shim")
   .option("-v, --value <value>", 'secret value (use "-" to read from stdin)')
-  .action(async (name: string, options: { envVar: string; programs?: string; value?: string }) => {
+  .action(async (name: string, options: { envVar: string; value?: string }) => {
     await runSecretSet({
       name,
       envVar: options.envVar,
-      programs: options.programs,
       value: options.value,
     });
   });
@@ -120,6 +119,29 @@ secret
   .description("delete a secret and its stored value")
   .action(async (name: string) => {
     await runSecretDelete(name);
+  });
+
+const processCommand = program
+  .command("process")
+  .description("manage processes (binaries wrapped with a secret-injecting PATH shim)");
+processCommand
+  .command("list")
+  .description("list processes (binary + the secrets each receives)")
+  .action(async () => {
+    await runProcessList();
+  });
+processCommand
+  .command("set <name>")
+  .description("set the secrets a binary receives (generates its PATH shim)")
+  .option("-s, --secrets <list>", "comma-separated secret names to inject")
+  .action(async (name: string, options: { secrets?: string }) => {
+    await runProcessSet({ name, secrets: options.secrets });
+  });
+processCommand
+  .command("delete <name>")
+  .description("delete a process and its shim")
+  .action(async (name: string) => {
+    await runProcessDelete(name);
   });
 
 program.parseAsync().catch((error: unknown) => {

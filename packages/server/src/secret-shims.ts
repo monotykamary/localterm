@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { SecretEntry } from "./types.js";
+import type { Process } from "./types.js";
 import type { SecretBackend } from "./secret-backend.js";
 
 interface ProgramSecret {
@@ -8,21 +8,28 @@ interface ProgramSecret {
   name: string;
 }
 
-// Build the index the shim generator consumes: program -> the secrets that
-// program should receive (in policy order, so the shim's env assignments are
-// stable across regenerations). A program that appears in several secrets'
-// `programs` lists gets all of them in one shim.
-const buildProgramIndex = (secrets: readonly SecretEntry[]): Map<string, ProgramSecret[]> => {
+// Build the index the shim generator consumes: process name -> the secrets that
+// process should receive (in policy order, so the shim's env assignments are
+// stable across regenerations). A process's requestedSecrets are resolved to
+// {envVar, name} via `envVarByName`; a name that no longer exists in the store
+// (a deleted secret the cascading delete missed, or a stale process file) is
+// skipped so a shim never references a missing secret. A process whose
+// requestedSecrets resolve to nothing (empty selection, or only deleted
+// secrets) is omitted entirely so it gets no shim — matching the pre-flip
+// behavior where a program no secret referenced had no shim, and the
+// stale-shim sweep then removes any shim it previously had.
+const buildProcessSecretIndex = (
+  processes: readonly Process[],
+  envVarByName: Map<string, string>,
+): Map<string, ProgramSecret[]> => {
   const index = new Map<string, ProgramSecret[]>();
-  for (const entry of secrets) {
-    for (const program of entry.programs) {
-      const list = index.get(program);
-      if (list) {
-        list.push({ envVar: entry.envVar, name: entry.name });
-      } else {
-        index.set(program, [{ envVar: entry.envVar, name: entry.name }]);
-      }
+  for (const process of processes) {
+    const resolved: ProgramSecret[] = [];
+    for (const secretName of process.requestedSecrets) {
+      const envVar = envVarByName.get(secretName);
+      if (envVar) resolved.push({ envVar, name: secretName });
     }
+    if (resolved.length > 0) index.set(process.name, resolved);
   }
   return index;
 };
@@ -69,13 +76,14 @@ export const buildShimContent = (
   ].join("\n");
 };
 
-// Regenerate all shims for the current policy: one shim per program that any
-// secret references, and stale shims (programs no longer referenced) removed.
-// Called on daemon start and after every policy change. The shims dir is
-// localterm-owned (~/.localterm/shims) and contains only generated shims, so
-// removing any file not in the wanted set is safe.
+// Regenerate all shims for the current policy: one shim per process, and
+// stale shims (process names no longer present) removed. Called on daemon start
+// and after every policy change. The shims dir is localterm-owned
+// (~/.localterm/shims) and contains only generated shims, so removing any file
+// not in the wanted set is safe.
 export const regenerateShims = (
-  secrets: readonly SecretEntry[],
+  processes: readonly Process[],
+  envVarByName: Map<string, string>,
   shimsDir: string,
   backend: SecretBackend,
 ): void => {
@@ -92,9 +100,9 @@ export const regenerateShims = (
     return;
   }
 
-  const programIndex = buildProgramIndex(secrets);
+  const processIndex = buildProcessSecretIndex(processes, envVarByName);
   fs.mkdirSync(shimsDir, { recursive: true, mode: 0o700 });
-  const wantedPrograms = new Set(programIndex.keys());
+  const wantedPrograms = new Set(processIndex.keys());
 
   for (const name of fs.readdirSync(shimsDir)) {
     if (!wantedPrograms.has(name)) {
@@ -102,7 +110,7 @@ export const regenerateShims = (
     }
   }
 
-  for (const [program, programSecrets] of programIndex) {
+  for (const [program, programSecrets] of processIndex) {
     const resolveSnippet = programSecrets
       .map((secret) => backend.shimResolveSnippet(secret.name, secret.envVar))
       .join("\n");

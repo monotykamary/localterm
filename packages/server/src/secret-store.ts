@@ -1,30 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import { MAX_SECRET_PROGRAMS, MAX_SECRETS, SECRETS_FILE_VERSION } from "./constants.js";
+import { MAX_SECRETS, SECRETS_FILE_VERSION } from "./constants.js";
 import { secretsFileSchema } from "./schemas.js";
 import type { SecretEntry } from "./types.js";
-import { memoBy } from "./utils/memo-by.js";
 
 interface SecretStoreOptions {
   filePath: string;
   shimsDir: string;
 }
 
-// Sanitize the program list the way caffeinate commands are sanitized: trim,
-// drop empties, memo by lowercased form (so "Pi" and "pi" don't both shadow),
-// and cap the count. Program names are matched case-sensitively by the shell,
-// but a user listing both "Pi" and "pi" is almost always a typo, so the dedupe
-// is case-insensitive keeping the first spelling.
-const sanitizePrograms = (programs: readonly string[]): string[] => {
-  const capped = programs.map((raw) => raw.trim().slice(0, 128)).filter(Boolean);
-  return memoBy(capped, (program) => program.toLowerCase()).slice(0, MAX_SECRET_PROGRAMS);
-};
-
-// Owns the persisted secret policy in ~/.localterm/secrets.json: the list of
-// { name, envVar, programs } entries. Names + env vars + programs only — NEVER
-// values (those live in the backend). Mirrors CaffeinatePreferencesStore's
-// load/persist shape (zod-validated read, atomic tmp+rename write) and the
-// caffeinate commands sanitize helper for the program list.
+// Owns the persisted secret identity in ~/.localterm/secrets.json: the list of
+// { name, envVar } entries. Names + env vars only — NEVER values (those live in
+// the backend). Mirrors CaffeinatePreferencesStore's load/persist shape
+// (zod-validated read, atomic tmp+rename write). The `shimsDir` option is
+// threaded through for callers that need it; the store itself does not read it.
 export class SecretStore {
   private secrets: SecretEntry[] = [];
   private readonly filePath: string;
@@ -37,28 +26,30 @@ export class SecretStore {
   }
 
   list(): SecretEntry[] {
-    return this.secrets.map((entry) => ({
-      name: entry.name,
-      envVar: entry.envVar,
-      programs: [...entry.programs],
-    }));
+    return this.secrets.map((entry) => ({ name: entry.name, envVar: entry.envVar }));
   }
 
   get(name: string): SecretEntry | undefined {
     return this.secrets.find((entry) => entry.name === name);
   }
 
+  // A name -> envVar lookup for the shim generator, which bakes each requested
+  // secret's envVar into a process's shim. Returns undefined for a name that no
+  // longer exists (a deleted secret the cascading delete missed, or a stale
+  // process file); the generator skips those so a shim never references a
+  // missing secret.
+  envVarByName(): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const entry of this.secrets) map.set(entry.name, entry.envVar);
+    return map;
+  }
+
   // Add or replace by name. `entry` is assumed pre-validated by the route's
-  // zod parse; the store re-sanitizes the program list (dedupe/cap) so the
-  // persisted shape is canonical regardless of input order. Returns the
-  // canonicalized entry, or null if adding a new name would exceed MAX_SECRETS
-  // (replacing an existing name doesn't count against the cap).
+  // zod parse. Returns the canonicalized entry, or null if adding a new name
+  // would exceed MAX_SECRETS (replacing an existing name doesn't count against
+  // the cap). The name is immutable by design: a rename is a delete + create.
   upsert(entry: SecretEntry): SecretEntry | null {
-    const canonical: SecretEntry = {
-      name: entry.name,
-      envVar: entry.envVar,
-      programs: sanitizePrograms(entry.programs),
-    };
+    const canonical: SecretEntry = { name: entry.name, envVar: entry.envVar };
     const existingIndex = this.secrets.findIndex((item) => item.name === canonical.name);
     if (existingIndex === -1 && this.secrets.length >= MAX_SECRETS) return null;
     if (existingIndex !== -1) {
@@ -67,7 +58,7 @@ export class SecretStore {
       this.secrets.push(canonical);
     }
     this.persist();
-    return { ...canonical, programs: [...canonical.programs] };
+    return { ...canonical };
   }
 
   delete(name: string): boolean {
@@ -100,7 +91,6 @@ export class SecretStore {
     this.secrets = parsed.data.secrets.map((entry) => ({
       name: entry.name,
       envVar: entry.envVar,
-      programs: sanitizePrograms(entry.programs),
     }));
   }
 

@@ -57,6 +57,9 @@ import type {
   secretEntryResponseSchema,
   secretsListResponseSchema,
   secretSetInputSchema,
+  processSchema,
+  processSetInputSchema,
+  processesListResponseSchema,
 } from "./schemas.js";
 
 export interface SpawnPtyInput {
@@ -96,6 +99,9 @@ export type SecretEntry = z.infer<typeof secretEntrySchema>;
 export type SecretEntryResponse = z.infer<typeof secretEntryResponseSchema>;
 export type SecretsListResponse = z.infer<typeof secretsListResponseSchema>;
 export type SecretSetInput = z.infer<typeof secretSetInputSchema>;
+export type Process = z.infer<typeof processSchema>;
+export type ProcessSetInput = z.infer<typeof processSetInputSchema>;
+export type ProcessesListResponse = z.infer<typeof processesListResponseSchema>;
 
 export type AutomationLastRunStatus = z.infer<typeof automationLastRunStatusSchema>;
 export type AutomationLastRun = z.infer<typeof automationLastRunSchema>;

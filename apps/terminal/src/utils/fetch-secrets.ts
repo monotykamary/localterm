@@ -6,8 +6,8 @@ import {
 
 const SECRETS_ENDPOINT = "/api/secrets";
 
-// The policy (names + env var + programs) is fetched as names only — VALUES are
-// never returned by the daemon (the `/api/*` surface is network-gated, not
+// The policy (names + env var) is fetched as names only — VALUES are never
+// returned by the daemon (the `/api/*` surface is network-gated, not
 // capability-gated, so serving values would expose them to any local process).
 // `hasValue` is probed server-side from the backend so the UI can show whether
 // a value is set without ever reading it.
@@ -24,7 +24,6 @@ export const fetchSecrets = async (signal?: AbortSignal): Promise<SecretsListRes
 
 interface SecretSetInput {
   envVar: string;
-  programs: string[];
   value?: string;
 }
 

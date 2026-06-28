@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createServer, type RunningServer } from "../src/index.js";
@@ -57,7 +57,7 @@ describe("secrets API", () => {
     (await (await fetch(`${baseUrl}/api/secrets`)).json()) as {
       supported: boolean;
       shimsDir: string;
-      secrets: Array<{ name: string; envVar: string; programs: string[]; hasValue: boolean }>;
+      secrets: Array<{ name: string; envVar: string; hasValue: boolean }>;
     };
 
   it("lists an empty policy with the backend's supported flag", async () => {
@@ -67,11 +67,11 @@ describe("secrets API", () => {
     expect(body.shimsDir).toBe(shimsDir);
   });
 
-  it("creates a secret, stores the value in the backend, and generates a shim", async () => {
+  it("creates a secret and stores the value in the backend (never on disk or echoed)", async () => {
     const response = await fetch(`${baseUrl}/api/secrets/anthropic-api-key`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ envVar: "ANTHROPIC_API_KEY", programs: ["pi"], value: "sk-test" }),
+      body: JSON.stringify({ envVar: "ANTHROPIC_API_KEY", value: "sk-test" }),
     });
     expect(response.status).toBe(200);
     const created = (await response.json()) as Record<string, unknown>;
@@ -85,50 +85,38 @@ describe("secrets API", () => {
     expect(backend.store.get("anthropic-api-key")).toBe("sk-test");
     const policyFile = readFileSync(path.join(stateDirectory, "secrets.json"), "utf8");
     expect(policyFile).not.toContain("sk-test");
-
-    // A shim for `pi` exists, is executable, and references the env var.
-    const shimPath = path.join(shimsDir, "pi");
-    expect(existsSync(shimPath)).toBe(true);
-    expect(statSync(shimPath).mode & 0o111).toBeTruthy();
-    const shim = readFileSync(shimPath, "utf8");
-    expect(shim).toContain("ANTHROPIC_API_KEY");
-    expect(shim).toContain("anthropic-api-key");
-    // The shim strips its own dir to avoid recursion.
-    expect(shim).toContain(shimsDir);
   });
 
-  it("updates a policy without a value, keeping the stored value", async () => {
+  it("updates the env var without a value, keeping the stored value", async () => {
     await fetch(`${baseUrl}/api/secrets/anthropic-api-key`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ envVar: "ANTHROPIC_API_KEY", programs: ["pi"], value: "sk-test" }),
+      body: JSON.stringify({ envVar: "ANTHROPIC_API_KEY", value: "sk-test" }),
     });
-    // Add a program without re-sending the value.
+    // Change the env var without re-sending the value.
     const response = await fetch(`${baseUrl}/api/secrets/anthropic-api-key`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ envVar: "ANTHROPIC_API_KEY", programs: ["pi", "claude"] }),
+      body: JSON.stringify({ envVar: "ANTHROPIC_KEY" }),
     });
     expect(response.status).toBe(200);
     expect(backend.store.get("anthropic-api-key")).toBe("sk-test");
-    expect(existsSync(path.join(shimsDir, "claude"))).toBe(true);
     const body = await listSecrets();
-    expect(body.secrets[0].programs).toEqual(["pi", "claude"]);
+    expect(body.secrets[0].envVar).toBe("ANTHROPIC_KEY");
     expect(body.secrets[0].hasValue).toBe(true);
   });
 
-  it("deletes a secret, its value, and its shims", async () => {
+  it("deletes a secret and its backend value", async () => {
     await fetch(`${baseUrl}/api/secrets/anthropic-api-key`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ envVar: "ANTHROPIC_API_KEY", programs: ["pi"], value: "sk-test" }),
+      body: JSON.stringify({ envVar: "ANTHROPIC_API_KEY", value: "sk-test" }),
     });
     const response = await fetch(`${baseUrl}/api/secrets/anthropic-api-key`, {
       method: "DELETE",
     });
     expect(response.status).toBe(200);
     expect(backend.store.has("anthropic-api-key")).toBe(false);
-    expect(existsSync(path.join(shimsDir, "pi"))).toBe(false);
     const body = await listSecrets();
     expect(body.secrets).toEqual([]);
   });
@@ -137,7 +125,7 @@ describe("secrets API", () => {
     const response = await fetch(`${baseUrl}/api/secrets/anthropic-api-key`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ envVar: "ANTHROPIC_API_KEY", programs: ["pi"] }),
+      body: JSON.stringify({ envVar: "ANTHROPIC_API_KEY" }),
     });
     expect(response.status).toBe(400);
   });
@@ -146,34 +134,16 @@ describe("secrets API", () => {
     const badName = await fetch(`${baseUrl}/api/secrets/bad name!`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ envVar: "X", programs: ["pi"], value: "v" }),
+      body: JSON.stringify({ envVar: "X", value: "v" }),
     });
     expect(badName.status).toBe(400);
 
     const badBody = await fetch(`${baseUrl}/api/secrets/x`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ envVar: "lowercase", programs: ["pi"], value: "v" }),
+      body: JSON.stringify({ envVar: "lowercase", value: "v" }),
     });
     expect(badBody.status).toBe(400);
-  });
-
-  it("removes a stale shim when a program is dropped from all secrets", async () => {
-    await fetch(`${baseUrl}/api/secrets/a`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ envVar: "A_KEY", programs: ["pi", "claude"], value: "va" }),
-    });
-    expect(existsSync(path.join(shimsDir, "pi"))).toBe(true);
-    expect(existsSync(path.join(shimsDir, "claude"))).toBe(true);
-    // Drop `claude` from the policy → its shim is stale and removed.
-    await fetch(`${baseUrl}/api/secrets/a`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ envVar: "A_KEY", programs: ["pi"] }),
-    });
-    expect(existsSync(path.join(shimsDir, "pi"))).toBe(true);
-    expect(existsSync(path.join(shimsDir, "claude"))).toBe(false);
   });
 });
 
@@ -215,7 +185,7 @@ describe("secrets API on an unsupported backend", () => {
     const response = await fetch(`${baseUrl}/api/secrets/x`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ envVar: "X", programs: ["pi"], value: "v" }),
+      body: JSON.stringify({ envVar: "X", value: "v" }),
     });
     expect(response.status).toBe(409);
   });

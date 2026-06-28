@@ -67,7 +67,7 @@ describe("buildAutomationSecretEnv", () => {
   });
 
   it("returns an empty env when the backend is unsupported", async () => {
-    store.upsert({ name: "neuralwatt_api_key", envVar: "NEURALWATT_API_KEY", programs: ["pi"] });
+    store.upsert({ name: "neuralwatt_api_key", envVar: "NEURALWATT_API_KEY" });
     backend.values.set("neuralwatt_api_key", "secret");
     expect(
       await buildAutomationSecretEnv(["neuralwatt_api_key"], store, new UnsupportedFakeBackend()),
@@ -75,8 +75,8 @@ describe("buildAutomationSecretEnv", () => {
   });
 
   it("resolves each requested secret to its policy env var", async () => {
-    store.upsert({ name: "neuralwatt_api_key", envVar: "NEURALWATT_API_KEY", programs: ["pi"] });
-    store.upsert({ name: "deepseek_api_key", envVar: "DEEPSEEK_API_KEY", programs: ["pi"] });
+    store.upsert({ name: "neuralwatt_api_key", envVar: "NEURALWATT_API_KEY" });
+    store.upsert({ name: "deepseek_api_key", envVar: "DEEPSEEK_API_KEY" });
     backend.values.set("neuralwatt_api_key", "nw-token");
     backend.values.set("deepseek_api_key", "ds-token");
     expect(
@@ -88,7 +88,7 @@ describe("buildAutomationSecretEnv", () => {
   });
 
   it("skips a name deleted since the automation was authored (fail-closed)", async () => {
-    store.upsert({ name: "neuralwatt_api_key", envVar: "NEURALWATT_API_KEY", programs: ["pi"] });
+    store.upsert({ name: "neuralwatt_api_key", envVar: "NEURALWATT_API_KEY" });
     backend.values.set("neuralwatt_api_key", "nw-token");
     expect(
       await buildAutomationSecretEnv(["neuralwatt_api_key", "ghost_api_key"], store, backend),
@@ -98,8 +98,8 @@ describe("buildAutomationSecretEnv", () => {
   });
 
   it("skips a secret with no value (locked Keychain / never set) without clobbering", async () => {
-    store.upsert({ name: "neuralwatt_api_key", envVar: "NEURALWATT_API_KEY", programs: ["pi"] });
-    store.upsert({ name: "deepseek_api_key", envVar: "DEEPSEEK_API_KEY", programs: ["pi"] });
+    store.upsert({ name: "neuralwatt_api_key", envVar: "NEURALWATT_API_KEY" });
+    store.upsert({ name: "deepseek_api_key", envVar: "DEEPSEEK_API_KEY" });
     backend.values.set("neuralwatt_api_key", "nw-token");
     expect(
       await buildAutomationSecretEnv(["neuralwatt_api_key", "deepseek_api_key"], store, backend),
@@ -109,8 +109,8 @@ describe("buildAutomationSecretEnv", () => {
   });
 
   it("resolves in parallel (backend.get is awaited for every requested name)", async () => {
-    store.upsert({ name: "a", envVar: "A", programs: ["pi"] });
-    store.upsert({ name: "b", envVar: "B", programs: ["pi"] });
+    store.upsert({ name: "a", envVar: "A" });
+    store.upsert({ name: "b", envVar: "B" });
     let resolveB: (value: string | null) => void = () => {};
     const bPromise = new Promise<string | null>((resolve) => {
       resolveB = resolve;
