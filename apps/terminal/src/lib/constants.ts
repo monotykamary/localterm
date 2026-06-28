@@ -28,6 +28,7 @@ export const DISCONNECT_MODAL_THRESHOLD_FAILURES = 2;
 export const RESTART_COMMAND = "npx @monotykamary/localterm@latest start";
 export const COPY_FEEDBACK_MS = 1500;
 export const RETRY_BUTTON_FEEDBACK_MS = 800;
+export const HAPTIC_TAP_MS = 10;
 export const RECONNECT_FAST_POLL_INTERVAL_MS = 250;
 export const RECONNECT_FAST_POLL_DURATION_MS = 5000;
 export const RECONNECT_POLL_INTERVAL_MS = 5000;

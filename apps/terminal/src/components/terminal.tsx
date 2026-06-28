@@ -83,6 +83,7 @@ import {
   TERMINAL_FONT_SIZE_STEP_PX,
   FAVICON_RUNNING_DEBOUNCE_MS,
   FAVICON_READY_DEBOUNCE_MS,
+  HAPTIC_TAP_MS,
   KEYBOARD_MODIFIER_SHIFT_BIT,
   KITTY_KEYBOARD_DISAMBIGUATE_FLAG,
   KITTY_KEYBOARD_SET_MODE_AND_NOT,
@@ -127,6 +128,7 @@ import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider"
 import { extractKeyboardModifiers } from "@/utils/extract-keyboard-modifiers";
 import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
 import { formatShellExitMarker } from "@/utils/format-shell-exit-marker";
+import { triggerHapticFeedback } from "@/utils/haptic-feedback";
 import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anchor";
 import { outputBatcher } from "@/utils/write-terminal-output";
@@ -367,16 +369,14 @@ export const Terminal = () => {
   const setCaffeinateBatteryThresholdRef = useRef<((percent: number | null) => void) | null>(null);
   const toolbarHoverTimeoutRef = useRef<number | null>(null);
   const isSettingsPopoverOpenRef = useRef(false);
+  const isKeepAwakePopoverOpenRef = useRef(false);
   const isAutomationsOpenRef = useRef(false);
   const isWorktreesOpenRef = useRef(false);
   const isSessionsOpenRef = useRef(false);
   const isPortsOpenRef = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const isActionsMenuOpenRef = useRef(false);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const isTouchDevice = useMemo(() => isCoarsePointer(), []);
-  useEffect(() => {
-    isActionsMenuOpenRef.current = isActionsMenuOpen;
-  }, [isActionsMenuOpen]);
   useEffect(() => {
     if (!isTouchDevice) return;
     const root = rootRef.current;
@@ -396,6 +396,22 @@ export const Terminal = () => {
       root.style.transform = "";
     };
   }, [isTouchDevice]);
+  // On touch the expanded action toolbar dismisses on a tap landing outside
+  // itself, replacing the dedicated overlay layer. The settings and keep-awake
+  // popovers portal to <body> and own their own outside-tap dismissal, so while
+  // either is open we defer to it — collapsing the toolbar would yank the
+  // popover's anchor, whose trigger lives in the collapsing grid.
+  useEffect(() => {
+    if (!isTouchDevice || !isActionsMenuOpen) return;
+    const handleOutsidePress = (event: PointerEvent) => {
+      if (isSettingsPopoverOpenRef.current || isKeepAwakePopoverOpenRef.current) return;
+      const toolbar = toolbarRef.current;
+      if (toolbar && event.target instanceof Node && toolbar.contains(event.target)) return;
+      setIsActionsMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", handleOutsidePress, true);
+    return () => window.removeEventListener("pointerdown", handleOutsidePress, true);
+  }, [isTouchDevice, isActionsMenuOpen]);
   const isToolbarVisible =
     isToolbarHovered ||
     isActionsMenuOpen ||
@@ -407,6 +423,7 @@ export const Terminal = () => {
     isPortsOpen ||
     isQrOpen;
   isSettingsPopoverOpenRef.current = isSettingsPopoverOpen;
+  isKeepAwakePopoverOpenRef.current = isKeepAwakePopoverOpen;
   isAutomationsOpenRef.current = isAutomationsOpen;
   isSessionsOpenRef.current = isSessionsOpen;
   isPortsOpenRef.current = isPortsOpen;
@@ -502,15 +519,6 @@ export const Terminal = () => {
   // the indicator stays visible while the action buttons collapse behind it and
   // expand on hover. A stale merged PR (null display state) doesn't count.
   const hasToolbarIndicator = hasDiff || branchPrDisplayState !== null;
-  const hasAmbientDiff = (hasDiff && diffSummary !== null) || branchPrDisplayState !== null;
-  const handleAmbientPress = useCallback(() => {
-    if (!isActionsMenuOpenRef.current) {
-      setIsActionsMenuOpen(true);
-      return;
-    }
-    if (hasAmbientDiff) openDiffViewerRef.current?.();
-    setIsActionsMenuOpen(false);
-  }, [hasAmbientDiff]);
 
   // A `git checkout` keeps the same cwd, so the cwd-keyed lease wouldn't notice.
   // The ambient summary carries the live branch; when it diverges from the branch
@@ -1610,6 +1618,7 @@ export const Terminal = () => {
       if (disposed) return;
       if (sid === liveSessionId) return;
       nextConnectSid = sid;
+      triggerHapticFeedback(HAPTIC_TAP_MS);
       manualReconnectRef.current?.();
     };
 
@@ -1884,11 +1893,13 @@ export const Terminal = () => {
 
   const handleKeepAwakePopoverOpenChange = useCallback((open: boolean) => {
     setIsKeepAwakePopoverOpen(open);
+    if (!open) setIsActionsMenuOpen(false);
   }, []);
 
   const handleSessionsOpenChange = useCallback((open: boolean) => {
     setIsSessionsOpen(open);
     if (open) {
+      setIsActionsMenuOpen(false);
       setIsCommandPaletteOpen(false);
       return;
     }
@@ -1905,6 +1916,7 @@ export const Terminal = () => {
   const handlePortsOpenChange = useCallback((open: boolean) => {
     setIsPortsOpen(open);
     if (open) {
+      setIsActionsMenuOpen(false);
       setIsCommandPaletteOpen(false);
       return;
     }
@@ -1921,6 +1933,7 @@ export const Terminal = () => {
   const handleQrOpenChange = useCallback((open: boolean) => {
     setIsQrOpen(open);
     if (open) {
+      setIsActionsMenuOpen(false);
       setIsCommandPaletteOpen(false);
       return;
     }
@@ -1988,6 +2001,7 @@ export const Terminal = () => {
   const handleSettingsPopoverOpenChange = useCallback((open: boolean) => {
     setIsSettingsPopoverOpen(open);
     if (!open) {
+      setIsActionsMenuOpen(false);
       if (toolbarHoverTimeoutRef.current !== null) {
         window.clearTimeout(toolbarHoverTimeoutRef.current);
       }
@@ -2001,6 +2015,7 @@ export const Terminal = () => {
   const handleAutomationsOpenChange = useCallback((open: boolean) => {
     setIsAutomationsOpen(open);
     if (open) {
+      setIsActionsMenuOpen(false);
       setIsCommandPaletteOpen(false);
       return;
     }
@@ -2022,6 +2037,7 @@ export const Terminal = () => {
   const handleWorktreesOpenChange = useCallback((open: boolean) => {
     setIsWorktreesOpen(open);
     if (open) {
+      setIsActionsMenuOpen(false);
       setIsCommandPaletteOpen(false);
       setWorktreeCreateError(null);
       return;
@@ -2089,6 +2105,7 @@ export const Terminal = () => {
   createWorktreeRef.current = createWorktree;
 
   const toggleCommandPalette = useCallback(() => {
+    setIsActionsMenuOpen(false);
     setIsCommandPaletteOpen((previous) => !previous);
   }, []);
   toggleCommandPaletteRef.current = toggleCommandPalette;
@@ -2100,6 +2117,7 @@ export const Terminal = () => {
 
   const openSearchOverlay = useCallback(() => {
     setIsSearchOpen(true);
+    setIsActionsMenuOpen(false);
     setIsCommandPaletteOpen(false);
     setSearchOpenAttempt((previous) => previous + 1);
   }, []);
@@ -2107,9 +2125,18 @@ export const Terminal = () => {
 
   const openDiffViewer = useCallback(() => {
     setIsDiffViewerOpen(true);
+    setIsActionsMenuOpen(false);
     setIsCommandPaletteOpen(false);
   }, []);
   openDiffViewerRef.current = openDiffViewer;
+
+  // The mobile chevron is the sole toggle for the action toolbar now that the
+  // diff/PR indicators open the diff viewer directly. A light tap haptic
+  // confirms the press on devices that support navigator.vibrate.
+  const toggleActionsMenu = useCallback(() => {
+    triggerHapticFeedback(HAPTIC_TAP_MS);
+    setIsActionsMenuOpen((previous) => !previous);
+  }, []);
 
   const closeDiffViewer = useCallback(() => {
     setIsDiffViewerOpen(false);
@@ -2506,15 +2533,6 @@ export const Terminal = () => {
               : `disconnected · code ${exitInfo.closeCode}`}
           </Badge>
         ) : null}
-        {isTouchDevice && isActionsMenuOpen ? (
-          <div
-            aria-hidden="true"
-            onClick={() => {
-              setIsActionsMenuOpen(false);
-            }}
-            className="absolute inset-0 z-[9]"
-          />
-        ) : null}
         <div
           className={cn(
             "absolute right-0 top-0 z-10 flex flex-col items-end pr-3 pt-1",
@@ -2536,6 +2554,7 @@ export const Terminal = () => {
           />
           {!isSearchOpen && (
             <div
+              ref={toolbarRef}
               role="toolbar"
               aria-label="terminal actions"
               className={cn(
@@ -2691,7 +2710,7 @@ export const Terminal = () => {
                   {hasDiff && diffSummary !== null ? (
                     <button
                       type="button"
-                      onClick={isTouchDevice ? handleAmbientPress : openDiffViewer}
+                      onClick={openDiffViewer}
                       aria-label={`view git diff: ${diffSummary.additions} additions, ${diffSummary.deletions} deletions${diffSummary.binaries > 0 ? `, ${diffSummary.binaries} binary files changed` : ""}`}
                       title={`${isMac ? "⌘" : "Ctrl+"}G`}
                       className="flex h-8 items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 font-mono text-xs tabular-nums outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
@@ -2713,7 +2732,7 @@ export const Terminal = () => {
                   {branchPr && branchPrDisplayState && BranchPrIcon ? (
                     <button
                       type="button"
-                      onClick={isTouchDevice ? handleAmbientPress : openDiffViewer}
+                      onClick={openDiffViewer}
                       aria-label={`view pull request diff: PR #${branchPr.number} (${PR_DISPLAY_STATE_LABELS[branchPrDisplayState]})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
                       title={`PR #${branchPr.number} (${PR_DISPLAY_STATE_LABELS[branchPrDisplayState]})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
                       className={cn(
@@ -2725,10 +2744,10 @@ export const Terminal = () => {
                       <span>#{branchPr.number}</span>
                     </button>
                   ) : null}
-                  {isTouchDevice && !hasAmbientDiff ? (
+                  {isTouchDevice ? (
                     <button
                       type="button"
-                      onClick={handleAmbientPress}
+                      onClick={toggleActionsMenu}
                       aria-label={
                         isActionsMenuOpen ? "Hide terminal actions" : "Show terminal actions"
                       }
