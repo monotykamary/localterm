@@ -414,7 +414,11 @@ export const gitBranchPrLeaseSchema = z
 // never removable, so the client hides its delete action and the server guards
 // removal. `isLocked` / `isPrunable` mirror git's own markers (a locked
 // worktree is exempt from auto-pruning; prunable means git thinks it can be
-// cleaned up).
+// cleaned up). `activeSessionCount` is how many live PTYs are sitting in this
+// worktree (attached, dormant in the no-clients grace window, or running an
+// automation) — the same signal the delete route uses to refuse removal, so the
+// client can hide the trash action on a worktree a shell is still open in
+// instead of offering a delete the server would 409.
 export const gitWorktreeSchema = z
   .object({
     path: z.string().min(1),
@@ -425,6 +429,7 @@ export const gitWorktreeSchema = z
     isMain: z.boolean(),
     isLocked: z.boolean(),
     isPrunable: z.boolean(),
+    activeSessionCount: z.number().int().nonnegative(),
   })
   .strict();
 

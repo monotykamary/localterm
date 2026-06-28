@@ -102,6 +102,7 @@ describe("listGitWorktrees", () => {
         isMain: true,
         isLocked: false,
         isPrunable: false,
+        activeSessionCount: 0,
       });
     } finally {
       fs.rmSync(repo.dir, { recursive: true, force: true });

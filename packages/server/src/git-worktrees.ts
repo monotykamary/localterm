@@ -218,6 +218,7 @@ const toWorktree = (
   parsed: ParsedWorktree,
   currentRoot: string | null,
   mainRoot: string | null,
+  countActiveSessions: (worktreePath: string) => number,
 ): GitWorktree => ({
   path: parsed.path,
   displayPath: tildifyHome(parsed.path),
@@ -227,9 +228,13 @@ const toWorktree = (
   isMain: mainRoot !== null && path.resolve(parsed.path) === path.resolve(mainRoot),
   isLocked: parsed.locked,
   isPrunable: parsed.prunable,
+  activeSessionCount: countActiveSessions(parsed.path),
 });
 
-export const listGitWorktrees = async (cwd: string): Promise<GitWorktreeListResponse> => {
+export const listGitWorktrees = async (
+  cwd: string,
+  countActiveSessions: (worktreePath: string) => number = () => 0,
+): Promise<GitWorktreeListResponse> => {
   if (!(await isGitRepo(cwd))) return { isRepo: false, worktrees: [], displayBaseDir: null };
   const [listResult, currentRoot, mainRoot] = await Promise.all([
     runGit(cwd, ["worktree", "list", "--porcelain"]),
@@ -240,7 +245,9 @@ export const listGitWorktrees = async (cwd: string): Promise<GitWorktreeListResp
     throw new WorktreeError(listResult.stderr.trim() || "git worktree list failed");
   }
   const parsed = parseWorktreePorcelain(listResult.stdout.toString("utf8"));
-  const worktrees = parsed.map((entry) => toWorktree(entry, currentRoot, mainRoot));
+  const worktrees = parsed.map((entry) =>
+    toWorktree(entry, currentRoot, mainRoot, countActiveSessions),
+  );
   let displayBaseDir: string | null = null;
   if (mainRoot) {
     const projectName = path.basename(mainRoot);
