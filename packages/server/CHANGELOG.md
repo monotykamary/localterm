@@ -1,5 +1,19 @@
 # localterm-server
 
+## 2.22.0
+
+### Minor Changes
+
+- Add an open dev-ports modal that shows the TCP listening sockets a session's shell has open (a dev server run inside a tab) and lets you stop one without leaving the terminal.
+
+  Server side, two new routes. `GET /ports` walks the process tree under each session shell (`ps`) and the listening socket table (`lsof -nP -iTCP -sTCP:LISTEN`), then returns the ports that descend from a live session — each row carries the owning pid/process name and the session's id/title/cwd so the modal can badge it without a second fetch. `DELETE /ports/:pid` stops a dev server by `SIGTERM`-ing the owning pid; it re-verifies the pid still descends from a live session against a fresh snapshot before signalling, so a pid recycled after the dev server exited (the shell spawned an unrelated process that reused the number) can't be killed by a stale request. Both snapshots are injectable via `ServerOptions` (`portsSnapshotProcesses` / `portsSnapshotListeners`) so tests can drive the list deterministically without a real listener; the tree snapshot defaults to the same shared `ps` read keep-awake's automatic mode uses.
+
+  Terminal side, a `PortsButton` in the toolbar and a `PortsModal` that polls the list while open (so a server starting/stopping shows up live). Each row is the port number (bold mono) as the identity, the owning session's title/path taking the flex-1 truncation slack, the process name + bind address right-aligned in a mono meta column (hidden on mobile so the row stays a one-liner on a phone), and an always-visible stop button trailing. The row itself is informational — stopping a dev server is an explicit, deliberate action via the stop button (or Enter on the highlighted row) so an accidental tap never kills a running server. The stop button is always shown, not hover-gated like the sessions modal's kill X, because a touch device has no hover to reveal it and stopping a dev server is this modal's whole purpose. Wired into the command palette as "Dev ports" with a Network icon.
+
+- Block worktree deletion while a PTY is still active on it, so `git worktree remove` can't pull the directory out from under a live shell.
+
+  A live PTY — attached, dormant in the no-clients grace window, or running an automation — holds the worktree as its cwd; removing the worktree out from under it would break the shell. The `DELETE /worktrees` route now refuses with `409 active_pty` (and a count-aware message) when any session's current cwd is inside the target worktree, and the stale-worktree sweep skips a shell-occupied worktree for the same reason. The signal is the session's _current_ cwd (last emitted, falling back to the spawn cwd), read via a new `SessionManager.sessionsInPath(targetPath)` helper, so a shell that's `cd`'d out of the worktree no longer blocks removal. The sweep's busy check runs before the git cleanliness spawn since it's an in-memory lookup.
+
 ## 2.21.0
 
 ## 2.20.2
