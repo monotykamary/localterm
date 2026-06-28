@@ -190,6 +190,10 @@ export const TERMINAL_SCROLLBACK_STORAGE_KEY = "localterm:terminal-scrollback";
 export const TERMINAL_SCROLL_ON_USER_INPUT_STORAGE_KEY = "localterm:terminal-scroll-on-user-input";
 export const TERMINAL_PADDING_X_STORAGE_KEY = "localterm:terminal-padding-x";
 export const TERMINAL_PADDING_Y_STORAGE_KEY = "localterm:terminal-padding-y";
+// Default working directory for shells launched without an explicit ?cwd=
+// (PWA app-icon launch, a fresh tab before any session connects, a reloaded
+// bare URL). Empty = unset, so the server falls back to the home directory.
+export const DEFAULT_CWD_STORAGE_KEY = "localterm:default-cwd";
 export const GOOGLE_FONTS_STYLESHEET_ID = "localterm-google-fonts";
 export const NERD_FONT_ENABLED_STORAGE_KEY = "localterm:nerd-font-enabled";
 export const NERD_FONT_SYMBOLS_FAMILY = "Symbols Nerd Font";

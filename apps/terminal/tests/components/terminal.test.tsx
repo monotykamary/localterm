@@ -14,6 +14,7 @@ import {
   TERMINAL_SCROLL_ON_USER_INPUT_STORAGE_KEY,
   TERMINAL_SCROLLBACK_STORAGE_KEY,
   LIGATURES_ENABLED_STORAGE_KEY,
+  DEFAULT_CWD_STORAGE_KEY,
 } from "../../src/lib/constants";
 import { DEFAULT_TERMINAL_CURSOR_STYLE } from "../../src/lib/terminal-cursor";
 import { DEFAULT_TERMINAL_SCROLLBACK_LINES } from "../../src/lib/terminal-scrollback";
@@ -1487,5 +1488,39 @@ describe("Terminal refresh reattach", () => {
     });
 
     expect(secondWs?.send).toHaveBeenCalledWith(JSON.stringify({ type: "ready", replay: false }));
+  });
+});
+
+describe("Terminal default launch directory", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("seeds the WS ?cwd= from the saved default on a bare launch", () => {
+    installFakeLocalStorage({ [DEFAULT_CWD_STORAGE_KEY]: "/Users/tester/repo" });
+    window.history.replaceState(null, "", "/");
+    render(<Terminal />);
+
+    expect(fakeWebSockets[0]).toBeDefined();
+    expect(fakeWebSockets[0].url).toContain("cwd=%2FUsers%2Ftester%2Frepo");
+  });
+
+  it("prefers an explicit address-bar ?cwd= over the saved default", () => {
+    installFakeLocalStorage({ [DEFAULT_CWD_STORAGE_KEY]: "/Users/tester/repo" });
+    window.history.replaceState(null, "", "/?cwd=%2Ftmp");
+    render(<Terminal />);
+
+    expect(fakeWebSockets[0]).toBeDefined();
+    expect(fakeWebSockets[0].url).toContain("cwd=%2Ftmp");
+    expect(fakeWebSockets[0].url).not.toContain("tester");
+  });
+
+  it("omits ?cwd= when no default and no address-bar cwd are set", () => {
+    installFakeLocalStorage();
+    window.history.replaceState(null, "", "/");
+    render(<Terminal />);
+
+    expect(fakeWebSockets[0]).toBeDefined();
+    expect(fakeWebSockets[0].url).not.toContain("cwd=");
   });
 });

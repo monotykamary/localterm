@@ -5,6 +5,7 @@ import { SettingsSelect, type SettingsSelectItem } from "@/components/settings-s
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -52,6 +53,8 @@ interface SettingsMenuProps {
   onPaddingXChange: (paddingX: number) => void;
   paddingY: number;
   onPaddingYChange: (paddingY: number) => void;
+  defaultCwd: string;
+  onDefaultCwdChange: (defaultCwd: string) => void;
   cursorStyle: TerminalCursorStyle;
   onCursorStyleChange: (style: TerminalCursorStyle) => void;
   onCursorStylePreview?: (style: TerminalCursorStyle | null) => void;
@@ -142,6 +145,8 @@ export const SettingsMenu = ({
   onPaddingXChange,
   paddingY,
   onPaddingYChange,
+  defaultCwd,
+  onDefaultCwdChange,
   cursorStyle,
   onCursorStyleChange,
   onCursorStylePreview,
@@ -367,6 +372,35 @@ export const SettingsMenu = ({
                 onValueChange={onPaddingYChange}
               />
             </div>
+          </Field>
+
+          <Separator className="bg-border/40" />
+
+          <Field orientation="vertical" className="gap-1.5">
+            <FieldLabel className={SECTION_LABEL_CLASSES}>Launch</FieldLabel>
+            <Tooltip>
+              <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                Default directory
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                className="max-w-xs"
+              >
+                Directory new shells open in when launched without an explicit
+                path — the PWA app icon, a fresh tab before any session
+                connects, or a reloaded bare URL. Leave empty to use your home
+                directory. The live session's directory always takes precedence
+                once a shell is running.
+              </TooltipContent>
+            </Tooltip>
+            <Input
+              value={defaultCwd}
+              placeholder="Home directory"
+              aria-label="default launch directory"
+              className="h-7 px-2 font-mono text-xs"
+              onChange={(event) => onDefaultCwdChange(event.target.value)}
+            />
           </Field>
 
           <Separator className="bg-border/40" />

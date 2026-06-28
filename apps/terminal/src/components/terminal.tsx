@@ -217,6 +217,11 @@ import {
   subscribeStoredTerminalPaddingY,
 } from "@/utils/stored-terminal-padding-y";
 import {
+  loadStoredDefaultCwd,
+  storeDefaultCwd,
+  subscribeStoredDefaultCwd,
+} from "@/utils/stored-default-cwd";
+import {
   loadStoredNerdFontEnabled,
   storeNerdFontEnabled,
   subscribeStoredNerdFontEnabled,
@@ -255,7 +260,11 @@ const buildWebSocketUrl = (cwdOverride?: string | null, sid?: string | null): st
   const url = new URL("/ws", window.location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   const params = new URLSearchParams(window.location.search);
-  const cwd = cwdOverride ?? params.get(CWD_QUERY_PARAM);
+  // The address-bar ?cwd= (or an explicit override like the live cwd on
+  // reconnect) wins; a bare launch with neither falls back to the user's
+  // saved default cwd so the PWA app icon and a fresh tab open somewhere
+  // meaningful instead of always the home directory.
+  const cwd = cwdOverride ?? params.get(CWD_QUERY_PARAM) ?? loadStoredDefaultCwd();
   if (cwd) url.searchParams.set(CWD_QUERY_PARAM, cwd);
   const runId = params.get(RUN_QUERY_PARAM);
   if (runId) url.searchParams.set(RUN_QUERY_PARAM, runId);
@@ -274,7 +283,11 @@ const buildWebSocketUrl = (cwdOverride?: string | null, sid?: string | null): st
 
 const buildNewTabUrl = (cwd: string | null, command?: string): string => {
   const url = new URL(window.location.origin);
-  if (cwd) url.searchParams.set(CWD_QUERY_PARAM, cwd);
+  // Inherit the live cwd when available; otherwise seed from the saved default
+  // so a new tab opened before any session connects still lands in the
+  // user's chosen directory rather than the home directory.
+  const resolvedCwd = cwd ?? loadStoredDefaultCwd();
+  if (resolvedCwd) url.searchParams.set(CWD_QUERY_PARAM, resolvedCwd);
   if (command) url.searchParams.set(INITIAL_COMMAND_QUERY_PARAM, command);
   return url.toString();
 };
@@ -331,6 +344,7 @@ export const Terminal = () => {
   const initialPaddingYRef = useRef<number>(loadStoredTerminalPaddingY());
   const initialNerdFontEnabledRef = useRef<boolean>(loadStoredNerdFontEnabled());
   const initialLigaturesEnabledRef = useRef<boolean>(loadStoredLigaturesEnabled());
+  const initialDefaultCwdRef = useRef<string>(loadStoredDefaultCwd());
   const fitAddonRef = useRef<FitAddon | null>(null);
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
   const openDiffViewerRef = useRef<(() => void) | null>(null);
@@ -472,6 +486,7 @@ export const Terminal = () => {
   );
   const [activePaddingX, setActivePaddingX] = useState<number>(initialPaddingXRef.current);
   const [activePaddingY, setActivePaddingY] = useState<number>(initialPaddingYRef.current);
+  const [activeDefaultCwd, setActiveDefaultCwd] = useState<string>(initialDefaultCwdRef.current);
   const [sessionInfo, setSessionInfo] = useState<TerminalSessionInfo | null>(null);
   const [notificationsPermission, setNotificationsPermission] = useState<
     NotificationPermission | "unsupported"
@@ -1840,6 +1855,16 @@ export const Terminal = () => {
     storeTerminalPaddingY(clamped);
   }, []);
 
+  // The default launch directory is trimmed before storing so a path with
+  // accidental leading/trailing whitespace never becomes a cwd the server
+  // rejects (it would silently fall back to the home directory). Mid-path
+  // spaces are preserved. Empty clears the default back to home.
+  const handleDefaultCwdChange = useCallback((nextDefaultCwd: string) => {
+    const trimmed = nextDefaultCwd.trim();
+    setActiveDefaultCwd(trimmed);
+    storeDefaultCwd(trimmed);
+  }, []);
+
   // Settings persist to localStorage, so changing one in any tab fires a
   // `storage` event in every OTHER tab. Re-applying each setting there keeps
   // theme/font/cursor/padding/… in lockstep across all open tabs — the
@@ -1860,6 +1885,7 @@ export const Terminal = () => {
       subscribeStoredTerminalScrollOnUserInput(setActiveScrollOnUserInput),
       subscribeStoredTerminalPaddingX(setActivePaddingX),
       subscribeStoredTerminalPaddingY(setActivePaddingY),
+      subscribeStoredDefaultCwd(setActiveDefaultCwd),
     ];
     return () => {
       for (const unsubscribe of unsubscribes) unsubscribe();
@@ -2641,6 +2667,8 @@ export const Terminal = () => {
                     onPaddingXChange={handlePaddingXChange}
                     paddingY={activePaddingY}
                     onPaddingYChange={handlePaddingYChange}
+                    defaultCwd={activeDefaultCwd}
+                    onDefaultCwdChange={handleDefaultCwdChange}
                     notificationsPermission={notificationsPermission}
                     onNotificationsPermissionRequest={handleNotificationsPermissionRequest}
                     sessionInfo={sessionInfo}

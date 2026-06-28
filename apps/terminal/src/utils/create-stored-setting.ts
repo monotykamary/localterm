@@ -103,3 +103,18 @@ export const createStringLookupStoredSetting = <T>(
     subscribe: (onChange) => subscribeToStorageKey(key, () => onChange(load())),
   };
 };
+
+// Free-form string (no enum constraint). Used for values like a saved path
+// whose only "invalid" form is empty — `loadRaw` returns null for a missing or
+// blank entry, so `defaultValue` (typically `"`) covers both unset and cleared.
+export const createStringStoredSetting = (
+  key: string,
+  defaultValue: string,
+): StoredSetting<string> => {
+  const load = (): string => loadRaw(key) ?? defaultValue;
+  return {
+    load,
+    store: (value) => storeRaw(key, value),
+    subscribe: (onChange) => subscribeToStorageKey(key, () => onChange(load())),
+  };
+};

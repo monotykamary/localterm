@@ -30,6 +30,7 @@ interface SettingsMenuHarnessProps {
   initialThemeId?: string;
   initialFontId?: string;
   initialLigaturesEnabled?: boolean;
+  initialDefaultCwd?: string;
   onThemeChange?: (id: string) => void;
   onThemePreview?: (id: string | null) => void;
   onFontChange?: (id: string) => void;
@@ -45,6 +46,7 @@ interface SettingsMenuHarnessProps {
   onPaddingXChange?: (paddingX: number) => void;
   onPaddingYChange?: (paddingY: number) => void;
   onLigaturesEnabledChange?: (enabled: boolean) => void;
+  onDefaultCwdChange?: (cwd: string) => void;
   notificationsPermission?: NotificationPermission | "unsupported";
   onNotificationsPermissionRequest?: () => void;
   sessionInfo?: TerminalSessionInfo | null;
@@ -61,6 +63,7 @@ const renderSettingsMenu = ({
   initialThemeId = "vesper",
   initialFontId = "geist-mono",
   initialLigaturesEnabled = false,
+  initialDefaultCwd = "",
   onThemeChange = () => {},
   onThemePreview,
   onFontChange = () => {},
@@ -76,6 +79,7 @@ const renderSettingsMenu = ({
   onPaddingXChange = () => {},
   onPaddingYChange = () => {},
   onLigaturesEnabledChange = () => {},
+  onDefaultCwdChange = () => {},
   notificationsPermission = "default",
   onNotificationsPermissionRequest = () => {},
   sessionInfo,
@@ -112,6 +116,8 @@ const renderSettingsMenu = ({
         onPaddingXChange={onPaddingXChange}
         paddingY={0}
         onPaddingYChange={onPaddingYChange}
+        defaultCwd={initialDefaultCwd}
+        onDefaultCwdChange={onDefaultCwdChange}
         notificationsPermission={notificationsPermission}
         onNotificationsPermissionRequest={onNotificationsPermissionRequest}
         sessionInfo={sessionInfo}
@@ -288,6 +294,38 @@ describe("SettingsMenu ligatures switch", () => {
 
     expect(onLigaturesEnabledChange).toHaveBeenCalledTimes(1);
     expect(onLigaturesEnabledChange.mock.calls[0]?.[0]).toBe(true);
+  });
+});
+
+describe("SettingsMenu default launch directory", () => {
+  it("renders the stored path in the Launch input", () => {
+    renderSettingsMenu({ initialDefaultCwd: "/Users/tester/repo" });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("default launch directory") as HTMLInputElement;
+    expect(input.value).toBe("/Users/tester/repo");
+  });
+
+  it("shows the home-directory placeholder when no default is set", () => {
+    renderSettingsMenu({ initialDefaultCwd: "" });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("default launch directory") as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(input.placeholder).toBe("Home directory");
+  });
+
+  it("calls onDefaultCwdChange with the typed value", () => {
+    const onDefaultCwdChange = vi.fn();
+    renderSettingsMenu({ initialDefaultCwd: "", onDefaultCwdChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    fireEvent.change(screen.getByLabelText("default launch directory"), {
+      target: { value: "/Users/tester/repo" },
+    });
+
+    expect(onDefaultCwdChange).toHaveBeenCalledTimes(1);
+    expect(onDefaultCwdChange.mock.calls[0]?.[0]).toBe("/Users/tester/repo");
   });
 });
 
