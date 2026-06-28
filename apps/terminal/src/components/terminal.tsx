@@ -774,6 +774,19 @@ export const Terminal = () => {
       if (terminal.textarea) terminal.textarea.inputMode = "";
       terminal.focus();
     };
+    // Programmatic refocus after an overlay closes (settings/keep-awake menu,
+    // search, command palette, diff viewer): route keystrokes back to the
+    // terminal without popping the virtual keyboard on touch. While an overlay
+    // was open the textarea blurred and the blur guard kept it
+    // `inputMode="none"` (keyboard suppressed); calling focusTerminalForInput
+    // here would un-guard it and pop the keyboard for a dismiss tap that never
+    // intended to type. On touch the guard stays in place — only a genuine tap
+    // on the terminal (handleTerminalTouchEnd) un-guards. Desktop has no virtual
+    // keyboard, so a plain focus is all that's needed.
+    const refocusTerminalQuietly = () => {
+      if (isTouchDevice && terminal.textarea) terminal.textarea.inputMode = "none";
+      terminal.focus();
+    };
     const handleTerminalTouchStart = (event: TouchEvent) => {
       if (event.touches.length !== 1) {
         tapMovedBeyondThreshold = true;
@@ -1209,7 +1222,7 @@ export const Terminal = () => {
       document.title = titleForLiveSession(trimmed);
     };
 
-    refocusTerminalRef.current = focusTerminalForInput;
+    refocusTerminalRef.current = refocusTerminalQuietly;
     // Routes through the normal paste pipeline (bracketed paste when the
     // foreground app enables it), so multi-line text lands in the prompt
     // without executing.
@@ -2526,7 +2539,7 @@ export const Terminal = () => {
         paddingLeft: "env(safe-area-inset-left, 0px)",
       }}
     >
-      <div className="relative h-full w-full">
+      <div data-terminal-surface className="relative h-full w-full">
         <div
           ref={containerRef}
           aria-label="terminal session"
