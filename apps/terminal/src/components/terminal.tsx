@@ -71,6 +71,7 @@ import { WorktreesButton } from "@/components/worktrees-menu";
 import { WorktreesModal } from "@/components/worktrees-modal";
 import { useGitBranchInfo } from "@/hooks/use-git-branch-info";
 import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
+import { useScreenWakeLock } from "@/hooks/use-screen-wake-lock";
 import { createGitWorktree, type CreateWorktreeOptions } from "@/utils/fetch-git-worktrees";
 import {
   COPY_FEEDBACK_MS,
@@ -515,6 +516,7 @@ export const Terminal = () => {
   // threshold (which defaults to 20% on) overwrites this on the first WS frame.
   const [caffeinateBatteryThreshold, setCaffeinateBatteryThreshold] = useState<number | null>(null);
   const caffeinateActiveTriggerRef = useRef<string | null>(null);
+  useScreenWakeLock(caffeinateActive);
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
   const { summary: diffSummary, setGitDiffSummary } = useGitDiffSummary();
   // Bumps every time the server pushes a git-diff-summary from a real git-dirty
