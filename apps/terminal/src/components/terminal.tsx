@@ -144,6 +144,7 @@ import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
 import { isDiffViewerShortcut } from "@/utils/is-diff-viewer-shortcut";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
+import { isPortsShortcut } from "@/utils/is-ports-shortcut";
 import { isSessionsShortcut } from "@/utils/is-sessions-shortcut";
 import { isWorktreesCreateShortcut } from "@/utils/is-worktrees-create-shortcut";
 import { isWorktreesShortcut } from "@/utils/is-worktrees-shortcut";
@@ -355,6 +356,7 @@ export const Terminal = () => {
   const [isPortsOpen, setIsPortsOpen] = useState(false);
   const openWorktreesRef = useRef<(() => void) | null>(null);
   const toggleWorktreesRef = useRef<(() => void) | null>(null);
+  const togglePortsRef = useRef<(() => void) | null>(null);
   const toggleSessionsRef = useRef<(() => void) | null>(null);
   const createWorktreeRef = useRef<
     ((options: CreateWorktreeOptions, openAfter: boolean) => Promise<boolean>) | null
@@ -368,6 +370,7 @@ export const Terminal = () => {
   const isAutomationsOpenRef = useRef(false);
   const isWorktreesOpenRef = useRef(false);
   const isSessionsOpenRef = useRef(false);
+  const isPortsOpenRef = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const isActionsMenuOpenRef = useRef(false);
   const isTouchDevice = useMemo(() => isCoarsePointer(), []);
@@ -406,6 +409,7 @@ export const Terminal = () => {
   isSettingsPopoverOpenRef.current = isSettingsPopoverOpen;
   isAutomationsOpenRef.current = isAutomationsOpen;
   isSessionsOpenRef.current = isSessionsOpen;
+  isPortsOpenRef.current = isPortsOpen;
   isWorktreesOpenRef.current = isWorktreesOpen;
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultState>({
@@ -1122,6 +1126,13 @@ export const Terminal = () => {
         if (event.type === "keydown") {
           event.preventDefault();
           toggleSessionsRef.current?.();
+        }
+        return false;
+      }
+      if (isPortsShortcut(event, isMac)) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          togglePortsRef.current?.();
         }
         return false;
       }
@@ -2041,6 +2052,11 @@ export const Terminal = () => {
   }, [handleSessionsOpenChange]);
   toggleSessionsRef.current = toggleSessions;
 
+  const togglePorts = useCallback(() => {
+    handlePortsOpenChange(!isPortsOpenRef.current);
+  }, [handlePortsOpenChange]);
+  togglePortsRef.current = togglePorts;
+
   const openShellAt = useCallback((shellCwd: string, command?: string) => {
     window.open(buildNewTabUrl(shellCwd, command), "_blank", "noopener,noreferrer");
   }, []);
@@ -2303,6 +2319,7 @@ export const Terminal = () => {
         id: "ports",
         label: "Dev ports",
         category: "Actions",
+        shortcut: `${togglePrefix}Shift+D`,
         icon: <Network className="size-3.5" />,
         action: () => handlePortsOpenChange(true),
       },
