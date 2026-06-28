@@ -362,7 +362,7 @@ export const Terminal = () => {
   const [searchOpenAttempt, setSearchOpenAttempt] = useState(0);
   const [isToolbarHovered, setIsToolbarHovered] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
-  const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAutomationsOpen, setIsAutomationsOpen] = useState(false);
   const [isKeepAwakePopoverOpen, setIsKeepAwakePopoverOpen] = useState(false);
   const [isSessionsOpen, setIsSessionsOpen] = useState(false);
@@ -385,7 +385,7 @@ export const Terminal = () => {
   const setCaffeinateActivityGateRef = useRef<((enabled: boolean) => void) | null>(null);
   const setCaffeinateBatteryThresholdRef = useRef<((percent: number | null) => void) | null>(null);
   const toolbarHoverTimeoutRef = useRef<number | null>(null);
-  const isSettingsPopoverOpenRef = useRef(false);
+  const isSettingsOpenRef = useRef(false);
   const isKeepAwakePopoverOpenRef = useRef(false);
   const isAutomationsOpenRef = useRef(false);
   const isWorktreesOpenRef = useRef(false);
@@ -421,7 +421,7 @@ export const Terminal = () => {
   useEffect(() => {
     if (!isTouchDevice || !isActionsMenuOpen) return;
     const handleOutsidePress = (event: PointerEvent) => {
-      if (isSettingsPopoverOpenRef.current || isKeepAwakePopoverOpenRef.current) return;
+      if (isSettingsOpenRef.current || isKeepAwakePopoverOpenRef.current) return;
       const toolbar = toolbarRef.current;
       if (toolbar && event.target instanceof Node && toolbar.contains(event.target)) return;
       setIsActionsMenuOpen(false);
@@ -432,7 +432,7 @@ export const Terminal = () => {
   const isToolbarVisible =
     isToolbarHovered ||
     isActionsMenuOpen ||
-    isSettingsPopoverOpen ||
+    isSettingsOpen ||
     isAutomationsOpen ||
     isKeepAwakePopoverOpen ||
     isSessionsOpen ||
@@ -440,7 +440,7 @@ export const Terminal = () => {
     isPortsOpen ||
     isQrOpen ||
     isSecretsOpen;
-  isSettingsPopoverOpenRef.current = isSettingsPopoverOpen;
+  isSettingsOpenRef.current = isSettingsOpen;
   isKeepAwakePopoverOpenRef.current = isKeepAwakePopoverOpen;
   isAutomationsOpenRef.current = isAutomationsOpen;
   isSessionsOpenRef.current = isSessionsOpen;
@@ -2035,14 +2035,14 @@ export const Terminal = () => {
       : TOOLBAR_HIDE_DELAY_MS;
     toolbarHoverTimeoutRef.current = window.setTimeout(() => {
       toolbarHoverTimeoutRef.current = null;
-      if (!isSettingsPopoverOpenRef.current && !isAutomationsOpenRef.current) {
+      if (!isSettingsOpenRef.current && !isAutomationsOpenRef.current) {
         setIsToolbarHovered(false);
       }
     }, delay);
   }, []);
 
-  const handleSettingsPopoverOpenChange = useCallback((open: boolean) => {
-    setIsSettingsPopoverOpen(open);
+  const handleSettingsOpenChange = useCallback((open: boolean) => {
+    setIsSettingsOpen(open);
     if (!open) {
       setIsActionsMenuOpen(false);
       if (toolbarHoverTimeoutRef.current !== null) {
@@ -2689,7 +2689,7 @@ export const Terminal = () => {
                     notificationsPermission={notificationsPermission}
                     onNotificationsPermissionRequest={handleNotificationsPermissionRequest}
                     sessionInfo={sessionInfo}
-                    onPopoverOpenChange={handleSettingsPopoverOpenChange}
+                    onOpenChange={handleSettingsOpenChange}
                     onClose={refocusTerminalRef.current ?? undefined}
                   />
                   <Button

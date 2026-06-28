@@ -1,17 +1,23 @@
-import { ChevronDown, Settings } from "lucide-react";
-import { useRef, useState, type CSSProperties } from "react";
+import { ChevronDown, Settings, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { NumberStepper } from "@/components/number-stepper";
 import { SettingsSelect, type SettingsSelectItem } from "@/components/settings-select";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { PANEL_ANIMATION_CLASSES, TRANSLUCENT_PANEL_CLASSES } from "@/lib/animation-classes";
 import {
+  COMMAND_PALETTE_BACKDROP_CLASSES,
+  COMMAND_PALETTE_PANEL_CLASSES,
+  MODAL_PANEL_CLASSES,
+} from "@/lib/animation-classes";
+import {
+  SETTINGS_MODAL_CLOSE_TRANSITION_MS,
+  SETTINGS_MODAL_MAX_HEIGHT_CSS,
   TERMINAL_FONT_SIZE_MAX_PX,
   TERMINAL_FONT_SIZE_MIN_PX,
   TERMINAL_FONT_SIZE_STEP_PX,
@@ -69,7 +75,7 @@ interface SettingsMenuProps {
   notificationsPermission: NotificationPermission | "unsupported";
   onNotificationsPermissionRequest: () => void;
   sessionInfo?: TerminalSessionInfo | null;
-  onPopoverOpenChange?: (open: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
   onClose?: () => void;
 }
 
@@ -161,24 +167,63 @@ export const SettingsMenu = ({
   notificationsPermission,
   onNotificationsPermissionRequest,
   sessionInfo,
-  onPopoverOpenChange,
+  onOpenChange,
   onClose,
 }: SettingsMenuProps) => {
-  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [settled, setSettled] = useState(false);
   const [isFontSelectOpen, setIsFontSelectOpen] = useState(false);
-  const settingsPanelRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
-  const handlePopoverOpenChange = (open: boolean) => {
-    setIsPopoverOpen(open);
-    onPopoverOpenChange?.(open);
-    if (!open) {
-      setIsFontSelectOpen(false);
-      onThemePreview?.(null);
-      onFontPreview?.(null);
-      onCursorStylePreview?.(null);
-      onClose?.();
+  // The overlay is portalled to document.body so the toolbar's transform
+  // (translate-y on hide) can't trap the fixed-position overlay in its stacking
+  // context — a fixed overlay rendered inside a transformed ancestor is
+  // positioned relative to that ancestor, not the viewport.
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      setIsOpen(open);
+      onOpenChange?.(open);
+      if (!open) {
+        setIsFontSelectOpen(false);
+        onThemePreview?.(null);
+        onFontPreview?.(null);
+        onCursorStylePreview?.(null);
+        onClose?.();
+      }
+    },
+    [onOpenChange, onClose, onThemePreview, onFontPreview, onCursorStylePreview],
+  );
+
+  // Mount/unmount + open/close animation mirrors the ports/sessions/secrets
+  // modals: CSS transitions on data-open/data-closed with a 150ms settle window.
+  // The panel is focused on open so the terminal's textarea releases focus
+  // before any field is interacted with (xterm otherwise steals keystrokes).
+  useEffect(() => {
+    if (isOpen) {
+      setMounted(true);
+      const frame = requestAnimationFrame(() => {
+        setSettled(true);
+        panelRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(frame);
     }
-  };
+    setSettled(false);
+    if (mounted) {
+      const timer = window.setTimeout(() => setMounted(false), SETTINGS_MODAL_CLOSE_TRANSITION_MS);
+      return () => window.clearTimeout(timer);
+    }
+  }, [isOpen]);
+
+  // Escape closes (mirrors the other palette overlays).
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") handleOpenChange(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, handleOpenChange]);
 
   const handleThemeChange = (next: string | null) => {
     if (next) onThemeChange(next);
@@ -215,333 +260,374 @@ export const SettingsMenu = ({
     if (isTerminalCursorStyle(next)) onCursorStylePreview?.(next);
   };
 
+  const isVisible = isOpen && settled;
+
   return (
-    <Popover open={isPopoverOpen} onOpenChange={handlePopoverOpenChange}>
-      <PopoverTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="terminal settings"
-            className="hover:text-foreground"
-          />
-        }
+    <>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="terminal settings"
+        className="hover:text-foreground"
+        onClick={() => handleOpenChange(!isOpen)}
       >
         <Settings />
-      </PopoverTrigger>
-      <PopoverContent
-        ref={settingsPanelRef}
-        side="bottom"
-        align="end"
-        sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-        className={cn(
-          "w-64 max-h-[calc(100dvh-1.5rem)] gap-0 overflow-y-auto p-3",
-          TRANSLUCENT_PANEL_CLASSES,
-          PANEL_ANIMATION_CLASSES,
-        )}
-      >
-        <FieldGroup className="gap-3">
-          <Field orientation="vertical" className="gap-1.5">
-            <FieldLabel className={SECTION_LABEL_CLASSES}>Theme</FieldLabel>
-            <SettingsSelect
-              value={themeId}
-              items={THEME_ITEMS}
-              ariaLabel="select theme"
-              placeholder="Theme"
-              onValueChange={handleThemeChange}
-              onOpenChange={handleThemeSelectOpenChange}
-              onItemHover={onThemePreview ? (id) => onThemePreview(id) : undefined}
-            />
-          </Field>
-
-          <Separator className="bg-border/40" />
-
-          <Field orientation="vertical" className="gap-1.5">
-            <FieldLabel className={SECTION_LABEL_CLASSES}>Font</FieldLabel>
-            <SettingsSelect
-              value={fontId}
-              items={BUILTIN_FONT_ITEMS}
-              ariaLabel="select font"
-              placeholder="Font"
-              open={isFontSelectOpen}
-              onValueChange={handleFontChange}
-              onOpenChange={handleFontSelectOpenChange}
-              onItemHover={onFontPreview ? (id) => onFontPreview(id) : undefined}
-            />
-            <div className="flex items-center justify-between gap-2">
-              <span className={ROW_LABEL_CLASSES}>Size</span>
-              <NumberStepper
-                value={fontSize}
-                min={TERMINAL_FONT_SIZE_MIN_PX}
-                max={TERMINAL_FONT_SIZE_MAX_PX}
-                step={TERMINAL_FONT_SIZE_STEP_PX}
-                ariaLabel="terminal font size"
-                decrementAriaLabel="decrease font size"
-                incrementAriaLabel="increase font size"
-                onValueChange={onFontSizeChange}
+      </Button>
+      {mounted
+        ? createPortal(
+            <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]">
+              <div
+                data-open={isVisible || undefined}
+                data-closed={!isVisible || undefined}
+                className={cn(COMMAND_PALETTE_BACKDROP_CLASSES)}
+                onClick={() => handleOpenChange(false)}
               />
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className={ROW_LABEL_CLASSES}>Line height</span>
-              <NumberStepper
-                value={lineHeight}
-                min={TERMINAL_LINE_HEIGHT_MIN}
-                max={TERMINAL_LINE_HEIGHT_MAX}
-                step={TERMINAL_LINE_HEIGHT_STEP}
-                ariaLabel="terminal line height"
-                decrementAriaLabel="decrease line height"
-                incrementAriaLabel="increase line height"
-                formatDisplay={formatLineHeight}
-                onValueChange={onLineHeightChange}
-              />
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <Tooltip>
-                <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
-                  Nerd Font icons
-                </TooltipTrigger>
-                <TooltipContent
-                  side="bottom"
-                  sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-                  className="max-w-xs"
-                >
-                  Appends a Symbols Only Nerd Font to the font stack. Icon glyphs (Private Use Area
-                  codepoints) are resolved by the symbols font while all other characters render
-                  from the primary font above.
-                </TooltipContent>
-              </Tooltip>
-              <Switch
-                aria-label="toggle nerd font icons"
-                checked={nerdFontEnabled}
-                onCheckedChange={onNerdFontEnabledChange}
-              />
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <Tooltip>
-                <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
-                  Ligatures
-                </TooltipTrigger>
-                <TooltipContent
-                  side="bottom"
-                  sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-                  className="max-w-xs"
-                >
-                  Fuses multi-character operators such as {"->"}, {"=>"}, and {"!=="} into single
-                  glyphs when the active font defines them (e.g. Fira Code, JetBrains Mono). Joins
-                  every run of operator characters so composable arrows like
-                  {"-->"} and {"===>"} shape at any length, plus letter pairs (fi, www) and
-                  hex/dimension literals (0xFF, 1920x1080) for full Fira Code parity. On fonts
-                  without ligatures this is a no-op and characters render exactly as before.
-                </TooltipContent>
-              </Tooltip>
-              <Switch
-                aria-label="toggle ligatures"
-                checked={ligaturesEnabled}
-                onCheckedChange={onLigaturesEnabledChange}
-              />
-            </div>
-          </Field>
-
-          <Separator className="bg-border/40" />
-
-          <Field orientation="vertical" className="gap-1.5">
-            <FieldLabel className={SECTION_LABEL_CLASSES}>Window</FieldLabel>
-            <div className="flex items-center justify-between gap-2">
-              <span className={ROW_LABEL_CLASSES}>Pad X</span>
-              <NumberStepper
-                value={paddingX}
-                min={TERMINAL_PADDING_MIN_PX}
-                max={TERMINAL_PADDING_MAX_PX}
-                step={TERMINAL_PADDING_STEP_PX}
-                ariaLabel="terminal horizontal padding"
-                decrementAriaLabel="decrease horizontal padding"
-                incrementAriaLabel="increase horizontal padding"
-                onValueChange={onPaddingXChange}
-              />
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className={ROW_LABEL_CLASSES}>Pad Y</span>
-              <NumberStepper
-                value={paddingY}
-                min={TERMINAL_PADDING_MIN_PX}
-                max={TERMINAL_PADDING_MAX_PX}
-                step={TERMINAL_PADDING_STEP_PX}
-                ariaLabel="terminal vertical padding"
-                decrementAriaLabel="decrease vertical padding"
-                incrementAriaLabel="increase vertical padding"
-                onValueChange={onPaddingYChange}
-              />
-            </div>
-          </Field>
-
-          <Separator className="bg-border/40" />
-
-          <Field orientation="vertical" className="gap-1.5">
-            <FieldLabel className={SECTION_LABEL_CLASSES}>Launch</FieldLabel>
-            <Tooltip>
-              <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
-                Default directory
-              </TooltipTrigger>
-              <TooltipContent
-                side="bottom"
-                sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-                className="max-w-xs"
+              <div
+                ref={panelRef}
+                role="dialog"
+                aria-label="settings"
+                aria-modal
+                tabIndex={-1}
+                data-open={isVisible || undefined}
+                data-closed={!isVisible || undefined}
+                className={cn(
+                  "relative z-10 flex w-[480px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl outline-none origin-top",
+                  MODAL_PANEL_CLASSES,
+                  COMMAND_PALETTE_PANEL_CLASSES,
+                )}
+                style={{ maxHeight: SETTINGS_MODAL_MAX_HEIGHT_CSS }}
               >
-                Directory new shells open in when launched without an explicit path — the PWA app
-                icon, a fresh tab before any session connects, or a reloaded bare URL. Leave empty
-                to use your home directory. The live session's directory always takes precedence
-                once a shell is running.
-              </TooltipContent>
-            </Tooltip>
-            <Input
-              value={defaultCwd}
-              placeholder="Home directory"
-              aria-label="default launch directory"
-              className="h-7 px-2 font-mono text-xs"
-              onChange={(event) => onDefaultCwdChange(event.target.value)}
-            />
-          </Field>
+                <div className="flex items-center justify-between gap-2 border-b border-border/40 px-4 py-2.5">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Settings className="size-4 text-muted-foreground" aria-hidden="true" />
+                    Settings
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="close"
+                    className="hover:text-foreground"
+                    onClick={() => handleOpenChange(false)}
+                  >
+                    <X />
+                  </Button>
+                </div>
+                <div className="flex-1 overflow-y-auto overscroll-contain p-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <FieldGroup className="gap-3">
+                    <Field orientation="vertical" className="gap-1.5">
+                      <FieldLabel className={SECTION_LABEL_CLASSES}>Theme</FieldLabel>
+                      <SettingsSelect
+                        value={themeId}
+                        items={THEME_ITEMS}
+                        ariaLabel="select theme"
+                        placeholder="Theme"
+                        onValueChange={handleThemeChange}
+                        onOpenChange={handleThemeSelectOpenChange}
+                        onItemHover={onThemePreview ? (id) => onThemePreview(id) : undefined}
+                      />
+                    </Field>
 
-          <Separator className="bg-border/40" />
+                    <Separator className="bg-border/40" />
 
-          <Field orientation="vertical" className="gap-1.5">
-            <FieldLabel className={SECTION_LABEL_CLASSES}>Notifications</FieldLabel>
-            <div className="flex items-center justify-between gap-2">
-              <Tooltip>
-                <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
-                  Desktop alerts
-                </TooltipTrigger>
-                <TooltipContent
-                  side="bottom"
-                  sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-                  className="max-w-xs"
-                >
-                  When on, OSC 9 sequences from the shell trigger browser notifications. Enable to
-                  receive alerts when the tab is in the background. Blocked permissions must be
-                  changed in browser settings.
-                </TooltipContent>
-              </Tooltip>
-              <Switch
-                aria-label="toggle desktop notifications"
-                checked={notificationsPermission === "granted"}
-                disabled={
-                  notificationsPermission === "unsupported" || notificationsPermission === "denied"
-                }
-                onCheckedChange={(checked) => {
-                  if (checked) onNotificationsPermissionRequest();
-                }}
-              />
-            </div>
-          </Field>
+                    <Field orientation="vertical" className="gap-1.5">
+                      <FieldLabel className={SECTION_LABEL_CLASSES}>Font</FieldLabel>
+                      <SettingsSelect
+                        value={fontId}
+                        items={BUILTIN_FONT_ITEMS}
+                        ariaLabel="select font"
+                        placeholder="Font"
+                        open={isFontSelectOpen}
+                        onValueChange={handleFontChange}
+                        onOpenChange={handleFontSelectOpenChange}
+                        onItemHover={onFontPreview ? (id) => onFontPreview(id) : undefined}
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={ROW_LABEL_CLASSES}>Size</span>
+                        <NumberStepper
+                          value={fontSize}
+                          min={TERMINAL_FONT_SIZE_MIN_PX}
+                          max={TERMINAL_FONT_SIZE_MAX_PX}
+                          step={TERMINAL_FONT_SIZE_STEP_PX}
+                          ariaLabel="terminal font size"
+                          decrementAriaLabel="decrease font size"
+                          incrementAriaLabel="increase font size"
+                          onValueChange={onFontSizeChange}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={ROW_LABEL_CLASSES}>Line height</span>
+                        <NumberStepper
+                          value={lineHeight}
+                          min={TERMINAL_LINE_HEIGHT_MIN}
+                          max={TERMINAL_LINE_HEIGHT_MAX}
+                          step={TERMINAL_LINE_HEIGHT_STEP}
+                          ariaLabel="terminal line height"
+                          decrementAriaLabel="decrease line height"
+                          incrementAriaLabel="increase line height"
+                          formatDisplay={formatLineHeight}
+                          onValueChange={onLineHeightChange}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <Tooltip>
+                          <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                            Nerd Font icons
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="bottom"
+                            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                            className="max-w-xs"
+                          >
+                            Appends a Symbols Only Nerd Font to the font stack. Icon glyphs (Private
+                            Use Area codepoints) are resolved by the symbols font while all other
+                            characters render from the primary font above.
+                          </TooltipContent>
+                        </Tooltip>
+                        <Switch
+                          aria-label="toggle nerd font icons"
+                          checked={nerdFontEnabled}
+                          onCheckedChange={onNerdFontEnabledChange}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <Tooltip>
+                          <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                            Ligatures
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="bottom"
+                            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                            className="max-w-xs"
+                          >
+                            Fuses multi-character operators such as {"->"}, {"=>"}, and {"!=="} into
+                            single glyphs when the active font defines them (e.g. Fira Code,
+                            JetBrains Mono). Joins every run of operator characters so composable
+                            arrows like
+                            {"-->"} and {"===>"} shape at any length, plus letter pairs (fi, www)
+                            and hex/dimension literals (0xFF, 1920x1080) for full Fira Code parity.
+                            On fonts without ligatures this is a no-op and characters render exactly
+                            as before.
+                          </TooltipContent>
+                        </Tooltip>
+                        <Switch
+                          aria-label="toggle ligatures"
+                          checked={ligaturesEnabled}
+                          onCheckedChange={onLigaturesEnabledChange}
+                        />
+                      </div>
+                    </Field>
 
-          <Separator className="bg-border/40" />
+                    <Separator className="bg-border/40" />
 
-          <Field orientation="vertical" className="gap-1.5">
-            <FieldLabel className={SECTION_LABEL_CLASSES}>Cursor</FieldLabel>
-            <div className="flex items-center justify-between gap-2">
-              <span className={ROW_LABEL_CLASSES}>Style</span>
-              <SettingsSelect
-                value={cursorStyle}
-                items={CURSOR_STYLE_ITEMS}
-                ariaLabel="select cursor style"
-                placeholder="Cursor style"
-                triggerClassName="w-fit min-w-[7rem]"
-                onValueChange={handleCursorStyleChange}
-                onOpenChange={handleCursorStyleSelectOpenChange}
-                onItemHover={onCursorStylePreview ? handleCursorStyleHover : undefined}
-              />
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className={ROW_LABEL_CLASSES}>Blink</span>
-              <Switch
-                aria-label="toggle cursor blink"
-                checked={cursorBlink}
-                onCheckedChange={onCursorBlinkChange}
-              />
-            </div>
-          </Field>
+                    <Field orientation="vertical" className="gap-1.5">
+                      <FieldLabel className={SECTION_LABEL_CLASSES}>Window</FieldLabel>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={ROW_LABEL_CLASSES}>Pad X</span>
+                        <NumberStepper
+                          value={paddingX}
+                          min={TERMINAL_PADDING_MIN_PX}
+                          max={TERMINAL_PADDING_MAX_PX}
+                          step={TERMINAL_PADDING_STEP_PX}
+                          ariaLabel="terminal horizontal padding"
+                          decrementAriaLabel="decrease horizontal padding"
+                          incrementAriaLabel="increase horizontal padding"
+                          onValueChange={onPaddingXChange}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={ROW_LABEL_CLASSES}>Pad Y</span>
+                        <NumberStepper
+                          value={paddingY}
+                          min={TERMINAL_PADDING_MIN_PX}
+                          max={TERMINAL_PADDING_MAX_PX}
+                          step={TERMINAL_PADDING_STEP_PX}
+                          ariaLabel="terminal vertical padding"
+                          decrementAriaLabel="decrease vertical padding"
+                          incrementAriaLabel="increase vertical padding"
+                          onValueChange={onPaddingYChange}
+                        />
+                      </div>
+                    </Field>
 
-          <Field orientation="vertical" className="gap-1.5">
-            <FieldLabel className={SECTION_LABEL_CLASSES}>Typing</FieldLabel>
-            <div className="flex items-center justify-between gap-2">
-              <span className={ROW_LABEL_CLASSES}>Predictive typing</span>
-              <Switch
-                aria-label="toggle predictive typing"
-                checked={localEcho}
-                onCheckedChange={onLocalEchoChange}
-              />
-            </div>
-          </Field>
+                    <Separator className="bg-border/40" />
 
-          <Separator className="bg-border/40" />
+                    <Field orientation="vertical" className="gap-1.5">
+                      <FieldLabel className={SECTION_LABEL_CLASSES}>Launch</FieldLabel>
+                      <Tooltip>
+                        <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                          Default directory
+                        </TooltipTrigger>
+                        <TooltipContent
+                          side="bottom"
+                          sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                          className="max-w-xs"
+                        >
+                          Directory new shells open in when launched without an explicit path — the
+                          PWA app icon, a fresh tab before any session connects, or a reloaded bare
+                          URL. Leave empty to use your home directory. The live session's directory
+                          always takes precedence once a shell is running.
+                        </TooltipContent>
+                      </Tooltip>
+                      <Input
+                        value={defaultCwd}
+                        placeholder="Home directory"
+                        aria-label="default launch directory"
+                        className="h-7 px-2 font-mono text-xs"
+                        onChange={(event) => onDefaultCwdChange(event.target.value)}
+                      />
+                    </Field>
 
-          <Field orientation="vertical" className="gap-1.5">
-            <FieldLabel className={SECTION_LABEL_CLASSES}>Scrollback</FieldLabel>
-            <SettingsSelect
-              value={String(scrollback)}
-              items={SCROLLBACK_ITEMS}
-              ariaLabel="select scrollback"
-              placeholder="Scrollback"
-              onValueChange={handleScrollbackChange}
-            />
-            <div className="flex items-center justify-between gap-2">
-              <Tooltip>
-                <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
-                  Pin to bottom on input
-                </TooltipTrigger>
-                <TooltipContent
-                  side="bottom"
-                  sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-                  className="max-w-xs"
-                >
-                  When on, typing scrolls the viewport back to the bottom. When off, the viewport
-                  stays where you scrolled — useful for reading history while typing.
-                </TooltipContent>
-              </Tooltip>
-              <Switch
-                aria-label="toggle pin to bottom on input"
-                checked={scrollOnUserInput}
-                onCheckedChange={onScrollOnUserInputChange}
-              />
-            </div>
-          </Field>
+                    <Separator className="bg-border/40" />
 
-          {sessionInfo ? (
-            <>
-              <Separator className="bg-border/40" />
-              <Collapsible defaultOpen={false}>
-                <CollapsibleTrigger
-                  render={
-                    <button
-                      type="button"
-                      className="group/shell flex w-full items-center justify-between gap-2 rounded-sm py-1 text-left transition-colors outline-none hover:text-foreground/90 focus-visible:text-foreground/90"
-                    >
-                      <span className={SECTION_LABEL_CLASSES}>Shell</span>
-                      <ChevronDown className="size-3 text-muted-foreground/60 transition-transform duration-200 ease-snappy will-change-transform group-aria-expanded/shell:rotate-180" />
-                    </button>
-                  }
-                />
-                <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 ease-snappy data-closed:h-0">
-                  <dl className="flex flex-col gap-1 pt-2 text-xs">
-                    <SessionInfoRow label="Name" value={sessionInfo.shellName} />
-                    <SessionInfoRow
-                      label="Path"
-                      value={sessionInfo.shell}
-                      title={sessionInfo.shell}
-                    />
-                    <SessionInfoRow
-                      label="PID"
-                      value={String(sessionInfo.pid)}
-                      valueClassName="tabular-nums"
-                    />
-                    <SessionInfoRow label="Cwd" value={sessionInfo.cwd} title={sessionInfo.cwd} />
-                  </dl>
-                </CollapsibleContent>
-              </Collapsible>
-            </>
-          ) : null}
-        </FieldGroup>
-      </PopoverContent>
-    </Popover>
+                    <Field orientation="vertical" className="gap-1.5">
+                      <FieldLabel className={SECTION_LABEL_CLASSES}>Notifications</FieldLabel>
+                      <div className="flex items-center justify-between gap-2">
+                        <Tooltip>
+                          <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                            Desktop alerts
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="bottom"
+                            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                            className="max-w-xs"
+                          >
+                            When on, OSC 9 sequences from the shell trigger browser notifications.
+                            Enable to receive alerts when the tab is in the background. Blocked
+                            permissions must be changed in browser settings.
+                          </TooltipContent>
+                        </Tooltip>
+                        <Switch
+                          aria-label="toggle desktop notifications"
+                          checked={notificationsPermission === "granted"}
+                          disabled={
+                            notificationsPermission === "unsupported" ||
+                            notificationsPermission === "denied"
+                          }
+                          onCheckedChange={(checked) => {
+                            if (checked) onNotificationsPermissionRequest();
+                          }}
+                        />
+                      </div>
+                    </Field>
+
+                    <Separator className="bg-border/40" />
+
+                    <Field orientation="vertical" className="gap-1.5">
+                      <FieldLabel className={SECTION_LABEL_CLASSES}>Cursor</FieldLabel>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={ROW_LABEL_CLASSES}>Style</span>
+                        <SettingsSelect
+                          value={cursorStyle}
+                          items={CURSOR_STYLE_ITEMS}
+                          ariaLabel="select cursor style"
+                          placeholder="Cursor style"
+                          triggerClassName="w-fit min-w-[7rem]"
+                          onValueChange={handleCursorStyleChange}
+                          onOpenChange={handleCursorStyleSelectOpenChange}
+                          onItemHover={onCursorStylePreview ? handleCursorStyleHover : undefined}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={ROW_LABEL_CLASSES}>Blink</span>
+                        <Switch
+                          aria-label="toggle cursor blink"
+                          checked={cursorBlink}
+                          onCheckedChange={onCursorBlinkChange}
+                        />
+                      </div>
+                    </Field>
+
+                    <Field orientation="vertical" className="gap-1.5">
+                      <FieldLabel className={SECTION_LABEL_CLASSES}>Typing</FieldLabel>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={ROW_LABEL_CLASSES}>Predictive typing</span>
+                        <Switch
+                          aria-label="toggle predictive typing"
+                          checked={localEcho}
+                          onCheckedChange={onLocalEchoChange}
+                        />
+                      </div>
+                    </Field>
+
+                    <Separator className="bg-border/40" />
+
+                    <Field orientation="vertical" className="gap-1.5">
+                      <FieldLabel className={SECTION_LABEL_CLASSES}>Scrollback</FieldLabel>
+                      <SettingsSelect
+                        value={String(scrollback)}
+                        items={SCROLLBACK_ITEMS}
+                        ariaLabel="select scrollback"
+                        placeholder="Scrollback"
+                        onValueChange={handleScrollbackChange}
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <Tooltip>
+                          <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                            Pin to bottom on input
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="bottom"
+                            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                            className="max-w-xs"
+                          >
+                            When on, typing scrolls the viewport back to the bottom. When off, the
+                            viewport stays where you scrolled — useful for reading history while
+                            typing.
+                          </TooltipContent>
+                        </Tooltip>
+                        <Switch
+                          aria-label="toggle pin to bottom on input"
+                          checked={scrollOnUserInput}
+                          onCheckedChange={onScrollOnUserInputChange}
+                        />
+                      </div>
+                    </Field>
+
+                    {sessionInfo ? (
+                      <>
+                        <Separator className="bg-border/40" />
+                        <Collapsible defaultOpen={false}>
+                          <CollapsibleTrigger
+                            render={
+                              <button
+                                type="button"
+                                className="group/shell flex w-full items-center justify-between gap-2 rounded-sm py-1 text-left transition-colors outline-none hover:text-foreground/90 focus-visible:text-foreground/90"
+                              >
+                                <span className={SECTION_LABEL_CLASSES}>Shell</span>
+                                <ChevronDown className="size-3 text-muted-foreground/60 transition-transform duration-200 ease-snappy will-change-transform group-aria-expanded/shell:rotate-180" />
+                              </button>
+                            }
+                          />
+                          <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 ease-snappy data-closed:h-0">
+                            <dl className="flex flex-col gap-1 pt-2 text-xs">
+                              <SessionInfoRow label="Name" value={sessionInfo.shellName} />
+                              <SessionInfoRow
+                                label="Path"
+                                value={sessionInfo.shell}
+                                title={sessionInfo.shell}
+                              />
+                              <SessionInfoRow
+                                label="PID"
+                                value={String(sessionInfo.pid)}
+                                valueClassName="tabular-nums"
+                              />
+                              <SessionInfoRow
+                                label="Cwd"
+                                value={sessionInfo.cwd}
+                                title={sessionInfo.cwd}
+                              />
+                            </dl>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      </>
+                    ) : null}
+                  </FieldGroup>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 };

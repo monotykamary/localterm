@@ -51,6 +51,11 @@ export const COMMAND_PALETTE_CLOSE_TRANSITION_MS = 150;
 // (a handful of grouped commands + a footer); the sessions modal virtualizes
 // its list so many shells scroll inside the same box.
 export const PALETTE_MODAL_MAX_HEIGHT_PX = 400;
+// Settings modal: taller than the palette modals (it holds many sections) but
+// capped by viewport so a phone never overflows past the bottom; the body
+// scrolls inside. min() picks the smaller of the fixed cap and the vh cap.
+export const SETTINGS_MODAL_MAX_HEIGHT_CSS = "min(620px, calc(100dvh - 20vh))";
+export const SETTINGS_MODAL_CLOSE_TRANSITION_MS = 150;
 
 export const DIFF_VIEWER_CLOSE_TRANSITION_MS = 150;
 // Delay before reacting to a server git-dirty signal in the open diff viewer.
