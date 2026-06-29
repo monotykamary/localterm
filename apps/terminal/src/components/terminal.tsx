@@ -2295,6 +2295,7 @@ export const Terminal = () => {
               top: ptyViewportOverlay.right.top,
               width: ptyViewportOverlay.right.width,
               height: ptyViewportOverlay.right.height,
+              backgroundColor: pageBackground,
               borderLeft: "1px solid var(--pty-viewport-edge)",
             }}
           />
