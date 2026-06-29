@@ -340,12 +340,6 @@ export const Terminal = () => {
   const setCaffeinateActivityGateRef = useRef<((enabled: boolean) => void) | null>(null);
   const setCaffeinateBatteryThresholdRef = useRef<((percent: number | null) => void) | null>(null);
   const toolbarHoverTimeoutRef = useRef<number | null>(null);
-  const isSettingsOpenRef = useRef(false);
-  const isKeepAwakePopoverOpenRef = useRef(false);
-  const isAutomationsOpenRef = useRef(false);
-  const isWorktreesOpenRef = useRef(false);
-  const isSessionsOpenRef = useRef(false);
-  const isPortsOpenRef = useRef(false);
   const qrPeerAttachedRef = useRef<(() => void) | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -377,14 +371,14 @@ export const Terminal = () => {
   useEffect(() => {
     if (!isTouchDevice || !isActionsMenuOpen) return;
     const handleOutsidePress = (event: PointerEvent) => {
-      if (isSettingsOpenRef.current || isKeepAwakePopoverOpenRef.current) return;
+      if (isSettingsOpen || isKeepAwakePopoverOpen) return;
       const toolbar = toolbarRef.current;
       if (toolbar && event.target instanceof Node && toolbar.contains(event.target)) return;
       setIsActionsMenuOpen(false);
     };
     window.addEventListener("pointerdown", handleOutsidePress, true);
     return () => window.removeEventListener("pointerdown", handleOutsidePress, true);
-  }, [isTouchDevice, isActionsMenuOpen]);
+  }, [isTouchDevice, isActionsMenuOpen, isSettingsOpen, isKeepAwakePopoverOpen]);
   const isToolbarVisible =
     isToolbarHovered ||
     isActionsMenuOpen ||
@@ -396,12 +390,6 @@ export const Terminal = () => {
     isPortsOpen ||
     isQrOpen ||
     isSecretsOpen;
-  isSettingsOpenRef.current = isSettingsOpen;
-  isKeepAwakePopoverOpenRef.current = isKeepAwakePopoverOpen;
-  isAutomationsOpenRef.current = isAutomationsOpen;
-  isSessionsOpenRef.current = isSessionsOpen;
-  isPortsOpenRef.current = isPortsOpen;
-  isWorktreesOpenRef.current = isWorktreesOpen;
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultState>({
     resultIndex: -1,
@@ -1725,18 +1713,21 @@ export const Terminal = () => {
     setIsToolbarHovered(true);
   }, []);
 
-  const handleToolbarAreaLeave = useCallback((event: React.MouseEvent) => {
-    const leftThroughViewportEdge = event.clientY <= 0 || event.clientX >= window.innerWidth - 1;
-    const delay = leftThroughViewportEdge
-      ? TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS
-      : TOOLBAR_HIDE_DELAY_MS;
-    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
-      toolbarHoverTimeoutRef.current = null;
-      if (!isSettingsOpenRef.current && !isAutomationsOpenRef.current) {
-        setIsToolbarHovered(false);
-      }
-    }, delay);
-  }, []);
+  const handleToolbarAreaLeave = useCallback(
+    (event: React.MouseEvent) => {
+      const leftThroughViewportEdge = event.clientY <= 0 || event.clientX >= window.innerWidth - 1;
+      const delay = leftThroughViewportEdge
+        ? TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS
+        : TOOLBAR_HIDE_DELAY_MS;
+      toolbarHoverTimeoutRef.current = window.setTimeout(() => {
+        toolbarHoverTimeoutRef.current = null;
+        if (!isSettingsOpen && !isAutomationsOpen) {
+          setIsToolbarHovered(false);
+        }
+      }, delay);
+    },
+    [isSettingsOpen, isAutomationsOpen],
+  );
 
   const handleSettingsOpenChange = useCallback((open: boolean) => {
     setIsSettingsOpen(open);
@@ -1758,8 +1749,8 @@ export const Terminal = () => {
   );
 
   const toggleAutomations = useCallback(() => {
-    handleAutomationsOpenChange(!isAutomationsOpenRef.current);
-  }, [handleAutomationsOpenChange]);
+    handleAutomationsOpenChange(!isAutomationsOpen);
+  }, [handleAutomationsOpenChange, isAutomationsOpen]);
   toggleAutomationsRef.current = toggleAutomations;
 
   const handleWorktreesOpenChange = useCallback(
@@ -1779,18 +1770,18 @@ export const Terminal = () => {
   openWorktreesRef.current = openWorktrees;
 
   const toggleWorktrees = useCallback(() => {
-    handleWorktreesOpenChange(!isWorktreesOpenRef.current);
-  }, [handleWorktreesOpenChange]);
+    handleWorktreesOpenChange(!isWorktreesOpen);
+  }, [handleWorktreesOpenChange, isWorktreesOpen]);
   toggleWorktreesRef.current = toggleWorktrees;
 
   const toggleSessions = useCallback(() => {
-    handleSessionsOpenChange(!isSessionsOpenRef.current);
-  }, [handleSessionsOpenChange]);
+    handleSessionsOpenChange(!isSessionsOpen);
+  }, [handleSessionsOpenChange, isSessionsOpen]);
   toggleSessionsRef.current = toggleSessions;
 
   const togglePorts = useCallback(() => {
-    handlePortsOpenChange(!isPortsOpenRef.current);
-  }, [handlePortsOpenChange]);
+    handlePortsOpenChange(!isPortsOpen);
+  }, [handlePortsOpenChange, isPortsOpen]);
   togglePortsRef.current = togglePorts;
 
   const openShellAt = useCallback((shellCwd: string, command?: string) => {
