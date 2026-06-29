@@ -73,7 +73,7 @@ program
 
 program
   .command("install")
-  .description("install launchd service for auto-start at login (macOS only)")
+  .description("install auto-start service (launchd on macOS, systemd user unit on Linux)")
   .option("-p, --port <port>", "port to bind", parsePortOption, resolveInitialPort())
   .option("-H, --host <host>", "host to bind", DEFAULT_HOST)
   .action(async (options: { port: number; host: string }) => {
@@ -82,7 +82,7 @@ program
 
 program
   .command("uninstall")
-  .description("remove the launchd auto-start service (macOS only)")
+  .description("remove the auto-start service (launchd on macOS, systemd user unit on Linux)")
   .action(async () => {
     await runUninstall();
   });

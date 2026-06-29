@@ -2,11 +2,17 @@ import { execFile } from "node:child_process";
 import { openSync } from "node:fs";
 import { promisify } from "node:util";
 import kleur from "kleur";
-import { DAEMON_PROBE_INTERVAL_MS, DAEMON_PROBE_MAX_WAIT_MS, LAUNCHD_LABEL } from "../constants.js";
+import {
+  DAEMON_PROBE_INTERVAL_MS,
+  DAEMON_PROBE_MAX_WAIT_MS,
+  LAUNCHD_LABEL,
+  SYSTEMD_USER_UNIT_NAME,
+} from "../constants.js";
 import { cliError, exitCodeForCliError } from "../errors.js";
 import { ensureLogFile, isAlive, readHost, readPid, readPort } from "../state.js";
 import { buildDaemonStartArgs } from "../utils/build-daemon-args.js";
 import { isLaunchdServiceLoaded } from "../utils/is-launchd-service-loaded.js";
+import { isSystemdUserServiceActive } from "../utils/is-systemd-service-active.js";
 import { pollForDaemonReady } from "../utils/poll-for-daemon-ready.js";
 import { announceResolvedUrl, resolveDaemonUrl } from "../utils/portless.js";
 import { reportCliError } from "../utils/report-cli-error.js";
@@ -50,6 +56,48 @@ const terminateOldDaemon = async (oldPid: number): Promise<void> => {
   }
 };
 
+const pollRestartedDaemon = async (
+  oldPid: number,
+  logPath: string,
+  label: string,
+): Promise<void> => {
+  let waited = 0;
+  while (waited < DAEMON_PROBE_MAX_WAIT_MS) {
+    await sleep(DAEMON_PROBE_INTERVAL_MS);
+    waited += DAEMON_PROBE_INTERVAL_MS;
+
+    const pid = readPid();
+    const port = readPort();
+    if (pid === null || port === null) continue;
+    if (pid === oldPid && isAlive(oldPid)) continue;
+    if (!isAlive(pid)) continue;
+
+    try {
+      const host = readHost() ?? "127.0.0.1";
+      const response = await fetch(`http://${host}:${port}/api/health`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      if (response.ok) {
+        console.log(
+          kleur.green(`✔ restarted via ${label} (pid ${pid}, port ${port}, logs: ${logPath})`),
+        );
+        const resolved = await resolveDaemonUrl(port);
+        announceResolvedUrl(resolved.url, resolved.surface);
+        for (const warning of resolved.warnings) {
+          console.log(kleur.yellow(`  ⚠ ${warning}`));
+        }
+        return;
+      }
+    } catch {
+      // health probe failed; keep polling
+    }
+  }
+
+  const timeoutError = cliError.daemonReadyTimeout(oldPid, DAEMON_PROBE_MAX_WAIT_MS, logPath);
+  reportCliError(timeoutError);
+  process.exit(exitCodeForCliError(timeoutError));
+};
+
 const restartViaLaunchd = async (_options: RestartOptions): Promise<void> => {
   const oldPid = readPid();
   const logPath = ensureLogFile();
@@ -69,46 +117,37 @@ const restartViaLaunchd = async (_options: RestartOptions): Promise<void> => {
     return;
   }
 
-  let waited = 0;
-  while (waited < DAEMON_PROBE_MAX_WAIT_MS) {
-    await sleep(DAEMON_PROBE_INTERVAL_MS);
-    waited += DAEMON_PROBE_INTERVAL_MS;
+  await pollRestartedDaemon(oldPid ?? 0, logPath, "launchd");
+};
 
-    const pid = readPid();
-    const port = readPort();
-    if (pid === null || port === null) continue;
-    if (pid === oldPid && isAlive(oldPid)) continue;
-    if (!isAlive(pid)) continue;
+const restartViaSystemd = async (_options: RestartOptions): Promise<void> => {
+  const oldPid = readPid();
+  const logPath = ensureLogFile();
 
-    try {
-      const host = readHost() ?? "127.0.0.1";
-      const response = await fetch(`http://${host}:${port}/api/health`, {
-        signal: AbortSignal.timeout(2000),
-      });
-      if (response.ok) {
-        console.log(
-          kleur.green(`✔ restarted via launchd (pid ${pid}, port ${port}, logs: ${logPath})`),
-        );
-        const resolved = await resolveDaemonUrl(port);
-        announceResolvedUrl(resolved.url, resolved.surface);
-        for (const warning of resolved.warnings) {
-          console.log(kleur.yellow(`  ⚠ ${warning}`));
-        }
-        return;
-      }
-    } catch {
-      // health probe failed; keep polling
-    }
+  try {
+    await execFileAsync("systemctl", ["--user", "restart", SYSTEMD_USER_UNIT_NAME], {
+      timeout: 10_000,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const startError = cliError.serverStartFailed(
+      new Error(`systemctl --user restart failed: ${message}`),
+    );
+    reportCliError(startError);
+    process.exit(exitCodeForCliError(startError));
+    return;
   }
 
-  const timeoutError = cliError.daemonReadyTimeout(oldPid ?? 0, DAEMON_PROBE_MAX_WAIT_MS, logPath);
-  reportCliError(timeoutError);
-  process.exit(exitCodeForCliError(timeoutError));
+  await pollRestartedDaemon(oldPid ?? 0, logPath, "systemd");
 };
 
 export const runRestart = async (options: RestartOptions): Promise<void> => {
   if (process.platform === "darwin" && (await isLaunchdServiceLoaded())) {
     await restartViaLaunchd(options);
+    return;
+  }
+  if (process.platform === "linux" && (await isSystemdUserServiceActive())) {
+    await restartViaSystemd(options);
     return;
   }
 

@@ -45,6 +45,14 @@ export const DAEMON_PROCESS_TITLE = "localtermd";
 export const LAUNCHD_LABEL = "com.monotykamary.localterm";
 export const LAUNCHD_PLIST_FILENAME = `${LAUNCHD_LABEL}.plist`;
 
+export const SYSTEMD_USER_UNIT_NAME = "localterm.service";
+// How long the unit's ExecStartPre waits for tailscaled before booting the
+// daemon anyway (it falls back to the loopback surface if tailscale isn't
+// ready; `localterm restart` re-resolves once it's up). Seconds, since it's
+// baked into a `seq 1 N` shell loop in the generated unit.
+export const SYSTEMD_TAILSCALE_BOOT_WAIT_SECONDS = 30;
+export const SYSTEMD_OPERATION_TIMEOUT_MS = 10_000;
+
 // Minimal system PATH baked into the launchd plist for the daemon. The daemon
 // needs only system binaries (caffeinate, ps, security, xattr, codesign) plus
 // `portless` (its dir is appended at install time); `git` runs via /usr/bin/git

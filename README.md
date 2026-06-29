@@ -55,7 +55,7 @@ localterm start [-p 3417] [-H 127.0.0.1] [--open]   # daemonizes by default
 localterm stop
 localterm status
 localterm restart
-localterm install [-p 3417] [-H 127.0.0.1]  # auto-start at login (macOS)
+localterm install [-p 3417] [-H 127.0.0.1]  # auto-start (launchd on macOS, systemd user unit on Linux)
 localterm uninstall                              # remove auto-start service
 localterm secret list                            # per-program secrets (names + policy; never values)
 localterm secret get <name>                       # print a value (resolved from Keychain, not the daemon)
@@ -94,6 +94,31 @@ localterm install
 ```
 
 Remove with `localterm uninstall` (also tears down the Tailscale serve rule).
+
+## Auto-start (Linux)
+
+`localterm install` writes a [systemd](https://systemd.io/) **user unit** at `~/.config/systemd/user/localterm.service` (the per-user mirror of the macOS LaunchAgent — no root required, state stays in `~/.localterm/`), runs `systemctl --user daemon-reload` and `enable --now`, and runs the same Tailscale step as on macOS:
+
+- **`Restart=on-failure`** — the daemon restarts immediately if it crashes, but a clean `localterm stop` stays stopped (crash-only, matching the macOS `KeepAlive`).
+- **`After=network-online.target tailscaled.service`** + an `ExecStartPre` that waits up to 30s for `tailscale status` to answer (only when tailscale is installed), so the daemon can resolve your tailnet URL and trust the `*.ts.net` host before the first request lands. If tailscale isn't ready, the daemon boots anyway on the loopback surface and `localterm restart` re-resolves once it's up.
+- The service starts at **login**. For a headless VPS where there's no active session at boot, enable lingering once: `sudo loginctl enable-linger $USER`.
+
+This makes localterm a real **ssh + tmux replacement**: host the daemon on a VPS, keep it loopback-bound, and reach it securely either over your tailnet (`https://<node>.ts.net`, auth = Tailscale ACLs) or an `ssh -L 3417:localhost:3417 vps` tunnel (`https://localterm.localhost`, auth = ssh). A shell that's still doing something — producing output, or running a foreground program even when quiet — survives the disconnect and reattaches silently; only a truly idle shell is reaped after the ~30s grace window, so you don't need nested `tmux` for the common case.
+
+One-time setup on a Linux VPS:
+
+```bash
+# tailscale + HTTPS certs (once)
+sudo tailscale up
+# enable HTTPS certs on your tailnet: https://login.tailscale.com/admin/settings/features
+
+localterm install                       # writes the unit, enables + starts it, provisions tailscale serve
+sudo loginctl enable-linger $USER        # so it starts at boot without an active session
+```
+
+Then open `https://<node>.ts.net` from any tailnet device. Manage the service directly with `systemctl --user {status,restart,stop} localterm`; `localterm restart` and `localterm stop` detect the active unit and go through systemd. Remove with `localterm uninstall` (disables the unit and tears down the Tailscale serve rule).
+
+Prefer an ssh tunnel over Tailscale? `localterm install` still auto-starts the daemon — its tailscale step is best-effort (it just prints a hint if tailscale isn't installed). From your laptop run `ssh -L 3417:localhost:3417 vps`, then open `https://localterm.localhost`. The daemon stays loopback-bound; ssh is the only ingress and the auth.
 
 ### Dev server (workspace contributors)
 

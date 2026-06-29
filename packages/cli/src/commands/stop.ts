@@ -1,10 +1,16 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import kleur from "kleur";
-import { LAUNCHD_LABEL, STOP_MAX_WAIT_MS, STOP_POLL_INTERVAL_MS } from "../constants.js";
+import {
+  LAUNCHD_LABEL,
+  STOP_MAX_WAIT_MS,
+  STOP_POLL_INTERVAL_MS,
+  SYSTEMD_USER_UNIT_NAME,
+} from "../constants.js";
 import { cliError, exitCodeForCliError } from "../errors.js";
 import { clearPid, isAlive, readPid } from "../state.js";
 import { isLaunchdServiceLoaded } from "../utils/is-launchd-service-loaded.js";
+import { isSystemdUserServiceActive } from "../utils/is-systemd-service-active.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 import { sleep } from "../utils/sleep.js";
 import { verifyPidIsLocalterm } from "../utils/verify-pid-is-localterm.js";
@@ -13,12 +19,21 @@ const execFileAsync = promisify(execFile);
 
 export const runStop = async (): Promise<void> => {
   const pid = readPid();
-  const serviceLoaded = process.platform === "darwin" && (await isLaunchdServiceLoaded());
+  const launchdLoaded = process.platform === "darwin" && (await isLaunchdServiceLoaded());
+  const systemdActive = process.platform === "linux" && (await isSystemdUserServiceActive());
 
-  if (serviceLoaded) {
+  if (launchdLoaded) {
     const serviceTarget = `gui/${process.getuid?.() ?? ""}/${LAUNCHD_LABEL}`;
     try {
       await execFileAsync("launchctl", ["stop", serviceTarget], { timeout: 10_000 });
+    } catch {
+      // Service may already be stopped; fall back to signaling the PID below.
+    }
+  } else if (systemdActive) {
+    try {
+      await execFileAsync("systemctl", ["--user", "stop", SYSTEMD_USER_UNIT_NAME], {
+        timeout: 10_000,
+      });
     } catch {
       // Service may already be stopped; fall back to signaling the PID below.
     }
