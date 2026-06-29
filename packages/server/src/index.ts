@@ -287,398 +287,52 @@ const safeSend = (ws: ClientSocket, payload: ServerToClientMessage) => {
   }
 };
 
-export const createServer = async (options: ServerOptions = {}): Promise<RunningServer> => {
-  const port = options.port ?? DEFAULT_PORT;
-  const host = options.host ?? DEFAULT_HOST;
-
-  const staticRoot =
-    typeof options.staticRoot === "string" ? path.resolve(options.staticRoot) : null;
-
-  const isLoopbackBind = isLoopbackHost(host);
-  if (!isLoopbackBind) {
-    console.warn(
-      `⚠ non-loopback bind (${host}): any client on the private network can open an unauthenticated shell`,
-    );
-  }
-
-  // The session manager owns every live PTY for the daemon's lifetime. A PTY
-  // persists across client detach (closing a tab detaches instead of killing
-  // it) so the session picker can re-attach to it; it dies on shell exit, an
-  // explicit kill from the picker, or the dormant-idle sweep. Multiple clients
-  // may attach to one PTY and fan out output/resize to all of them. The hooks
-  // close over managers defined further below; they only fire at runtime
-  // (attach/detach/output/exit), so referencing the later consts here is safe.
-  const stateDirectory = options.stateDirectory ?? path.join(os.homedir(), ".localterm");
-  const shimsDir = path.join(stateDirectory, SECRETS_SHIMS_DIRNAME);
-  const registry = new SessionManager({
-    shimsDir,
-    sendControl: safeSend,
-    hooks: {
-      onOutputActivity: () => caffeinateManager.noteOutputActivity(),
-      onSessionActivity: () => caffeinateManager.pokeAuto(),
-      onSessionEvent: (event, cwd) => sessionEventManager.onSessionEvent(event, cwd),
-      onAutomationExit: (automationId, runId, exitCode) => {
-        automationStore.updateRun(automationId, runId, {
-          status: exitCode === 0 ? "completed" : "failed",
-          exitCode,
-          finishedAt: Date.now(),
-        });
-        broadcastAutomations();
-        closeRunTabIfRequested(automationId, runId);
-        folderWatchManager.notifyRunFinished(automationId);
-        sessionEventManager.notifyRunFinished(automationId);
-      },
-      onClientExit: (ws, exitCode) => {
-        const targetId = wsToTargetId.get(ws);
-        if (targetId && (exitCode === null || exitCode === 0)) void cdpClient?.closeTab(targetId);
-      },
-    },
-  });
-  const app = new Hono();
-  app.use(
-    "*",
-    createNetworkPolicyMiddleware(host, () => publicOrigin),
-  );
-  const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
-  wss.options.maxPayload = 256 * 1024;
-
-  const automationStore = new AutomationStore(path.join(stateDirectory, "automations.json"));
-  const automationRunTracker = new AutomationRunTracker();
-  const automationScheduler = new AutomationScheduler(automationStore);
-  // Folder-watch triggers: one fs.watch per watch automation's cwd (no polling).
-  // isRunInFlight gates overlap (a launched/running latest run blocks a new
-  // launch); getAutomation re-reads live state when the debounce fires.
-  const folderWatchManager = new FolderWatchManager({
-    debounceMs: AUTOMATION_WATCH_DEBOUNCE_MS,
-    postRunGraceMs: AUTOMATION_WATCH_POST_RUN_GRACE_MS,
-    isRunInFlight: (automationId) => {
-      const status = automationStore.get(automationId)?.runs[0]?.status;
-      return status === "launched" || status === "running";
-    },
-    getAutomation: (automationId) => automationStore.get(automationId),
-  });
-  const syncFolderWatchers = () => folderWatchManager.sync(automationStore.list());
-  const sessionEventManager = new SessionEventManager({
-    debounceMs: AUTOMATION_EVENT_DEBOUNCE_MS,
-    postRunGraceMs: AUTOMATION_WATCH_POST_RUN_GRACE_MS,
-    isRunInFlight: (automationId) => {
-      const status = automationStore.get(automationId)?.runs[0]?.status;
-      return status === "launched" || status === "running";
-    },
-    getAutomation: (automationId) => automationStore.get(automationId),
-  });
-  const syncSessionEventListeners = () => sessionEventManager.sync(automationStore.list());
-  // Webhook triggers: a POST to /api/webhooks/:id arms a trailing debounce per
-  // automation (coalesces duplicate delivery) with an in-flight overlap guard.
-  // Stateless vs the watch/event managers — nothing to arm, so no sync().
-  const webhookTriggerManager = new WebhookTriggerManager({
-    debounceMs: AUTOMATION_WEBHOOK_DEBOUNCE_MS,
-    isRunInFlight: (automationId) => {
-      const status = automationStore.get(automationId)?.runs[0]?.status;
-      return status === "launched" || status === "running";
-    },
-    getAutomation: (automationId) => automationStore.get(automationId),
-  });
-  const heartbeatStore = new HeartbeatStore(path.join(stateDirectory, "daemon-heartbeat.json"));
-  const caffeinateController = options.caffeinateController ?? new CaffeinateController();
-  const caffeinatePreferencesStore = new CaffeinatePreferencesStore(
-    path.join(stateDirectory, "caffeinate.json"),
-  );
-  const worktreeConfigStore = new WorktreeConfigStore(stateDirectory);
-  // Per-process secret injection: a backend (macOS Keychain on darwin) holds
-  // secret values; a secret is an identity + the env var it exports
-  // (~/.localterm/secrets.json, names + env var only — never values), and a
-  // process is a binary name plus the secret names it should receive
-  // (~/.localterm/processes.json) — the same multi-select model automations use
-  // for requestedSecrets. The daemon generates a PATH shim per process in
-  // ~/.localterm/shims; localterm's shell hook prepends the shims dir so the
-  // shims shadow the real binaries and inject the secret(s) at exec time.
-  // The one-time migrator rewrites a pre-flip secrets.json (with `programs`) to
-  // the new shape + a processes.json before the stores load either file.
-  migrateSecretsToProcesses(stateDirectory);
-  const secretBackend = options.secretBackend ?? createDefaultSecretBackend();
-  const secretStore = new SecretStore({
-    filePath: path.join(stateDirectory, SECRETS_FILENAME),
-    shimsDir,
-  });
-  const processStore = new ProcessStore(path.join(stateDirectory, PROCESSES_FILENAME));
-  const syncSecretShims = () =>
-    regenerateShims(processStore.list(), secretStore.envVarByName(), shimsDir, secretBackend);
-  syncSecretShims();
-  const caffeinateManager = new CaffeinateManager({
-    controller: caffeinateController,
-    store: caffeinatePreferencesStore,
-    listSessionPids: () => registry.pids(),
-    snapshotProcesses: options.caffeinateSnapshotProcesses,
-    batteryProbe: options.caffeinateBatteryProbe,
-    hasRecentOutput: (pids, withinMs) => registry.hasRecentOutput(pids, withinMs),
-  });
-  // Open dev ports: the daemon reads the process tree (ps) and the listening
-  // socket table (lsof) on demand while the ports modal is open. Both are
-  // injectable so tests can drive the list deterministically without a real
-  // listener; the tree snapshot defaults to the same `ps` read keep-awake's
-  // automatic mode uses (one shared subprocess per poll).
-  const portsSnapshotProcesses =
-    options.portsSnapshotProcesses ?? defaultCaffeinateSnapshotProcesses;
-  const portsSnapshotListeners = options.portsSnapshotListeners ?? defaultSnapshotListeners;
-  const clientSockets = new Set<ClientSocket>();
-  // CDP target paired with each WS via the {type:"identify"} handshake, so the
-  // manager's onClientExit hook can drive closeTab on a clean shell exit for
-  // that specific socket. Per-WS (a CDP target belongs to one page); cleared
-  // on detach.
-  const wsToTargetId = new Map<ClientSocket, string>();
-  const cdpBackgroundTabsDisabled = process.env.LOCALTERM_DISABLE_CDP_TABS === "1";
-  // One persistent CDP socket for the daemon's lifetime — opened once at start
-  // (below), so the user clears the browser's remote-debugging prompt a single
-  // time rather than on every run. Skipped when a caller injects its own
-  // `tabController` (it owns tab control) or when disabled via env.
-  const cdpClient =
-    options.tabController || cdpBackgroundTabsDisabled
-      ? null
-      : new CdpClient({
-          detect: options.cdpDetect,
-          // Only page-type targets on the daemon's own origin get an ambient token
-          // injected — unrelated tabs the user has open in their debugged browser
-          // stay untouched. `actualPort` is bound by the http server's listen
-          // callback below; the filter is only invoked at targetCreated event
-          // time (after CdpClient.connect, which runs after listen), so it reads
-          // the resolved port rather than the pre-bind placeholder. `publicOrigin`
-          // is read live for the same reason — set post-bind via setPublicUrl.
-          tabUrlFilter: (candidateUrl: string) =>
-            isLocaltermTabUrl(candidateUrl, actualPort, host, publicOrigin, localOrigin),
-        });
-  const tabController: AutomationTabController = options.tabController ?? {
-    open: async (url: string) => {
-      // Best case: if a debug-enabled Chromium browser is running, open the run
-      // tab via CDP with `background: true` so it lands *behind* the active tab
-      // (a true background tab, no focus steal) and stays closeable. This is how
-      // browser-harness-js does it, over a connection we keep alive across runs.
-      if (cdpClient) {
-        const handle = await cdpClient.openBackgroundTab(url);
-        if (handle) return handle;
-      }
-      // Fallback: the OS opener. `background: true` is macOS `open -g`, which at
-      // least keeps the browser app from coming to the foreground; ignored
-      // elsewhere. Used whenever CDP isn't available (non-Chromium default
-      // browser, remote debugging off, or LOCALTERM_DISABLE_CDP_TABS=1). Not
-      // closeable, so `closeOnFinish` is silently a no-op on this path.
-      await open(url, { background: true });
-      return null;
-    },
-    close: async (handle: string) => {
-      if (cdpClient) await cdpClient.closeTab(handle);
-    },
-  };
-  // Maps a run id -> the tab handle that ran it, so we can close the tab when
-  // the command finishes (only set when the opener returned a closeable handle).
-  const runTabHandles = new Map<string, string>();
-  // Announced REMOTE surface origin for mobile/remote tabs + the `--open`
-  // browser + the network-policy host allowlist (tailnet / portless / null =
-  // loopback). A `let` rather than a const so the CLI can swap it in after
-  // `listen` resolves the bound port and surface; `tryLaunch` and the CDP
-  // `tabUrlFilter` read it live, so a post-bind `setPublicUrl` takes effect
-  // for runs and token injection without re-wiring either closure.
-  let publicOrigin: string | null = options.publicUrl ?? null;
-  const setPublicUrl = (url: string | null): void => {
-    publicOrigin = url;
-  };
-  // Announced LOCAL surface origin automation-run tabs open at — a daemon-local
-  // origin (portless / loopback) that doesn't ride the tailnet, so a flapping
-  // `tailscale serve` can't fail the run-tab load and the automation. Read live
-  // by `tryLaunch` and the CDP `tabUrlFilter` for the same reason as
-  // `publicOrigin`; falls back to `publicOrigin` (then the loopback default)
-  // when unset so a caller that only set `publicUrl` keeps the prior behavior.
-  let localOrigin: string | null = options.localUrl ?? null;
-  const setLocalUrl = (url: string | null): void => {
-    localOrigin = url;
-  };
-
-  // Project the newest run as the legacy `lastRun` for back-compat clients.
-  const deriveLastRun = (automation: Automation): AutomationLastRun | null => {
-    const latest = automation.runs[0];
-    if (!latest) return null;
-    return {
-      runId: latest.runId,
-      at: latest.finishedAt ?? latest.startedAt ?? latest.scheduledFor,
-      status: latest.status,
-      exitCode: latest.exitCode,
-    };
-  };
-
-  const toAutomationWithNextRun = (automation: Automation, from: Date): AutomationWithNextRun => ({
-    ...automation,
-    nextRunAt: computeNextAutomationRunAt(automation, from),
-    cron:
-      automation.trigger.kind === "schedule" ? compileSchedule(automation.trigger.schedule) : null,
-    lastRun: deriveLastRun(automation),
-  });
-
-  const listAutomationsWithNextRun = (): AutomationWithNextRun[] => {
-    const from = new Date();
-    return automationStore.list().map((automation) => toAutomationWithNextRun(automation, from));
-  };
-
-  const broadcastAutomations = () => {
-    const payload: ServerToClientMessage = {
-      type: "automations",
-      automations: listAutomationsWithNextRun(),
-    };
-    for (const clientSocket of clientSockets) {
-      safeSend(clientSocket, payload);
-    }
-  };
-
-  const caffeinateStatePayload = (): ServerToClientMessage => ({
-    type: "caffeinate",
-    supported: caffeinateManager.supported,
-    active: caffeinateManager.active,
-    mode: caffeinateManager.mode,
-    activityGate: caffeinateManager.activityGate,
-    batteryThreshold: caffeinateManager.batteryThreshold,
-    defaultCommands: [...caffeinateManager.defaultCommands],
-    commands: caffeinateManager.commands,
-    activeTrigger: caffeinateManager.activeTrigger,
-  });
-
-  // The daemon owns the single keep-awake process, so its state is broadcast to
-  // every tab — exactly like automations — and the coffee controls stay in sync.
-  const broadcastCaffeinate = () => {
-    const payload = caffeinateStatePayload();
-    for (const clientSocket of clientSockets) {
-      safeSend(clientSocket, payload);
-    }
-  };
-
-  caffeinateManager.on("change", broadcastCaffeinate);
-
-  // Open a browser tab for a run and record it in history. Scheduled and watch
-  // launches count toward the limit (and can finish the automation); manual
-  // launches never count and are allowed even on a finished/disabled automation.
-  const tryLaunch = (
+interface DaemonContext {
+  registry: SessionManager;
+  cdpClient: CdpClient | null;
+  secretBackend: SecretBackend;
+  secretStore: SecretStore;
+  shimsDir: string;
+  processStore: ProcessStore;
+  syncSecretShims: () => void;
+  automationStore: AutomationStore;
+  broadcastAutomations: () => void;
+  syncFolderWatchers: () => void;
+  syncSessionEventListeners: () => void;
+  webhookTriggerManager: WebhookTriggerManager;
+  worktreeConfigStore: WorktreeConfigStore;
+  portsSnapshotProcesses: SnapshotProcesses;
+  portsSnapshotListeners: SnapshotListeners;
+  toAutomationWithNextRun: (automation: Automation, from: Date) => AutomationWithNextRun;
+  listAutomationsWithNextRun: () => AutomationWithNextRun[];
+  tryLaunch: (
     automation: Automation,
     trigger: "schedule" | "manual" | "watch" | "event" | "webhook",
-  ): PendingAutomationRun | null => {
-    if (trigger !== "manual") {
-      const current = automationStore.get(automation.id);
-      if (!current || !current.enabled || current.lifecycle === "finished") return null;
-    }
-    const run = automationRunTracker.create(automation);
-    const counts = trigger !== "manual";
-    automationStore.appendRun(automation.id, {
-      runId: run.runId,
-      scheduledFor:
-        trigger === "schedule"
-          ? Math.floor(run.createdAt / MS_PER_MINUTE) * MS_PER_MINUTE
-          : run.createdAt,
-      startedAt: run.createdAt,
-      finishedAt: null,
-      status: "launched",
-      exitCode: null,
-      trigger,
-      countsTowardLimit: counts,
-    });
-    if (counts) automationStore.incrementRunCount(automation.id);
-    broadcastAutomations();
-    // A watch automation that just reached its limit is now "finished"; stop
-    // watching its folder promptly instead of waiting for the next mutation.
-    syncFolderWatchers();
-    syncSessionEventListeners();
-    // Open the run tab at the announced LOCAL surface origin when the CLI
-    // resolved one (portless / loopback) — run tabs open in the daemon's own
-    // debugged browser, where a flapping `tailscale serve` (laptop wake, DERP
-    // relay, cert renewal) would fail the tab load and the automation, so they
-    // never ride the tailnet even when `publicOrigin` is the tailnet URL. Fall
-    // back to `publicOrigin` (then the loopback form) so a caller that only set
-    // `publicUrl` keeps the prior single-surface behavior. A bare origin (no
-    // path) is the contract, so the `new URL` base rewrites any stray path and
-    // searchParams encodes the id.
-    const runUrl = new URL(
-      localOrigin ?? publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`,
-    );
-    runUrl.searchParams.set(AUTOMATION_RUN_QUERY_PARAM, run.runId);
-    // Resolve requested secrets before opening the run tab so the env is set on
-    // the pending run by the time the WS claims it. The claim happens only after
-    // the browser loads this tab, which is gated on the resolution below, so
-    // `onOpen` always sees the resolved env. The launch stays synchronous up to
-    // here — the pending run + "launched" history are already recorded, so the
-    // `isRunInFlight` overlap guard holds across the await. A secret-resolution
-    // error is logged but does not block the tab (the run still starts, just
-    // without the failed secret).
-    void (async () => {
-      try {
-        const secretEnv = await buildAutomationSecretEnv(
-          automation.requestedSecrets,
-          secretStore,
-          secretBackend,
-        );
-        automationRunTracker.setEnv(run.runId, secretEnv);
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`failed to resolve secrets for automation "${automation.name}": ${message}`);
-      }
-      try {
-        const handle = await tabController.open(runUrl.href);
-        // Remember the tab so `automation-exit` can close it if closeOnFinish.
-        if (handle) runTabHandles.set(run.runId, handle);
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(
-          `failed to open a browser tab for automation "${automation.name}": ${message}`,
-        );
-      }
-    })();
-    return run;
-  };
+  ) => PendingAutomationRun | null;
+}
 
-  // Close a finished run's tab when the automation opted into closeOnFinish.
-  const closeRunTabIfRequested = (automationId: string, runId: string): void => {
-    const handle = runTabHandles.get(runId);
-    runTabHandles.delete(runId);
-    if (!handle) return;
-    const automation = automationStore.get(automationId);
-    if (!automation?.closeOnFinish) return;
-    void tabController.close(handle).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`failed to close automation tab (run ${runId}): ${message}`);
-    });
-  };
-
-  // On boot, settle the state the dead process left behind: any run still
-  // "launched"/"running" can never resume (the run tracker is in-memory), so it
-  // becomes "missed"; and if the daemon was down across scheduled times, record
-  // those as "skipped" so the user can see what didn't run while the machine was
-  // off. Skipped runs never launch and never count toward a limit. No clients
-  // exist yet, so nothing is broadcast.
-  const reconcileOnStartup = (now: number): void => {
-    const lastAliveAt = heartbeatStore.read();
-    const hadOutage =
-      lastAliveAt !== null && now - lastAliveAt >= AUTOMATION_RECONCILE_MIN_DOWNTIME_MS;
-    for (const automation of automationStore.list()) {
-      for (const run of automation.runs) {
-        if (run.status === "launched" || run.status === "running") {
-          automationStore.updateRun(automation.id, run.runId, {
-            status: "missed",
-            finishedAt: now,
-          });
-        }
-      }
-      if (!hadOutage || !automation.enabled || automation.lifecycle === "finished") continue;
-      for (const occurrence of enumerateMissedOccurrences(automation, lastAliveAt as number, now)) {
-        automationStore.appendRun(automation.id, {
-          runId: randomUUID(),
-          scheduledFor: occurrence,
-          startedAt: null,
-          finishedAt: occurrence,
-          status: "skipped",
-          exitCode: null,
-          trigger: "schedule",
-          countsTowardLimit: false,
-        });
-      }
-    }
-  };
-
+const buildApiRoutes = (ctx: DaemonContext): Hono => {
   const api = new Hono();
+  const {
+    registry,
+    cdpClient,
+    secretBackend,
+    secretStore,
+    shimsDir,
+    processStore,
+    syncSecretShims,
+    automationStore,
+    broadcastAutomations,
+    syncFolderWatchers,
+    syncSessionEventListeners,
+    webhookTriggerManager,
+    worktreeConfigStore,
+    portsSnapshotProcesses,
+    portsSnapshotListeners,
+    toAutomationWithNextRun,
+    listAutomationsWithNextRun,
+    tryLaunch,
+  } = ctx;
   api.get("/health", (context) =>
     context.json({
       ok: true,
@@ -1335,6 +989,421 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   });
 
   api.notFound((context) => context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND));
+  return api;
+};
+
+export const createServer = async (options: ServerOptions = {}): Promise<RunningServer> => {
+  const port = options.port ?? DEFAULT_PORT;
+  const host = options.host ?? DEFAULT_HOST;
+
+  const staticRoot =
+    typeof options.staticRoot === "string" ? path.resolve(options.staticRoot) : null;
+
+  const isLoopbackBind = isLoopbackHost(host);
+  if (!isLoopbackBind) {
+    console.warn(
+      `⚠ non-loopback bind (${host}): any client on the private network can open an unauthenticated shell`,
+    );
+  }
+
+  // The session manager owns every live PTY for the daemon's lifetime. A PTY
+  // persists across client detach (closing a tab detaches instead of killing
+  // it) so the session picker can re-attach to it; it dies on shell exit, an
+  // explicit kill from the picker, or the dormant-idle sweep. Multiple clients
+  // may attach to one PTY and fan out output/resize to all of them. The hooks
+  // close over managers defined further below; they only fire at runtime
+  // (attach/detach/output/exit), so referencing the later consts here is safe.
+  const stateDirectory = options.stateDirectory ?? path.join(os.homedir(), ".localterm");
+  const shimsDir = path.join(stateDirectory, SECRETS_SHIMS_DIRNAME);
+  const registry = new SessionManager({
+    shimsDir,
+    sendControl: safeSend,
+    hooks: {
+      onOutputActivity: () => caffeinateManager.noteOutputActivity(),
+      onSessionActivity: () => caffeinateManager.pokeAuto(),
+      onSessionEvent: (event, cwd) => sessionEventManager.onSessionEvent(event, cwd),
+      onAutomationExit: (automationId, runId, exitCode) => {
+        automationStore.updateRun(automationId, runId, {
+          status: exitCode === 0 ? "completed" : "failed",
+          exitCode,
+          finishedAt: Date.now(),
+        });
+        broadcastAutomations();
+        closeRunTabIfRequested(automationId, runId);
+        folderWatchManager.notifyRunFinished(automationId);
+        sessionEventManager.notifyRunFinished(automationId);
+      },
+      onClientExit: (ws, exitCode) => {
+        const targetId = wsToTargetId.get(ws);
+        if (targetId && (exitCode === null || exitCode === 0)) void cdpClient?.closeTab(targetId);
+      },
+    },
+  });
+  const app = new Hono();
+  app.use(
+    "*",
+    createNetworkPolicyMiddleware(host, () => publicOrigin),
+  );
+  const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
+  wss.options.maxPayload = 256 * 1024;
+
+  const automationStore = new AutomationStore(path.join(stateDirectory, "automations.json"));
+  const automationRunTracker = new AutomationRunTracker();
+  const automationScheduler = new AutomationScheduler(automationStore);
+  // Folder-watch triggers: one fs.watch per watch automation's cwd (no polling).
+  // isRunInFlight gates overlap (a launched/running latest run blocks a new
+  // launch); getAutomation re-reads live state when the debounce fires.
+  const folderWatchManager = new FolderWatchManager({
+    debounceMs: AUTOMATION_WATCH_DEBOUNCE_MS,
+    postRunGraceMs: AUTOMATION_WATCH_POST_RUN_GRACE_MS,
+    isRunInFlight: (automationId) => {
+      const status = automationStore.get(automationId)?.runs[0]?.status;
+      return status === "launched" || status === "running";
+    },
+    getAutomation: (automationId) => automationStore.get(automationId),
+  });
+  const syncFolderWatchers = () => folderWatchManager.sync(automationStore.list());
+  const sessionEventManager = new SessionEventManager({
+    debounceMs: AUTOMATION_EVENT_DEBOUNCE_MS,
+    postRunGraceMs: AUTOMATION_WATCH_POST_RUN_GRACE_MS,
+    isRunInFlight: (automationId) => {
+      const status = automationStore.get(automationId)?.runs[0]?.status;
+      return status === "launched" || status === "running";
+    },
+    getAutomation: (automationId) => automationStore.get(automationId),
+  });
+  const syncSessionEventListeners = () => sessionEventManager.sync(automationStore.list());
+  // Webhook triggers: a POST to /api/webhooks/:id arms a trailing debounce per
+  // automation (coalesces duplicate delivery) with an in-flight overlap guard.
+  // Stateless vs the watch/event managers — nothing to arm, so no sync().
+  const webhookTriggerManager = new WebhookTriggerManager({
+    debounceMs: AUTOMATION_WEBHOOK_DEBOUNCE_MS,
+    isRunInFlight: (automationId) => {
+      const status = automationStore.get(automationId)?.runs[0]?.status;
+      return status === "launched" || status === "running";
+    },
+    getAutomation: (automationId) => automationStore.get(automationId),
+  });
+  const heartbeatStore = new HeartbeatStore(path.join(stateDirectory, "daemon-heartbeat.json"));
+  const caffeinateController = options.caffeinateController ?? new CaffeinateController();
+  const caffeinatePreferencesStore = new CaffeinatePreferencesStore(
+    path.join(stateDirectory, "caffeinate.json"),
+  );
+  const worktreeConfigStore = new WorktreeConfigStore(stateDirectory);
+  // Per-process secret injection: a backend (macOS Keychain on darwin) holds
+  // secret values; a secret is an identity + the env var it exports
+  // (~/.localterm/secrets.json, names + env var only — never values), and a
+  // process is a binary name plus the secret names it should receive
+  // (~/.localterm/processes.json) — the same multi-select model automations use
+  // for requestedSecrets. The daemon generates a PATH shim per process in
+  // ~/.localterm/shims; localterm's shell hook prepends the shims dir so the
+  // shims shadow the real binaries and inject the secret(s) at exec time.
+  // The one-time migrator rewrites a pre-flip secrets.json (with `programs`) to
+  // the new shape + a processes.json before the stores load either file.
+  migrateSecretsToProcesses(stateDirectory);
+  const secretBackend = options.secretBackend ?? createDefaultSecretBackend();
+  const secretStore = new SecretStore({
+    filePath: path.join(stateDirectory, SECRETS_FILENAME),
+    shimsDir,
+  });
+  const processStore = new ProcessStore(path.join(stateDirectory, PROCESSES_FILENAME));
+  const syncSecretShims = () =>
+    regenerateShims(processStore.list(), secretStore.envVarByName(), shimsDir, secretBackend);
+  syncSecretShims();
+  const caffeinateManager = new CaffeinateManager({
+    controller: caffeinateController,
+    store: caffeinatePreferencesStore,
+    listSessionPids: () => registry.pids(),
+    snapshotProcesses: options.caffeinateSnapshotProcesses,
+    batteryProbe: options.caffeinateBatteryProbe,
+    hasRecentOutput: (pids, withinMs) => registry.hasRecentOutput(pids, withinMs),
+  });
+  // Open dev ports: the daemon reads the process tree (ps) and the listening
+  // socket table (lsof) on demand while the ports modal is open. Both are
+  // injectable so tests can drive the list deterministically without a real
+  // listener; the tree snapshot defaults to the same `ps` read keep-awake's
+  // automatic mode uses (one shared subprocess per poll).
+  const portsSnapshotProcesses =
+    options.portsSnapshotProcesses ?? defaultCaffeinateSnapshotProcesses;
+  const portsSnapshotListeners = options.portsSnapshotListeners ?? defaultSnapshotListeners;
+  const clientSockets = new Set<ClientSocket>();
+  // CDP target paired with each WS via the {type:"identify"} handshake, so the
+  // manager's onClientExit hook can drive closeTab on a clean shell exit for
+  // that specific socket. Per-WS (a CDP target belongs to one page); cleared
+  // on detach.
+  const wsToTargetId = new Map<ClientSocket, string>();
+  const cdpBackgroundTabsDisabled = process.env.LOCALTERM_DISABLE_CDP_TABS === "1";
+  // One persistent CDP socket for the daemon's lifetime — opened once at start
+  // (below), so the user clears the browser's remote-debugging prompt a single
+  // time rather than on every run. Skipped when a caller injects its own
+  // `tabController` (it owns tab control) or when disabled via env.
+  const cdpClient =
+    options.tabController || cdpBackgroundTabsDisabled
+      ? null
+      : new CdpClient({
+          detect: options.cdpDetect,
+          // Only page-type targets on the daemon's own origin get an ambient token
+          // injected — unrelated tabs the user has open in their debugged browser
+          // stay untouched. `actualPort` is bound by the http server's listen
+          // callback below; the filter is only invoked at targetCreated event
+          // time (after CdpClient.connect, which runs after listen), so it reads
+          // the resolved port rather than the pre-bind placeholder. `publicOrigin`
+          // is read live for the same reason — set post-bind via setPublicUrl.
+          tabUrlFilter: (candidateUrl: string) =>
+            isLocaltermTabUrl(candidateUrl, actualPort, host, publicOrigin, localOrigin),
+        });
+  const tabController: AutomationTabController = options.tabController ?? {
+    open: async (url: string) => {
+      // Best case: if a debug-enabled Chromium browser is running, open the run
+      // tab via CDP with `background: true` so it lands *behind* the active tab
+      // (a true background tab, no focus steal) and stays closeable. This is how
+      // browser-harness-js does it, over a connection we keep alive across runs.
+      if (cdpClient) {
+        const handle = await cdpClient.openBackgroundTab(url);
+        if (handle) return handle;
+      }
+      // Fallback: the OS opener. `background: true` is macOS `open -g`, which at
+      // least keeps the browser app from coming to the foreground; ignored
+      // elsewhere. Used whenever CDP isn't available (non-Chromium default
+      // browser, remote debugging off, or LOCALTERM_DISABLE_CDP_TABS=1). Not
+      // closeable, so `closeOnFinish` is silently a no-op on this path.
+      await open(url, { background: true });
+      return null;
+    },
+    close: async (handle: string) => {
+      if (cdpClient) await cdpClient.closeTab(handle);
+    },
+  };
+  // Maps a run id -> the tab handle that ran it, so we can close the tab when
+  // the command finishes (only set when the opener returned a closeable handle).
+  const runTabHandles = new Map<string, string>();
+  // Announced REMOTE surface origin for mobile/remote tabs + the `--open`
+  // browser + the network-policy host allowlist (tailnet / portless / null =
+  // loopback). A `let` rather than a const so the CLI can swap it in after
+  // `listen` resolves the bound port and surface; `tryLaunch` and the CDP
+  // `tabUrlFilter` read it live, so a post-bind `setPublicUrl` takes effect
+  // for runs and token injection without re-wiring either closure.
+  let publicOrigin: string | null = options.publicUrl ?? null;
+  const setPublicUrl = (url: string | null): void => {
+    publicOrigin = url;
+  };
+  // Announced LOCAL surface origin automation-run tabs open at — a daemon-local
+  // origin (portless / loopback) that doesn't ride the tailnet, so a flapping
+  // `tailscale serve` can't fail the run-tab load and the automation. Read live
+  // by `tryLaunch` and the CDP `tabUrlFilter` for the same reason as
+  // `publicOrigin`; falls back to `publicOrigin` (then the loopback default)
+  // when unset so a caller that only set `publicUrl` keeps the prior behavior.
+  let localOrigin: string | null = options.localUrl ?? null;
+  const setLocalUrl = (url: string | null): void => {
+    localOrigin = url;
+  };
+
+  // Project the newest run as the legacy `lastRun` for back-compat clients.
+  const deriveLastRun = (automation: Automation): AutomationLastRun | null => {
+    const latest = automation.runs[0];
+    if (!latest) return null;
+    return {
+      runId: latest.runId,
+      at: latest.finishedAt ?? latest.startedAt ?? latest.scheduledFor,
+      status: latest.status,
+      exitCode: latest.exitCode,
+    };
+  };
+
+  const toAutomationWithNextRun = (automation: Automation, from: Date): AutomationWithNextRun => ({
+    ...automation,
+    nextRunAt: computeNextAutomationRunAt(automation, from),
+    cron:
+      automation.trigger.kind === "schedule" ? compileSchedule(automation.trigger.schedule) : null,
+    lastRun: deriveLastRun(automation),
+  });
+
+  const listAutomationsWithNextRun = (): AutomationWithNextRun[] => {
+    const from = new Date();
+    return automationStore.list().map((automation) => toAutomationWithNextRun(automation, from));
+  };
+
+  const broadcastAutomations = () => {
+    const payload: ServerToClientMessage = {
+      type: "automations",
+      automations: listAutomationsWithNextRun(),
+    };
+    for (const clientSocket of clientSockets) {
+      safeSend(clientSocket, payload);
+    }
+  };
+
+  const caffeinateStatePayload = (): ServerToClientMessage => ({
+    type: "caffeinate",
+    supported: caffeinateManager.supported,
+    active: caffeinateManager.active,
+    mode: caffeinateManager.mode,
+    activityGate: caffeinateManager.activityGate,
+    batteryThreshold: caffeinateManager.batteryThreshold,
+    defaultCommands: [...caffeinateManager.defaultCommands],
+    commands: caffeinateManager.commands,
+    activeTrigger: caffeinateManager.activeTrigger,
+  });
+
+  // The daemon owns the single keep-awake process, so its state is broadcast to
+  // every tab — exactly like automations — and the coffee controls stay in sync.
+  const broadcastCaffeinate = () => {
+    const payload = caffeinateStatePayload();
+    for (const clientSocket of clientSockets) {
+      safeSend(clientSocket, payload);
+    }
+  };
+
+  caffeinateManager.on("change", broadcastCaffeinate);
+
+  // Open a browser tab for a run and record it in history. Scheduled and watch
+  // launches count toward the limit (and can finish the automation); manual
+  // launches never count and are allowed even on a finished/disabled automation.
+  const tryLaunch = (
+    automation: Automation,
+    trigger: "schedule" | "manual" | "watch" | "event" | "webhook",
+  ): PendingAutomationRun | null => {
+    if (trigger !== "manual") {
+      const current = automationStore.get(automation.id);
+      if (!current || !current.enabled || current.lifecycle === "finished") return null;
+    }
+    const run = automationRunTracker.create(automation);
+    const counts = trigger !== "manual";
+    automationStore.appendRun(automation.id, {
+      runId: run.runId,
+      scheduledFor:
+        trigger === "schedule"
+          ? Math.floor(run.createdAt / MS_PER_MINUTE) * MS_PER_MINUTE
+          : run.createdAt,
+      startedAt: run.createdAt,
+      finishedAt: null,
+      status: "launched",
+      exitCode: null,
+      trigger,
+      countsTowardLimit: counts,
+    });
+    if (counts) automationStore.incrementRunCount(automation.id);
+    broadcastAutomations();
+    // A watch automation that just reached its limit is now "finished"; stop
+    // watching its folder promptly instead of waiting for the next mutation.
+    syncFolderWatchers();
+    syncSessionEventListeners();
+    // Open the run tab at the announced LOCAL surface origin when the CLI
+    // resolved one (portless / loopback) — run tabs open in the daemon's own
+    // debugged browser, where a flapping `tailscale serve` (laptop wake, DERP
+    // relay, cert renewal) would fail the tab load and the automation, so they
+    // never ride the tailnet even when `publicOrigin` is the tailnet URL. Fall
+    // back to `publicOrigin` (then the loopback form) so a caller that only set
+    // `publicUrl` keeps the prior single-surface behavior. A bare origin (no
+    // path) is the contract, so the `new URL` base rewrites any stray path and
+    // searchParams encodes the id.
+    const runUrl = new URL(
+      localOrigin ?? publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`,
+    );
+    runUrl.searchParams.set(AUTOMATION_RUN_QUERY_PARAM, run.runId);
+    // Resolve requested secrets before opening the run tab so the env is set on
+    // the pending run by the time the WS claims it. The claim happens only after
+    // the browser loads this tab, which is gated on the resolution below, so
+    // `onOpen` always sees the resolved env. The launch stays synchronous up to
+    // here — the pending run + "launched" history are already recorded, so the
+    // `isRunInFlight` overlap guard holds across the await. A secret-resolution
+    // error is logged but does not block the tab (the run still starts, just
+    // without the failed secret).
+    void (async () => {
+      try {
+        const secretEnv = await buildAutomationSecretEnv(
+          automation.requestedSecrets,
+          secretStore,
+          secretBackend,
+        );
+        automationRunTracker.setEnv(run.runId, secretEnv);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`failed to resolve secrets for automation "${automation.name}": ${message}`);
+      }
+      try {
+        const handle = await tabController.open(runUrl.href);
+        // Remember the tab so `automation-exit` can close it if closeOnFinish.
+        if (handle) runTabHandles.set(run.runId, handle);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `failed to open a browser tab for automation "${automation.name}": ${message}`,
+        );
+      }
+    })();
+    return run;
+  };
+
+  // Close a finished run's tab when the automation opted into closeOnFinish.
+  const closeRunTabIfRequested = (automationId: string, runId: string): void => {
+    const handle = runTabHandles.get(runId);
+    runTabHandles.delete(runId);
+    if (!handle) return;
+    const automation = automationStore.get(automationId);
+    if (!automation?.closeOnFinish) return;
+    void tabController.close(handle).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`failed to close automation tab (run ${runId}): ${message}`);
+    });
+  };
+
+  // On boot, settle the state the dead process left behind: any run still
+  // "launched"/"running" can never resume (the run tracker is in-memory), so it
+  // becomes "missed"; and if the daemon was down across scheduled times, record
+  // those as "skipped" so the user can see what didn't run while the machine was
+  // off. Skipped runs never launch and never count toward a limit. No clients
+  // exist yet, so nothing is broadcast.
+  const reconcileOnStartup = (now: number): void => {
+    const lastAliveAt = heartbeatStore.read();
+    const hadOutage =
+      lastAliveAt !== null && now - lastAliveAt >= AUTOMATION_RECONCILE_MIN_DOWNTIME_MS;
+    for (const automation of automationStore.list()) {
+      for (const run of automation.runs) {
+        if (run.status === "launched" || run.status === "running") {
+          automationStore.updateRun(automation.id, run.runId, {
+            status: "missed",
+            finishedAt: now,
+          });
+        }
+      }
+      if (!hadOutage || !automation.enabled || automation.lifecycle === "finished") continue;
+      for (const occurrence of enumerateMissedOccurrences(automation, lastAliveAt as number, now)) {
+        automationStore.appendRun(automation.id, {
+          runId: randomUUID(),
+          scheduledFor: occurrence,
+          startedAt: null,
+          finishedAt: occurrence,
+          status: "skipped",
+          exitCode: null,
+          trigger: "schedule",
+          countsTowardLimit: false,
+        });
+      }
+    }
+  };
+
+  const ctx: DaemonContext = {
+    registry,
+    cdpClient,
+    secretBackend,
+    secretStore,
+    shimsDir,
+    processStore,
+    syncSecretShims,
+    automationStore,
+    broadcastAutomations,
+    syncFolderWatchers,
+    syncSessionEventListeners,
+    webhookTriggerManager,
+    worktreeConfigStore,
+    portsSnapshotProcesses,
+    portsSnapshotListeners,
+    toAutomationWithNextRun,
+    listAutomationsWithNextRun,
+    tryLaunch,
+  };
+  const api = buildApiRoutes(ctx);
   app.route("/api", api);
 
   app.get(
