@@ -430,7 +430,7 @@ export const Terminal = () => {
   const hasDiff = diffSummary !== null && diffSummary.isRepo && diffSummary.files > 0;
   // Ambient branch/PR lease for the active cwd: drives the toolbar PR indicator
   // and is handed to the diff viewer so it opens in branch mode instantly.
-  const { branchInfo, refresh: refreshBranchInfo } = useGitBranchInfo(liveCwd);
+  const { branchInfo, refresh: refreshBranchInfo, setPushedPr } = useGitBranchInfo(liveCwd);
   const branchPr = branchInfo?.pr ?? null;
   const branchPrDisplayState = useMemo(
     () => (branchPr ? resolvePrDisplayState(branchPr, branchInfo?.currentBranch ?? null) : null),
@@ -1436,6 +1436,8 @@ export const Terminal = () => {
         } else if (message.type === "git-diff-summary") {
           setGitDiffSummary(message.summary);
           setGitDirtyVersion((version) => (version ?? 0) + 1);
+        } else if (message.type === "git-branch-pr") {
+          setPushedPr(message.pr);
         } else if (message.type === "foreground") {
           const nowHasProcess = message.process !== null;
           if (nowHasProcess) {

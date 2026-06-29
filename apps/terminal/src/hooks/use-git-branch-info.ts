@@ -14,10 +14,19 @@ import { fetchGitBranchPr, fetchGitBranches } from "@/utils/fetch-git-diff";
  * toolbar paints right away. The PR hits the GitHub REST API and is fired in
  * parallel from a separate lease; `pr` is merged into the returned branch info
  * once it resolves, so the indicator lands without blocking the toolbar.
+ *
+ * `setPushedPr` absorbs server-pushed `git-branch-pr` messages so a PR state
+ * change one sibling tab observed (via its own refresh) propagates to every tab
+ * in the same cwd — closing the gap where a remote merge produced no local
+ * git-dirty signal for the siblings to refetch from.
  */
 export const useGitBranchInfo = (
   cwd: string | null,
-): { branchInfo: GitBranchInfo | null; refresh: () => void } => {
+): {
+  branchInfo: GitBranchInfo | null;
+  refresh: () => void;
+  setPushedPr: (pr: GitBranchPr | null) => void;
+} => {
   const [branchData, setBranchData] = useState<GitBranchInfo | null>(null);
   const [pr, setPr] = useState<GitBranchPr | null>(null);
   const [nonce, setNonce] = useState(0);
@@ -38,5 +47,5 @@ export const useGitBranchInfo = (
 
   const refresh = useCallback(() => setNonce((value) => value + 1), []);
   const branchInfo = useMemo(() => (branchData ? { ...branchData, pr } : null), [branchData, pr]);
-  return { branchInfo, refresh };
+  return { branchInfo, refresh, setPushedPr: setPr };
 };

@@ -19,10 +19,10 @@ import {
   GIT_DIFF_WATCHER_EVENT_NAMES,
   type GitRefEventName,
 } from "./git-diff-watcher.js";
-import { GitDirtyCoordinator } from "./git-dirty-coordinator.js";
+import { GitMetadataCoordinator } from "./git-metadata-coordinator.js";
 import { Session } from "./session.js";
 import type { SessionEventName } from "./session-event-manager.js";
-import type { ServerToClientMessage, SpawnPtyInput } from "./types.js";
+import type { GitBranchPr, ServerToClientMessage, SpawnPtyInput } from "./types.js";
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 
 export interface AutomationContext {
@@ -53,7 +53,7 @@ interface ManagedClient {
   rows: number;
   pixelWidth?: number;
   pixelHeight?: number;
-  coordinator: GitDirtyCoordinator | null;
+  coordinator: GitMetadataCoordinator | null;
 }
 
 export interface ManagedSession {
@@ -127,7 +127,7 @@ export class SessionManager {
     { client: ManagedClient; session: ManagedSession }
   >();
   private readonly lastOutputAtByPid = new Map<number, number>();
-  private readonly coordinatorsByCwd = new Map<string, GitDirtyCoordinator>();
+  private readonly coordinatorsByCwd = new Map<string, GitMetadataCoordinator>();
   private readonly hooks: SessionManagerHooks;
   private readonly sendControl: (ws: ClientSocket, payload: ServerToClientMessage) => void;
   private readonly graceMs: number;
@@ -764,18 +764,27 @@ export class SessionManager {
     return managed.hasForeground ? "alive-quiet" : "ready";
   }
 
-  private coordinatorForCwd(cwd: string): GitDirtyCoordinator {
+  private coordinatorForCwd(cwd: string): GitMetadataCoordinator {
     const key = path.resolve(cwd);
     let coordinator = this.coordinatorsByCwd.get(key);
     if (!coordinator) {
-      coordinator = new GitDirtyCoordinator(key, this.sendControl);
+      coordinator = new GitMetadataCoordinator(key, this.sendControl);
       this.coordinatorsByCwd.set(key, coordinator);
     }
     return coordinator;
   }
 
-  private releaseCoordinator(coordinator: GitDirtyCoordinator): void {
+  private releaseCoordinator(coordinator: GitMetadataCoordinator): void {
     if (coordinator.isEmpty) this.coordinatorsByCwd.delete(coordinator.cwd);
+  }
+
+  // Push a freshly-detected PR to every tab in `cwd` after the
+  // /api/git/branches/pr endpoint recomputes it, so a remote state change one
+  // tab observed (a merge on GitHub) reaches siblings sharing the directory.
+  // Non-creating: a cwd with no subscribers has no coordinator, and allocating
+  // one here would orphan it (it never enters the attach/detach release path).
+  broadcastGitBranchPr(cwd: string, pr: GitBranchPr | null): void {
+    this.coordinatorsByCwd.get(path.resolve(cwd))?.broadcastPr(pr);
   }
 }
 

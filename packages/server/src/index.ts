@@ -647,7 +647,12 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   api.get("/git/branches/pr", async (context) => {
     const cwd = resolveCwdQuery(context.req.query("cwd"));
     if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
-    return context.json({ pr: await getGitBranchPr(cwd) });
+    const pr = await getGitBranchPr(cwd);
+    // Propagate the fresh PR to every tab in this cwd so a remote state change
+    // one tab observed (a merge on GitHub) reaches siblings sharing the
+    // directory — the working-tree git-dirty signal never fires for it.
+    registry.broadcastGitBranchPr(cwd, pr);
+    return context.json({ pr });
   });
 
   // Serves a working-tree image for the diff viewer's inline preview and

@@ -406,6 +406,20 @@ export const gitBranchPrLeaseSchema = z
   })
   .strict();
 
+// Pushed by the per-cwd coordinator whenever the /api/git/branches/pr endpoint
+// recomputes the PR (manual refresh or initial fetch), so a remote state change
+// one tab observed — e.g. a merge on GitHub, which produces no local git-dirty
+// signal — reaches every sibling tab in the same cwd. Carries no cwd field: like
+// git-diff-summary, the client resets its PR lease on cwd change, so a push
+// from the previous cwd (in flight when the shell `cd`'d) is wiped before it
+// can stick, and the per-session socket guard drops pushes from a prior session.
+const gitBranchPrMessageSchema = z
+  .object({
+    type: z.literal("git-branch-pr"),
+    pr: gitBranchPrSchema.nullable(),
+  })
+  .strict();
+
 // One entry from `git worktree list --porcelain`. `path` is the worktree root
 // (absolute, as git prints it) — kept absolute so the client can pass it back
 // for actions (open a shell there, remove it). `displayPath` is the same path
@@ -1144,6 +1158,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   foregroundMessageSchema,
   notificationMessageSchema,
   gitDiffSummaryMessageSchema,
+  gitBranchPrMessageSchema,
   automationsMessageSchema,
   caffeinateStateMessageSchema,
   cdpControlledMessageSchema,

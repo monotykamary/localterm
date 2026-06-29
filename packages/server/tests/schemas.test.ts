@@ -267,4 +267,32 @@ describe("serverToClientMessageSchema", () => {
         .success,
     ).toBe(false);
   });
+
+  it("accepts a git-branch-pr frame with a merged PR", () => {
+    const result = serverToClientMessageSchema.safeParse({
+      type: "git-branch-pr",
+      pr: {
+        number: 42,
+        title: "Fix",
+        baseRefName: "main",
+        baseRef: "origin/main",
+        url: "https://github.com/o/r/pull/42",
+        state: "merged",
+        isDraft: false,
+        mergeable: "mergeable",
+        mergedAt: "2024-01-01T00:00:00.000Z",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a git-branch-pr frame with null (no PR)", () => {
+    expect(serverToClientMessageSchema.safeParse({ type: "git-branch-pr", pr: null }).success).toBe(
+      true,
+    );
+  });
+
+  it("rejects git-branch-pr frames missing the pr field", () => {
+    expect(serverToClientMessageSchema.safeParse({ type: "git-branch-pr" }).success).toBe(false);
+  });
 });

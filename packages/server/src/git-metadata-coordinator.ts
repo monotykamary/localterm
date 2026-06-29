@@ -1,5 +1,5 @@
 import { getGitDiffSummary, invalidateGitDiffCache } from "./git-diff.js";
-import type { GitDiffSummary, ServerToClientMessage } from "./types.js";
+import type { GitBranchPr, GitDiffSummary, ServerToClientMessage } from "./types.js";
 import type { ClientSocket } from "./utils/ws-socket.js";
 
 // Git metadata is per-repo, not per-tab. Two tabs in the same cwd share one
@@ -17,7 +17,18 @@ import type { ClientSocket } from "./utils/ws-socket.js";
 // signals from sibling tabs: their independent fs watchers and prompt hooks all
 // funnel into a single in-flight pass (with one trailing pass after the burst
 // settles), and the result is broadcast to every subscribed socket.
-export class GitDirtyCoordinator {
+//
+// The PR lease rides the same subscriber set but is driven differently: it
+// reflects remote GitHub state (open/merged/closed), which a working-tree edit
+// never changes, so a git-dirty signal must NOT refetch it. Instead the
+// /api/git/branches/pr endpoint recomputes the PR and calls broadcastPr to push
+// the fresh value to every tab in the cwd — so a manual refresh on one tab
+// propagates a "merged" transition a sibling tab's shell never observed. The
+// PR is NOT replayed on subscribe: with no local signal refreshing it, a cached
+// value can be arbitrarily stale, and replaying it would race a tab's own
+// freshly-fetched lease. Each tab populates its initial PR from its own HTTP
+// fetch and converges with siblings through these pushes.
+export class GitMetadataCoordinator {
   private inFlight = false;
   private pending = false;
   private lastSummary: GitDiffSummary | null = null;
@@ -38,7 +49,8 @@ export class GitDirtyCoordinator {
     // The first subscriber (no cached summary yet) kicks off a fresh compute;
     // later subscribers piggyback on that in-flight run (they're in the
     // subscriber set, so its broadcast reaches them) instead of arming a
-    // redundant trailing recompute.
+    // redundant trailing recompute. The PR is intentionally not replayed here
+    // — see the class doc.
     if (this.lastSummary) {
       this.send(ws, { type: "git-diff-summary", summary: this.lastSummary });
       return;
@@ -61,6 +73,14 @@ export class GitDirtyCoordinator {
     }
     this.inFlight = true;
     void this.run();
+  }
+
+  // Push a freshly-detected PR to every tab in this cwd. Called by the
+  // /api/git/branches/pr endpoint after it recomputes the PR, so a remote
+  // state change one tab observed reaches siblings sharing the directory.
+  broadcastPr(pr: GitBranchPr | null): void {
+    const payload: ServerToClientMessage = { type: "git-branch-pr", pr };
+    for (const ws of this.subscribers) this.send(ws, payload);
   }
 
   private readonly run = async (): Promise<void> => {
