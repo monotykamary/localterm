@@ -77,6 +77,14 @@ const addRemote = (testRepo: TestRepo, name: string, url: string): void => {
   runGitSync(testRepo.dir, ["remote", "add", name, url]);
 };
 
+// Mark a remote as a partial/blobless clone so `git remote -v` appends the
+// filter annotation, e.g. `(fetch) [blob:none]` — mirroring what a real
+// `git clone --filter=blob:none` records, without the clone machinery.
+const markPartialClone = (testRepo: TestRepo, name: string, filter = "blob:none"): void => {
+  runGitSync(testRepo.dir, ["config", `remote.${name}.promisor`, "true"]);
+  runGitSync(testRepo.dir, ["config", `remote.${name}.partialclonefilter`, filter]);
+};
+
 const stagePath = (testRepo: TestRepo, filePath: string): void => {
   runGitSync(testRepo.dir, ["add", filePath]);
 };
@@ -532,6 +540,48 @@ describe("branch comparison mode", () => {
     }
   });
 
+  it("collects GitHub slugs from a partial/blobless clone whose fetch line is annotated", async () => {
+    const repo = await initRepo(makeTempDir());
+    try {
+      fs.writeFileSync(path.join(repo.dir, "file.txt"), "content\n");
+      await commitAll(repo, "initial");
+      addRemote(repo, "origin", "https://github.com/me/fork.git");
+      markPartialClone(repo, "origin", "blob:none");
+      const slugs = await listGithubRemoteSlugs(repo.dir);
+      expect(slugs).toContain("me/fork");
+    } finally {
+      fs.rmSync(repo.dir, { recursive: true, force: true });
+    }
+  });
+
+  it("passes the bare branch name to the PR fetcher, not owner:branch", async () => {
+    // The fetcher queries GraphQL `headRefName` (the bare branch), which matches
+    // same-repo PRs. The REST `head=owner:branch` form returned 0 for a same-repo
+    // PR, so the caller must never add the `owner:` prefix back.
+    const repo = await initRepo(makeTempDir());
+    try {
+      fs.writeFileSync(path.join(repo.dir, "a.txt"), "a\n");
+      await commitAll(repo, "base");
+      createAndCheckoutBranch(repo, "feature");
+      addRemote(repo, "origin", "git@github.com:me/repo.git");
+      let capturedBranch: string | undefined;
+      setPrFetcher({
+        list: async (_slug, branch) => {
+          capturedBranch = branch;
+          return [];
+        },
+      });
+      try {
+        await getGitBranchPr(repo.dir);
+      } finally {
+        setPrFetcher({ list: async () => [] });
+      }
+      expect(capturedBranch).toBe("feature");
+    } finally {
+      fs.rmSync(repo.dir, { recursive: true, force: true });
+    }
+  });
+
   it("returns PR data without internal headOwner field", async () => {
     const forkRepo = await initRepo(makeTempDir());
     try {
@@ -547,8 +597,8 @@ describe("branch comparison mode", () => {
       setRemoteRef(forkRepo.dir, "upstream", "main", baseSha);
 
       setPrFetcher({
-        list: async (slug, head, _state, _perPage) => {
-          if (slug === "them/repo" && head === "me:feature") {
+        list: async (slug, branch, _state, _perPage) => {
+          if (slug === "them/repo" && branch === "feature") {
             return [
               {
                 number: 42,
@@ -647,8 +697,8 @@ describe("fork PR base resolution", () => {
     setRemoteRef(forkRepo.dir, "upstream", "main", baseSha);
 
     setPrFetcher({
-      list: async (slug, head, _state, _perPage) => {
-        if (slug === "them/repo" && head === "me:feature") {
+      list: async (slug, branch, _state, _perPage) => {
+        if (slug === "them/repo" && branch === "feature") {
           return [
             {
               number: 7,
@@ -732,8 +782,8 @@ describe("fork PR base resolution", () => {
       setRemoteRef(repo.dir, "upstream", "main", getHeadSha(repo.dir));
       // baseRepoFullName matches origin's slug -> same-repo PR.
       setPrFetcher({
-        list: async (slug, head) =>
-          slug === "me/repo" && head === "me:feature"
+        list: async (slug, branch) =>
+          slug === "me/repo" && branch === "feature"
             ? [
                 {
                   number: 11,
@@ -787,8 +837,8 @@ describe("fork PR base resolution", () => {
       setRemoteRef(repo.dir, "origin", "main", driftSha);
       setRemoteRef(repo.dir, "upstream", "main", baseRefSha);
       setPrFetcher({
-        list: async (slug, head) =>
-          slug.toLowerCase() === "them/repo" && head === "me:feature"
+        list: async (slug, branch) =>
+          slug.toLowerCase() === "them/repo" && branch === "feature"
             ? [
                 {
                   number: 9,
@@ -837,8 +887,8 @@ describe("fork PR base resolution", () => {
       setRemoteRef(repo.dir, "origin", "main", driftSha);
       setRemoteRef(repo.dir, "upstream", "main", baseRefSha);
       setPrFetcher({
-        list: async (slug, head) =>
-          slug === "them/repo" && head === "me:feature"
+        list: async (slug, branch) =>
+          slug === "them/repo" && branch === "feature"
             ? [
                 {
                   number: 10,

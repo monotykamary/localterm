@@ -807,71 +807,92 @@ type ParsedPr = GitBranchPr & {
   baseRepoFullName: string | null;
 };
 
-const normalizeOctokitPrState = (state: string, mergedAt: string | null): GitBranchPrState => {
-  if (mergedAt !== null) return "merged";
-  if (state === "closed") return "closed";
+const normalizeGraphqlPrState = (state: string): GitBranchPrState => {
+  if (state === "MERGED") return "merged";
+  if (state === "CLOSED") return "closed";
   return "open";
 };
 
-export interface PrFetcher {
-  list(slug: string, head: string, state: string, perPage: number): Promise<PrApiData[]>;
-}
-
-const resolveMergeable = (mergeable: boolean | null | undefined): GitBranchPrMergeable => {
-  if (mergeable === null || mergeable === undefined) return "unknown";
-  return mergeable ? "mergeable" : "conflicting";
+const resolveGraphqlMergeable = (mergeable: string | null | undefined): GitBranchPrMergeable => {
+  if (mergeable === "MERGEABLE") return "mergeable";
+  if (mergeable === "CONFLICTING") return "conflicting";
+  return "unknown";
 };
 
+export interface PrFetcher {
+  list(slug: string, branch: string, state: string, perPage: number): Promise<PrApiData[]>;
+}
+
+interface GraphqlPrNode {
+  number: number;
+  title: string | null;
+  url: string | null;
+  isDraft: boolean;
+  mergedAt: string | null;
+  mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN" | null;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  baseRefName: string;
+  headRepositoryOwner: { login: string } | null;
+  baseRepository: { nameWithOwner: string } | null;
+}
+
+// GraphQL `pullRequests(headRefName:)` filters by branch name across same-repo
+// and fork PRs — the same semantics `gh pr list --head` uses. The REST
+// `pulls.list` `head` param can't: `owner:branch` only matches fork PRs (0 for
+// a same-repo PR), and a bare branch is silently ignored (returns all PRs). So
+// a same-repo PR — the common case where you push to origin directly — was
+// never detected. GraphQL also returns `mergeable` inline, so there is no
+// per-PR detail round-trip.
+const PR_LIST_QUERY = `
+  query($owner: String!, $repo: String!, $branch: String!, $perPage: Int!) {
+    repository(owner: $owner, name: $repo) {
+      pullRequests(
+        headRefName: $branch
+        states: [OPEN, CLOSED, MERGED]
+        first: $perPage
+        orderBy: { field: CREATED_AT, direction: DESC }
+      ) {
+        nodes {
+          number
+          title
+          url
+          isDraft
+          mergedAt
+          mergeable
+          state
+          baseRefName
+          headRepositoryOwner { login }
+          baseRepository { nameWithOwner }
+        }
+      }
+    }
+  }
+`;
+
 const defaultPrFetcher: PrFetcher = {
-  list: async (slug, head, _state, perPage) => {
+  list: async (slug, branch, _state, perPage) => {
     const token = await resolveGithubToken();
     if (!token) return [];
-
     try {
       const [owner, repo] = slug.split("/");
       const octokit = new Octokit({ auth: token, request: { timeout: 8_000 } });
-      const { data } = await octokit.rest.pulls.list({
-        owner,
-        repo,
-        head,
-        state: "all",
-        per_page: perPage,
-      });
-
-      // `pulls.list` never includes `mergeable`; fetch the detail for each open
-      // PR so the client can badge conflicted ones. Closed/merged PRs don't need
-      // mergeability for the UI, so we leave them as "unknown".
-      const mergeableByNumber = new Map<number, GitBranchPrMergeable>();
-      await Promise.all(
-        data
-          .filter((pr) => normalizeOctokitPrState(pr.state, pr.merged_at) === "open")
-          .map(async (pr) => {
-            try {
-              const { data: detail } = await octokit.rest.pulls.get({
-                owner,
-                repo,
-                pull_number: pr.number,
-              });
-              mergeableByNumber.set(pr.number, resolveMergeable(detail.mergeable));
-            } catch {
-              mergeableByNumber.set(pr.number, "unknown");
-            }
-          }),
-      );
-
-      return data.map((pr) => {
-        const state = normalizeOctokitPrState(pr.state, pr.merged_at);
+      const data = await octokit.graphql<{
+        repository: { pullRequests: { nodes: GraphqlPrNode[] } } | null;
+      }>(PR_LIST_QUERY, { owner, repo, branch, perPage });
+      const nodes = data?.repository?.pullRequests?.nodes ?? [];
+      return nodes.map((pr) => {
+        const state = normalizeGraphqlPrState(pr.state);
         return {
           number: pr.number,
           title: pr.title ?? "",
-          baseRefName: pr.base?.ref ?? "",
-          url: pr.html_url ?? null,
+          baseRefName: pr.baseRefName ?? "",
+          url: pr.url ?? null,
           state,
-          isDraft: pr.draft ?? false,
-          mergeable: state === "open" ? (mergeableByNumber.get(pr.number) ?? "unknown") : "unknown",
-          headOwner: pr.head?.repo?.owner?.login ?? null,
-          baseRepoFullName: pr.base?.repo?.full_name ?? null,
-          mergedAt: pr.merged_at ?? null,
+          isDraft: pr.isDraft ?? false,
+          mergeable: state === "open" ? resolveGraphqlMergeable(pr.mergeable) : "unknown",
+          headOwner: pr.headRepositoryOwner?.login ?? null,
+          baseRepoFullName: pr.baseRepository?.nameWithOwner ?? null,
+          mergedAt: pr.mergedAt ?? null,
         };
       });
     } catch {
@@ -899,7 +920,10 @@ const parseGithubRemotes = async (cwd: string): Promise<GithubRemote[]> => {
   const raw: GithubRemote[] = [];
   const seen = new Set<string>();
   for (const line of result.stdout.toString("utf8").split("\n")) {
-    const match = /^(\S+)\t(.+?)\s+\(fetch\)$/.exec(line);
+    // Partial/blobless clones annotate the fetch line with the filter spec,
+    // e.g. `origin\t<url> (fetch) [blob:none]`; a bare `(fetch)$` anchor misses
+    // it, so PR detection silently no-ops on partial clones.
+    const match = /^(\S+)\t(.+?)\s+\(fetch\)(?:\s+\[[^\]]*\])?$/.exec(line);
     if (!match) continue;
     const [, name, url] = match;
     if (seen.has(name)) continue;
@@ -941,7 +965,7 @@ const detectPr = async (cwd: string): Promise<ParsedPr | null> => {
   const slugs = memoBy(remotes, (remote) => remote.slug).map((remote) => remote.slug);
 
   const results = await Promise.all(
-    slugs.map((slug) => activePrFetcher.list(slug, `${ownOwner}:${currentBranch}`, "all", 30)),
+    slugs.map((slug) => activePrFetcher.list(slug, currentBranch, "all", 30)),
   );
 
   const candidates = memoBy(
