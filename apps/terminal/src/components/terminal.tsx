@@ -1945,73 +1945,45 @@ export const Terminal = () => {
     if (!open) setIsActionsMenuOpen(false);
   }, []);
 
-  const handleSessionsOpenChange = useCallback((open: boolean) => {
-    setIsSessionsOpen(open);
-    if (open) {
-      setIsActionsMenuOpen(false);
-      setIsCommandPaletteOpen(false);
-      return;
-    }
-    if (toolbarHoverTimeoutRef.current !== null) {
-      window.clearTimeout(toolbarHoverTimeoutRef.current);
-    }
-    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
-      toolbarHoverTimeoutRef.current = null;
-      setIsToolbarHovered(false);
-    }, TOOLBAR_HIDE_DELAY_MS);
-    refocusTerminalRef.current?.();
-  }, []);
+  const handleOverlayOpenChange = useCallback(
+    (setOpen: (open: boolean) => void, open: boolean): void => {
+      setOpen(open);
+      if (open) {
+        setIsActionsMenuOpen(false);
+        setIsCommandPaletteOpen(false);
+        return;
+      }
+      if (toolbarHoverTimeoutRef.current !== null) {
+        window.clearTimeout(toolbarHoverTimeoutRef.current);
+      }
+      toolbarHoverTimeoutRef.current = window.setTimeout(() => {
+        toolbarHoverTimeoutRef.current = null;
+        setIsToolbarHovered(false);
+      }, TOOLBAR_HIDE_DELAY_MS);
+      refocusTerminalRef.current?.();
+    },
+    [],
+  );
 
-  const handlePortsOpenChange = useCallback((open: boolean) => {
-    setIsPortsOpen(open);
-    if (open) {
-      setIsActionsMenuOpen(false);
-      setIsCommandPaletteOpen(false);
-      return;
-    }
-    if (toolbarHoverTimeoutRef.current !== null) {
-      window.clearTimeout(toolbarHoverTimeoutRef.current);
-    }
-    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
-      toolbarHoverTimeoutRef.current = null;
-      setIsToolbarHovered(false);
-    }, TOOLBAR_HIDE_DELAY_MS);
-    refocusTerminalRef.current?.();
-  }, []);
+  const handleSessionsOpenChange = useCallback(
+    (open: boolean) => handleOverlayOpenChange(setIsSessionsOpen, open),
+    [handleOverlayOpenChange],
+  );
 
-  const handleSecretsOpenChange = useCallback((open: boolean) => {
-    setIsSecretsOpen(open);
-    if (open) {
-      setIsActionsMenuOpen(false);
-      setIsCommandPaletteOpen(false);
-      return;
-    }
-    if (toolbarHoverTimeoutRef.current !== null) {
-      window.clearTimeout(toolbarHoverTimeoutRef.current);
-    }
-    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
-      toolbarHoverTimeoutRef.current = null;
-      setIsToolbarHovered(false);
-    }, TOOLBAR_HIDE_DELAY_MS);
-    refocusTerminalRef.current?.();
-  }, []);
+  const handlePortsOpenChange = useCallback(
+    (open: boolean) => handleOverlayOpenChange(setIsPortsOpen, open),
+    [handleOverlayOpenChange],
+  );
 
-  const handleQrOpenChange = useCallback((open: boolean) => {
-    setIsQrOpen(open);
-    if (open) {
-      setIsActionsMenuOpen(false);
-      setIsCommandPaletteOpen(false);
-      return;
-    }
-    if (toolbarHoverTimeoutRef.current !== null) {
-      window.clearTimeout(toolbarHoverTimeoutRef.current);
-    }
-    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
-      toolbarHoverTimeoutRef.current = null;
-      setIsToolbarHovered(false);
-    }, TOOLBAR_HIDE_DELAY_MS);
-    refocusTerminalRef.current?.();
-  }, []);
+  const handleSecretsOpenChange = useCallback(
+    (open: boolean) => handleOverlayOpenChange(setIsSecretsOpen, open),
+    [handleOverlayOpenChange],
+  );
+
+  const handleQrOpenChange = useCallback(
+    (open: boolean) => handleOverlayOpenChange(setIsQrOpen, open),
+    [handleOverlayOpenChange],
+  );
 
   useEffect(() => {
     if (!isSearchOpen) return;
@@ -2078,45 +2050,25 @@ export const Terminal = () => {
     }
   }, []);
 
-  const handleAutomationsOpenChange = useCallback((open: boolean) => {
-    setIsAutomationsOpen(open);
-    if (open) {
-      setIsActionsMenuOpen(false);
-      setIsCommandPaletteOpen(false);
-      return;
-    }
-    if (toolbarHoverTimeoutRef.current !== null) {
-      window.clearTimeout(toolbarHoverTimeoutRef.current);
-    }
-    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
-      toolbarHoverTimeoutRef.current = null;
-      setIsToolbarHovered(false);
-    }, TOOLBAR_HIDE_DELAY_MS);
-    refocusTerminalRef.current?.();
-  }, []);
+  const handleAutomationsOpenChange = useCallback(
+    (open: boolean) => handleOverlayOpenChange(setIsAutomationsOpen, open),
+    [handleOverlayOpenChange],
+  );
 
   const toggleAutomations = useCallback(() => {
     handleAutomationsOpenChange(!isAutomationsOpenRef.current);
   }, [handleAutomationsOpenChange]);
   toggleAutomationsRef.current = toggleAutomations;
 
-  const handleWorktreesOpenChange = useCallback((open: boolean) => {
-    setIsWorktreesOpen(open);
-    if (open) {
-      setIsActionsMenuOpen(false);
-      setIsCommandPaletteOpen(false);
-      setWorktreeCreateError(null);
-      return;
-    }
-    if (toolbarHoverTimeoutRef.current !== null) {
-      window.clearTimeout(toolbarHoverTimeoutRef.current);
-    }
-    toolbarHoverTimeoutRef.current = window.setTimeout(() => {
-      toolbarHoverTimeoutRef.current = null;
-      setIsToolbarHovered(false);
-    }, TOOLBAR_HIDE_DELAY_MS);
-    refocusTerminalRef.current?.();
-  }, []);
+  const handleWorktreesOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) {
+        setWorktreeCreateError(null);
+      }
+      handleOverlayOpenChange(setIsWorktreesOpen, open);
+    },
+    [handleOverlayOpenChange],
+  );
 
   const openWorktrees = useCallback(() => {
     setIsWorktreesOpen(true);
