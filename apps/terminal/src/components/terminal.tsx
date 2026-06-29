@@ -251,6 +251,18 @@ export const Terminal = () => {
   // the server, or null until the first `pty-size` frame lands (and cleared on
   // every session frame so a switch never inherits the prior PTY's mask).
   const [ptySize, setPtySize] = useState<{ cols: number; rows: number } | null>(null);
+  // ptySize as a ref so the proposeDimensions closure (set once at terminal
+  // creation) can read the live effective size and clamp the local grid to it.
+  const ptySizeRef = useRef<{ cols: number; rows: number } | null>(null);
+  // The local viewer's natural cols (the viewport's width in cells, ignoring
+  // any peer-imposed clamp), stashed by proposeDimensions so sendResize can
+  // report it to the server and the overlay can gate the mask on it. The
+  // server sizes the PTY to the min across clients, so each viewer must report
+  // its NATURAL cols — reporting the clamped grid would deadlock the PTY at
+  // the narrow size when the constraining peer leaves (the server would never
+  // learn a wider size is available). The grid reflow is a purely local
+  // render concern the server never sees.
+  const naturalColsRef = useRef<number | null>(null);
   // Bumped on any resize/layout change so the pty-viewport overlay recomputes
   // against the freshly-measured `.xterm-screen` rect. ptySize alone only
   // covers the effective size changing; this covers the local grid/cells moving
@@ -480,9 +492,12 @@ export const Terminal = () => {
     const terminal = terminalRef.current;
     const surface = terminalSurfaceRef.current;
     if (!terminal || !surface || !ptySize) return { right: null };
+    const localCols = naturalColsRef.current;
+    if (!localCols) return { right: null };
     return computePtyViewportOverlay({
       terminal,
       effectiveCols: ptySize.cols,
+      localCols,
       paddingX: activePaddingX,
       origin: surface.getBoundingClientRect(),
     });
@@ -850,10 +865,22 @@ export const Terminal = () => {
           parseInt(parentStyle.getPropertyValue("height")) -
           (parseInt(elementStyle.getPropertyValue("padding-top")) +
             parseInt(elementStyle.getPropertyValue("padding-bottom")));
-        return {
-          cols: Math.max(2, Math.floor(availableWidth / cellWidth)),
-          rows: Math.max(1, Math.floor(availableHeight / cellHeight)),
-        };
+        const naturalCols = Math.max(2, Math.floor(availableWidth / cellWidth));
+        const naturalRows = Math.max(1, Math.floor(availableHeight / cellHeight));
+        // Stash the natural cols so sendResize reports them (not the clamped
+        // grid) and the overlay gates the mask on natural-vs-effective.
+        naturalColsRef.current = naturalCols;
+        // Reflow the local grid to the PTY's effective cols when a narrower peer
+        // constrains it: xterm reflows the whole buffer on resize, so the dead
+        // columns beyond the effective width carry no stale wide content (a
+        // narrow phone joining a wide desktop otherwise leaves the desktop's
+        // pre-join 120-col scrollback sitting in cols 40-120, bleeding through
+        // the mask). Rows stay at the local natural height — only the vertical
+        // boundary conveys anything, and clamping rows would shrink the
+        // terminal instead of masking the side.
+        const effectiveCols = ptySizeRef.current?.cols;
+        const cols = effectiveCols ? Math.min(naturalCols, effectiveCols) : naturalCols;
+        return { cols, rows: naturalRows };
       };
     };
     patchFitAddonScrollbarWidth();
@@ -1194,9 +1221,16 @@ export const Terminal = () => {
       };
       const canvasWidth = terminalInternals._core._renderService?.dimensions?.css?.canvas?.width;
       const canvasHeight = terminalInternals._core._renderService?.dimensions?.css?.canvas?.height;
+      // Report the viewer's NATURAL cols, not the (possibly clamped) grid
+      // cols: the server sizes the PTY to the min across clients, so a wider
+      // viewer reporting its clamped cols would deadlock the PTY at the narrow
+      // size when the constraining peer leaves. Rows are unclamped, so the
+      // passed rows are already the natural height. The canvas pixels stay as
+      // measured — the server only uses them for a sole (unclamped) viewer,
+      // where the canvas is already the natural size.
       send({
         type: "resize",
-        cols,
+        cols: naturalColsRef.current ?? cols,
         rows,
         ...(canvasWidth != null && canvasHeight != null
           ? { pixelWidth: Math.round(canvasWidth), pixelHeight: Math.round(canvasHeight) }
@@ -1393,7 +1427,14 @@ export const Terminal = () => {
           // Drop the prior PTY's effective-viewport mask: the new PTY's size
           // arrives in its own `pty-size` frame, and until it does the mask
           // would otherwise show the old PTY's narrower region over the new one.
+          ptySizeRef.current = null;
           setPtySize(null);
+          // Unclamp the grid back to the local natural size until the new PTY's
+          // pty-size frame re-clamps it (a fresh sole PTY sends no pty-size
+          // frame, so without this refit the grid would stay clamped at the
+          // prior PTY's effective size). The mask is already cleared above, so
+          // the debounced refit can't flash a stale region.
+          scheduleFit();
           if (message.id) {
             if (priorSessionId !== null && message.id !== priorSessionId) {
               previousSessionIdRef.current = priorSessionId;
@@ -1515,7 +1556,15 @@ export const Terminal = () => {
         } else if (message.type === "peer-attached") {
           qrPeerAttachedRef.current?.();
         } else if (message.type === "pty-size") {
+          ptySizeRef.current = { cols: message.cols, rows: message.rows };
           setPtySize({ cols: message.cols, rows: message.rows });
+          // Refit immediately (not the debounced scheduleFit) so the grid
+          // reflows to the new effective size in the same tick the mask
+          // recomputes — a debounced refit would leave the old grid sitting
+          // under the new mask position for a frame, bleeding the prior
+          // effective width through the wash. pty-size frames are infrequent
+          // (peer attach/detach/resize), so the synchronous reflow cost is fine.
+          fitToContainer();
         }
       });
 

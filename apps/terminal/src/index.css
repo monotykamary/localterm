@@ -206,7 +206,7 @@ body {
 }
 
 .xterm .xterm-screen {
-  margin: 0 auto;
+  margin: 0;
 }
 
 /* The dead area beyond the PTY's effective viewport (columns right of a

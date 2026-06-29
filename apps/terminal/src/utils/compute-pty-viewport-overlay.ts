@@ -25,6 +25,13 @@ interface XtermRenderDimensions {
 export interface ComputePtyViewportOverlayOptions {
   terminal: Terminal;
   effectiveCols: number;
+  // The local viewer's natural cols — the viewport's width in cells, ignoring
+  // any peer-imposed clamp. The grid is reflowed to effectiveCols (see
+  // proposeDimensions in terminal.tsx), so terminal.cols equals effectiveCols
+  // and can't gate the mask; instead it fires when the effective size is
+  // narrower than what the local viewport could display (effectiveCols <
+  // localCols) — i.e. this viewer is the wider peer with dead space to mask.
+  localCols: number;
   // The terminal's configured horizontal padding — the gap between the live
   // viewport's right edge and the mask's left edge, so the mask doesn't hug
   // the text. Only the left boundary carries this gap; the mask is flush to
@@ -38,32 +45,29 @@ export interface ComputePtyViewportOverlayOptions {
 
 // The PTY only streams into its effective cols×rows — the min across every
 // attached client (tmux-style), so a narrower peer (a phone) constrains a
-// wider viewer (a desktop). xterm's own grid is the *local* viewer's size,
-// which can be wider, leaving dead columns to the right filled with empty
-// terminal background that reads as usable space. This returns the rectangle
-// of that dead area, relative to `origin`, so the caller can mask it as
-// inactive chrome.
+// wider viewer (a desktop). The local grid is reflowed to that effective
+// width (terminal.tsx's proposeDimensions clamps xterm to it), so the dead
+// columns beyond it are empty page background, not stale wide scrollback.
+// This returns the rectangle of that dead area, relative to `origin`, so the
+// caller can mask it as inactive chrome.
 //
 // Only the vertical boundary is masked: a single band to the right of the
 // live viewport, flush to the surface's top/right/bottom, with the configured
 // horizontal padding as the gap on its left (from the live viewport's right
-// edge). Dead rows below the live viewport are left unmasked — the horizontal
-// boundary conveys nothing the vertical one doesn't, and a phone with the
-// keyboard down is often taller than the desktop (so the desktop is the
-// row-limiter) and masking the phone's own bottom read as a bleed and wasted
-// its limited vertical space.
+// edge). The screen is left-aligned (`.xterm-screen { margin: 0 }`), so the
+// live viewport sits at the left and the dead area is only on the right. The
+// grid keeps the local natural row height, so the live area fills the full
+// height regardless of the effective rows — no bottom band.
 //
-// The mask is gated on the local grid being wider than the effective size — a
-// col count, not a pixel sliver. xterm centers its screen with `margin: 0
-// auto`, so the screen's right edge can sit a sub-pixel inside the container; a
-// pixel gate would render a phantom 0.5px strip plus a 1px hairline on the
-// limiting viewer (the phone, or a desktop after its peer leaves and the stale
-// pty-size still reads narrower than the local grid). The count gate never
-// fires when the local grid already matches the effective size (sole/limiting
-// viewer → nothing to mask).
+// The mask is gated on the local viewport being wider than the effective size
+// (effectiveCols < localCols) — a col count, not a pixel sliver, so a
+// sub-pixel gap from cell-width rounding can't render a phantom strip on the
+// sole/limiting viewer (where effectiveCols equals localCols → nothing to
+// mask).
 export const computePtyViewportOverlay = ({
   terminal,
   effectiveCols,
+  localCols,
   paddingX,
   origin,
 }: ComputePtyViewportOverlayOptions): PtyViewportOverlay => {
@@ -74,14 +78,15 @@ export const computePtyViewportOverlay = ({
   if (!(screen instanceof HTMLElement)) return { right: null };
   const screenRect = screen.getBoundingClientRect();
 
-  const hasDeadCols = effectiveCols < terminal.cols;
+  const hasDeadCols = effectiveCols < localCols;
   if (!hasDeadCols) return { right: null };
 
-  // Clamp the live width to the local grid: the effective size is the min
+  // Clamp the live width to the local viewport: the effective size is the min
   // across clients so it can never exceed the viewer's own cols, but a frame
-  // arriving mid-resize can transiently outrun the settled grid — clamp so the
-  // boundary never lands past the live text.
-  const liveWidth = Math.min(effectiveCols, terminal.cols) * cellWidth;
+  // arriving mid-resize can transiently outrun the settled viewport — clamp
+  // so the boundary never lands past the live text (and hasDeadCols stays
+  // false → no mask).
+  const liveWidth = Math.min(effectiveCols, localCols) * cellWidth;
   // The mask's left edge sits one horizontal padding-width right of the live
   // viewport — the only gap, from the mobile viewport. The mask then runs
   // flush to the surface's top, right, and bottom (a full-height band).
