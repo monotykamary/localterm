@@ -1,0 +1,418 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Terminal as XtermTerminal } from "@xterm/xterm";
+import type { FitAddon } from "@xterm/addon-fit";
+import { familyForFont, findTerminalFontById } from "@/lib/terminal-fonts";
+import { findTerminalThemeById } from "@/lib/terminal-themes";
+import type { TerminalCursorStyle } from "@/lib/terminal-cursor";
+import { LocalEcho } from "@/lib/local-echo";
+import { awaitFontReady } from "@/utils/await-font-ready";
+import { clampTerminalFontSize } from "@/utils/clamp-terminal-font-size";
+import { clampTerminalLineHeight } from "@/utils/clamp-terminal-line-height";
+import { clampTerminalPaddingX, clampTerminalPaddingY } from "@/utils/clamp-terminal-padding";
+import { findLigatureRanges } from "@/utils/ligature-joiner";
+import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
+import { generateExtendedPalette } from "@/utils/generate-extended-palette";
+import {
+  loadStoredDefaultCwd,
+  storeDefaultCwd,
+  subscribeStoredDefaultCwd,
+} from "@/utils/stored-default-cwd";
+import {
+  loadStoredLigaturesEnabled,
+  storeLigaturesEnabled,
+  subscribeStoredLigaturesEnabled,
+} from "@/utils/stored-ligatures-enabled";
+import {
+  loadStoredLocalEcho,
+  storeStoredLocalEcho,
+  subscribeStoredLocalEcho,
+} from "@/utils/stored-local-echo-enabled";
+import {
+  loadStoredNerdFontEnabled,
+  storeNerdFontEnabled,
+  subscribeStoredNerdFontEnabled,
+} from "@/utils/stored-nerd-font-enabled";
+import {
+  loadStoredTerminalCursorBlink,
+  storeTerminalCursorBlink,
+  subscribeStoredTerminalCursorBlink,
+} from "@/utils/stored-terminal-cursor-blink";
+import {
+  loadStoredTerminalCursorStyle,
+  storeTerminalCursorStyle,
+  subscribeStoredTerminalCursorStyle,
+} from "@/utils/stored-terminal-cursor-style";
+import {
+  loadStoredTerminalFontId,
+  storeTerminalFontId,
+  subscribeStoredTerminalFontId,
+} from "@/utils/stored-terminal-font-id";
+import {
+  loadStoredTerminalFontSize,
+  storeTerminalFontSize,
+  subscribeStoredTerminalFontSize,
+} from "@/utils/stored-terminal-font-size";
+import {
+  loadStoredTerminalLineHeight,
+  storeTerminalLineHeight,
+  subscribeStoredTerminalLineHeight,
+} from "@/utils/stored-terminal-line-height";
+import {
+  loadStoredTerminalPaddingX,
+  storeTerminalPaddingX,
+  subscribeStoredTerminalPaddingX,
+} from "@/utils/stored-terminal-padding-x";
+import {
+  loadStoredTerminalPaddingY,
+  storeTerminalPaddingY,
+  subscribeStoredTerminalPaddingY,
+} from "@/utils/stored-terminal-padding-y";
+import {
+  loadStoredTerminalScrollOnUserInput,
+  storeTerminalScrollOnUserInput,
+  subscribeStoredTerminalScrollOnUserInput,
+} from "@/utils/stored-terminal-scroll-on-user-input";
+import {
+  loadStoredTerminalScrollback,
+  storeTerminalScrollback,
+  subscribeStoredTerminalScrollback,
+} from "@/utils/stored-terminal-scrollback";
+import {
+  loadStoredTerminalThemeId,
+  storeTerminalThemeId,
+  subscribeStoredTerminalThemeId,
+} from "@/utils/stored-terminal-theme-id";
+
+interface UseTerminalSettingsParams {
+  terminalRef: { readonly current: XtermTerminal | null };
+  fitAddonRef: { readonly current: FitAddon | null };
+  terminalReady: boolean;
+  localEchoRef: { readonly current: LocalEcho | null };
+}
+
+// All terminal appearance/behavior settings — theme, font, cursor, scrollback,
+// padding, predictive typing, default cwd — plus their xterm apply-effects and
+// the cross-tab `storage` subscription that keeps every open tab in lockstep.
+// The initial-value refs are returned because the connection hook reads them
+// once when it constructs the xterm instance; everything else is consumed by
+// the settings menu and the command palette.
+export const useTerminalSettings = ({
+  terminalRef,
+  fitAddonRef,
+  terminalReady,
+  localEchoRef,
+}: UseTerminalSettingsParams) => {
+  const initialThemeIdRef = useRef<string>(loadStoredTerminalThemeId());
+  const initialFontIdRef = useRef<string>(loadStoredTerminalFontId());
+  const initialFontSizeRef = useRef<number>(loadStoredTerminalFontSize());
+  const initialLineHeightRef = useRef<number>(loadStoredTerminalLineHeight());
+  const initialCursorStyleRef = useRef<TerminalCursorStyle>(loadStoredTerminalCursorStyle());
+  const initialCursorBlinkRef = useRef<boolean>(loadStoredTerminalCursorBlink());
+  const initialLocalEchoRef = useRef<boolean>(loadStoredLocalEcho());
+  const activeLocalEchoRef = useRef<boolean>(initialLocalEchoRef.current);
+  const initialScrollbackRef = useRef<number>(loadStoredTerminalScrollback());
+  const initialScrollOnUserInputRef = useRef<boolean>(loadStoredTerminalScrollOnUserInput());
+  const initialPaddingXRef = useRef<number>(loadStoredTerminalPaddingX());
+  const initialPaddingYRef = useRef<number>(loadStoredTerminalPaddingY());
+  const initialNerdFontEnabledRef = useRef<boolean>(loadStoredNerdFontEnabled());
+  const initialLigaturesEnabledRef = useRef<boolean>(loadStoredLigaturesEnabled());
+  const initialDefaultCwdRef = useRef<string>(loadStoredDefaultCwd());
+
+  const [activeThemeId, setActiveThemeId] = useState<string>(initialThemeIdRef.current);
+  const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
+  const effectiveThemeId = previewThemeId ?? activeThemeId;
+  const effectiveTheme = useMemo(() => findTerminalThemeById(effectiveThemeId), [effectiveThemeId]);
+  const effectiveThemeWithExtendedPalette = useMemo(
+    () => ({
+      ...effectiveTheme.colors,
+      extendedAnsi: generateExtendedPalette(effectiveTheme.colors),
+    }),
+    [effectiveTheme],
+  );
+  const [activeFontId, setActiveFontId] = useState<string>(initialFontIdRef.current);
+  const [previewFontId, setPreviewFontId] = useState<string | null>(null);
+  const effectiveFontId = previewFontId ?? activeFontId;
+  const [activeNerdFontEnabled, setActiveNerdFontEnabled] = useState<boolean>(
+    initialNerdFontEnabledRef.current,
+  );
+  const [activeLigaturesEnabled, setActiveLigaturesEnabled] = useState<boolean>(
+    initialLigaturesEnabledRef.current,
+  );
+  const ligatureJoinerIdRef = useRef<number | null>(null);
+  const effectiveFont = useMemo(() => findTerminalFontById(effectiveFontId), [effectiveFontId]);
+  const [activeFontSize, setActiveFontSize] = useState<number>(initialFontSizeRef.current);
+  const [activeLineHeight, setActiveLineHeight] = useState<number>(initialLineHeightRef.current);
+  const [activeCursorStyle, setActiveCursorStyle] = useState<TerminalCursorStyle>(
+    initialCursorStyleRef.current,
+  );
+  const [previewCursorStyle, setPreviewCursorStyle] = useState<TerminalCursorStyle | null>(null);
+  const effectiveCursorStyle = previewCursorStyle ?? activeCursorStyle;
+  const [activeCursorBlink, setActiveCursorBlink] = useState<boolean>(
+    initialCursorBlinkRef.current,
+  );
+  const [activeLocalEcho, setActiveLocalEcho] = useState<boolean>(initialLocalEchoRef.current);
+  const [activeScrollback, setActiveScrollback] = useState<number>(initialScrollbackRef.current);
+  const [activeScrollOnUserInput, setActiveScrollOnUserInput] = useState<boolean>(
+    initialScrollOnUserInputRef.current,
+  );
+  const [activePaddingX, setActivePaddingX] = useState<number>(initialPaddingXRef.current);
+  const [activePaddingY, setActivePaddingY] = useState<number>(initialPaddingYRef.current);
+  const [activeDefaultCwd, setActiveDefaultCwd] = useState<string>(initialDefaultCwdRef.current);
+
+  useEffect(() => {
+    if (!terminalReady) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.theme = effectiveThemeWithExtendedPalette;
+  }, [terminalReady, effectiveThemeWithExtendedPalette]);
+
+  useEffect(() => {
+    if (!terminalReady) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    let cancelled = false;
+    void awaitFontReady(effectiveFont).then(() => {
+      if (cancelled) return;
+      const liveTerminal = terminalRef.current;
+      if (!liveTerminal) return;
+      liveTerminal.options.fontFamily = familyForFont(effectiveFont, activeNerdFontEnabled);
+      liveTerminal.clearTextureAtlas();
+      const liveFitAddon = fitAddonRef.current;
+      if (liveFitAddon) fitTerminalPreservingScroll(liveTerminal, liveFitAddon);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [terminalReady, effectiveFont, activeNerdFontEnabled]);
+
+  const handleThemeChange = useCallback((nextThemeId: string) => {
+    setActiveThemeId(nextThemeId);
+    setPreviewThemeId(null);
+    storeTerminalThemeId(nextThemeId);
+  }, []);
+
+  const handleFontChange = useCallback((nextFontId: string) => {
+    setActiveFontId(nextFontId);
+    setPreviewFontId(null);
+    storeTerminalFontId(nextFontId);
+  }, []);
+
+  const handleNerdFontEnabledChange = useCallback((nextEnabled: boolean) => {
+    setActiveNerdFontEnabled(nextEnabled);
+    storeNerdFontEnabled(nextEnabled);
+  }, []);
+
+  const handleLigaturesEnabledChange = useCallback((nextEnabled: boolean) => {
+    setActiveLigaturesEnabled(nextEnabled);
+    storeLigaturesEnabled(nextEnabled);
+  }, []);
+
+  // registerCharacterJoiner/deregisterCharacterJoiner each refresh the whole
+  // viewport in xterm core, so toggling re-rasters joined spans without an
+  // explicit refresh. The id guards keep the register/deregister idempotent
+  // across effect re-runs.
+  useEffect(() => {
+    if (!terminalReady) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    if (activeLigaturesEnabled) {
+      if (ligatureJoinerIdRef.current === null) {
+        ligatureJoinerIdRef.current = terminal.registerCharacterJoiner(findLigatureRanges);
+      }
+    } else if (ligatureJoinerIdRef.current !== null) {
+      terminal.deregisterCharacterJoiner(ligatureJoinerIdRef.current);
+      ligatureJoinerIdRef.current = null;
+    }
+  }, [terminalReady, activeLigaturesEnabled]);
+
+  useEffect(() => {
+    if (!terminalReady) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.fontSize = activeFontSize;
+    const fitAddon = fitAddonRef.current;
+    if (fitAddon) fitTerminalPreservingScroll(terminal, fitAddon);
+  }, [terminalReady, activeFontSize]);
+
+  const handleFontSizeChange = useCallback((nextFontSize: number) => {
+    const clamped = clampTerminalFontSize(nextFontSize);
+    setActiveFontSize(clamped);
+    storeTerminalFontSize(clamped);
+  }, []);
+
+  useEffect(() => {
+    if (!terminalReady) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.lineHeight = activeLineHeight;
+    const fitAddon = fitAddonRef.current;
+    if (fitAddon) fitTerminalPreservingScroll(terminal, fitAddon);
+  }, [terminalReady, activeLineHeight]);
+
+  const handleLineHeightChange = useCallback((nextLineHeight: number) => {
+    const clamped = clampTerminalLineHeight(nextLineHeight);
+    setActiveLineHeight(clamped);
+    storeTerminalLineHeight(clamped);
+  }, []);
+
+  useEffect(() => {
+    if (!terminalReady) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.cursorStyle = effectiveCursorStyle;
+  }, [terminalReady, effectiveCursorStyle]);
+
+  const handleCursorStyleChange = useCallback((nextCursorStyle: TerminalCursorStyle) => {
+    setActiveCursorStyle(nextCursorStyle);
+    setPreviewCursorStyle(null);
+    storeTerminalCursorStyle(nextCursorStyle);
+  }, []);
+
+  useEffect(() => {
+    if (!terminalReady) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.cursorBlink = activeCursorBlink;
+  }, [terminalReady, activeCursorBlink]);
+
+  useEffect(() => {
+    activeLocalEchoRef.current = activeLocalEcho;
+    localEchoRef.current?.setEnabled(activeLocalEcho);
+  }, [activeLocalEcho]);
+
+  const handleLocalEchoChange = useCallback((nextLocalEcho: boolean) => {
+    setActiveLocalEcho(nextLocalEcho);
+    storeStoredLocalEcho(nextLocalEcho);
+  }, []);
+
+  const handleCursorBlinkChange = useCallback((nextCursorBlink: boolean) => {
+    setActiveCursorBlink(nextCursorBlink);
+    storeTerminalCursorBlink(nextCursorBlink);
+  }, []);
+
+  useEffect(() => {
+    if (!terminalReady) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.scrollback = activeScrollback;
+  }, [terminalReady, activeScrollback]);
+
+  const handleScrollbackChange = useCallback((nextScrollback: number) => {
+    setActiveScrollback(nextScrollback);
+    storeTerminalScrollback(nextScrollback);
+  }, []);
+
+  useEffect(() => {
+    if (!terminalReady) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.scrollOnUserInput = activeScrollOnUserInput;
+  }, [terminalReady, activeScrollOnUserInput]);
+
+  const handleScrollOnUserInputChange = useCallback((nextScrollOnUserInput: boolean) => {
+    setActiveScrollOnUserInput(nextScrollOnUserInput);
+    storeTerminalScrollOnUserInput(nextScrollOnUserInput);
+  }, []);
+
+  useEffect(() => {
+    if (!terminalReady) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const fitAddon = fitAddonRef.current;
+    if (fitAddon) fitTerminalPreservingScroll(terminal, fitAddon);
+  }, [terminalReady, activePaddingX, activePaddingY]);
+
+  const handlePaddingXChange = useCallback((nextPaddingX: number) => {
+    const clamped = clampTerminalPaddingX(nextPaddingX);
+    setActivePaddingX(clamped);
+    storeTerminalPaddingX(clamped);
+  }, []);
+
+  const handlePaddingYChange = useCallback((nextPaddingY: number) => {
+    const clamped = clampTerminalPaddingY(nextPaddingY);
+    setActivePaddingY(clamped);
+    storeTerminalPaddingY(clamped);
+  }, []);
+
+  // The default launch directory is trimmed before storing so a path with
+  // accidental leading/trailing whitespace never becomes a cwd the server
+  // rejects (it would silently fall back to the home directory). Mid-path
+  // spaces are preserved. Empty clears the default back to home.
+  const handleDefaultCwdChange = useCallback((nextDefaultCwd: string) => {
+    const trimmed = nextDefaultCwd.trim();
+    setActiveDefaultCwd(trimmed);
+    storeDefaultCwd(trimmed);
+  }, []);
+
+  // Settings persist to localStorage, so changing one in any tab fires a
+  // `storage` event in every OTHER tab. Re-applying each setting there keeps
+  // theme/font/cursor/padding/… in lockstep across all open tabs — the
+  // terminal-option effects above already react to these setters. Each
+  // subscription self-filters by its storage key.
+  useEffect(() => {
+    const unsubscribes = [
+      subscribeStoredTerminalThemeId(setActiveThemeId),
+      subscribeStoredTerminalFontId(setActiveFontId),
+      subscribeStoredNerdFontEnabled(setActiveNerdFontEnabled),
+      subscribeStoredLigaturesEnabled(setActiveLigaturesEnabled),
+      subscribeStoredTerminalFontSize(setActiveFontSize),
+      subscribeStoredTerminalLineHeight(setActiveLineHeight),
+      subscribeStoredTerminalCursorStyle(setActiveCursorStyle),
+      subscribeStoredTerminalCursorBlink(setActiveCursorBlink),
+      subscribeStoredLocalEcho(setActiveLocalEcho),
+      subscribeStoredTerminalScrollback(setActiveScrollback),
+      subscribeStoredTerminalScrollOnUserInput(setActiveScrollOnUserInput),
+      subscribeStoredTerminalPaddingX(setActivePaddingX),
+      subscribeStoredTerminalPaddingY(setActivePaddingY),
+      subscribeStoredDefaultCwd(setActiveDefaultCwd),
+    ];
+    return () => {
+      for (const unsubscribe of unsubscribes) unsubscribe();
+    };
+  }, []);
+
+  return {
+    initialThemeIdRef,
+    initialFontIdRef,
+    initialNerdFontEnabledRef,
+    initialFontSizeRef,
+    initialLineHeightRef,
+    initialCursorStyleRef,
+    initialCursorBlinkRef,
+    initialScrollbackRef,
+    initialScrollOnUserInputRef,
+    activeLocalEchoRef,
+    activeThemeId,
+    activeFontId,
+    activeNerdFontEnabled,
+    activeLigaturesEnabled,
+    activeFontSize,
+    activeLineHeight,
+    activeCursorStyle,
+    activeCursorBlink,
+    activeLocalEcho,
+    activeScrollback,
+    activeScrollOnUserInput,
+    activePaddingX,
+    activePaddingY,
+    activeDefaultCwd,
+    effectiveTheme,
+    setPreviewThemeId,
+    setPreviewFontId,
+    setPreviewCursorStyle,
+    handleThemeChange,
+    handleFontChange,
+    handleNerdFontEnabledChange,
+    handleLigaturesEnabledChange,
+    handleFontSizeChange,
+    handleLineHeightChange,
+    handleCursorStyleChange,
+    handleCursorBlinkChange,
+    handleLocalEchoChange,
+    handleScrollbackChange,
+    handleScrollOnUserInputChange,
+    handlePaddingXChange,
+    handlePaddingYChange,
+    handleDefaultCwdChange,
+  };
+};
