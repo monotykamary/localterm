@@ -999,6 +999,22 @@ const replayEndMessageSchema = z.object({ type: z.literal("replay-end") }).stric
 // attached to the session a peer joined.
 const peerAttachedMessageSchema = z.object({ type: z.literal("peer-attached") }).strict();
 
+// The PTY's effective size — the min cols/rows across all attached clients
+// (tmux-style: a narrower peer constrains everyone). Broadcast whenever that
+// min changes (a peer attaches/detaches, or any client resizes) so each
+// viewer can mask the dead area beyond its own — possibly wider — grid as
+// inactive chrome instead of empty terminal background. A viewer whose own
+// cols/rows equal the effective size is the sole/limiting one and renders no
+// mask; a lone viewer is never sent the frame at all. See
+// SessionManager.recomputeResize for the broadcast gating.
+const ptySizeMessageSchema = z
+  .object({
+    type: z.literal("pty-size"),
+    cols: z.number().int().positive().max(MAX_COLS),
+    rows: z.number().int().positive().max(MAX_ROWS),
+  })
+  .strict();
+
 const cdpControlledMessageSchema = z
   .object({
     type: z.literal("cdp-controlled"),
@@ -1164,6 +1180,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   cdpControlledMessageSchema,
   replayEndMessageSchema,
   peerAttachedMessageSchema,
+  ptySizeMessageSchema,
 ]);
 
 export const gitDiffFileSchema = gitDiffFileMetaSchema

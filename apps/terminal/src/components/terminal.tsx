@@ -163,6 +163,7 @@ import { loadStoredDefaultCwd } from "@/utils/stored-default-cwd";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
+import { computePtyViewportOverlay } from "@/utils/compute-pty-viewport-overlay";
 
 import {
   MAX_INPUT_BYTES,
@@ -242,6 +243,19 @@ interface ResizeScrollRestoreState {
 export const Terminal = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XtermTerminal | null>(null);
+  // The terminal surface (xterm's positioned parent) — anchors the pty-viewport
+  // mask so it can be positioned off the live `.xterm-screen` rect in the
+  // surface's coordinate space.
+  const terminalSurfaceRef = useRef<HTMLDivElement | null>(null);
+  // The PTY's effective cols/rows (the min across attached clients) reported by
+  // the server, or null until the first `pty-size` frame lands (and cleared on
+  // every session frame so a switch never inherits the prior PTY's mask).
+  const [ptySize, setPtySize] = useState<{ cols: number; rows: number } | null>(null);
+  // Bumped on any resize/layout change so the pty-viewport overlay recomputes
+  // against the freshly-measured `.xterm-screen` rect. ptySize alone only
+  // covers the effective size changing; this covers the local grid/cells moving
+  // (window resize, font, padding, fit).
+  const [ptyViewportVersion, setPtyViewportVersion] = useState(0);
   const [terminalReady, setTerminalReady] = useState(false);
   const manualReconnectRef = useRef<(() => void) | null>(null);
   const switchSessionRef = useRef<((sid: string) => void) | null>(null);
@@ -379,6 +393,17 @@ export const Terminal = () => {
     window.addEventListener("pointerdown", handleOutsidePress, true);
     return () => window.removeEventListener("pointerdown", handleOutsidePress, true);
   }, [isTouchDevice, isActionsMenuOpen, isSettingsOpen, isKeepAwakePopoverOpen]);
+  // xterm's onResize covers grid/cell changes, but a container resize that
+  // doesn't change cols (a sub-cell-width tweak, a safe-area inset shift) still
+  // moves the `.xterm-screen` rect the pty-viewport mask is anchored to. Watch
+  // the surface so those re-measure too.
+  useEffect(() => {
+    const surface = terminalSurfaceRef.current;
+    if (!surface) return;
+    const observer = new ResizeObserver(() => setPtyViewportVersion((version) => version + 1));
+    observer.observe(surface);
+    return () => observer.disconnect();
+  }, []);
   const isToolbarVisible =
     isToolbarHovered ||
     isActionsMenuOpen ||
@@ -444,6 +469,24 @@ export const Terminal = () => {
   // the indicator stays visible while the action buttons collapse behind it and
   // expand on hover. A stale merged PR (null display state) doesn't count.
   const hasToolbarIndicator = hasDiff || branchPrDisplayState !== null;
+
+  // Rectangle of the dead columns beyond the PTY's effective viewport (the
+  // area right of a narrower peer's wrap), in the terminal surface's coordinate
+  // space. Recomputes when the effective size changes (a `pty-size` frame) or
+  // the local grid/cells move (resize, font, padding). Null when there's nothing
+  // to mask — no frame yet, the local grid already matches the effective size
+  // (sole/limiting viewer), or the terminal isn't measurable.
+  const ptyViewportOverlay = useMemo(() => {
+    const terminal = terminalRef.current;
+    const surface = terminalSurfaceRef.current;
+    if (!terminal || !surface || !ptySize) return { right: null };
+    return computePtyViewportOverlay({
+      terminal,
+      effectiveCols: ptySize.cols,
+      paddingX: activePaddingX,
+      origin: surface.getBoundingClientRect(),
+    });
+  }, [ptySize, ptyViewportVersion, terminalReady, activePaddingX]);
 
   // A `git checkout` keeps the same cwd, so the cwd-keyed lease wouldn't notice.
   // The ambient summary carries the live branch; when it diverges from the branch
@@ -838,6 +881,13 @@ export const Terminal = () => {
     updateScrollbar();
     const scrollDisposable = terminal.onScroll(updateScrollbar);
     outputBatcher.setAfterFlush(updateScrollbar);
+    // A grid/cell-size change (window resize, font, padding, fit) moves the
+    // `.xterm-screen` rect the pty-viewport mask is positioned off, so re-measure
+    // on resize. onResize fires before the DOM settles, so defer to the next
+    // frame for an accurate getBoundingClientRect.
+    const ptyViewportResizeDisposable = terminal.onResize(() => {
+      requestAnimationFrame(() => setPtyViewportVersion((version) => version + 1));
+    });
 
     let isDragging = false;
     let dragStartY = 0;
@@ -1340,6 +1390,10 @@ export const Terminal = () => {
           reattachPending = false;
           reattachCloseCode = 0;
           reattachCloseReason = "";
+          // Drop the prior PTY's effective-viewport mask: the new PTY's size
+          // arrives in its own `pty-size` frame, and until it does the mask
+          // would otherwise show the old PTY's narrower region over the new one.
+          setPtySize(null);
           if (message.id) {
             if (priorSessionId !== null && message.id !== priorSessionId) {
               previousSessionIdRef.current = priorSessionId;
@@ -1460,6 +1514,8 @@ export const Terminal = () => {
           cdpControlled = message.controlled;
         } else if (message.type === "peer-attached") {
           qrPeerAttachedRef.current?.();
+        } else if (message.type === "pty-size") {
+          setPtySize({ cols: message.cols, rows: message.rows });
         }
       });
 
@@ -1581,6 +1637,7 @@ export const Terminal = () => {
       }
       searchResultsDisposable.dispose();
       scrollDisposable.dispose();
+      ptyViewportResizeDisposable.dispose();
       kittyPushDisposable.dispose();
       kittyPopDisposable.dispose();
       kittySetDisposable.dispose();
@@ -2217,7 +2274,7 @@ export const Terminal = () => {
         paddingLeft: "env(safe-area-inset-left, 0px)",
       }}
     >
-      <div data-terminal-surface className="relative h-full w-full">
+      <div data-terminal-surface ref={terminalSurfaceRef} className="relative h-full w-full">
         <div
           ref={containerRef}
           aria-label="terminal session"
@@ -2229,6 +2286,19 @@ export const Terminal = () => {
             left: activePaddingX,
           }}
         />
+        {ptyViewportOverlay.right ? (
+          <div
+            aria-hidden="true"
+            className="xterm-pty-viewport-mask"
+            style={{
+              left: ptyViewportOverlay.right.left,
+              top: ptyViewportOverlay.right.top,
+              width: ptyViewportOverlay.right.width,
+              height: ptyViewportOverlay.right.height,
+              borderLeft: "1px solid var(--pty-viewport-edge)",
+            }}
+          />
+        ) : null}
         <div
           ref={scrollbarTrackRef}
           className="xterm-scrollbar-track"

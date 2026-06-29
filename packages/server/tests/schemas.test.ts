@@ -133,6 +133,9 @@ describe("serverToClientMessageSchema", () => {
     );
     expect(serverToClientMessageSchema.safeParse({ type: "replay-end" }).success).toBe(true);
     expect(serverToClientMessageSchema.safeParse({ type: "peer-attached" }).success).toBe(true);
+    expect(
+      serverToClientMessageSchema.safeParse({ type: "pty-size", cols: 80, rows: 24 }).success,
+    ).toBe(true);
   });
 
   // Output is NOT a JSON member of the union — the server emits it as a binary

@@ -209,6 +209,31 @@ body {
   margin: 0 auto;
 }
 
+/* The dead area beyond the PTY's effective viewport (columns right of a
+   narrower peer's wrap, rows below a shorter one) reads as empty terminal
+   background by default. Mask it as inactive chrome — a faint grey wash + a
+   diagonal hatch (the universal "disabled" affordance) with a hairline at the
+   live/dead boundary — so it conveys the active viewport is the narrower
+   peer's. Sits below the scrollbar (z-index 5) and toolbar (z-index 10) and
+   ignores pointer events so it never blocks selection or the controls over it. */
+:root {
+  --pty-viewport-edge: color-mix(in oklab, var(--muted-foreground) 22%, transparent);
+}
+
+.xterm-pty-viewport-mask {
+  position: absolute;
+  pointer-events: none;
+  z-index: 4;
+  background-color: color-mix(in oklab, var(--muted-foreground) 8%, transparent);
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--muted-foreground) 20%, transparent) 0,
+    color-mix(in oklab, var(--muted-foreground) 20%, transparent) 1px,
+    transparent 1px,
+    transparent 12px
+  );
+}
+
 .xterm-scrollbar-track {
   position: absolute;
   width: 10px;

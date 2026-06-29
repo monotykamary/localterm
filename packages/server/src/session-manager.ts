@@ -80,6 +80,18 @@ export interface ManagedSession {
   // is reaped.
   graceTimer: NodeJS.Timeout | null;
   parkedAt: number | null;
+  // Last effective size broadcast to clients (the min cols/rows across
+  // attached clients), or null before the first compute. Tracked so the
+  // manager only broadcasts pty-size on an actual change instead of every
+  // resize tick. See recomputeResize for the broadcast gating.
+  ptySizeCols: number | null;
+  ptySizeRows: number | null;
+  // Whether the last recompute saw more than one client — drives the 2→1
+  // clear: when a peer detaches and drops the session to a lone viewer, one
+  // final pty-size (now the lone viewer's own, unconstrained size) is sent so
+  // the remaining viewer erases any mask the leaving peer imposed. Stays false
+  // for a lone viewer across its own resizes, so those stay quiet on the wire.
+  ptySizeWasMultiViewer: boolean;
 }
 
 export interface SessionManagerHooks {
@@ -264,6 +276,9 @@ export class SessionManager {
       hasForeground: false,
       graceTimer: null,
       parkedAt: null,
+      ptySizeCols: null,
+      ptySizeRows: null,
+      ptySizeWasMultiViewer: false,
     };
     this.sessions.set(managed.id, managed);
     this.installSessionListeners(managed);
@@ -314,6 +329,19 @@ export class SessionManager {
     managed.clients.add(client);
     this.wsToClient.set(ws, { client, session: managed });
     this.recomputeResize(managed);
+    // Seed a joiner with the current effective size when it's entering an
+    // already-multi-viewer session whose min its own (possibly wider) report
+    // doesn't change — recomputeResize only broadcasts on a change, so without
+    // this the new viewer would never learn it's constrained and would render
+    // no mask. A fresh spawn (now the lone viewer) has no stored size and is
+    // skipped, and a joiner that changes the min is reached by the broadcast.
+    if (managed.clients.size > 1 && managed.ptySizeCols !== null && managed.ptySizeRows !== null) {
+      this.sendToClient(client, {
+        type: "pty-size",
+        cols: managed.ptySizeCols,
+        rows: managed.ptySizeRows,
+      });
+    }
     // Auto-promote a client that never sends {type:"ready"} — a back-compat
     // client (an older bundled terminal, or any plain WS reader) would otherwise
     // stay pending and never receive output. The localterm client sends ready
@@ -482,14 +510,16 @@ export class SessionManager {
     }
   }
 
-  private broadcast(managed: ManagedSession, payload: ServerToClientMessage): void {
-    for (const client of managed.clients) {
-      if (client.pending) {
-        client.pendingControl.push(payload);
-        continue;
-      }
-      this.sendControl(client.ws, payload);
+  private sendToClient(client: ManagedClient, payload: ServerToClientMessage): void {
+    if (client.pending) {
+      client.pendingControl.push(payload);
+      return;
     }
+    this.sendControl(client.ws, payload);
+  }
+
+  private broadcast(managed: ManagedSession, payload: ServerToClientMessage): void {
+    for (const client of managed.clients) this.sendToClient(client, payload);
   }
 
   private onSessionOutput(managed: ManagedSession, data: string): void {
@@ -587,6 +617,26 @@ export class SessionManager {
       session.resize(cols, rows, single.pixelWidth, single.pixelHeight);
     } else {
       session.resize(cols, rows);
+    }
+    // The PTY's effective size is the min across attached clients (tmux-style):
+    // a narrower peer constrains everyone. Broadcast it on change so each
+    // viewer can mask the dead area beyond its own (possibly wider) grid as
+    // inactive chrome. A lone viewer is never constrained (its effective size
+    // always equals its own), so it's left quiet except for one clear frame when
+    // a peer detaches and drops it back to solo — that erases the mask the
+    // leaving peer had imposed. A joiner entering an already-constrained
+    // session without changing the min is seeded in attach.
+    const sizeChanged = managed.ptySizeCols !== cols || managed.ptySizeRows !== rows;
+    managed.ptySizeCols = cols;
+    managed.ptySizeRows = rows;
+    if (count > 1) {
+      managed.ptySizeWasMultiViewer = true;
+      if (sizeChanged) {
+        this.broadcast(managed, { type: "pty-size", cols, rows });
+      }
+    } else if (managed.ptySizeWasMultiViewer) {
+      managed.ptySizeWasMultiViewer = false;
+      this.broadcast(managed, { type: "pty-size", cols, rows });
     }
   }
 
