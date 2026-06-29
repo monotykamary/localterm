@@ -2,9 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { createGitWorktree, listGitWorktrees } from "../src/git-worktrees.js";
 import { sweepStaleWorktrees } from "../src/utils/worktree-sweep.js";
+import { cleanupWorktreeTestLeftovers } from "./worktree-test-cleanup.js";
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
@@ -50,6 +51,8 @@ const backdateDir = (dir: string, daysAgo: number): void => {
   const past = new Date(Date.now() - daysAgo * MS_PER_DAY_MS);
   fs.utimesSync(dir, past, past);
 };
+
+beforeAll(cleanupWorktreeTestLeftovers);
 
 describe("sweepStaleWorktrees", () => {
   it("removes a stale clean auto-created worktree and leaves the main one", async () => {
@@ -128,6 +131,44 @@ describe("sweepStaleWorktrees", () => {
 
       const list = await listGitWorktrees(repo);
       expect(list.worktrees.some((worktree) => worktree.path === created.path)).toBe(true);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reaps the project folder once its last worktree is swept", async () => {
+    const repo = makeTempDir();
+    initRepo(repo);
+    const baseDir = worktreesBaseDirFor(repo);
+    try {
+      const created = await createGitWorktree(repo, { baseRef: "head" });
+      backdateDir(created.path, 31);
+
+      await sweepStaleWorktrees(repo);
+
+      expect(fs.existsSync(created.path)).toBe(false);
+      expect(fs.existsSync(baseDir)).toBe(false);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the project folder when a sibling worktree stays", async () => {
+    const repo = makeTempDir();
+    initRepo(repo);
+    const baseDir = worktreesBaseDirFor(repo);
+    try {
+      const swept = await createGitWorktree(repo, { baseRef: "head" });
+      const kept = await createGitWorktree(repo, { baseRef: "head" });
+      backdateDir(swept.path, 31);
+
+      await sweepStaleWorktrees(repo);
+
+      expect(fs.existsSync(swept.path)).toBe(false);
+      expect(fs.existsSync(kept.path)).toBe(true);
+      expect(fs.existsSync(baseDir)).toBe(true);
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
       fs.rmSync(baseDir, { recursive: true, force: true });

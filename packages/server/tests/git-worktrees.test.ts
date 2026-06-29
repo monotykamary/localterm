@@ -2,9 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { createGitWorktree, listGitWorktrees, removeGitWorktree } from "../src/git-worktrees.js";
 import { generateWorktreeName } from "../src/utils/worktree-names.js";
+import { cleanupWorktreeTestLeftovers } from "./worktree-test-cleanup.js";
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
@@ -64,6 +65,8 @@ const expectedDisplayPath = (absolutePath: string): string => {
     ? `~${resolved.slice(os.homedir().length)}`
     : resolved;
 };
+
+beforeAll(cleanupWorktreeTestLeftovers);
 
 describe("listGitWorktrees", () => {
   it("reports a non-repo directory", async () => {
@@ -209,6 +212,8 @@ describe("createGitWorktree", () => {
     fs.mkdirSync(repoBDir, { recursive: true });
     const repoA = await initRepo(repoADir);
     const repoB = await initRepo(repoBDir);
+    let projectFolderA: string | null = null;
+    let projectFolderB: string | null = null;
     try {
       for (const repo of [repoA, repoB]) {
         fs.writeFileSync(path.join(repo.dir, "a.txt"), "a\n");
@@ -217,6 +222,8 @@ describe("createGitWorktree", () => {
 
       const createdA = await createGitWorktree(repoA.dir);
       const createdB = await createGitWorktree(repoB.dir);
+      projectFolderA = path.dirname(createdA.path);
+      projectFolderB = path.dirname(createdB.path);
 
       expect(path.dirname(createdA.path)).not.toBe(path.dirname(createdB.path));
       // Each repo sees only its own worktree in its own project folder.
@@ -231,10 +238,10 @@ describe("createGitWorktree", () => {
     } finally {
       fs.rmSync(parentA, { recursive: true, force: true });
       fs.rmSync(parentB, { recursive: true, force: true });
-      fs.rmSync(path.join(os.homedir(), ".localterm", "worktrees", "same-name"), {
-        recursive: true,
-        force: true,
-      });
+      // repoB lands in a same-name-<hash> sibling whose hash (a fresh temp dir)
+      // changes per run, so remove the exact folders the creates landed in.
+      if (projectFolderA) fs.rmSync(projectFolderA, { recursive: true, force: true });
+      if (projectFolderB) fs.rmSync(projectFolderB, { recursive: true, force: true });
     }
   });
 });

@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { WORKTREE_SWEEP_BATCH_LIMIT, WORKTREE_SWEEP_MAX_AGE_DAYS } from "../constants.js";
+import {
+  WORKTREE_SWEEP_BATCH_LIMIT,
+  WORKTREE_SWEEP_MAX_AGE_DAYS,
+  REPO_MARKER_FILENAME,
+} from "../constants.js";
 import { WORKTREES_PARENT_DIR, listGitWorktrees } from "../git-worktrees.js";
 import { runGit } from "./run-git.js";
 
@@ -34,12 +38,31 @@ const worktreeAgeMs = (worktreePath: string, now: number): number | null => {
   }
 };
 
+// After a worktree is removed its project folder may be left holding only the
+// repo-id marker — the sweep just took the last worktree, so the folder is dead
+// weight. Reap it, but only when nothing else remains: a kept sibling worktree
+// or any file the user dropped in must never be deleted. The folder is always
+// this repo's own project folder (the parent of an auto-created worktree), so
+// there's no cross-repo risk.
+const reapEmptyProjectFolder = (worktreePath: string): void => {
+  const projectFolder = path.dirname(worktreePath);
+  if (projectFolder === WORKTREES_PARENT_DIR) return;
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(projectFolder);
+  } catch {
+    return;
+  }
+  if (!entries.every((entry) => entry === REPO_MARKER_FILENAME)) return;
+  fs.rmSync(projectFolder, { recursive: true, force: true });
+};
+
 // Removes stale, clean, auto-created worktrees so the shared worktrees dir
 // doesn't accumulate orphans. Returns the paths actually removed. The current
 // and main worktrees are never eligible; a dirty, too-new, or shell-occupied
 // worktree is skipped silently. Never throws — a worktree that fails to remove
 // is simply not in the returned list, so a sweep never breaks the list view
-// that triggered it.
+// that triggered it. A project folder emptied by the sweep is reaped too.
 export const sweepStaleWorktrees = async (
   cwd: string,
   now: number = Date.now(),
@@ -72,7 +95,10 @@ export const sweepStaleWorktrees = async (
     if (!(await isClean(worktree.path))) continue;
 
     const result = await runGit(cwd, ["worktree", "remove", worktree.path]);
-    if (result.exitCode === 0) removed.push(worktree.path);
+    if (result.exitCode === 0) {
+      removed.push(worktree.path);
+      reapEmptyProjectFolder(worktree.path);
+    }
   }
   return { removed };
 };
