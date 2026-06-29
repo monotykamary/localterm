@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.27.2
+
+### Patch Changes
+
+- Internal: extract the `/api` route tree out of `createServer` into a `buildApiRoutes(ctx)` builder (threading a `DaemonContext`), and apply style nits (arrow functions in browser detection, explicit boolean checks in the network policy). No public API change.
+
 ## 2.27.1
 
 ### Patch Changes
