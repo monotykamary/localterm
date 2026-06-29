@@ -32,10 +32,10 @@ export type DetectedBrowser = {
 };
 
 /** OS-specific user-data dirs for Chromium-based browsers, rough popularity order. */
-export function getBrowserCandidates(
+export const getBrowserCandidates = (
   home: string = os.homedir(),
   platform: NodeJS.Platform = process.platform,
-): BrowserCandidate[] {
+): BrowserCandidate[] => {
   const list: BrowserCandidate[] = [];
   const push = (name: string, profileDir: string) => list.push({ name, profileDir });
 
@@ -74,12 +74,12 @@ export function getBrowserCandidates(
     push("Google Chrome Canary", `${local}\\Google\\Chrome SxS\\User Data`);
   }
   return list;
-}
+};
 
 /** Parse `<profileDir>/DevToolsActivePort`; undefined if missing/malformed. */
-async function tryReadDevToolsActivePort(
+const tryReadDevToolsActivePort = async (
   profileDir: string,
-): Promise<{ port: number; wsPath: string; mtimeMs: number } | undefined> {
+): Promise<{ port: number; wsPath: string; mtimeMs: number } | undefined> => {
   const file = path.join(profileDir, "DevToolsActivePort");
   try {
     const [text, stat] = await Promise.all([fs.readFile(file, "utf8"), fs.stat(file)]);
@@ -91,16 +91,16 @@ async function tryReadDevToolsActivePort(
   } catch {
     return undefined;
   }
-}
+};
 
 /**
  * Scan known user-data dirs and return every Chromium browser with a live
  * DevToolsActivePort, most-recently-launched first. Does NOT verify the WS
  * endpoint actually accepts — the caller does that by trying to connect.
  */
-export async function detectChromiumBrowsers(
+export const detectChromiumBrowsers = async (
   candidates: BrowserCandidate[] = getBrowserCandidates(),
-): Promise<DetectedBrowser[]> {
+): Promise<DetectedBrowser[]> => {
   const detected: DetectedBrowser[] = [];
   for (const { name, profileDir } of candidates) {
     const parsed = await tryReadDevToolsActivePort(profileDir);
@@ -116,4 +116,4 @@ export async function detectChromiumBrowsers(
   }
   detected.sort((a, b) => b.mtimeMs - a.mtimeMs);
   return detected;
-}
+};

@@ -30,7 +30,7 @@ export const useCloseSelectOnTouchOutside = (
     if (!isCoarsePointer()) return;
     let dismissGesture = false;
     const isTerminalSurface = (target: EventTarget | null): boolean =>
-      target instanceof Element && !!target.closest("[data-terminal-surface]");
+      target instanceof Element && Boolean(target.closest("[data-terminal-surface]"));
     const handleTouchStart = (event: TouchEvent) => {
       if (!openRef.current) return;
       if (!isTerminalSurface(event.target)) return;

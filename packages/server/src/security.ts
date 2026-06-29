@@ -129,14 +129,18 @@ export const createNetworkPolicyMiddleware = (
     const extraHost = publicOriginHostname(getPublicOrigin);
     const hostHeader = context.req.header("host");
     const hostname = stripPort(hostHeader);
-    const hostAccepted = !!hostname && (hostAllowed(hostname) || hostname === extraHost);
+    const hostAccepted =
+      hostname !== null && hostname !== "" && (hostAllowed(hostname) || hostname === extraHost);
     if (!hostAccepted) {
       return new Response("forbidden: host not allowed", { status: 403 });
     }
     const origin = context.req.header("origin");
     if (origin !== undefined) {
       const originHost = originHostname(origin);
-      const originAccepted = !!originHost && (hostAllowed(originHost) || originHost === extraHost);
+      const originAccepted =
+        originHost !== null &&
+        originHost !== "" &&
+        (hostAllowed(originHost) || originHost === extraHost);
       if (!originAccepted) {
         return new Response("forbidden: cross-origin", { status: 403 });
       }
