@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { DaemonConfigStore } from "../src/daemon-config-store.js";
-import { DAEMON_CONFIG_FILE_VERSION } from "../src/constants.js";
+import { DAEMON_CONFIG_FILE_VERSION, SESSION_GRACE_DEFAULT_SECONDS } from "../src/constants.js";
 
 describe("DaemonConfigStore", () => {
   let stateDirectory: string;
@@ -31,6 +31,7 @@ describe("DaemonConfigStore", () => {
     expect(JSON.parse(fs.readFileSync(filePath, "utf8"))).toEqual({
       version: DAEMON_CONFIG_FILE_VERSION,
       cdpPort: 52860,
+      graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
     });
   });
 

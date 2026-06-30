@@ -3,6 +3,20 @@ import { Command } from "commander";
 import { runInstall, runUninstall } from "./commands/install.js";
 import { runProcessDelete, runProcessList, runProcessSet } from "./commands/process.js";
 import { runRestart } from "./commands/restart.js";
+import {
+  parseInteger,
+  runOneShotExec,
+  runSessionAttach,
+  runSessionCapture,
+  runSessionExec,
+  runSessionKill,
+  runSessionList,
+  runSessionNew,
+  runSessionPin,
+  runSessionRename,
+  runSessionResize,
+  runSessionSendKeys,
+} from "./commands/session.js";
 import { runSecretDelete, runSecretGet, runSecretList, runSecretSet } from "./commands/secret.js";
 import { runStart } from "./commands/start.js";
 import { runStatus } from "./commands/status.js";
@@ -142,6 +156,122 @@ processCommand
   .description("delete a process and its shim")
   .action(async (name: string) => {
     await runProcessDelete(name);
+  });
+
+program
+  .command("exec")
+  .description("run a one-shot command in a transient PTY and print its output")
+  .argument("<command>", "shell command to run")
+  .option("--cwd <path>", "working directory")
+  .option("--cols <n>", "terminal columns", parseInteger)
+  .option("--rows <n>", "terminal rows", parseInteger)
+  .option("--timeout <seconds>", "timeout in seconds", parseInteger)
+  .option("--json", "emit the result as JSON (exit code in the payload; CLI exits 0)")
+  .action(
+    async (
+      command: string,
+      options: { cwd?: string; cols?: number; rows?: number; timeout?: number; json: boolean },
+    ) => {
+      await runOneShotExec(command, options);
+    },
+  );
+
+const session = program
+  .command("session")
+  .description("control PTYs like tmux (list, create, send-keys, capture, exec, kill)");
+session
+  .command("ls")
+  .description("list live PTYs")
+  .option("--json", "emit the list as JSON")
+  .action(async (options: { json: boolean }) => {
+    await runSessionList(options);
+  });
+session
+  .command("new")
+  .description("spawn a detached PTY (pinned by default so it survives between calls)")
+  .option("--cwd <path>", "working directory")
+  .option("--cmd <command>", "command to run at spawn (shell stays alive after)")
+  .option("--name <title>", "session title")
+  .option("--cols <n>", "terminal columns", parseInteger)
+  .option("--rows <n>", "terminal rows", parseInteger)
+  .option("--no-pin", "subject to the idle reap (default: pinned)")
+  .option("--json", "emit the session as JSON")
+  .action(
+    async (options: {
+      cwd?: string;
+      cmd?: string;
+      name?: string;
+      cols?: number;
+      rows?: number;
+      pin: boolean;
+      json: boolean;
+    }) => {
+      await runSessionNew(options);
+    },
+  );
+session
+  .command("attach <id>")
+  .description("open a browser tab onto a live PTY by id")
+  .action(async (id: string) => {
+    await runSessionAttach(id);
+  });
+session
+  .command("kill <id>")
+  .description("kill a session and its shell")
+  .action(async (id: string) => {
+    await runSessionKill(id);
+  });
+session
+  .command("send-keys <id> <keys>")
+  .description("write raw input to a session (\\n=Enter, \\xHH=control byte)")
+  .action(async (id: string, keys: string) => {
+    await runSessionSendKeys(id, keys);
+  });
+session
+  .command("capture <id>")
+  .description("print the rendered screen as text (tmux capture-pane -p)")
+  .option(
+    "--lines <n>",
+    "lines to capture (default: viewport; extends into scrollback)",
+    parseInteger,
+  )
+  .option("--json", "emit the pane text as JSON")
+  .action(async (id: string, options: { lines?: number; json: boolean }) => {
+    await runSessionCapture(id, options);
+  });
+session
+  .command("exec <id> <command>")
+  .description("run a command in a persistent session; print output, exit with its code")
+  .option("--timeout <seconds>", "timeout in seconds", parseInteger)
+  .option("--json", "emit the result as JSON; CLI exits 0 (exit code in the payload)")
+  .action(async (id: string, command: string, options: { timeout?: number; json: boolean }) => {
+    await runSessionExec(id, command, options);
+  });
+session
+  .command("resize <id>")
+  .description("resize a session")
+  .requiredOption("--cols <n>", "terminal columns", parseInteger)
+  .requiredOption("--rows <n>", "terminal rows", parseInteger)
+  .action(async (id: string, options: { cols: number; rows: number }) => {
+    await runSessionResize(id, options);
+  });
+session
+  .command("rename <id> <name>")
+  .description("set a session's title (the shell may overwrite it)")
+  .action(async (id: string, name: string) => {
+    await runSessionRename(id, name);
+  });
+session
+  .command("pin <id>")
+  .description("exempt a session from the idle reap")
+  .action(async (id: string) => {
+    await runSessionPin(id, true);
+  });
+session
+  .command("unpin <id>")
+  .description("subject a session to the idle reap")
+  .action(async (id: string) => {
+    await runSessionPin(id, false);
   });
 
 program.parseAsync().catch((error: unknown) => {

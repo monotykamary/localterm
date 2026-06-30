@@ -239,6 +239,17 @@ export class Session extends EventEmitter<SessionEvents> {
     return this.lastEmittedCwdValue;
   }
 
+  // Force the session's title from the REST/CLI rename surface. The shell's
+  // next OSC 0/2 title or cwd-derived title overwrites it (matching tmux, where
+  // a shell that sets its own title can override `rename-session`), but until
+  // then the picker and a fresh attach see the renamed title. Kept separate
+  // from `initialDocumentTitle` (frozen at spawn) so the override is live.
+  setTitle(title: string): void {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    this.lastEmittedTitle = trimmed;
+  }
+
   write(data: string): void {
     if (this.exited) return;
     // xterm.js's responses to DA1/DA2 flow back through here (onData -> client

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { createServer, type RunningServer } from "../src/index.js";
+import { SESSION_GRACE_DEFAULT_SECONDS } from "../src/constants.js";
 
 describe("/api/config", () => {
   let stateDirectory: string;
@@ -31,7 +32,10 @@ describe("/api/config", () => {
   it("GET returns a null cdpPort by default (auto-detect)", async () => {
     const response = await fetch(configUrl());
     expect(response.ok).toBe(true);
-    expect(await response.json()).toEqual({ cdpPort: null });
+    expect(await response.json()).toEqual({
+      cdpPort: null,
+      graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
+    });
   });
 
   it("PUT persists a configured port and echoes it back", async () => {
@@ -41,14 +45,18 @@ describe("/api/config", () => {
       body: JSON.stringify({ cdpPort: 52860 }),
     });
     expect(response.ok).toBe(true);
-    expect(await response.json()).toEqual({ cdpPort: 52860 });
+    expect(await response.json()).toEqual({
+      cdpPort: 52860,
+      graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
+    });
 
-    const reloaded = JSON.parse(
-      fs.readFileSync(path.join(stateDirectory, "config.json"), "utf8"),
-    );
+    const reloaded = JSON.parse(fs.readFileSync(path.join(stateDirectory, "config.json"), "utf8"));
     expect(reloaded.cdpPort).toBe(52860);
 
-    expect(await (await fetch(configUrl())).json()).toEqual({ cdpPort: 52860 });
+    expect(await (await fetch(configUrl())).json()).toEqual({
+      cdpPort: 52860,
+      graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
+    });
   });
 
   it("PUT with null clears the override back to auto-detect", async () => {
@@ -62,7 +70,10 @@ describe("/api/config", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ cdpPort: null }),
     });
-    expect(await response.json()).toEqual({ cdpPort: null });
+    expect(await response.json()).toEqual({
+      cdpPort: null,
+      graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
+    });
   });
 
   it("PUT rejects an out-of-range port with 400", async () => {
@@ -73,7 +84,10 @@ describe("/api/config", () => {
     });
     expect(response.status).toBe(400);
     // The override is unchanged.
-    expect(await (await fetch(configUrl())).json()).toEqual({ cdpPort: null });
+    expect(await (await fetch(configUrl())).json()).toEqual({
+      cdpPort: null,
+      graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
+    });
   });
 
   it("PUT rejects an invalid body with 400", async () => {

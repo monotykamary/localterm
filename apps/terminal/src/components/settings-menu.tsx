@@ -643,11 +643,12 @@ export const SettingsMenu = ({
                           sideOffset={TOOLTIP_SIDE_OFFSET_PX}
                           className="max-w-xs"
                         >
-                          How long a shell with no viewers stays alive after you close its tab, so
-                          a transient disconnect or a tab switch can reattach. A shell still running
-                          a command is never reaped regardless. Set to Off to keep dormant shells
-                          until you kill them from the switcher (they're still evicted if the session
-                          cap is reached). 0 reaps an idle shell the moment its last viewer leaves.
+                          How long a shell with no viewers stays alive after you close its tab, so a
+                          transient disconnect or a tab switch can reattach. A shell still running a
+                          command is never reaped regardless. Set to Off to keep dormant shells
+                          until you kill them from the switcher (they're still evicted if the
+                          session cap is reached). 0 reaps an idle shell the moment its last viewer
+                          leaves.
                         </TooltipContent>
                       </Tooltip>
                       <GracePeriodField
@@ -705,8 +706,7 @@ export const SettingsMenu = ({
                           Automation run tabs open in the background over the DevTools Protocol.
                           Leave empty to auto-detect a Chromium browser launched with
                           {" --remote-debugging-port"}; set a port to target a specific debug
-                          endpoint (e.g. Aside on 52860). Saved to the daemon and used by every
-                          tab.
+                          endpoint (e.g. Aside on 52860). Saved to the daemon and used by every tab.
                         </TooltipContent>
                       </Tooltip>
                       <CdpPortField

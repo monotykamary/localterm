@@ -54,6 +54,15 @@ import type {
   sessionListItemSchema,
   sessionsListResponseSchema,
   sessionActivityStateSchema,
+  createSessionInputSchema,
+  sessionResponseSchema,
+  updateSessionInputSchema,
+  sessionInputSchema,
+  sessionResizeSchema,
+  execInputSchema,
+  execOneShotInputSchema,
+  execResultSchema,
+  capturePaneResponseSchema,
   triggerInputSchema,
   updateAutomationInputSchema,
   secretEntrySchema,
@@ -152,6 +161,15 @@ export type GitDiffSummary = z.infer<typeof gitDiffSummarySchema>;
 export type SessionListItem = z.infer<typeof sessionListItemSchema>;
 export type SessionListResponse = z.infer<typeof sessionsListResponseSchema>;
 export type SessionActivityState = z.infer<typeof sessionActivityStateSchema>;
+export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
+export type SessionResponse = z.infer<typeof sessionResponseSchema>;
+export type UpdateSessionInput = z.infer<typeof updateSessionInputSchema>;
+export type SessionInput = z.infer<typeof sessionInputSchema>;
+export type SessionResize = z.infer<typeof sessionResizeSchema>;
+export type ExecInput = z.infer<typeof execInputSchema>;
+export type ExecOneShotInput = z.infer<typeof execOneShotInputSchema>;
+export type ExecResultResponse = z.infer<typeof execResultSchema>;
+export type CapturePaneResponse = z.infer<typeof capturePaneResponseSchema>;
 export type ListeningPort = z.infer<typeof listeningPortSchema>;
 export type ListeningPortsResponse = z.infer<typeof listeningPortsResponseSchema>;
 export type GitDiffFileMeta = z.infer<typeof gitDiffFileMetaSchema>;

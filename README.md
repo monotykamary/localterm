@@ -57,11 +57,30 @@ localterm status
 localterm restart
 localterm install [-p 3417] [-H 127.0.0.1]  # auto-start (launchd on macOS, systemd user unit on Linux)
 localterm uninstall                              # remove auto-start service
+localterm exec "<command>" [--cwd <path>] [--timeout 60] [--json]  # one-shot: run, capture, exit with its code
+localterm session ls [--json]                    # list live PTYs
+localterm session new [--cwd <path>] [--cmd <c>] [--name <t>] [--no-pin] [--json]  # spawn a detached shell
+localterm session attach <id>                    # open a browser tab onto a shell
+localterm session exec <id> "<cmd>" [--timeout 60] [--json]  # run in a persistent session
+localterm session send-keys <id> '<keys>'        # raw input (\n=Enter, \x03=Ctrl-C)
+localterm session capture <id> [--lines 200] [--json]  # rendered screen (tmux capture-pane -p)
+localterm session resize <id> --cols 120 --rows 40
+localterm session rename <id> <name>
+localterm session pin <id> | unpin <id>           # toggle idle-reap exemption
+localterm session kill <id>
 localterm secret list                            # per-program secrets (names + policy; never values)
 localterm secret get <name>                       # print a value (resolved from Keychain, not the daemon)
 localterm secret set <name> -e <VAR> [-p a,b] [-v <value>|-]  # -v - reads stdin
 localterm secret delete <name>
 ```
+
+`exec` and the `localterm session` group are the tmux-parity surface for users
+and AI agents — drive PTYs headlessly over the CLI and the matching REST API
+(`POST /api/sessions`, `POST /api/sessions/:id/{input,resize,exec}`, `GET
+/api/sessions/:id/pane`, `POST /api/exec`). REST-created sessions are **pinned**
+by default (exempt from the idle reap) so an agent's shell survives between
+calls; `exec` is synchronous — one call returns a command's captured output and
+exit code, the LLM-ergonomic upgrade over tmux's fire-and-forget `send-keys`.
 
 State lives in `~/.localterm/` (PID, port, server log at `~/.localterm/server.log`).
 

@@ -29,11 +29,7 @@ const DEFAULT_CONFIG: DaemonConfig = {
 };
 
 const clampPort = (port: number | null): number | null =>
-  port === null
-    ? null
-    : Number.isInteger(port) && port > 0 && port <= TCP_PORT_MAX
-      ? port
-      : null;
+  port === null ? null : Number.isInteger(port) && port > 0 && port <= TCP_PORT_MAX ? port : null;
 
 // `null` stays `null` (the "never reap" sentinel, a deliberate user choice, not
 // an error fallback); an out-of-range or non-integer falls back to the default

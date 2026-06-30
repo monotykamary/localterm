@@ -13,6 +13,7 @@ const buildSession = (id: string): SessionListItem => ({
   lastOutputAt: 0,
   clients: 0,
   state: "ready",
+  pinned: false,
 });
 
 describe("resolveInitialSessionIndex", () => {

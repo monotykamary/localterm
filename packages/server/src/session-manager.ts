@@ -1,5 +1,15 @@
+import { randomBytes } from "node:crypto";
 import path from "node:path";
+import { CaptureRenderer } from "./capture-renderer.js";
 import {
+  CAPTURE_PANE_MAX_LINES,
+  EXEC_DEFAULT_OUTPUT_LIMIT_BYTES,
+  EXEC_DEFAULT_TIMEOUT_MS,
+  EXEC_EPHEMERAL_SCROLLBACK,
+  EXEC_MAX_OUTPUT_LIMIT_BYTES,
+  EXEC_MAX_TIMEOUT_MS,
+  EXEC_RAW_ACCUMULATE_CAP_BYTES,
+  EXEC_TIMEOUT_INTERRUPT_GRACE_MS,
   MAX_CONCURRENT_SESSIONS,
   MAX_OUTPUT_BYTES,
   OUTPUT_BATCH_FLUSH_BYTES,
@@ -28,6 +38,27 @@ import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 export interface AutomationContext {
   automationId: string;
   runId: string;
+}
+
+// The synchronous command-and-capture primitive (the tmux send-keys +
+// capture-pane replacement, but blocking). One call runs a single shell command
+// line inside a session, captures its rendered output, and returns the exit
+// code — the shape an agent turn maps to directly. `output` is ANSI-processed
+// clean text (rendered through a headless xterm); `timedOut` marks a command
+// that didn't finish within `timeoutMs`; `truncated` marks output past the
+// `outputLimitBytes` cap. `exitCode` is the command's exit status, or null when
+// the call timed out (the command may still be running) or the session exited.
+export interface ExecResult {
+  exitCode: number | null;
+  output: string;
+  timedOut: boolean;
+  truncated: boolean;
+  durationMs: number;
+}
+
+export interface ExecOptions {
+  timeoutMs?: number;
+  outputLimitBytes?: number;
 }
 
 // Favicon-equivalent activity state, computed server-side from output recency
@@ -73,13 +104,24 @@ export interface ManagedSession {
   lastOutputAt: number;
   hasForeground: boolean;
   // No-clients grace timer: armed when the last subscriber detaches, cancelled
-  // when any subscriber re-attaches. On fire, re-checks activity — if the shell
+  // when any subscriber re-attached. On fire, re-checks activity — if the shell
   // is still doing something (output arriving, or a foreground program alive
   // though quiet) it reschedules so a dormant shell is never reaped mid-stream;
   // only a truly idle one (no recent output, no foreground program, no clients)
   // is reaped.
   graceTimer: NodeJS.Timeout | null;
   parkedAt: number | null;
+  // Pinned sessions are exempt from the no-clients idle grace reap and from
+  // eviction at the session cap — they live until explicitly killed or their
+  // shell exits. REST-created sessions (POST /api/sessions) default to pinned
+  // so an agent that spawns now and send-keys minutes later doesn't lose its
+  // shell; browser tabs (spawned over the WS) are never pinned. Toggling via
+  // PATCH /api/sessions/:id re-arms (or cancels) the grace timer live.
+  pinned: boolean;
+  // Lazily-created headless terminal for capture-pane reads. Zero cost until
+  // the first capture; fed the session's live output thereafter and disposed on
+  // teardown. Kept on the managed session so its lifecycle is bound to the PTY.
+  captureRenderer: CaptureRenderer | undefined;
   // Last effective size broadcast to clients (the min cols/rows across
   // attached clients), or null before the first compute. Tracked so the
   // manager only broadcasts pty-size on an actual change instead of every
@@ -165,7 +207,10 @@ export class SessionManager {
   atCapacity(): boolean {
     if (this.sessions.size < MAX_CONCURRENT_SESSIONS) return false;
     for (const managed of this.sessions.values()) {
-      if (managed.clients.size === 0) return false;
+      // A dormant, non-pinned session can be evicted to make room. Pinned
+      // sessions hold their slots (never silently reaped), so a full cap of
+      // pinned sessions surfaces a real capacity error instead of a steal.
+      if (managed.clients.size === 0 && !managed.pinned) return false;
     }
     return true;
   }
@@ -202,6 +247,7 @@ export class SessionManager {
       lastOutputAt: managed.lastOutputAt,
       clients: managed.clients.size,
       state: this.computeState(managed),
+      pinned: managed.pinned,
     }));
   }
 
@@ -279,6 +325,8 @@ export class SessionManager {
       hasForeground: false,
       graceTimer: null,
       parkedAt: null,
+      pinned: false,
+      captureRenderer: undefined,
       ptySizeCols: null,
       ptySizeRows: null,
       ptySizeWasMultiViewer: false,
@@ -477,6 +525,253 @@ export class SessionManager {
     this.lastOutputAtByPid.clear();
   }
 
+  // Spawn a PTY with no attached WebSocket — the REST/CLI path (POST /api/sessions,
+  // `localterm session new`, the one-shot exec helper). `pinned` controls the
+  // idle-reap policy: a pinned session (the REST default) lives until explicitly
+  // killed or its shell exits; an unpinned one enters the no-clients grace window
+  // immediately (it has no viewer to detach from), matching a browser tab nobody
+  // opened. Returns the session id, or null at the capacity cap.
+  spawnDetached(input: SpawnPtyInput, pinned: boolean): string | null {
+    const managed = this.spawn(input);
+    if (!managed) return null;
+    managed.pinned = pinned;
+    // A detached session has no client to detach from, so arm the grace now (a
+    // no-op arm when pinned — startGrace parks it indefinitely instead).
+    if (managed.clients.size === 0 && !managed.session.isExited) this.startGrace(managed);
+    return managed.id;
+  }
+
+  // Write input to a session by id — the REST/CLI send-keys path. Unlike the
+  // WebSocket `writeInput`, there's no pending-client handshake to promote; the
+  // bytes go straight to the PTY. Returns false for an unknown/exited session.
+  writeInputById(id: string, data: string): boolean {
+    const managed = this.sessions.get(id);
+    if (!managed || managed.session.isExited) return false;
+    managed.session.write(data);
+    return true;
+  }
+
+  // Resize a session by id — the REST/CLI resize path for detached sessions
+  // (those with no WebSocket client to drive recomputeResize). Also keeps the
+  // capture renderer's grid in sync. Returns false for an unknown/exited session.
+  resizeById(id: string, cols: number, rows: number): boolean {
+    const managed = this.sessions.get(id);
+    if (!managed || managed.session.isExited) return false;
+    managed.session.resize(cols, rows);
+    managed.captureRenderer?.resize(cols, rows);
+    return true;
+  }
+
+  // Read the session's rendered screen as clean text (ANSI processed by the
+  // headless emulator) — the tmux `capture-pane -p` equivalent. `lines` defaults
+  // to the visible viewport and may extend into scrollback up to
+  // CAPTURE_PANE_MAX_LINES. Returns null for an unknown/exited session. Awaits
+  // the renderer's pending writes so the read never lands before a parse.
+  async capturePane(id: string, lines?: number): Promise<string | null> {
+    const managed = this.sessions.get(id);
+    if (!managed || managed.session.isExited) return null;
+    const capped = lines && lines > 0 ? Math.min(lines, CAPTURE_PANE_MAX_LINES) : undefined;
+    const renderer = await this.ensureCaptureRenderer(managed);
+    return renderer.capture(capped);
+  }
+
+  // Toggle a session's pinned flag — PATCH /api/sessions/:id. Re-arms (or
+  // cancels) the grace timer live for a dormant session so the change takes
+  // effect immediately, not on the next detach. Returns false for an unknown id.
+  setPinned(id: string, pinned: boolean): boolean {
+    const managed = this.sessions.get(id);
+    if (!managed) return false;
+    managed.pinned = pinned;
+    if (managed.clients.size === 0 && !managed.session.isExited) this.startGrace(managed);
+    return true;
+  }
+
+  // Rename a session — PATCH /api/sessions/:id. The shell's next OSC title or
+  // cwd-derived title overwrites it (as in tmux), but until then the picker and a
+  // fresh attach see the renamed title. Returns false for an unknown id.
+  setTitleById(id: string, title: string): boolean {
+    const managed = this.sessions.get(id);
+    if (!managed) return false;
+    managed.session.setTitle(title);
+    return true;
+  }
+
+  // Lazily create (and prime) a session's capture renderer. Fed the scrollback
+  // snapshot at creation so it catches up on recent history before the renderer
+  // existed, then kept alive and fed live output by onSessionOutput. Awaits the
+  // snapshot's async parse so the first capture-pane read lands on a populated
+  // grid instead of a blank one (xterm parses `write` on a timer).
+  private async ensureCaptureRenderer(managed: ManagedSession): Promise<CaptureRenderer> {
+    if (managed.captureRenderer) return managed.captureRenderer;
+    const renderer = new CaptureRenderer(managed.session.cols, managed.session.rows);
+    const snapshot = managed.session.snapshotScrollback();
+    if (snapshot) renderer.write(snapshot);
+    await renderer.flush();
+    managed.captureRenderer = renderer;
+    return renderer;
+  }
+
+  // Run a single shell command line inside a persistent session, capture its
+  // rendered output, and return its exit code — the blocking tmux send-keys +
+  // capture-pane replacement for agents. The command and its completion marker
+  // are written on ONE input line (`;`-chained) so `$?` is the command's exit
+  // before the next prompt's precmd hooks reset it. A start/end marker pair
+  // brackets the output in the rendered grid; the marker lines themselves are
+  // stripped. A timeout interrupts a hung command (Ctrl-C) and returns partial
+  // output. `command` must be a single line — for multi-line logic, write a
+  // script and exec `bash script.sh`.
+  async execInSession(
+    id: string,
+    command: string,
+    options: ExecOptions = {},
+  ): Promise<ExecResult | null> {
+    const managed = this.sessions.get(id);
+    if (!managed || managed.session.isExited) return null;
+    const session = managed.session;
+
+    const timeoutMs = this.clampInt(
+      options.timeoutMs ?? EXEC_DEFAULT_TIMEOUT_MS,
+      1,
+      EXEC_MAX_TIMEOUT_MS,
+    );
+    const outputLimit = this.clampInt(
+      options.outputLimitBytes ?? EXEC_DEFAULT_OUTPUT_LIMIT_BYTES,
+      1,
+      EXEC_MAX_OUTPUT_LIMIT_BYTES,
+    );
+
+    const token = randomBytes(8).toString("hex");
+    const startMarker = `__LT_S_${token}__`;
+    const endMarkerPrefix = `__LT_E_${token}__`;
+    const endPattern = new RegExp(`${endMarkerPrefix} (\\d+)`);
+    const cmd = command.trim() || ":";
+    const wrapped = `printf '${startMarker}\\n'; ${cmd}; printf '${endMarkerPrefix} %d\\n' "$?"`;
+
+    const startedAt = Date.now();
+    let accumulated = "";
+    let capped = false;
+    let exitCode: number | null = null;
+    let didTimeout = false;
+    let resolved = false;
+    let timeoutHandle: NodeJS.Timeout | null = null;
+    let interruptHandle: NodeJS.Timeout | null = null;
+
+    return new Promise<ExecResult>((resolve) => {
+      const finalize = async (finalExit: number | null, finalTimedOut: boolean) => {
+        if (resolved) return;
+        resolved = true;
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (interruptHandle) clearTimeout(interruptHandle);
+        session.off("output", onOutput);
+        session.off("exit", onExit);
+        resolve(
+          await this.buildExecResult(
+            session.cols,
+            session.rows,
+            accumulated,
+            startMarker,
+            endMarkerPrefix,
+            finalExit,
+            finalTimedOut,
+            outputLimit,
+            startedAt,
+          ),
+        );
+      };
+
+      const onOutput = (data: string): void => {
+        if (!capped) {
+          if (accumulated.length + data.length <= EXEC_RAW_ACCUMULATE_CAP_BYTES) {
+            accumulated += data;
+          } else {
+            const room = EXEC_RAW_ACCUMULATE_CAP_BYTES - accumulated.length;
+            if (room > 0) accumulated += data.slice(0, room);
+            capped = true;
+          }
+        }
+        // Once the timeout has fired we've committed to a timed-out result; a
+        // marker arriving during the interrupt grace (Ctrl-C kills the command,
+        // the trailing `printf END $?` runs with the interrupt exit code) is
+        // ignored so the call resolves as timed out, not as a normal completion.
+        if (didTimeout) return;
+        const match = accumulated.match(endPattern);
+        if (match) {
+          exitCode = Number.parseInt(match[1], 10);
+          finalize(exitCode, false);
+        }
+      };
+      const onExit = (code: number | null): void => {
+        exitCode = code;
+        finalize(code, false);
+      };
+
+      session.on("output", onOutput);
+      session.on("exit", onExit);
+
+      timeoutHandle = setTimeout(() => {
+        // Commit to a timed-out result: the command didn't finish within
+        // timeoutMs. Send Ctrl-C to interrupt it (so the session returns to a
+        // prompt for a follow-up call), then resolve after a short grace so any
+        // output already in flight is captured into the partial result. A marker
+        // arriving during the grace is ignored (see onOutput).
+        didTimeout = true;
+        session.write("\x03");
+        interruptHandle = setTimeout(() => finalize(null, true), EXEC_TIMEOUT_INTERRUPT_GRACE_MS);
+        interruptHandle.unref?.();
+      }, timeoutMs);
+      timeoutHandle.unref?.();
+
+      // A client sending input is live; for a detached session there's no
+      // pending handshake, so the bytes reach the PTY directly.
+      session.write(`${wrapped}\r`);
+    });
+  }
+
+  private async buildExecResult(
+    cols: number,
+    rows: number,
+    accumulated: string,
+    startMarker: string,
+    endMarkerPrefix: string,
+    exitCode: number | null,
+    timedOut: boolean,
+    outputLimit: number,
+    startedAt: number,
+  ): Promise<ExecResult> {
+    // Render the captured raw stream through a fresh headless terminal and slice
+    // between the start/end marker rows for clean, ANSI-processed text. A fresh
+    // (not the persistent) renderer so this exec's output is isolated and the
+    // markers are always near the bottom of the buffer.
+    const renderer = new CaptureRenderer(cols, rows, EXEC_EPHEMERAL_SCROLLBACK);
+    let output: string;
+    try {
+      renderer.write(accumulated);
+      await renderer.flush();
+      const endRow =
+        exitCode !== null && !timedOut ? renderer.findRow(`${endMarkerPrefix} ${exitCode}`) : -1;
+      const startRow = renderer.findRow(startMarker);
+      output = renderer.extractBetween(startRow, endRow);
+    } finally {
+      renderer.dispose();
+    }
+    const textBytes = Buffer.byteLength(output, "utf8");
+    const truncated = textBytes > outputLimit;
+    if (truncated) {
+      output = Buffer.from(output, "utf8").subarray(0, outputLimit).toString("utf8");
+    }
+    return {
+      exitCode,
+      output,
+      timedOut,
+      truncated,
+      durationMs: Date.now() - startedAt,
+    };
+  }
+
+  private clampInt(value: number, min: number, max: number): number {
+    return Math.min(Math.max(Math.trunc(value), min), max);
+  }
+
   private sendScrollback(ws: ClientSocket, managed: ManagedSession): void {
     const snapshot = managed.session.snapshotScrollback();
     if (!snapshot) return;
@@ -530,6 +825,10 @@ export class SessionManager {
     managed.lastOutputAt = Date.now();
     this.noteOutput(managed.session.pid);
     this.hooks.onOutputActivity();
+    // Keep the capture renderer (if one exists) in lockstep with the PTY so a
+    // later capture-pane reads current rendered text. Lazily created, so this
+    // is a no-op for sessions nobody has captured (the common browser case).
+    managed.captureRenderer?.write(data);
     if (managed.outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
       if (managed.outputBatchTimer !== null) {
         clearTimeout(managed.outputBatchTimer);
@@ -621,6 +920,9 @@ export class SessionManager {
     } else {
       session.resize(cols, rows);
     }
+    // Keep the capture renderer's grid at the PTY's effective size so a
+    // capture-pane reflects the same line wrapping a viewer would see.
+    managed.captureRenderer?.resize(cols, rows);
     // The PTY's effective size is the min across attached clients (tmux-style):
     // a narrower peer constrains everyone. Broadcast it on change so each
     // viewer can mask the dead area beyond its own (possibly wider) grid as
@@ -731,6 +1033,8 @@ export class SessionManager {
       managed.graceTimer = null;
     }
     managed.parkedAt = null;
+    managed.captureRenderer?.dispose();
+    managed.captureRenderer = undefined;
     if (managed.outputBatchTimer !== null) {
       clearTimeout(managed.outputBatchTimer);
       managed.outputBatchTimer = null;
@@ -765,6 +1069,8 @@ export class SessionManager {
     let oldestKey = Infinity;
     for (const managed of this.sessions.values()) {
       if (managed.clients.size > 0) continue;
+      // Pinned sessions are never silently evicted — they're explicitly held.
+      if (managed.pinned) continue;
       // Evict the parked session whose grace fires soonest (armed earliest); a
       // parked session with no timer is a fresh spawn nobody attached yet —
       // yield it only after all armed ones.
@@ -780,6 +1086,9 @@ export class SessionManager {
   private startGrace(managed: ManagedSession): void {
     this.cancelGrace(managed);
     managed.parkedAt = Date.now();
+    // Pinned sessions park indefinitely — never reaped by the idle grace and
+    // never evicted at the cap. They live until an explicit kill or shell exit.
+    if (managed.pinned) return;
     const graceMs = this.getGraceMs();
     // "Never reap": park the shell with no timer. It lingers until a viewer
     // reattaches, it's killed from the switcher, the shell exits, or it's
@@ -868,4 +1177,5 @@ export interface SessionListItem {
   lastOutputAt: number;
   clients: number;
   state: SessionActivityState;
+  pinned: boolean;
 }

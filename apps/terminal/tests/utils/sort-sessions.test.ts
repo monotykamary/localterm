@@ -12,6 +12,7 @@ const buildSession = (overrides: Partial<SessionListItem> & { id: string }): Ses
   clients: 0,
   state: "ready",
   lastOutputAt: 0,
+  pinned: false,
   ...overrides,
 });
 

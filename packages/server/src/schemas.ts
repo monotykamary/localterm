@@ -7,6 +7,8 @@ import {
   CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT,
   CAFFEINATE_PREFERENCES_FILE_VERSION,
   DAEMON_CONFIG_FILE_VERSION,
+  EXEC_MAX_OUTPUT_LIMIT_BYTES,
+  EXEC_MAX_TIMEOUT_MS,
   MAX_AUTOMATION_COMMAND_LENGTH,
   MAX_AUTOMATION_NAME_LENGTH,
   MAX_AUTOMATION_REQUESTED_SECRETS,
@@ -107,12 +109,78 @@ export const sessionListItemSchema = z
     lastOutputAt: z.number().int().nonnegative(),
     clients: z.number().int().nonnegative(),
     state: sessionActivityStateSchema,
+    pinned: z.boolean(),
   })
   .strict();
 
 export const sessionsListResponseSchema = z
   .object({ sessions: z.array(sessionListItemSchema) })
   .strict();
+
+// Programmatic PTY control surface (tmux parity). `POST /api/sessions` spawns a
+// detached PTY (no browser tab); `pinned` defaults to true so an agent's shell
+// survives between calls. `command` is written at spawn like the WS `?cmd=`
+// param (the shell stays alive after it). `name` sets the title.
+export const createSessionInputSchema = z
+  .object({
+    cwd: z.string().min(1).optional(),
+    cols: z.number().int().min(1).max(MAX_COLS).optional(),
+    rows: z.number().int().min(1).max(MAX_ROWS).optional(),
+    command: z.string().max(MAX_INPUT_BYTES).optional(),
+    name: z.string().max(MAX_TITLE_LENGTH).optional(),
+    pinned: z.boolean().optional(),
+  })
+  .strict();
+
+export const sessionResponseSchema = z.object({ session: sessionListItemSchema }).strict();
+
+export const updateSessionInputSchema = z
+  .object({
+    name: z.string().max(MAX_TITLE_LENGTH).optional(),
+    pinned: z.boolean().optional(),
+  })
+  .strict();
+
+export const sessionInputSchema = z.object({ data: z.string().max(MAX_INPUT_BYTES) }).strict();
+
+export const sessionResizeSchema = z
+  .object({
+    cols: z.number().int().min(1).max(MAX_COLS),
+    rows: z.number().int().min(1).max(MAX_ROWS),
+  })
+  .strict();
+
+export const execInputSchema = z
+  .object({
+    command: z.string().min(1).max(MAX_INPUT_BYTES),
+    timeoutMs: z.number().int().min(1).max(EXEC_MAX_TIMEOUT_MS).optional(),
+    outputLimitBytes: z.number().int().min(1).max(EXEC_MAX_OUTPUT_LIMIT_BYTES).optional(),
+  })
+  .strict();
+
+export const execOneShotInputSchema = z
+  .object({
+    command: z.string().min(1).max(MAX_INPUT_BYTES),
+    cwd: z.string().min(1).optional(),
+    cols: z.number().int().min(1).max(MAX_COLS).optional(),
+    rows: z.number().int().min(1).max(MAX_ROWS).optional(),
+    timeoutMs: z.number().int().min(1).max(EXEC_MAX_TIMEOUT_MS).optional(),
+    outputLimitBytes: z.number().int().min(1).max(EXEC_MAX_OUTPUT_LIMIT_BYTES).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+  })
+  .strict();
+
+export const execResultSchema = z
+  .object({
+    exitCode: z.number().int().nullable(),
+    output: z.string(),
+    timedOut: z.boolean(),
+    truncated: z.boolean(),
+    durationMs: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const capturePaneResponseSchema = z.object({ text: z.string() }).strict();
 
 // One row in the ports modal: a TCP listening socket owned by a process
 // descended from a localterm session shell (a dev server run inside a tab).

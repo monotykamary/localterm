@@ -87,20 +87,31 @@ import {
 import {
   clientToServerMessageSchema,
   createAutomationInputSchema,
+  createSessionInputSchema,
   createWorktreeInputSchema,
+  execInputSchema,
+  execOneShotInputSchema,
   launchInputSchema,
   resetAutomationInputSchema,
   secretEntrySchema,
   secretSetInputSchema,
+  sessionInputSchema,
+  sessionResizeSchema,
   processNameSchema,
   processSetInputSchema,
   updateAutomationInputSchema,
   updateDaemonConfigInputSchema,
+  updateSessionInputSchema,
   updateWorktreeConfigInputSchema,
   worktreeIncludeFileInputSchema,
 } from "./schemas.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
-import { SessionManager, type AutomationContext, type ManagedSession } from "./session-manager.js";
+import {
+  SessionManager,
+  type AutomationContext,
+  type ExecResult,
+  type ManagedSession,
+} from "./session-manager.js";
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 import { resolveStaticAsset } from "./static-resolver.js";
 import { resolveImageAsset } from "./utils/resolve-image-asset.js";
@@ -383,6 +394,144 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     const killed = registry.kill(context.req.param("id"));
     if (!killed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json({ ok: true });
+  });
+
+  // Programmatic PTY control (tmux parity). The session list above and the kill
+  // route bracket the picker's surface; these routes give the CLI and REST
+  // agents the rest of tmux's session model — create, attach (via a browser tab
+  // opened at ?sid=), send-keys, capture-pane, resize, rename — plus `exec`, the
+  // synchronous command+capture+exit-code primitive that's the LLM-ergonomic
+  // upgrade over tmux's fire-and-forget send-keys. All routes inherit the
+  // network-policy middleware already on `*`; the daemon hands out unrestricted
+  // shells, so driving one programmatically is no escalation.
+  api.get("/sessions/:id", (context) => {
+    const managed = registry.list().find((session) => session.id === context.req.param("id"));
+    if (!managed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json({ session: managed });
+  });
+
+  // Spawn a detached PTY (no browser tab). Pinned by default so an agent's shell
+  // survives between calls; `--no-pin` enters the no-clients grace window like a
+  // browser tab nobody opened. `command` is written at spawn (the shell stays
+  // alive after, like the WS `?cmd=` param); `name` sets the title.
+  api.post("/sessions", async (context) => {
+    const parsed = createSessionInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    let cwd = parsed.data.cwd;
+    if (cwd !== undefined && !resolveCwdQuery(cwd)) {
+      return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    if (registry.atCapacity()) {
+      return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
+    }
+    const id = registry.spawnDetached(
+      {
+        cwd,
+        cols: parsed.data.cols,
+        rows: parsed.data.rows,
+        initialCommand: parsed.data.command,
+      },
+      parsed.data.pinned ?? true,
+    );
+    if (!id) return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
+    if (parsed.data.name) registry.setTitleById(id, parsed.data.name);
+    const session = registry.list().find((item) => item.id === id);
+    return context.json({ session }, HTTP_STATUS_CREATED);
+  });
+
+  // Rename (sets the title) and/or toggle pin. A pin change re-arms the grace
+  // timer live for a dormant session so it takes effect immediately.
+  api.patch("/sessions/:id", async (context) => {
+    const parsed = updateSessionInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const id = context.req.param("id");
+    if (parsed.data.name !== undefined) registry.setTitleById(id, parsed.data.name);
+    if (parsed.data.pinned !== undefined) registry.setPinned(id, parsed.data.pinned);
+    const session = registry.list().find((item) => item.id === id);
+    if (!session) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json({ session });
+  });
+
+  // send-keys: write raw input to a session by id. Bytes go straight to the
+  // PTY (no pending handshake — there's no WebSocket client). To execute a
+  // command, include a trailing newline; for a blocking command+output+exit
+  // in one call, use `exec` instead.
+  api.post("/sessions/:id/input", async (context) => {
+    const parsed = sessionInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const written = registry.writeInputById(context.req.param("id"), parsed.data.data);
+    if (!written) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json({ ok: true });
+  });
+
+  api.post("/sessions/:id/resize", async (context) => {
+    const parsed = sessionResizeSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const resized = registry.resizeById(
+      context.req.param("id"),
+      parsed.data.cols,
+      parsed.data.rows,
+    );
+    if (!resized) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json({ ok: true });
+  });
+
+  // capture-pane: the session's rendered screen as clean text (ANSI processed by
+  // the headless emulator). `lines` defaults to the viewport and may extend into
+  // scrollback. Returns the tmux `capture-pane -p` equivalent.
+  api.get("/sessions/:id/pane", async (context) => {
+    const linesParam = context.req.query("lines");
+    const lines = linesParam ? Number(linesParam) : undefined;
+    if (lines !== undefined && (!Number.isInteger(lines) || lines <= 0)) {
+      return context.json({ error: "invalid_lines" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const text = await registry.capturePane(context.req.param("id"), lines);
+    if (text === null) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json({ text });
+  });
+
+  // In-session exec: run a single command line inside a persistent session,
+  // capture its rendered output, and return its exit code. The session's
+  // cwd/env/history survive across calls (the tmux send-keys+capture-pane
+  // replacement, but blocking and one-shot).
+  api.post("/sessions/:id/exec", async (context) => {
+    const parsed = execInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const result = await registry.execInSession(context.req.param("id"), parsed.data.command, {
+      timeoutMs: parsed.data.timeoutMs,
+      outputLimitBytes: parsed.data.outputLimitBytes,
+    });
+    if (!result) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json(result);
+  });
+
+  // One-shot exec: spawn a transient shell in `cwd`, run the command, capture,
+  // and kill the shell — a self-contained PTY-backed `bash -c` with a real
+  // terminal so TUIs/cursor apps behave, returning `{exitCode, output, ...}`.
+  // No session management; the 90% agent case. The transient session is never
+  // pinned (it's torn down regardless of outcome).
+  api.post("/exec", async (context) => {
+    const parsed = execOneShotInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    let cwd = parsed.data.cwd;
+    if (cwd !== undefined && !resolveCwdQuery(cwd)) {
+      return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    if (registry.atCapacity()) {
+      return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
+    }
+    const id = registry.spawnDetached(
+      { cwd, cols: parsed.data.cols, rows: parsed.data.rows, env: parsed.data.env },
+      false,
+    );
+    if (!id) return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
+    const result: ExecResult | null = await registry.execInSession(id, parsed.data.command, {
+      timeoutMs: parsed.data.timeoutMs,
+      outputLimitBytes: parsed.data.outputLimitBytes,
+    });
+    registry.kill(id);
+    if (!result) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json(result);
   });
 
   // Returns the requested-secret names that don't exist in the store — used to
@@ -1015,8 +1164,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     const parsed = updateDaemonConfigInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
     return context.json({
-      cdpPort:
-        parsed.data.cdpPort === undefined ? getCdpPort() : applyCdpPort(parsed.data.cdpPort),
+      cdpPort: parsed.data.cdpPort === undefined ? getCdpPort() : applyCdpPort(parsed.data.cdpPort),
       graceSeconds:
         parsed.data.graceSeconds === undefined
           ? getGraceSeconds()
@@ -1969,6 +2117,8 @@ export type {
   ManagedSession,
   AutomationContext,
   SessionListItem,
+  ExecResult,
+  ExecOptions,
 } from "./session-manager.js";
 export { CaffeinateController } from "./caffeinate-controller.js";
 export type {
@@ -1978,11 +2128,31 @@ export type {
 export type * from "./types.js";
 export { DEFAULT_HOST, DEFAULT_PORT, WS_CLOSE_BACKPRESSURE } from "./constants.js";
 export { isLoopbackHost, isPrivateHost, isAllowedSourceIp } from "./security.js";
-export { healthSchema, cdpHealthSchema, daemonConfigSchema, updateDaemonConfigInputSchema } from "./schemas.js";
+export {
+  healthSchema,
+  cdpHealthSchema,
+  daemonConfigSchema,
+  updateDaemonConfigInputSchema,
+} from "./schemas.js";
+export {
+  createSessionInputSchema,
+  sessionResponseSchema,
+  updateSessionInputSchema,
+  sessionInputSchema,
+  sessionResizeSchema,
+  execInputSchema,
+  execOneShotInputSchema,
+  execResultSchema,
+  capturePaneResponseSchema,
+  sessionsListResponseSchema,
+} from "./schemas.js";
 export { createDefaultSecretBackend } from "./secret-backend.js";
 export type { SecretBackend } from "./secret-backend.js";
 export { detectChromiumBrowsers } from "./cdp/detect-chromium.js";
-export { detectWithExplicitPort, discoverExplicitCdpEndpoint } from "./cdp/discover-explicit-endpoint.js";
+export {
+  detectWithExplicitPort,
+  discoverExplicitCdpEndpoint,
+} from "./cdp/discover-explicit-endpoint.js";
 export { DaemonConfigStore } from "./daemon-config-store.js";
 export type { BrowserCandidate, DetectedBrowser } from "./cdp/detect-chromium.js";
 export {

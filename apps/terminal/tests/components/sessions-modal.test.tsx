@@ -56,6 +56,7 @@ const buildSession = (overrides: Partial<SessionListItem> = {}): SessionListItem
   lastOutputAt: Date.now(),
   clients: 1,
   state: "running",
+  pinned: false,
   ...overrides,
 });
 

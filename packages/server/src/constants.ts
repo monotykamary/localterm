@@ -513,3 +513,52 @@ export const CDP_EXPLICIT_PROBE_TIMEOUT_MS = 1_500;
 // list on any failure (the modal just shows nothing).
 export const LSOF_LISTEN_TIMEOUT_MS = 5_000;
 export const LSOF_LISTEN_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+
+// Programmatic PTY control (REST + CLI): the tmux-parity surface for users and
+// AI agents. A session created over REST (POST /api/sessions) is "pinned" by
+// default — exempt from the no-clients idle grace reap that reaps browser
+// tabs' dormant shells — so an agent that spawns now and send-keys minutes
+// later doesn't lose its shell mid-use. A pinned shell lives until it's
+// explicitly killed or its shell exits, and is never silently evicted at the
+// session cap (a pinned shell holding a slot surfaces a capacity error
+// instead of being silently reaped). Browser tabs (spawned over the WS) are
+// never pinned; their grace-window behavior is unchanged.
+
+// Default and maximum lifetime for an exec call (the synchronous command+
+// capture primitive). An agent turn is one exec call, so the default covers a
+// long build or test run; the cap bounds a runaway command's hold on the
+// daemon's event loop (one exec call holds an output listener + a headless
+// terminal for its duration).
+export const EXEC_DEFAULT_TIMEOUT_MS = 120_000;
+export const EXEC_MAX_TIMEOUT_MS = 30 * 60_000;
+// Default and maximum bytes of clean (ANSI-processed) output an exec call
+// returns. The headless emulator renders the full captured stream, then the
+// result is truncated to this limit and flagged `truncated` so an agent never
+// receives an unbounded payload from a chatty command.
+export const EXEC_DEFAULT_OUTPUT_LIMIT_BYTES = 1 * 1024 * 1024;
+export const EXEC_MAX_OUTPUT_LIMIT_BYTES = 8 * 1024 * 1024;
+// Hard ceiling on the raw byte stream an exec call accumulates while watching
+// for its completion marker. Bounds memory for a runaway command whose output
+// never reaches the marker; once crossed the call stops accumulating and lets
+// the timeout (or a session exit) finalize it. Well above the output limit so
+// marker detection survives a large-but-finite command.
+export const EXEC_RAW_ACCUMULATE_CAP_BYTES = 16 * 1024 * 1024;
+// Scrollback the per-exec ephemeral headless terminal keeps. The exec captures
+// only the output between its start/end markers, so this just needs to hold one
+// command's worth of output without scrolling the end marker out of reach.
+export const EXEC_EPHEMERAL_SCROLLBACK = 10_000;
+// After an exec times out, the command may still be running in the persistent
+// session. Send Ctrl-C + a newline to interrupt it and wait this long for the
+// shell to return to a prompt before resolving, so a follow-up exec isn't
+// greeted by a half-finished command. A no-op for one-shot exec (the transient
+// session is killed regardless).
+export const EXEC_TIMEOUT_INTERRUPT_GRACE_MS = 500;
+// Maximum lines a capture-pane request may return (the `--lines` ceiling).
+// Bounds a response from a session with a huge scrollback.
+export const CAPTURE_PANE_MAX_LINES = 10_000;
+// Scrollback the persistent per-session capture renderer keeps. Lazily created
+// on first capture-pane (zero cost for browser-only sessions that are never
+// captured), fed the session's live output thereafter, disposed on session
+// exit/kill. Sized to cover a reasonable screenful of history for an agent
+// reading a pane without ballooning memory across the session cap.
+export const CAPTURE_RENDERER_SCROLLBACK = 10_000;

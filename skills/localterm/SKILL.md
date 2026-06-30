@@ -1,6 +1,6 @@
 ---
 name: localterm
-description: Drive the localterm daemon's HTTP API — schedule automations, set up event-driven triggers (git changes, shell notifications, directory changes), trigger runs, manage per-program secrets (Keychain-backed PATH shims), list/kill live sessions, inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage automations, secrets, or sessions in localterm, or to script against the localterm server.
+description: Drive the localterm daemon's HTTP API and CLI — schedule automations, set up event-driven triggers (git changes, shell notifications, directory changes), trigger runs, manage per-program secrets (Keychain-backed PATH shims), control PTYs like tmux (list, create, send-keys, capture-pane, resize, rename, kill), run synchronous exec commands with captured output + exit code, inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage automations, secrets, sessions, or run shell commands in localterm, or to script against the localterm server.
 ---
 
 # localterm API
@@ -221,6 +221,67 @@ disabled or finished.
        "enabled": true
      }'
    ```
+
+## Sessions & exec (PTY control)
+
+Drive PTYs like tmux over the REST API and the `localterm session` CLI, plus
+**exec** — the synchronous command+output+exit-code primitive that's the
+LLM-ergonomic upgrade over tmux's fire-and-forget `send-keys`.
+
+```bash
+# List every live PTY
+BASE="http://127.0.0.1:$(cat ~/.localterm/server.port 2>/dev/null || echo 3417)/api"
+curl -s "$BASE/sessions"
+
+# One-shot exec: run a command in a fresh shell, get output + exit code (the 90% case)
+curl -s -X POST "$BASE/exec" \
+  -H 'content-type: application/json' \
+  -d '{ "command": "pnpm test 2>&1 | tail -20", "cwd": "/Users/me/project", "timeoutMs": 60000 }'
+# → { "exitCode": 0, "output": "…", "timedOut": false, "truncated": false, "durationMs": 4321 }
+
+# Stateful: a pinned session survives across calls (cwd/env/history persist)
+SID=$(curl -s -X POST "$BASE/sessions" -H 'content-type: application/json' \
+  -d '{ "cwd": "/Users/me/project" }' | node -pe 'JSON.parse(require("fs").readFileSync(0)).session.id')
+curl -s -X POST "$BASE/sessions/$SID/exec" -H 'content-type: application/json' \
+  -d '{ "command": "cd src && pwd" }'    # → exitCode 0, output "/Users/me/project/src"
+curl -s -X POST "$BASE/sessions/$SID/exec" -H 'content-type: application/json' \
+  -d '{ "command": "ls *.ts" }'          # cwd is still src — state survived
+curl -s -X DELETE "$BASE/sessions/$SID"    # pinned sessions don't self-reap — clean up
+
+# send-keys (raw input; \n executes a line) + capture-pane (rendered screen text)
+curl -s -X POST "$BASE/sessions/$SID/input" -H 'content-type: application/json' \
+  -d '{ "data": "npm run dev\n" }'
+curl -s "$BASE/sessions/$SID/pane?lines=200"
+```
+
+CLI equivalents:
+
+```bash
+localterm exec "pnpm test 2>&1 | tail -20" --cwd /Users/me/project --timeout 60 --json
+localterm session new --cwd /Users/me/project --json   # prints the session id
+localterm session exec <id> "cd src && pwd" --json
+localterm session send-keys <id> 'ls\n'                # \n=Enter, \x03=Ctrl-C
+localterm session capture <id> --lines 200
+localterm session attach <id>                          # open a browser tab onto it
+localterm session ls [--json] | kill <id> | rename <id> <name> | pin <id> | unpin <id>
+```
+
+Key points for agents:
+
+- **Default to one-shot `exec`** for stateless commands — no session to manage.
+  With `--json` the CLI exits 0 and the exit code is in the payload; without it,
+  the CLI prints output and exits with the command's code (124 on timeout).
+- **Use a pinned session** only when state must survive across calls (a `cd`,
+  an rc-sourced alias, a REPL). Create, drive, then `DELETE` it — pinned
+  sessions don't self-reap.
+- **`exec` takes a single command line.** Pipes, `&&`/`||`, redirects work;
+  for multi-line logic write a script and `exec "bash script.sh"`.
+- **`capture-pane`/exec read the rendered grid**, not infinite history (matches
+  tmux); tail a long build with repeated `capture-pane` or a long `timeoutMs`.
+
+For the full surface — all REST endpoints, request/result fields, the pinned/
+grace-window model, error responses, and the agent playbook — see
+[references/sessions-exec.md](references/sessions-exec.md).
 
 ## Other endpoints
 
