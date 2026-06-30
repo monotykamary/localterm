@@ -111,6 +111,8 @@ import {
   AMBIENT_TAB_CLOSE_DEADLINE_MS,
   LOCALTERM_TAB_TOKEN_EVENT,
   LOCALTERM_TAB_TOKEN_PROPERTY,
+  LOCALTERM_PANE_TEXT_PROPERTY,
+  LOCALTERM_MOUSE_CELLS_PROPERTY,
   serverToClientMessageSchema,
   type AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
@@ -735,6 +737,46 @@ export const Terminal = () => {
     const searchResultsDisposable = searchAddon.onDidChangeResults(setSearchResults);
 
     terminal.open(container);
+
+    // Expose viewport serializers to the daemon's CDP automation (capture-pane
+    // --png, mouse). The daemon reads these off the tab's window over the
+    // existing CDP socket: a pane-text serializer (the render-landed source of
+    // truth — a content-equality check against the server-side capture renderer
+    // that can't return stale pixels) and a cell-metrics helper (col/row →
+    // pixel for Input.dispatchMouseEvent). Mirrors LOCALTERM_TAB_TOKEN_PROPERTY
+    // — well-known names so the wire protocol stays authoritative. Torn down
+    // on unmount so a tab the user closed never answers a stale query.
+    const w = window as unknown as Record<string, unknown>;
+    w[LOCALTERM_PANE_TEXT_PROPERTY] = (): string => {
+      const buffer = terminal.buffer.active;
+      const rows: string[] = [];
+      for (let i = buffer.baseY; i < buffer.baseY + terminal.rows; i++) {
+        const line = buffer.getLine(i);
+        rows.push(line ? line.translateToString(true) : "");
+      }
+      while (rows.length > 0 && rows[rows.length - 1] === "") rows.pop();
+      return rows.join("\n");
+    };
+    w[LOCALTERM_MOUSE_CELLS_PROPERTY] = (): {
+      left: number;
+      top: number;
+      cellWidth: number;
+      cellHeight: number;
+      cols: number;
+      rows: number;
+    } | null => {
+      const screen = container.querySelector(".xterm-screen");
+      if (!(screen instanceof HTMLElement)) return null;
+      const rect = screen.getBoundingClientRect();
+      return {
+        left: rect.left,
+        top: rect.top,
+        cellWidth: terminal.cols > 0 ? rect.width / terminal.cols : 0,
+        cellHeight: terminal.rows > 0 ? rect.height / terminal.rows : 0,
+        cols: terminal.cols,
+        rows: terminal.rows,
+      };
+    };
 
     const helperTextArea = container.querySelector("textarea.xterm-helper-textarea");
     if (helperTextArea instanceof HTMLTextAreaElement) {
@@ -1705,6 +1747,9 @@ export const Terminal = () => {
       kittySetDisposable.dispose();
       scrollbackPurgeDisposable.dispose();
       selectiveScrollbackPurgeDisposable.dispose();
+      const w = window as unknown as Record<string, unknown>;
+      delete w[LOCALTERM_PANE_TEXT_PROPERTY];
+      delete w[LOCALTERM_MOUSE_CELLS_PROPERTY];
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       clearResizeScrollRestore();

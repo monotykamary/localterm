@@ -59,4 +59,17 @@ export class TerminalModeState {
     if (this.cursorHidden) parts.push(`${ESC}[?25l`);
     return parts.join("");
   }
+
+  // Whether a mouse *tracking* mode is enabled (1000–1003) — gates the SGR
+  // fallback so mouse bytes are never written into an app that didn't ask for
+  // them (where they'd land as typed text). Encoding modes (1005/1006/1007/1015)
+  // and focus reporting (1004) are excluded: they change the format or report
+  // focus, not whether the app reads mouse events. xterm.js gates this itself
+  // in the CDP path; this is for the true-headless fallback.
+  get mouseEnabled(): boolean {
+    for (const mode of this.enabledModes) {
+      if (mode >= 1000 && mode <= 1003) return true;
+    }
+    return false;
+  }
 }

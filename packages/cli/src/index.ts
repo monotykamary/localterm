@@ -11,11 +11,18 @@ import {
   runSessionExec,
   runSessionKill,
   runSessionList,
+  runSessionMouseClick,
+  runSessionMouseDrag,
+  runSessionMouseMove,
+  runSessionMouseScroll,
+  runSessionMouseState,
   runSessionNew,
   runSessionPin,
+  runSessionPress,
   runSessionRename,
   runSessionResize,
   runSessionSendKeys,
+  runSessionWait,
 } from "./commands/session.js";
 import { runSecretDelete, runSecretGet, runSecretList, runSecretSet } from "./commands/secret.js";
 import { runStart } from "./commands/start.js";
@@ -229,16 +236,25 @@ session
   });
 session
   .command("capture <id>")
-  .description("print the rendered screen as text (tmux capture-pane -p)")
+  .description(
+    "print the rendered screen as text (tmux capture-pane -p), or --png for a PNG screenshot",
+  )
   .option(
     "--lines <n>",
     "lines to capture (default: viewport; extends into scrollback)",
     parseInteger,
   )
-  .option("--json", "emit the pane text as JSON")
-  .action(async (id: string, options: { lines?: number; json: boolean }) => {
-    await runSessionCapture(id, options);
-  });
+  .option("--png", "rasterize the pane to a PNG via the browser (CDP)")
+  .option("-o, --output <file>", "write the PNG to a file (default: pane-<id>-<ts>.png)")
+  .option("--json", "emit the pane text as JSON (or {path,bytes} for --png)")
+  .action(
+    async (
+      id: string,
+      options: { lines?: number; png?: boolean; output?: string; json: boolean },
+    ) => {
+      await runSessionCapture(id, options);
+    },
+  );
 session
   .command("exec <id> <command>")
   .description("run a command in a persistent session; print output, exit with its code")
@@ -272,6 +288,119 @@ session
   .description("subject a session to the idle reap")
   .action(async (id: string) => {
     await runSessionPin(id, false);
+  });
+session
+  .command("press <id> <keys...>")
+  .description("send named keys (F2, Enter, Ctrl-C, Escape : w q Enter, or literal text)")
+  .action(async (id: string, keys: string[]) => {
+    await runSessionPress(id, keys);
+  });
+session
+  .command("wait <id>")
+  .description("block until the pane matches --text/--regex or goes --idle")
+  .option("--text <s>", "match a substring")
+  .option("--regex <p>", "match a regex")
+  .option("--idle-ms <n>", "resolve after no output for N ms", parseInteger)
+  .option("--timeout <seconds>", "overall timeout in seconds", parseInteger)
+  .option("--case-sensitive", "case-sensitive --text match")
+  .option("--json", "emit the result as JSON")
+  .action(
+    async (
+      id: string,
+      options: {
+        text?: string;
+        regex?: string;
+        idleMs?: number;
+        timeout?: number;
+        caseSensitive?: boolean;
+        json: boolean;
+      },
+    ) => {
+      await runSessionWait(id, options);
+    },
+  );
+const mouse = session
+  .command("mouse")
+  .description("drive a TUI with the mouse (click, drag, move, scroll)");
+mouse
+  .command("click <id>")
+  .description("click (by --col/--row, or --on-text)")
+  .option("--col <n>", "column (0-indexed)", parseInteger)
+  .option("--row <n>", "row (0-indexed)", parseInteger)
+  .option("--on-text <s>", "click the bottom-most occurrence of this label")
+  .option("--button <b>", "left | middle | right", "left")
+  .option("--clicks <n>", "click count (1-3)", parseInteger)
+  .option("--json", "emit the result as JSON")
+  .action(
+    async (
+      id: string,
+      options: {
+        col?: number;
+        row?: number;
+        onText?: string;
+        button: string;
+        clicks?: number;
+        json: boolean;
+      },
+    ) => {
+      await runSessionMouseClick(id, options);
+    },
+  );
+mouse
+  .command("drag <id>")
+  .description("drag from --from-col/--from-row to --to-col/--to-row")
+  .requiredOption("--from-col <n>", "start column", parseInteger)
+  .requiredOption("--from-row <n>", "start row", parseInteger)
+  .requiredOption("--to-col <n>", "end column", parseInteger)
+  .requiredOption("--to-row <n>", "end row", parseInteger)
+  .option("--button <b>", "left | middle | right", "left")
+  .option("--json", "emit the result as JSON")
+  .action(
+    async (
+      id: string,
+      options: {
+        fromCol: number;
+        fromRow: number;
+        toCol: number;
+        toRow: number;
+        button: string;
+        json: boolean;
+      },
+    ) => {
+      await runSessionMouseDrag(id, options);
+    },
+  );
+mouse
+  .command("move <id>")
+  .description("move the cursor to --col/--row")
+  .requiredOption("--col <n>", "column", parseInteger)
+  .requiredOption("--row <n>", "row", parseInteger)
+  .option("--json", "emit the result as JSON")
+  .action(async (id: string, options: { col: number; row: number; json: boolean }) => {
+    await runSessionMouseMove(id, options);
+  });
+mouse
+  .command("scroll <id>")
+  .description("scroll up|down")
+  .argument("<direction>", "up | down")
+  .option("--amount <n>", "scroll lines", parseInteger)
+  .option("--col <n>", "anchor column", parseInteger)
+  .option("--row <n>", "anchor row", parseInteger)
+  .option("--json", "emit the result as JSON")
+  .action(
+    async (
+      id: string,
+      direction: string,
+      options: { amount?: number; col?: number; row?: number; json: boolean },
+    ) => {
+      await runSessionMouseScroll(id, direction, options);
+    },
+  );
+mouse
+  .command("state <id>")
+  .description("show whether mouse tracking is enabled + viewport size")
+  .action(async (id: string) => {
+    await runSessionMouseState(id);
   });
 
 program.parseAsync().catch((error: unknown) => {

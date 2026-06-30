@@ -489,6 +489,16 @@ export const WS_CLOSE_CAPACITY_REACHED = 4503;
 export const LOCALTERM_TAB_TOKEN_PROPERTY = "__LOCALTERM_TAB_TOKEN";
 export const LOCALTERM_TAB_TOKEN_EVENT = "localterm-token";
 export const MAX_TAB_TOKEN_LENGTH = 128;
+// Frontend globals the daemon's CDP automation (screenshot/mouse) reads off a
+// viewer tab's window, mirroring LOCALTERM_TAB_TOKEN_PROPERTY: well-known names
+// so the wire protocol stays authoritative (no parallel literals). The
+// pane-text serializer returns the viewport as clean text — the render-landed
+// source of truth via a content-equality check against the server-side capture
+// renderer (robust against xterm's async write, can't return stale pixels); the
+// mouse-cells helper returns the .xterm-screen rect + cell metrics so
+// col/row → pixel mapping needs no xterm internals.
+export const LOCALTERM_PANE_TEXT_PROPERTY = "__LOCALTERM_PANE_TEXT";
+export const LOCALTERM_MOUSE_CELLS_PROPERTY = "__LOCALTERM_MOUSE_CELLS";
 // How long the client waits for the daemon's CDP-driven closeTab to settle on
 // a clean shell exit before falling back to window.close() + the dead-session
 // mask. Generous vs. CLOSE_SETTLE_MS (100ms) + the queued close latency so
@@ -562,3 +572,31 @@ export const CAPTURE_PANE_MAX_LINES = 10_000;
 // exit/kill. Sized to cover a reasonable screenful of history for an agent
 // reading a pane without ballooning memory across the session cap.
 export const CAPTURE_RENDERER_SCROLLBACK = 10_000;
+
+// CDP-backed screenshot + mouse — the terminal-use parity layer that reuses
+// the daemon's existing CDP socket (the one `localterm start` opened for
+// background-tab automation) instead of a new rasterizer or input device.
+// capture-pane --png opens an ephemeral background tab at `?sid=<id>` (or reuses
+// a live viewer tab if one exists), waits for xterm.js to render the session's
+// current state, then `Page.captureScreenshot`s the .xterm element. Mouse
+// dispatches `Input.dispatchMouseEvent` into the same tab so xterm.js — which
+// already speaks SGR mouse natively — generates the sequence, avoiding a
+// from-scratch encoder for the browser case (a minimal SGR-1006 fallback covers
+// true headless). Pinned sessions (the REST default) survive between calls
+// with no tab burning a slot — the exact use case `pinned` was built for.
+export const CDP_SCREENSHOT_TIMEOUT_MS = 10_000;
+export const CDP_MOUSE_TIMEOUT_MS = 10_000;
+export const CDP_RENDER_LANDED_POLL_INTERVAL_MS = 50;
+export const CDP_RENDER_LANDED_SETTLE_MS = 80;
+// `wait` primitive: subscribe to a session's output and resolve once the
+// rendered pane matches a text/regex predicate or goes idle for a window.
+// Reuses the tmux-parity capture renderer (flushed per frame) as the source of
+// truth — the same grid `capture-pane` and `exec` read.
+export const WAIT_DEFAULT_TIMEOUT_MS = 30_000;
+export const WAIT_MAX_TIMEOUT_MS = 5 * 60_000;
+export const WAIT_IDLE_POLL_INTERVAL_MS = 100;
+// `press` (named keys): a human key name → the xterm escape bytes a real
+// terminal sends, so an agent writes `press F2` / `press Escape : w q Enter`
+// instead of `send-keys '\x1bOQ'`. Space-separated tokens; an unknown token
+// passes through as literal text so `press hello` types "hello".
+export const MAX_NAMED_KEYS_BYTES = MAX_INPUT_BYTES;

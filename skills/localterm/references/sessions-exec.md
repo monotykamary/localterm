@@ -102,7 +102,14 @@ localterm session new [--cwd <path>] [--cmd <command>] [--name <t>] [--cols N] [
 localterm session attach <id>          # open a browser tab at <surface>/?sid=<id>
 localterm session kill <id>
 localterm session send-keys <id> '<keys>'   # \n = Enter, \xHH = control byte
-localterm session capture <id> [--lines N] [--json]
+localterm session press <id> <keys...>      # named keys: F2, Ctrl-C, Escape : w q Enter
+localterm session capture <id> [--lines N] [--png -o file] [--json]
+localterm session wait <id> --text <s> | --regex <p> | --idle-ms N [--timeout s] [--json]
+localterm session mouse click <id> --col N --row N | --on-text <s> [--button left|middle|right] [--clicks N]
+localterm session mouse drag <id> --from-col N --from-row N --to-col N --to-row N
+localterm session mouse move <id> --col N --row N
+localterm session mouse scroll <id> up|down [--amount N]
+localterm session mouse state <id>
 localterm session resize <id> --cols N --rows N
 localterm session rename <id> <name>
 localterm session pin <id>
@@ -242,3 +249,121 @@ it surfaces a shell-side failure as `{ "exitCode": <nonzero>, ... }`.
    surface a clear "daemon not running" message if `GET /api/health` fails.
 6. **Clean up pinned sessions** you created (`DELETE /api/sessions/:id`) — they
    don't self-reap. A leaked pinned session holds a slot until the cap.
+
+## terminal-use parity: press, wait, screenshots, mouse
+
+Built on the insight that the daemon's existing CDP socket (the one `localterm
+start` opened for background-tab automation) plus the tmux-parity surface above
+compose with no new deps. The browser (already a hard dep for the viewer) is the
+PNG rasterizer; xterm.js (already speaking SGR mouse natively) is the mouse
+encoder; the headless capture renderer is the render-landed source of truth and
+the no-browser fallback. Every CDP call reuses the daemon's one persistent
+socket — no second connection, no per-call reconnect.
+
+### press (named keys)
+
+`send-keys` for humans: `press F2` / `press Ctrl-C` / `press Escape : w q Enter`
+instead of `send-keys '\x1bOQ'`. Space-separated tokens; a known name maps to its
+xterm bytes, an unknown token passes through as literal text so `press hello`
+types "hello". Same route as send-keys with `named:true`.
+
+```bash
+curl -s -X POST "$BASE/sessions/<id>/input" \
+  -H 'content-type: application/json' \
+  -d '{ "data": "Escape : w q Enter", "named": true }'
+
+localterm session press <id> Escape : w q Enter
+localterm session press <id> Ctrl-C
+```
+
+### wait
+
+Block until the rendered pane matches a predicate or goes idle — the primitive
+for interactive apps so you don't poll. Tests the flushed capture-renderer grid
+(the same source `capture-pane` reads), not raw bytes. Resolves on match,
+timeout, or shell exit. Exits 0 on match, 1 on timeout (CLI).
+
+```bash
+curl -s -X POST "$BASE/sessions/<id>/wait" \
+  -H 'content-type: application/json' \
+  -d '{ "mode": "text", "text": "Complete", "timeoutMs": 10000 }'
+# → { "matched": true, "elapsedMs": 1234, "snapshot": "<rendered pane now>" }
+
+# regex + idle modes:
+curl -s -X POST "$BASE/sessions/<id>/wait" \
+  -H 'content-type: application/json' -d '{ "mode": "regex", "regex": "error:|done", "timeoutMs": 10000 }'
+curl -s -X POST "$BASE/sessions/<id>/wait" \
+  -H 'content-type: application/json' -d '{ "mode": "idle", "idleMs": 500, "timeoutMs": 10000 }'
+
+localterm session wait <id> --text "Complete" --timeout 10
+localterm session wait <id> --regex "error:|done" --timeout 10
+localterm session wait <id> --idle-ms 500 --timeout 10
+```
+
+### capture --png (screenshots)
+
+`capture-pane` rasterized to a PNG by the browser over the daemon's CDP socket.
+Reuses a live viewer tab for the session when one exists (zero spawn latency,
+render already current); otherwise opens an ephemeral background tab, waits for
+xterm to render the session's current state, `Page.captureScreenshot`s the
+`.xterm` element, and closes the tab. Pinned sessions (the REST default)
+survive between calls with no tab burning a slot. `?format=png` on the pane
+route; CLI `--png -o file`.
+
+```bash
+curl -s "$BASE/sessions/<id>/pane?format=png" -o shot.png
+# no browser reachable → 409 {"error":"no_browser"} (text capture-pane still works)
+
+localterm session capture <id> --png -o shot.png
+localterm session capture <id> --png --json   # → { "path": "pane-…png", "bytes": 12345 }
+```
+
+### mouse
+
+Drive a TUI with the mouse. Primary path dispatches a real event through the
+tab's xterm.js (SGR generated natively — exact drag/scroll/click-count
+semantics with no encoder) over the CDP socket; falls back to direct SGR-1006
+bytes written to the PTY when no browser is reachable (true-headless), gated on
+the session's mouse-tracking mode so bytes are never fed to an app that didn't
+enable mouse. `--on-text` resolves a label's coords on the server-side capture
+grid (no tab needed) so the fallback can also locate a label.
+
+```bash
+# by coords or by label
+curl -s -X POST "$BASE/sessions/<id>/mouse" \
+  -H 'content-type: application/json' \
+  -d '{ "action": "click", "col": 50, "row": 20 }'
+curl -s -X POST "$BASE/sessions/<id>/mouse" \
+  -H 'content-type: application/json' \
+  -d '{ "action": "click", "onText": "OK", "clicks": 2 }'
+# drag / move / scroll
+curl -s -X POST "$BASE/sessions/<id>/mouse" \
+  -H 'content-type: application/json' \
+  -d '{ "action": "drag", "fromCol": 10, "fromRow": 5, "toCol": 30, "toRow": 15 }'
+curl -s -X POST "$BASE/sessions/<id>/mouse" \
+  -H 'content-type: application/json' -d '{ "action": "scroll", "direction": "down", "amount": 5 }'
+# state: is mouse tracking on? + viewport size
+curl -s "$BASE/sessions/<id>/mouse/state"
+
+localterm session mouse click <id> --col 50 --row 20
+localterm session mouse click <id> --on-text OK --clicks 2
+localterm session mouse scroll <id> down --amount 5
+```
+
+Result: `{ "ok": bool, "mode": "cdp"|"sgr", "col": int|null, "row": int|null,
+"text": string|null, "reason": string|null }`. `mode` tells an agent whether the
+gesture reached a real xterm (`cdp`) or was synthesized as SGR bytes (`sgr`).
+`reason` is set on a miss (`text_not_found`, `mouse_disabled`, `no_browser`,
+`out_of_bounds`).
+
+### When to use what
+
+- **`exec`** for stateless command+output+exit.
+- **`send-keys`/`press`** to drive an interactive program keystroke by keystroke.
+- **`wait`** to block until a TUI reaches a state instead of polling.
+- **`capture --png`** when layout/color carries meaning a text read can't (a
+  dialog, a colored diff) and a browser is reachable; `capture-pane` (text)
+  otherwise — it works with no browser.
+- **`mouse`** for mouse-first TUIs (NetHack, `dialog` installers, `mc`) — open
+  a viewer tab once (`session attach <id>`) so every gesture reuses it instead
+  of opening ephemeral tabs per call.

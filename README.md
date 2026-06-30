@@ -63,7 +63,12 @@ localterm session new [--cwd <path>] [--cmd <c>] [--name <t>] [--no-pin] [--json
 localterm session attach <id>                    # open a browser tab onto a shell
 localterm session exec <id> "<cmd>" [--timeout 60] [--json]  # run in a persistent session
 localterm session send-keys <id> '<keys>'        # raw input (\n=Enter, \x03=Ctrl-C)
+localterm session press <id> <keys...>           # named keys: F2, Ctrl-C, Escape : w q Enter
 localterm session capture <id> [--lines 200] [--json]  # rendered screen (tmux capture-pane -p)
+localterm session capture <id> --png -o shot.png # screenshot via the browser (CDP)
+localterm session wait <id> --text "done" [--timeout 10] [--json]  # block until the pane matches
+localterm session mouse click <id> --on-text OK | --col N --row N  # drive mouse-first TUIs
+localterm session mouse drag|move|scroll <id> …   # drag/move/scroll gestures
 localterm session resize <id> --cols 120 --rows 40
 localterm session rename <id> <name>
 localterm session pin <id> | unpin <id>           # toggle idle-reap exemption
@@ -81,6 +86,11 @@ and AI agents — drive PTYs headlessly over the CLI and the matching REST API
 by default (exempt from the idle reap) so an agent's shell survives between
 calls; `exec` is synchronous — one call returns a command's captured output and
 exit code, the LLM-ergonomic upgrade over tmux's fire-and-forget `send-keys`.
+`press` sends named keys, `wait` blocks until the pane matches, `capture --png`
+screenshots the terminal via the daemon's existing CDP socket (the browser is
+the rasterizer — no new dep), and `mouse` drives mouse-first TUIs (NetHack,
+dialog installers, `mc`) through the viewer's xterm.js with an SGR fallback for
+true headless. See the `localterm session` skill reference for the full surface.
 
 State lives in `~/.localterm/` (PID, port, server log at `~/.localterm/server.log`).
 

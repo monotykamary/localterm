@@ -1,6 +1,6 @@
 ---
 name: localterm
-description: Drive the localterm daemon's HTTP API and CLI — schedule automations, set up event-driven triggers (git changes, shell notifications, directory changes), trigger runs, manage per-program secrets (Keychain-backed PATH shims), control PTYs like tmux (list, create, send-keys, capture-pane, resize, rename, kill), run synchronous exec commands with captured output + exit code, inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage automations, secrets, sessions, or run shell commands in localterm, or to script against the localterm server.
+description: Drive the localterm daemon's HTTP API and CLI — schedule automations, set up event-driven triggers (git changes, shell notifications, directory changes), trigger runs, manage per-program secrets (Keychain-backed PATH shims), control PTYs like tmux (list, create, send-keys, capture-pane, resize, rename, kill), run synchronous exec commands with captured output + exit code, send named keys (press), wait for a pane state, screenshot a pane to PNG (capture --png via the browser), drive TUIs with the mouse (click/drag/move/scroll, by coords or label), inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage automations, secrets, sessions, or run shell commands in localterm, or to script against the localterm server.
 ---
 
 # localterm API
@@ -261,7 +261,11 @@ localterm exec "pnpm test 2>&1 | tail -20" --cwd /Users/me/project --timeout 60 
 localterm session new --cwd /Users/me/project --json   # prints the session id
 localterm session exec <id> "cd src && pwd" --json
 localterm session send-keys <id> 'ls\n'                # \n=Enter, \x03=Ctrl-C
+localterm session press <id> Escape : w q Enter      # named keys (F2, Ctrl-C, literal text)
 localterm session capture <id> --lines 200
+localterm session capture <id> --png -o shot.png      # screenshot via the browser (CDP)
+localterm session wait <id> --text "done" --timeout 10  # block until the pane matches
+localterm session mouse click <id> --on-text OK        # drive mouse-first TUIs (CDP or SGR fallback)
 localterm session attach <id>                          # open a browser tab onto it
 localterm session ls [--json] | kill <id> | rename <id> <name> | pin <id> | unpin <id>
 ```

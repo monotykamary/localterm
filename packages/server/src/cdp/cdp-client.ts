@@ -251,17 +251,19 @@ export class CdpClient {
     method: string,
     params: Record<string, unknown>,
     sessionId?: string,
+    timeoutMs?: number,
   ): Promise<unknown> {
     const ws = this.ws;
     if (!ws || ws.readyState !== WS_OPEN) {
       return Promise.reject(new Error("CDP not connected"));
     }
     const id = this.nextId++;
+    const deadline = timeoutMs ?? this.callTimeoutMs;
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`CDP call timed out after ${this.callTimeoutMs}ms`));
-      }, this.callTimeoutMs);
+        reject(new Error(`CDP call timed out after ${deadline}ms`));
+      }, deadline);
       this.pending.set(id, {
         resolve: (value) => {
           clearTimeout(timer);
@@ -377,6 +379,150 @@ export class CdpClient {
    */
   findTargetIdForToken(token: string): string | undefined {
     return this.tokenToTargetId.get(token);
+  }
+
+  /**
+   * Find an existing page-type target whose URL passes `predicate` — used to
+   * reuse a live viewer tab for screenshot/mouse instead of opening an
+   * ephemeral one (zero spawn latency, render already current). Calls
+   * `Target.getTargets` over the existing socket; returns the first matching
+   * targetId or null. Never throws: a dropped socket or empty list yields null.
+   */
+  async findTargetByUrl(predicate: (url: string) => boolean): Promise<string | null> {
+    try {
+      await this.connect();
+    } catch {
+      return null;
+    }
+    try {
+      const result = (await this.call("Target.getTargets", {})) as {
+        targetInfos?: Array<{ type?: string; targetId?: string; url?: string }>;
+      };
+      const targets = result?.targetInfos ?? [];
+      for (const target of targets) {
+        if (
+          target.type === "page" &&
+          typeof target.targetId === "string" &&
+          typeof target.url === "string" &&
+          predicate(target.url)
+        ) {
+          return target.targetId;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Attach to `targetId` and return the CDP sessionId for subsequent
+   * session-scoped calls (evaluateInSession/captureScreenshotInSession). Used
+   * by screenshot/mouse to attach once and poll cheaply instead of
+   * re-attaching on every render-landed probe. Returns null on attach failure.
+   */
+  async attachSession(targetId: string): Promise<string | null> {
+    try {
+      const attached = (await this.call("Target.attachToTarget", { targetId, flatten: true })) as {
+        sessionId?: string;
+      };
+      return attached?.sessionId ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * `Runtime.evaluate` against a sessionId from `attachSession`, returning the
+   * value by JSON value (or null for undefined/a thrown error). Cheap: one
+   * round-trip, no re-attach. Used by the render-landed poll loop.
+   */
+  async evaluateInSession(
+    sessionId: string,
+    expression: string,
+    timeoutMs?: number,
+  ): Promise<unknown> {
+    try {
+      const result = (await this.call(
+        "Runtime.evaluate",
+        { expression, returnByValue: true },
+        sessionId,
+        timeoutMs,
+      )) as { result?: { value?: unknown } };
+      return result?.result?.value ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Attach to `targetId`, enable the Page domain, and `Runtime.evaluate` an
+   * expression, returning its JSON value (or null for undefined/a thrown
+   * error). One-shot convenience for a single read (mouse cell metrics, a
+   * single render-seq check) where re-attaching is acceptable. Never throws.
+   */
+  async evaluate(targetId: string, expression: string, timeoutMs?: number): Promise<unknown> {
+    const sessionId = await this.attachSession(targetId);
+    if (!sessionId) return null;
+    try {
+      await this.call("Page.enable", {}, sessionId, timeoutMs);
+    } catch {
+      /* page domain optional for a plain evaluate */
+    }
+    return this.evaluateInSession(sessionId, expression, timeoutMs);
+  }
+
+  /**
+   * `Page.captureScreenshot` against a pre-attached sessionId (from
+   * attachSession), clipped to `clip` ({x,y,width,height} in CSS px) or the
+   * full viewport when omitted. Returns the PNG as a Node Buffer, or null on
+   * failure. Reuses the existing socket; the browser (already a hard dep for
+   * the viewer) is the rasterizer, so there is no new image dependency.
+   */
+  async captureScreenshotInSession(
+    sessionId: string,
+    clip?: { x: number; y: number; width: number; height: number },
+  ): Promise<Buffer | null> {
+    try {
+      const params: Record<string, unknown> = { format: "png" };
+      if (clip) params.clip = { ...clip, scale: 1 };
+      const result = (await this.call("Page.captureScreenshot", params, sessionId)) as {
+        data?: string;
+      };
+      return result?.data ? Buffer.from(result.data, "base64") : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Dispatch a sequence of `Input.dispatchMouseEvent` calls against a
+   * pre-attached sessionId so the page's own xterm.js — which speaks SGR mouse
+   * natively — generates the sequence, avoiding a from-scratch encoder for the
+   * browser case. The caller composes presses/releases/moves/wheels from
+   * already-resolved CSS-pixel coords and a button name.
+   */
+  async dispatchMouseEventsInSession(
+    sessionId: string,
+    events: Array<{
+      type: "mousePressed" | "mouseReleased" | "mouseMoved" | "mouseWheel";
+      x: number;
+      y: number;
+      button?: "left" | "middle" | "right" | "none";
+      buttons?: number;
+      clickCount?: number;
+      deltaX?: number;
+      deltaY?: number;
+    }>,
+  ): Promise<void> {
+    for (const event of events) {
+      try {
+        await this.call("Input.dispatchMouseEvent", event, sessionId);
+      } catch {
+        /* tab closed mid-sequence; the gesture is best-effort */
+        return;
+      }
+    }
   }
 
   /**

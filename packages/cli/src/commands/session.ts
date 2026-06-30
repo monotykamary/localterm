@@ -1,4 +1,5 @@
 import kleur from "kleur";
+import { writeFile } from "node:fs/promises";
 import open from "open";
 import { daemonBaseUrl, reportApiError, reportDaemonDown } from "../utils/daemon-api.js";
 import { resolveDaemonUrl } from "../utils/portless.js";
@@ -218,12 +219,33 @@ const runSendKeys = async (id: string, keys: string): Promise<void> => {
   console.log(kleur.green(`✓ sent ${data.length} byte(s) to ${shortId(id)}`));
 };
 
-// `localterm session capture <id> [--lines N] [--json]` — the rendered screen
-// as clean text (ANSI processed). `--json` wraps it as `{"text": "..."}`.
+// `localterm session capture <id> [--lines N] [--png -o file] [--json]` — the
+// rendered screen as clean text (ANSI processed), or a PNG screenshot of the
+// terminal rasterized by the browser over the daemon's CDP socket. `--json`
+// wraps text as `{"text":"..."}` (or `{"path","bytes"}` for --png).
 const runCapture = async (
   id: string,
-  options: { lines?: number; json: boolean },
+  options: { lines?: number; png?: boolean; output?: string; json: boolean },
 ): Promise<void> => {
+  if (options.png) {
+    const params = new URLSearchParams({ format: "png" });
+    if (options.lines) params.set("lines", String(options.lines));
+    const response = await fetchOrReport(
+      `/sessions/${encodeURIComponent(id)}/pane?${params.toString()}`,
+      {},
+    );
+    if (!response) return;
+    if (!response.ok) return;
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const file = options.output ?? `pane-${id.slice(0, 8)}-${Date.now()}.png`;
+    await writeFile(file, buffer);
+    if (options.json) {
+      console.log(JSON.stringify({ path: file, bytes: buffer.length }));
+    } else {
+      console.log(kleur.green(`✓ wrote ${file} (${buffer.length} bytes)`));
+    }
+    return;
+  }
   const query = options.lines ? `?lines=${options.lines}` : "";
   const response = await fetchOrReport(`/sessions/${encodeURIComponent(id)}/pane${query}`, {});
   if (!response) return;
@@ -234,6 +256,69 @@ const runCapture = async (
   }
   process.stdout.write(body.text);
   if (body.text && !body.text.endsWith("\n")) process.stdout.write("\n");
+};
+
+// `localterm session press <id> <keys...>` — send named keys (F2, Enter,
+// Ctrl-C, Escape : w q Enter, or literal text). Resolves server-side to xterm
+// bytes over the same /input route.
+const runPress = async (id: string, keys: string[]): Promise<void> => {
+  const data = keys.join(" ");
+  const response = await fetchOrReport(`/sessions/${encodeURIComponent(id)}/input`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ data, named: true }),
+  });
+  if (!response) return;
+  console.log(kleur.green(`✓ pressed ${kleur.dim(JSON.stringify(data))} on ${shortId(id)}`));
+};
+
+interface WaitResult {
+  matched: boolean;
+  elapsedMs: number;
+  snapshot: string;
+}
+
+// `localterm session wait <id> ...` — block until the pane matches --text /
+// --regex, or goes --idle for --idle-ms. Exits 0 on match, 1 on timeout.
+const runWait = async (
+  id: string,
+  options: {
+    text?: string;
+    regex?: string;
+    idleMs?: number;
+    timeout?: number;
+    caseSensitive?: boolean;
+    json: boolean;
+  },
+): Promise<void> => {
+  const body: Record<string, unknown> = {};
+  if (options.text !== undefined) {
+    body.mode = "text";
+    body.text = options.text;
+    if (options.caseSensitive) body.caseSensitive = true;
+  } else if (options.regex !== undefined) {
+    body.mode = "regex";
+    body.regex = options.regex;
+  } else {
+    body.mode = "idle";
+    if (options.idleMs !== undefined) body.idleMs = options.idleMs;
+  }
+  if (options.timeout) body.timeoutMs = secondsToMs(options.timeout);
+  const response = await fetchOrReport(`/sessions/${encodeURIComponent(id)}/wait`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response) return;
+  const result = (await response.json()) as WaitResult;
+  if (options.json) {
+    console.log(JSON.stringify(result));
+  } else if (result.matched) {
+    console.log(kleur.green(`✓ matched in ${result.elapsedMs}ms`));
+  } else {
+    console.log(kleur.yellow(`✗ timed out after ${result.elapsedMs}ms`));
+  }
+  process.exitCode = result.matched ? 0 : 1;
 };
 
 // `localterm session exec <id> <command> [--timeout s] [--json]` — run a single
@@ -335,6 +420,147 @@ const runAttach = async (id: string): Promise<void> => {
 
 const parseInteger = (raw: string): number => Number.parseInt(raw, 10);
 
+interface MouseResult {
+  ok: boolean;
+  mode: "cdp" | "sgr";
+  col: number | null;
+  row: number | null;
+  text: string | null;
+  reason: string | null;
+}
+
+interface MouseState {
+  enabled: boolean;
+  cols: number;
+  rows: number;
+}
+
+const renderMouseResult = (id: string, result: MouseResult, json: boolean): void => {
+  if (json) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  if (!result.ok) {
+    const where = result.col !== null ? ` at (${result.col},${result.row})` : "";
+    const label = result.text ? ` ${kleur.cyan(result.text)}` : "";
+    console.error(
+      kleur.red(`✗ mouse failed:${where}${label} — ${result.reason ?? "unknown"} [${result.mode}]`),
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const at = result.col !== null ? ` (${result.col},${result.row})` : "";
+  const label = result.text ? ` ${kleur.cyan(result.text)}` : "";
+  console.log(kleur.green(`✓ mouse [${result.mode}]${at}${label} on ${shortId(id)}`));
+};
+
+const parseButton = (raw: string): "left" | "middle" | "right" => {
+  if (raw === "middle" || raw === "right") return raw;
+  return "left";
+};
+
+// `localterm session mouse click <id>` — by --col/--row or --on-text.
+const runMouseClick = async (
+  id: string,
+  options: {
+    col?: number;
+    row?: number;
+    onText?: string;
+    button: string;
+    clicks?: number;
+    json: boolean;
+  },
+): Promise<void> => {
+  const body: Record<string, unknown> = { action: "click", button: parseButton(options.button) };
+  if (options.onText !== undefined) body.onText = options.onText;
+  else {
+    body.col = options.col ?? 0;
+    body.row = options.row ?? 0;
+  }
+  if (options.clicks !== undefined) body.clicks = options.clicks;
+  const response = await fetchOrReport(`/sessions/${encodeURIComponent(id)}/mouse`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response) return;
+  renderMouseResult(id, (await response.json()) as MouseResult, options.json);
+};
+
+// `localterm session mouse drag <id>` — drag from --from to --to.
+const runMouseDrag = async (
+  id: string,
+  options: {
+    fromCol: number;
+    fromRow: number;
+    toCol: number;
+    toRow: number;
+    button: string;
+    json: boolean;
+  },
+): Promise<void> => {
+  const response = await fetchOrReport(`/sessions/${encodeURIComponent(id)}/mouse`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      action: "drag",
+      fromCol: options.fromCol,
+      fromRow: options.fromRow,
+      toCol: options.toCol,
+      toRow: options.toRow,
+      button: parseButton(options.button),
+    }),
+  });
+  if (!response) return;
+  renderMouseResult(id, (await response.json()) as MouseResult, options.json);
+};
+
+// `localterm session mouse move <id>` — move the cursor.
+const runMouseMove = async (
+  id: string,
+  options: { col: number; row: number; json: boolean },
+): Promise<void> => {
+  const response = await fetchOrReport(`/sessions/${encodeURIComponent(id)}/mouse`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "move", col: options.col, row: options.row }),
+  });
+  if (!response) return;
+  renderMouseResult(id, (await response.json()) as MouseResult, options.json);
+};
+
+// `localterm session mouse scroll <id> up|down`.
+const runMouseScroll = async (
+  id: string,
+  direction: string,
+  options: { amount?: number; col?: number; row?: number; json: boolean },
+): Promise<void> => {
+  const body: Record<string, unknown> = {
+    action: "scroll",
+    direction: direction === "up" ? "up" : "down",
+  };
+  if (options.amount !== undefined) body.amount = options.amount;
+  if (options.col !== undefined) body.col = options.col;
+  if (options.row !== undefined) body.row = options.row;
+  const response = await fetchOrReport(`/sessions/${encodeURIComponent(id)}/mouse`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response) return;
+  renderMouseResult(id, (await response.json()) as MouseResult, options.json);
+};
+
+// `localterm session mouse state <id>` — mouse tracking + viewport size.
+const runMouseState = async (id: string): Promise<void> => {
+  const response = await fetchOrReport(`/sessions/${encodeURIComponent(id)}/mouse/state`, {});
+  if (!response) return;
+  const state = (await response.json()) as MouseState;
+  console.log(
+    `${kleur.green("✓")} mouse ${state.enabled ? kleur.green("enabled") : kleur.dim("disabled")} · ${state.cols}×${state.rows}`,
+  );
+};
+
 export const runSessionList = runList;
 export const runSessionNew = runNew;
 export const runSessionKill = runKill;
@@ -345,5 +571,12 @@ export const runSessionResize = runResize;
 export const runSessionRename = runRename;
 export const runSessionPin = runSetPin;
 export const runSessionAttach = runAttach;
+export const runSessionPress = runPress;
+export const runSessionWait = runWait;
+export const runSessionMouseClick = runMouseClick;
+export const runSessionMouseDrag = runMouseDrag;
+export const runSessionMouseMove = runMouseMove;
+export const runSessionMouseScroll = runMouseScroll;
+export const runSessionMouseState = runMouseState;
 export const runOneShotExec = runOneShotExecImpl;
 export { parseInteger };

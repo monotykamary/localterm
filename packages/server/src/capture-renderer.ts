@@ -122,6 +122,26 @@ export class CaptureRenderer {
     return rows.join("\n");
   }
 
+  // Find the (col, row) of the bottom-most visible-row occurrence of `needle`
+  // as a substring, searching the viewport from the bottom up. `row` is
+  // viewport-relative (0 = top of the visible area), the coordinate system CDP
+  // `Input.dispatchMouseEvent` and SGR mouse use. Returns null when the text
+  // isn't on screen (scrolled out of the viewport) so `mouse --on-text` can
+  // report a miss instead of clicking a stale cell. Used by `session mouse` to
+  // resolve a label's position without a browser tab.
+  findTextInViewport(needle: string): { col: number; row: number } | null {
+    const buffer = this.terminal.buffer.active;
+    const base = buffer.baseY;
+    for (let row = this.terminal.rows - 1; row >= 0; row--) {
+      const line = buffer.getLine(base + row);
+      if (!line) continue;
+      const text = line.translateToString(true);
+      const col = text.indexOf(needle);
+      if (col >= 0) return { col, row };
+    }
+    return null;
+  }
+
   get cols(): number {
     return this.terminal.cols;
   }

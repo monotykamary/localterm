@@ -22,6 +22,7 @@ import { CdpClient } from "./cdp/cdp-client.js";
 import type { DetectedBrowser } from "./cdp/detect-chromium.js";
 import { detectWithExplicitPort } from "./cdp/discover-explicit-endpoint.js";
 import { DaemonConfigStore } from "./daemon-config-store.js";
+import { z } from "zod";
 import {
   AUTOMATION_EVENT_DEBOUNCE_MS,
   AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
@@ -47,6 +48,8 @@ import {
   SECRETS_SHIMS_DIRNAME,
   SERVER_STOP_GRACE_MS,
   SESSION_ID_QUERY_PARAM,
+  SESSION_ACTIVITY_WINDOW_MS,
+  WAIT_DEFAULT_TIMEOUT_MS,
   WS_BACKPRESSURE_THRESHOLD_BYTES,
   WS_CLOSE_BACKPRESSURE,
   WS_CLOSE_CAPACITY_REACHED,
@@ -104,6 +107,8 @@ import {
   updateSessionInputSchema,
   updateWorktreeConfigInputSchema,
   worktreeIncludeFileInputSchema,
+  waitInputSchema,
+  mouseInputSchema,
 } from "./schemas.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
 import {
@@ -111,7 +116,10 @@ import {
   type AutomationContext,
   type ExecResult,
   type ManagedSession,
+  type WaitPredicate,
 } from "./session-manager.js";
+import { capturePanePng, sendMouse, type MouseAction } from "./session-automation.js";
+import { encodeClick, encodeDrag, encodeMove, encodeScroll } from "./utils/sgr-mouse.js";
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 import { resolveStaticAsset } from "./static-resolver.js";
 import { resolveImageAsset } from "./utils/resolve-image-asset.js";
@@ -326,6 +334,11 @@ interface DaemonContext {
   // the createServer-scoped `cdpPort` let.
   getCdpPort: () => number | null;
   applyCdpPort: (port: number | null) => number | null;
+  // Build the viewer-tab URL for a session (`?sid=<id>` at the daemon's local
+  // origin) — used by CDP automation (capture-pane --png, mouse) to open an
+  // ephemeral tab or match an existing one. Mirrors the run-tab URL so a
+  // flapping `tailscale serve` never fails the automation tab load.
+  buildTabUrl: (sessionId: string) => string;
   // Live grace-window access for GET/PUT /api/config (seconds; `null` = never
   // reap). `getGraceSeconds` reads the persisted value; `applyGraceSeconds`
   // persists it and re-arms already-dormant sessions. Routed through ctx for
@@ -342,6 +355,67 @@ interface DaemonContext {
     trigger: "schedule" | "manual" | "watch" | "event" | "webhook",
   ) => PendingAutomationRun | null;
 }
+
+type ParsedWait = z.infer<typeof waitInputSchema>;
+type ParsedMouse = z.infer<typeof mouseInputSchema>;
+
+// Build the predicate the session manager polls against the flushed capture
+// renderer. Text matches substring (case-insensitive by default); regex compiles
+// (a bad pattern yields invalid_body); idle returns a no-op test since the
+// manager resolves it from output recency, not the pane text.
+const buildWaitPredicate = (input: ParsedWait): WaitPredicate | null => {
+  if (input.mode === "text") {
+    const needle = input.text;
+    const caseSensitive = input.caseSensitive ?? false;
+    return {
+      kind: "text",
+      test: caseSensitive
+        ? (text) => text.includes(needle)
+        : (text) => text.toLowerCase().includes(needle.toLowerCase()),
+    };
+  }
+  if (input.mode === "regex") {
+    let pattern: RegExp;
+    try {
+      pattern = new RegExp(input.regex);
+    } catch {
+      return null;
+    }
+    return { kind: "regex", test: (text) => pattern.test(text) };
+  }
+  return { kind: "idle", test: () => false };
+};
+
+// Normalize the parsed mouse schema into the MouseAction union the automation
+// layer consumes, applying defaults (left button, 1 click, 3 scroll lines).
+const normalizeMouseAction = (input: ParsedMouse): MouseAction | null => {
+  if (input.action === "click") {
+    const button = input.button ?? "left";
+    const clicks = input.clicks ?? 1;
+    if (input.onText !== undefined)
+      return { action: "click", onText: input.onText, button, clicks };
+    if (input.col !== undefined && input.row !== undefined)
+      return { action: "click", col: input.col, row: input.row, button, clicks };
+    return null;
+  }
+  if (input.action === "drag")
+    return {
+      action: "drag",
+      fromCol: input.fromCol,
+      fromRow: input.fromRow,
+      toCol: input.toCol,
+      toRow: input.toRow,
+      button: input.button ?? "left",
+    };
+  if (input.action === "move") return { action: "move", col: input.col, row: input.row };
+  return {
+    action: "scroll",
+    direction: input.direction,
+    amount: input.amount ?? 3,
+    col: input.col ?? 0,
+    row: input.row ?? 0,
+  };
+};
 
 const buildApiRoutes = (ctx: DaemonContext): Hono => {
   const api = new Hono();
@@ -369,7 +443,36 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     getGraceSeconds,
     applyGraceSeconds,
     connectCdpNow,
+    buildTabUrl,
   } = ctx;
+
+  // Headless SGR-1006 fallback for `mouse` when no CDP tab is reachable:
+  // encode the gesture as SGR bytes and write them straight to the PTY. Closes
+  // over `registry` so the automation layer stays CDP-agnostic. Coords arrive
+  // 0-indexed (viewport cells); SGR is 1-indexed.
+  const writeSgrMouseFallback = (
+    id: string,
+    action: MouseAction,
+    col: number,
+    row: number,
+  ): boolean => {
+    const c = col + 1;
+    const r = row + 1;
+    const button = action.action === "click" || action.action === "drag" ? action.button : "left";
+    let bytes: string;
+    if (action.action === "click") bytes = encodeClick(c, r, button, action.clicks);
+    else if (action.action === "drag")
+      bytes = encodeDrag(
+        action.fromCol + 1,
+        action.fromRow + 1,
+        action.toCol + 1,
+        action.toRow + 1,
+        button,
+      );
+    else if (action.action === "move") bytes = encodeMove(c, r);
+    else bytes = encodeScroll(c, r, action.direction, action.amount);
+    return registry.writeInputById(id, bytes);
+  };
   api.get("/health", (context) =>
     context.json({
       ok: true,
@@ -452,14 +555,18 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     return context.json({ session });
   });
 
-  // send-keys: write raw input to a session by id. Bytes go straight to the
-  // PTY (no pending handshake — there's no WebSocket client). To execute a
+  // send-keys / press: write input to a session by id. Bytes go straight to
+  // the PTY (no pending handshake — there's no WebSocket client). To execute a
   // command, include a trailing newline; for a blocking command+output+exit
-  // in one call, use `exec` instead.
+  // in one call, use `exec` instead. `named:true` resolves space-separated key
+  // names (`F2`, `Ctrl-C`, literal text) to xterm bytes — the `press` path.
   api.post("/sessions/:id/input", async (context) => {
     const parsed = sessionInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
-    const written = registry.writeInputById(context.req.param("id"), parsed.data.data);
+    const id = context.req.param("id");
+    const written = parsed.data.named
+      ? registry.pressKeysById(id, parsed.data.data)
+      : registry.writeInputById(id, parsed.data.data);
     if (!written) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json({ ok: true });
   });
@@ -476,18 +583,77 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     return context.json({ ok: true });
   });
 
-  // capture-pane: the session's rendered screen as clean text (ANSI processed by
-  // the headless emulator). `lines` defaults to the viewport and may extend into
-  // scrollback. Returns the tmux `capture-pane -p` equivalent.
+  // capture-pane: the session's rendered screen. `format=png` returns the
+  // terminal rasterized to a PNG by the browser over the daemon's existing
+  // CDP socket (the viewer is reused, or an ephemeral background tab is
+  // opened and closed) — no new image dependency. Text (the default) is the
+  // headless capture renderer's grid, which works with no browser at all.
   api.get("/sessions/:id/pane", async (context) => {
+    const id = context.req.param("id");
+    const format = context.req.query("format");
+    if (format === "png") {
+      const png = await capturePanePng({ cdpClient, buildTabUrl }, registry, id);
+      if (!png) return context.json({ error: "no_browser" }, HTTP_STATUS_CONFLICT);
+      return new Response(png, { headers: { "content-type": "image/png" } });
+    }
     const linesParam = context.req.query("lines");
     const lines = linesParam ? Number(linesParam) : undefined;
     if (lines !== undefined && (!Number.isInteger(lines) || lines <= 0)) {
       return context.json({ error: "invalid_lines" }, HTTP_STATUS_BAD_REQUEST);
     }
-    const text = await registry.capturePane(context.req.param("id"), lines);
+    const text = await registry.capturePane(id, lines);
     if (text === null) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json({ text });
+  });
+
+  // wait: block until the session's rendered pane matches a text/regex
+  // predicate or goes idle for a window. The blocking `wait` primitive for
+  // interactive apps so an agent doesn't poll. Reuses the capture renderer as
+  // the source of truth (flushed per frame). Exits on match, timeout, or exit.
+  api.post("/sessions/:id/wait", async (context) => {
+    const parsed = waitInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const id = context.req.param("id");
+    const timeoutMs = parsed.data.timeoutMs ?? WAIT_DEFAULT_TIMEOUT_MS;
+    const predicate = buildWaitPredicate(parsed.data);
+    if (!predicate) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const idleMs =
+      parsed.data.mode === "idle" ? (parsed.data.idleMs ?? SESSION_ACTIVITY_WINDOW_MS) : undefined;
+    const result = await registry.waitFor(id, predicate, timeoutMs, idleMs);
+    if (!result) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json(result);
+  });
+
+  // mouse: drive a TUI with the mouse. Dispatches a real event through the
+  // tab's xterm.js (SGR generated natively) over the existing CDP socket, or
+  // falls back to direct SGR-1006 bytes when no browser is reachable.
+  api.post("/sessions/:id/mouse", async (context) => {
+    const parsed = mouseInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const id = context.req.param("id");
+    const action = normalizeMouseAction(parsed.data);
+    if (!action) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const result = await sendMouse(
+      { cdpClient, buildTabUrl },
+      registry,
+      id,
+      action,
+      writeSgrMouseFallback,
+    );
+    return context.json(result);
+  });
+
+  // mouse state: whether the session's foreground app enabled mouse tracking
+  // (gates the SGR fallback) plus the viewport size.
+  api.get("/sessions/:id/mouse/state", (context) => {
+    const id = context.req.param("id");
+    const managed = registry.list().find((session) => session.id === id);
+    if (!managed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json({
+      enabled: registry.mouseEnabledFor(id),
+      cols: registry.sessionSizeFor(id).cols,
+      rows: registry.sessionSizeFor(id).rows,
+    });
   });
 
   // In-session exec: run a single command line inside a persistent session,
@@ -1675,6 +1841,13 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     getGraceSeconds,
     applyGraceSeconds,
     connectCdpNow,
+    buildTabUrl: (sessionId: string) => {
+      const url = new URL(
+        localOrigin ?? publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`,
+      );
+      url.searchParams.set(SESSION_ID_QUERY_PARAM, sessionId);
+      return url.toString();
+    },
   };
   const api = buildApiRoutes(ctx);
   app.route("/api", api);

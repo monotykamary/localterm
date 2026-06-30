@@ -97,6 +97,15 @@ export class Session extends EventEmitter<SessionEvents> {
   private readonly reportInitialCommandExit: boolean;
   private hasEmittedAutomationExit = false;
 
+  // Whether the PTY's foreground app enabled a mouse tracking mode (1000–1007).
+  // Gates the SGR-1006 fallback for `session mouse` when no CDP tab is
+  // available: writing mouse bytes into a session that didn't enable mouse
+  // would feed them to the app as typed text. xterm.js gates this itself when
+  // dispatching a real event over CDP.
+  get mouseEnabled(): boolean {
+    return this.modeState.mouseEnabled;
+  }
+
   constructor(input: SpawnPtyInput) {
     super();
     ensureSpawnHelperExecutable();

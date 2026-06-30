@@ -46,6 +46,7 @@ import {
   SESSION_GRACE_MIN_SECONDS,
   TCP_PORT_MAX,
   WORKTREE_CONFIG_FILE_VERSION,
+  WAIT_MAX_TIMEOUT_MS,
 } from "./constants.js";
 
 // Live state of the daemon's persistent CDP connection (browser tab control for
@@ -141,7 +142,16 @@ export const updateSessionInputSchema = z
   })
   .strict();
 
-export const sessionInputSchema = z.object({ data: z.string().max(MAX_INPUT_BYTES) }).strict();
+export const sessionInputSchema = z
+  .object({
+    data: z.string().max(MAX_INPUT_BYTES),
+    // When true, `data` is space-separated named keys (`F2`, `Escape`,
+    // `Ctrl-C`, literal text) resolved server-side to xterm bytes — the
+    // `localterm session press` path. An unknown token passes through as
+    // literal text so `press hello` types "hello".
+    named: z.boolean().optional(),
+  })
+  .strict();
 
 export const sessionResizeSchema = z
   .object({
@@ -181,6 +191,159 @@ export const execResultSchema = z
   .strict();
 
 export const capturePaneResponseSchema = z.object({ text: z.string() }).strict();
+
+// `wait` primitive: block until the rendered pane matches a predicate or goes
+// idle. `mode` discriminates the strategy. Text/regex test the flushed
+// capture-renderer pane (ANSI-processed); idle resolves once no output has
+// arrived for `idleMs`. Bounded by `timeoutMs` (default/ max in constants).
+export const waitInputSchema = z.discriminatedUnion("mode", [
+  z
+    .object({
+      mode: z.literal("text"),
+      text: z.string().min(1).max(MAX_INPUT_BYTES),
+      timeoutMs: z.number().int().min(1).max(WAIT_MAX_TIMEOUT_MS).optional(),
+      caseSensitive: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("regex"),
+      regex: z.string().min(1).max(MAX_INPUT_BYTES),
+      timeoutMs: z.number().int().min(1).max(WAIT_MAX_TIMEOUT_MS).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("idle"),
+      idleMs: z.number().int().min(50).max(5_000).optional(),
+      timeoutMs: z.number().int().min(1).max(WAIT_MAX_TIMEOUT_MS).optional(),
+    })
+    .strict(),
+]);
+
+export const waitResultSchema = z
+  .object({
+    matched: z.boolean(),
+    elapsedMs: z.number().int().nonnegative(),
+    snapshot: z.string(),
+  })
+  .strict();
+
+// `mouse` primitive: drive a TUI with the mouse. Primary path dispatches a
+// real event through the tab's xterm.js (SGR generated natively); falls back to
+// direct SGR-1006 bytes when no browser is reachable. `action` discriminates;
+// `click` takes either explicit col/row or `onText` (resolved on the server
+// grid). Coords are 0-indexed viewport cells (the SGR/CDP layer normalizes).
+const mouseButtonSchema = z.enum(["left", "middle", "right"]);
+
+export const mouseInputSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("click"),
+      col: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_COLS - 1)
+        .optional(),
+      row: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_ROWS - 1)
+        .optional(),
+      onText: z.string().min(1).max(MAX_INPUT_BYTES).optional(),
+      button: mouseButtonSchema.optional(),
+      clicks: z.number().int().min(1).max(3).optional(),
+    })
+    .strict()
+    .refine((v) => (v.col !== undefined && v.row !== undefined) || v.onText !== undefined, {
+      message: "click requires col+row or onText",
+    }),
+  z
+    .object({
+      action: z.literal("drag"),
+      fromCol: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_COLS - 1),
+      fromRow: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_ROWS - 1),
+      toCol: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_COLS - 1),
+      toRow: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_ROWS - 1),
+      button: mouseButtonSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("move"),
+      col: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_COLS - 1),
+      row: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_ROWS - 1),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("scroll"),
+      direction: z.enum(["up", "down"]),
+      amount: z.number().int().min(1).max(1000).optional(),
+      col: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_COLS - 1)
+        .optional(),
+      row: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_ROWS - 1)
+        .optional(),
+    })
+    .strict(),
+]);
+
+export const mouseResultSchema = z
+  .object({
+    ok: z.boolean(),
+    mode: z.enum(["cdp", "sgr"]),
+    col: z.number().int().nullable(),
+    row: z.number().int().nullable(),
+    text: z.string().nullable(),
+    reason: z.string().nullable(),
+  })
+  .strict();
+
+export const mouseStateSchema = z
+  .object({
+    enabled: z.boolean(),
+    cols: z.number().int().positive(),
+    rows: z.number().int().positive(),
+  })
+  .strict();
+
+export const capturePngResponseSchema = z
+  .object({ bytes: z.number().int().nonnegative() })
+  .strict();
 
 // One row in the ports modal: a TCP listening socket owned by a process
 // descended from a localterm session shell (a dev server run inside a tab).

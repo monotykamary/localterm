@@ -17,6 +17,7 @@ import {
   SESSION_ACTIVITY_WINDOW_MS,
   SESSION_GRACE_MS,
   SESSION_PENDING_PROMOTE_TIMEOUT_MS,
+  WAIT_IDLE_POLL_INTERVAL_MS,
   WS_BACKPRESSURE_THRESHOLD_BYTES,
   WS_CLOSE_BACKPRESSURE,
   WS_OUTBOUND_DRAIN_POLL_MS,
@@ -33,6 +34,7 @@ import { GitMetadataCoordinator } from "./git-metadata-coordinator.js";
 import { Session } from "./session.js";
 import type { SessionEventName } from "./session-event-manager.js";
 import type { GitBranchPr, ServerToClientMessage, SpawnPtyInput } from "./types.js";
+import { resolveNamedKeys } from "./utils/named-keys.js";
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 
 export interface AutomationContext {
@@ -59,6 +61,21 @@ export interface ExecResult {
 export interface ExecOptions {
   timeoutMs?: number;
   outputLimitBytes?: number;
+}
+
+// Predicate for the `wait` primitive. `kind` discriminates the match strategy so
+// the manager can special-case idle (poll recency) vs text/regex (flush + test
+// on every output frame). `test` runs against the flushed capture-renderer
+// pane text (ANSI-processed, the same grid `capture-pane` returns).
+export interface WaitPredicate {
+  kind: "text" | "regex" | "idle";
+  test: (text: string) => boolean;
+}
+
+export interface WaitResult {
+  matched: boolean;
+  elapsedMs: number;
+  snapshot: string;
 }
 
 // Favicon-equivalent activity state, computed server-side from output recency
@@ -594,6 +611,121 @@ export class SessionManager {
     if (!managed) return false;
     managed.session.setTitle(title);
     return true;
+  }
+
+  // Resolve space-separated named keys (`F2`, `Escape`, `Ctrl-C`, literal text)
+  // to xterm bytes and write them to a session — the `localterm session press`
+  // path. Unknown tokens pass through as literal text so `press hello` types
+  // "hello". Returns false for an unknown/exited session.
+  pressKeysById(id: string, input: string): boolean {
+    const managed = this.sessions.get(id);
+    if (!managed || managed.session.isExited) return false;
+    const data = resolveNamedKeys(input);
+    if (!data) return false;
+    managed.session.write(data);
+    return true;
+  }
+
+  // Wait primitive: block until the session's rendered pane matches a text /
+  // regex predicate or goes idle for `idleMs`, bounded by `timeoutMs`. Reuses
+  // the tmux-parity capture renderer (flushed per frame) as the source of
+  // truth — the same grid `capture-pane` and `exec` read — so the predicate
+  // tests clean, ANSI-processed text, not raw bytes. Resolves `{matched,
+  // elapsedMs, snapshot}`. Returns null for an unknown/exited session.
+  async waitFor(
+    id: string,
+    predicate: WaitPredicate,
+    timeoutMs: number,
+    idleMs?: number,
+  ): Promise<WaitResult | null> {
+    const managed = this.sessions.get(id);
+    if (!managed || managed.session.isExited) return null;
+    const session = managed.session;
+    const startedAt = Date.now();
+    let resolved = false;
+    let lastChangeAt = Date.now();
+    let timeoutHandle: NodeJS.Timeout | null = null;
+    let idleTimer: NodeJS.Timeout | null = null;
+    return new Promise<WaitResult>((resolve) => {
+      const finalize = async (matched: boolean) => {
+        if (resolved) return;
+        resolved = true;
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (idleTimer) clearInterval(idleTimer);
+        session.off("output", onOutput);
+        session.off("exit", onExit);
+        const snapshot = await this.capturePane(id).catch(() => "");
+        resolve({
+          matched,
+          elapsedMs: Date.now() - startedAt,
+          snapshot: snapshot ?? "",
+        });
+      };
+      const testPredicate = async (): Promise<boolean> => {
+        const renderer = await this.ensureCaptureRenderer(managed);
+        await renderer.flush();
+        return predicate.test(renderer.capture());
+      };
+      const onOutput = (): void => {
+        lastChangeAt = Date.now();
+        void testPredicate().then((hit) => {
+          if (hit && !resolved) finalize(true);
+        });
+      };
+      const onExit = (): void => {
+        void finalize(false);
+      };
+      // Idle mode: resolve once no output has arrived for `idleMs`. The interval
+      // checks recency without forcing a renderer read each tick (the output
+      // listener already bumps lastChangeAt).
+      if (predicate.kind === "idle") {
+        idleTimer = setInterval(() => {
+          if (!resolved && Date.now() - lastChangeAt >= (idleMs ?? 0)) finalize(true);
+        }, WAIT_IDLE_POLL_INTERVAL_MS);
+        idleTimer.unref?.();
+      } else {
+        // Text/regex: test once up front in case the pane already matches, then
+        // react to output events.
+        void testPredicate().then((hit) => {
+          if (hit && !resolved) finalize(true);
+        });
+      }
+      session.on("output", onOutput);
+      session.on("exit", onExit);
+      timeoutHandle = setTimeout(() => finalize(false), timeoutMs);
+      timeoutHandle.unref?.();
+    });
+  }
+
+  // Resolve the (col, row) of a label on the session's visible viewport — the
+  // `mouse --on-text` coord source. Reads the capture renderer's grid (the same
+  // source `capture-pane` uses) so no browser tab is required to find the label.
+  // Returns null when the text isn't on screen.
+  async findTextInViewport(
+    id: string,
+    needle: string,
+  ): Promise<{ col: number; row: number } | null> {
+    const managed = this.sessions.get(id);
+    if (!managed || managed.session.isExited) return null;
+    const renderer = await this.ensureCaptureRenderer(managed);
+    await renderer.flush();
+    return renderer.findTextInViewport(needle);
+  }
+
+  // Whether the session's foreground app enabled a mouse tracking mode — gates
+  // the SGR-1006 fallback for `mouse` when no CDP tab is available.
+  mouseEnabledFor(id: string): boolean {
+    const managed = this.sessions.get(id);
+    return managed ? managed.session.mouseEnabled : false;
+  }
+
+  // The session's current PTY size (cols/rows), for the mouse-state endpoint
+  // and any coord-bounds check. Returns `{0,0}` for an unknown id.
+  sessionSizeFor(id: string): { cols: number; rows: number } {
+    const managed = this.sessions.get(id);
+    return managed
+      ? { cols: managed.session.cols, rows: managed.session.rows }
+      : { cols: 0, rows: 0 };
   }
 
   // Lazily create (and prime) a session's capture renderer. Fed the scrollback
