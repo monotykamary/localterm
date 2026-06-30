@@ -48,6 +48,8 @@ interface SettingsMenuHarnessProps {
   cdpConnecting?: boolean;
   onCdpPortChange?: (port: number | null) => void;
   onCdpConnect?: () => void;
+  initialGraceSeconds?: number | null;
+  onGraceSecondsChange?: (seconds: number | null) => void;
   onPaddingXChange?: (paddingX: number) => void;
   onPaddingYChange?: (paddingY: number) => void;
   onLigaturesEnabledChange?: (enabled: boolean) => void;
@@ -86,6 +88,8 @@ const renderSettingsMenu = ({
   cdpConnecting = false,
   onCdpPortChange = () => {},
   onCdpConnect = () => {},
+  initialGraceSeconds = null,
+  onGraceSecondsChange = () => {},
   onPaddingXChange = () => {},
   onPaddingYChange = () => {},
   onLigaturesEnabledChange = () => {},
@@ -127,6 +131,8 @@ const renderSettingsMenu = ({
         cdpConnecting={cdpConnecting}
         onCdpPortChange={onCdpPortChange}
         onCdpConnect={onCdpConnect}
+        graceSeconds={initialGraceSeconds}
+        onGraceSecondsChange={onGraceSecondsChange}
         paddingX={0}
         onPaddingXChange={onPaddingXChange}
         paddingY={0}
@@ -746,5 +752,74 @@ describe("SettingsMenu CDP port field", () => {
     const button = screen.getByLabelText("connect to CDP endpoint") as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     expect(button.textContent).toContain("Connecting…");
+  });
+});
+
+describe("SettingsMenu grace period field", () => {
+  it("renders the stored seconds in the input", () => {
+    renderSettingsMenu({ initialGraceSeconds: 45 });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("grace period in seconds") as HTMLInputElement;
+    expect(input.value).toBe("45");
+  });
+
+  it("shows the Off placeholder when no grace is set", () => {
+    renderSettingsMenu({ initialGraceSeconds: null });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("grace period in seconds") as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(input.placeholder).toBe("Off");
+  });
+
+  it("commits a valid value on blur", () => {
+    const onGraceSecondsChange = vi.fn();
+    renderSettingsMenu({ initialGraceSeconds: null, onGraceSecondsChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("grace period in seconds");
+    fireEvent.change(input, { target: { value: "120" } });
+    fireEvent.blur(input);
+
+    expect(onGraceSecondsChange).toHaveBeenCalledTimes(1);
+    expect(onGraceSecondsChange.mock.calls[0]?.[0]).toBe(120);
+  });
+
+  it("accepts 0 (reap idle immediately) as a valid value", () => {
+    const onGraceSecondsChange = vi.fn();
+    renderSettingsMenu({ initialGraceSeconds: null, onGraceSecondsChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("grace period in seconds");
+    fireEvent.change(input, { target: { value: "0" } });
+    fireEvent.blur(input);
+
+    expect(onGraceSecondsChange).toHaveBeenCalledWith(0);
+  });
+
+  it("clears to null (Off) when the field is emptied", () => {
+    const onGraceSecondsChange = vi.fn();
+    renderSettingsMenu({ initialGraceSeconds: 30, onGraceSecondsChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("grace period in seconds");
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+
+    expect(onGraceSecondsChange).toHaveBeenCalledWith(null);
+  });
+
+  it("rolls back an out-of-range value without calling onGraceSecondsChange", () => {
+    const onGraceSecondsChange = vi.fn();
+    renderSettingsMenu({ initialGraceSeconds: 30, onGraceSecondsChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("grace period in seconds") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "99999" } });
+    fireEvent.blur(input);
+
+    expect(onGraceSecondsChange).not.toHaveBeenCalled();
+    expect(input.value).toBe("30");
   });
 });

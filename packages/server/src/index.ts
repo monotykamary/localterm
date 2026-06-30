@@ -315,6 +315,12 @@ interface DaemonContext {
   // the createServer-scoped `cdpPort` let.
   getCdpPort: () => number | null;
   applyCdpPort: (port: number | null) => number | null;
+  // Live grace-window access for GET/PUT /api/config (seconds; `null` = never
+  // reap). `getGraceSeconds` reads the persisted value; `applyGraceSeconds`
+  // persists it and re-arms already-dormant sessions. Routed through ctx for
+  // the same reason as the CDP port.
+  getGraceSeconds: () => number | null;
+  applyGraceSeconds: (seconds: number | null) => number | null;
   connectCdpNow: () => Promise<CdpConnectResult>;
   portsSnapshotProcesses: SnapshotProcesses;
   portsSnapshotListeners: SnapshotListeners;
@@ -349,6 +355,8 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     tryLaunch,
     getCdpPort,
     applyCdpPort,
+    getGraceSeconds,
+    applyGraceSeconds,
     connectCdpNow,
   } = ctx;
   api.get("/health", (context) =>
@@ -1000,11 +1008,20 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   // `connect()` re-detects against the new port, and kicks a best-effort
   // reconnect so `/api/health` reflects the new browser promptly. A `null`
   // cdpPort clears the override back to auto-detect.
-  api.get("/config", (context) => context.json({ cdpPort: getCdpPort() }));
+  api.get("/config", (context) =>
+    context.json({ cdpPort: getCdpPort(), graceSeconds: getGraceSeconds() }),
+  );
   api.put("/config", async (context) => {
     const parsed = updateDaemonConfigInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
-    return context.json({ cdpPort: applyCdpPort(parsed.data.cdpPort) });
+    return context.json({
+      cdpPort:
+        parsed.data.cdpPort === undefined ? getCdpPort() : applyCdpPort(parsed.data.cdpPort),
+      graceSeconds:
+        parsed.data.graceSeconds === undefined
+          ? getGraceSeconds()
+          : applyGraceSeconds(parsed.data.graceSeconds),
+    });
   });
 
   // Explicit "Connect now" for the Settings → Automation browser → Connect
@@ -1062,6 +1079,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const shimsDir = path.join(stateDirectory, SECRETS_SHIMS_DIRNAME);
   const registry = new SessionManager({
     shimsDir,
+    getGraceMs: () => {
+      const seconds = getGraceSeconds();
+      return seconds === null ? null : seconds * 1000;
+    },
     sendControl: safeSend,
     hooks: {
       onOutputActivity: () => caffeinateManager.noteOutputActivity(),
@@ -1436,6 +1457,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   };
 
   const getCdpPort = (): number | null => cdpPort;
+  // Live read of the persisted no-clients grace window (seconds; `null` = never
+  // reap). The SessionManager's getGraceMs closure converts to ms at arm time.
+  const getGraceSeconds = (): number | null => daemonConfigStore.getGraceSeconds();
   // Persist + apply a CDP port change from `PUT /api/config`: write the config
   // file, update the live `cdpPort` the CdpClient's detect closure reads, and
   // reconnect so `/api/health` reflects the new browser promptly. Returns the
@@ -1447,6 +1471,14 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const applyCdpPort = (port: number | null): number | null => {
     cdpPort = daemonConfigStore.setCdpPort(port);
     return cdpPort;
+  };
+  // Persist a grace change and re-arm every already-dormant session so it takes
+  // effect immediately, not only on the next detach. Returns the resolved
+  // (clamped) value.
+  const applyGraceSeconds = (seconds: number | null): number | null => {
+    const next = daemonConfigStore.setGraceSeconds(seconds);
+    registry.rearmGrace();
+    return next;
   };
   // Explicit "Connect now" (Settings → Automation browser → Connect): drop any
   // live socket and await a fresh connect so the caller learns the outcome —
@@ -1492,6 +1524,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     tryLaunch,
     getCdpPort,
     applyCdpPort,
+    getGraceSeconds,
+    applyGraceSeconds,
     connectCdpNow,
   };
   const api = buildApiRoutes(ctx);

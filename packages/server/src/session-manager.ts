@@ -105,9 +105,12 @@ export interface SessionManagerHooks {
 interface SessionManagerOptions {
   hooks: SessionManagerHooks;
   sendControl: (ws: ClientSocket, payload: ServerToClientMessage) => void;
-  // Override the no-clients grace window (default SESSION_GRACE_MS). Injectable
-  // so a test can verify the reap path without waiting 30s.
-  graceMs?: number;
+  // Live resolver for the no-clients grace window in milliseconds. Read each
+  // time a grace timer arms, so a `PUT /api/config` change takes effect on the
+  // next detach (and the next reschedule) without re-wiring the manager.
+  // `null` = never reap. Injectable so a test can verify the reap path without
+  // waiting 30s.
+  getGraceMs?: () => number | null;
   // Override the pending-promote window (default SESSION_PENDING_PROMOTE_TIMEOUT_MS).
   // Injectable so a test can verify the auto-promote path (and that it still
   // sends `replay-end` so a slow client never deadlocks in its replay window)
@@ -142,14 +145,14 @@ export class SessionManager {
   private readonly coordinatorsByCwd = new Map<string, GitMetadataCoordinator>();
   private readonly hooks: SessionManagerHooks;
   private readonly sendControl: (ws: ClientSocket, payload: ServerToClientMessage) => void;
-  private readonly graceMs: number;
+  private readonly getGraceMs: () => number | null;
   private readonly pendingPromoteTimeoutMs: number;
   private readonly shimsDir?: string;
 
   constructor(options: SessionManagerOptions) {
     this.hooks = options.hooks;
     this.sendControl = options.sendControl;
-    this.graceMs = options.graceMs ?? SESSION_GRACE_MS;
+    this.getGraceMs = options.getGraceMs ?? (() => SESSION_GRACE_MS);
     this.pendingPromoteTimeoutMs =
       options.pendingPromoteTimeoutMs ?? SESSION_PENDING_PROMOTE_TIMEOUT_MS;
     this.shimsDir = options.shimsDir;
@@ -777,6 +780,12 @@ export class SessionManager {
   private startGrace(managed: ManagedSession): void {
     this.cancelGrace(managed);
     managed.parkedAt = Date.now();
+    const graceMs = this.getGraceMs();
+    // "Never reap": park the shell with no timer. It lingers until a viewer
+    // reattaches, it's killed from the switcher, the shell exits, or it's
+    // evicted at MAX_CONCURRENT_SESSIONS. parkedAt stays set so eviction
+    // ordering still treats it as dormant.
+    if (graceMs === null) return;
     managed.graceTimer = setTimeout(() => {
       managed.graceTimer = null;
       managed.parkedAt = null;
@@ -793,8 +802,18 @@ export class SessionManager {
       }
       this.tearDown(managed);
       this.hooks.onSessionActivity();
-    }, this.graceMs);
+    }, graceMs);
     managed.graceTimer.unref?.();
+  }
+
+  // Re-arm every parked session's grace timer with the current grace value.
+  // Called after a `PUT /api/config` grace change so it takes effect on shells
+  // that are already dormant, not only the next detach: a finite value arms (or
+  // resets) their timers, and `null` cancels them so they park indefinitely.
+  rearmGrace(): void {
+    for (const managed of this.sessions.values()) {
+      if (managed.clients.size === 0 && !managed.session.isExited) this.startGrace(managed);
+    }
   }
 
   private cancelGrace(managed: ManagedSession): void {

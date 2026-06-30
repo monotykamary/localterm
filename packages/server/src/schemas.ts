@@ -40,6 +40,8 @@ import {
   MAX_WORKTREE_OPEN_IN_LABEL_LENGTH,
   MAX_WORKTREE_PR_NUMBER,
   MAX_WORKTREE_SETUP_SCRIPT_LENGTH,
+  SESSION_GRACE_MAX_SECONDS,
+  SESSION_GRACE_MIN_SECONDS,
   TCP_PORT_MAX,
   WORKTREE_CONFIG_FILE_VERSION,
 } from "./constants.js";
@@ -1076,23 +1078,39 @@ export const caffeinatePreferencesFileSchema = z
   })
   .strict();
 
-// Persisted daemon config (~/.localterm/config.json). The only knob today is
-// `cdpPort`: `null` auto-detects (file-scan for a DevToolsActivePort), a number
-// targets a specific debug endpoint via `/json/version` (e.g. Aside on 52860).
+// Persisted daemon config (~/.localterm/config.json). `cdpPort`: `null`
+// auto-detects (file-scan for a DevToolsActivePort), a number targets a specific
+// debug endpoint via `/json/version` (e.g. Aside on 52860). `graceSeconds`: the
+// no-clients grace window in seconds (`null` = never reap, `0` = reap idle
+// immediately); optional in the file so an existing config without it upgrades
+// to the default rather than failing the strict parse.
 export const cdpPortSchema = z.number().int().min(1).max(TCP_PORT_MAX).nullable();
+export const graceSecondsSchema = z
+  .number()
+  .int()
+  .min(SESSION_GRACE_MIN_SECONDS)
+  .max(SESSION_GRACE_MAX_SECONDS)
+  .nullable();
 
 export const daemonConfigFileSchema = z
   .object({
     version: z.literal(DAEMON_CONFIG_FILE_VERSION),
     cdpPort: cdpPortSchema,
+    graceSeconds: graceSecondsSchema.optional(),
   })
   .strict();
 
-// API response shape for GET/PUT /api/config.
-export const daemonConfigSchema = z.object({ cdpPort: cdpPortSchema }).strict();
+// API response shape for GET/PUT /api/config — always carries the resolved
+// values (a number or null, never undefined).
+export const daemonConfigSchema = z
+  .object({ cdpPort: cdpPortSchema, graceSeconds: graceSecondsSchema })
+  .strict();
 
-// PUT /api/config body — `cdpPort` is the only field today.
-export const updateDaemonConfigInputSchema = z.object({ cdpPort: cdpPortSchema }).strict();
+// PUT /api/config body — either knob may be omitted when only the other is
+// being changed.
+export const updateDaemonConfigInputSchema = z
+  .object({ cdpPort: cdpPortSchema.optional(), graceSeconds: graceSecondsSchema.optional() })
+  .strict();
 
 // Secret identity + the env var a shim exports it as. `name` is the secret's
 // identifier and the Keychain item label (service `localterm:<name>`) and the

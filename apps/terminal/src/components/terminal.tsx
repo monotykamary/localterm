@@ -353,6 +353,7 @@ export const Terminal = () => {
   const [isSessionsOpen, setIsSessionsOpen] = useState(false);
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [cdpPort, setCdpPort] = useState<number | null>(null);
+  const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
   const [cdpStatus, setCdpStatus] = useState<{
     connected: boolean;
     browser?: string;
@@ -1870,6 +1871,15 @@ export const Terminal = () => {
     });
   }, []);
 
+  // The grace window lives on the daemon; PUT the new value and adopt the
+  // clamped confirmation (the daemon re-arms already-dormant shells).
+  const handleGraceSecondsChange = useCallback((next: number | null) => {
+    setGraceSeconds(next);
+    void updateDaemonConfig({ graceSeconds: next }).then((confirmed) => {
+      if (confirmed) setGraceSeconds(confirmed.graceSeconds);
+    });
+  }, []);
+
   // Explicit "Connect now": await the daemon's connect and fold the result
   // (including any error) into cdpStatus, so the field shows why a connection
   // failed rather than silently staying "Not connected".
@@ -1895,7 +1905,10 @@ export const Terminal = () => {
       setIsSettingsOpen(open);
       if (open) {
         void fetchDaemonConfig().then((config) => {
-          if (config) setCdpPort(config.cdpPort);
+          if (config) {
+            setCdpPort(config.cdpPort);
+            setGraceSeconds(config.graceSeconds);
+          }
         });
         refreshCdpStatus();
       } else {
@@ -2543,6 +2556,8 @@ export const Terminal = () => {
                     cdpConnecting={cdpConnecting}
                     onCdpPortChange={handleCdpPortChange}
                     onCdpConnect={handleCdpConnect}
+                    graceSeconds={graceSeconds}
+                    onGraceSecondsChange={handleGraceSecondsChange}
                     paddingX={activePaddingX}
                     onPaddingXChange={handlePaddingXChange}
                     paddingY={activePaddingY}

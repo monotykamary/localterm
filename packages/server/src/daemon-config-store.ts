@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DAEMON_CONFIG_FILE_VERSION, TCP_PORT_MAX } from "./constants.js";
+import {
+  DAEMON_CONFIG_FILE_VERSION,
+  SESSION_GRACE_DEFAULT_SECONDS,
+  SESSION_GRACE_MAX_SECONDS,
+  SESSION_GRACE_MIN_SECONDS,
+  TCP_PORT_MAX,
+} from "./constants.js";
 import { daemonConfigFileSchema } from "./schemas.js";
 
 interface DaemonConfig {
@@ -10,9 +16,17 @@ interface DaemonConfig {
   // path — the daemon reads it live, so a `PUT /api/config` takes effect on
   // the next `connect()` without a restart.
   cdpPort: number | null;
+  // No-clients grace window in seconds. `null` = never reap (a dormant shell
+  // lingers until killed from the switcher or evicted at the session cap);
+  // `0` = reap an idle shell the moment its last viewer detaches. The daemon
+  // reads it live, so a `PUT /api/config` re-arms already-dormant shells.
+  graceSeconds: number | null;
 }
 
-const DEFAULT_CONFIG: DaemonConfig = { cdpPort: null };
+const DEFAULT_CONFIG: DaemonConfig = {
+  cdpPort: null,
+  graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
+};
 
 const clampPort = (port: number | null): number | null =>
   port === null
@@ -20,6 +34,18 @@ const clampPort = (port: number | null): number | null =>
     : Number.isInteger(port) && port > 0 && port <= TCP_PORT_MAX
       ? port
       : null;
+
+// `null` stays `null` (the "never reap" sentinel, a deliberate user choice, not
+// an error fallback); an out-of-range or non-integer falls back to the default
+// so a bad hand-edited value never escalates an idle shell to "never reap".
+const clampGraceSeconds = (seconds: number | null): number | null =>
+  seconds === null
+    ? null
+    : Number.isInteger(seconds) &&
+        seconds >= SESSION_GRACE_MIN_SECONDS &&
+        seconds <= SESSION_GRACE_MAX_SECONDS
+      ? seconds
+      : SESSION_GRACE_DEFAULT_SECONDS;
 
 // Owns the persisted daemon config (~/.localterm/config.json). Mirrors the
 // caffeinate preferences store: zod-validated read, atomic tmp+rename write,
@@ -45,6 +71,19 @@ export class DaemonConfigStore {
     return this.config.cdpPort;
   }
 
+  getGraceSeconds(): number | null {
+    return this.config.graceSeconds;
+  }
+
+  // Returns the resolved value (clamped) and persists only on a real change.
+  setGraceSeconds(seconds: number | null): number | null {
+    const next = clampGraceSeconds(seconds);
+    if (next === this.config.graceSeconds) return this.config.graceSeconds;
+    this.config = { ...this.config, graceSeconds: next };
+    this.persist();
+    return this.config.graceSeconds;
+  }
+
   private load(): void {
     let raw: string;
     try {
@@ -64,7 +103,10 @@ export class DaemonConfigStore {
       console.warn(`daemon config file invalid; using defaults (${this.filePath})`);
       return;
     }
-    this.config = { cdpPort: parsed.data.cdpPort };
+    this.config = {
+      cdpPort: parsed.data.cdpPort,
+      graceSeconds: parsed.data.graceSeconds ?? SESSION_GRACE_DEFAULT_SECONDS,
+    };
   }
 
   private persist(): void {
@@ -72,6 +114,7 @@ export class DaemonConfigStore {
     const payload = {
       version: DAEMON_CONFIG_FILE_VERSION,
       cdpPort: this.config.cdpPort,
+      graceSeconds: this.config.graceSeconds,
     };
     const tmpPath = `${this.filePath}.tmp`;
     fs.writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");

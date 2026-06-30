@@ -222,6 +222,15 @@ export const SESSION_SCROLLBACK_REPLAY_BYTES = 256 * 1024;
 // side's close/error/end during wake, surfacing as 1006 before the client
 // even tries to reconnect).
 export const SESSION_GRACE_MS = 30_000;
+// User-tunable bounds for the no-clients grace window (Settings → Sessions →
+// Grace period), expressed in seconds in ~/.localterm/config.json. `null` means
+// "never reap" — a dormant shell lingers until killed from the switcher or
+// evicted when MAX_CONCURRENT_SESSIONS is reached. `0` reaps an idle shell the
+// instant its last viewer detaches. The default mirrors SESSION_GRACE_MS; the
+// cap is a sane ceiling for a finite value, with "Off" covering anything longer.
+export const SESSION_GRACE_DEFAULT_SECONDS = SESSION_GRACE_MS / 1000;
+export const SESSION_GRACE_MIN_SECONDS = 0;
+export const SESSION_GRACE_MAX_SECONDS = 3_600;
 // Output recency used to compute a session's favicon-equivalent state for the
 // session list (recent output = running, a foreground process but quiet =
 // alive-quiet, idle = ready) AND to gate the grace reap: a dormant session

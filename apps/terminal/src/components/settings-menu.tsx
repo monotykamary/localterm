@@ -17,6 +17,8 @@ import {
 } from "@/lib/animation-classes";
 import {
   CDP_PORT_MAX,
+  SESSION_GRACE_MAX_SECONDS,
+  SESSION_GRACE_MIN_SECONDS,
   SETTINGS_MODAL_CLOSE_TRANSITION_MS,
   SETTINGS_MODAL_MAX_HEIGHT_CSS,
   TERMINAL_FONT_SIZE_MAX_PX,
@@ -78,6 +80,8 @@ interface SettingsMenuProps {
   cdpConnecting: boolean;
   onCdpPortChange: (port: number | null) => void;
   onCdpConnect: () => void;
+  graceSeconds: number | null;
+  onGraceSecondsChange: (seconds: number | null) => void;
   notificationsPermission: NotificationPermission | "unsupported";
   onNotificationsPermissionRequest: () => void;
   sessionInfo?: TerminalSessionInfo | null;
@@ -146,33 +150,70 @@ interface CdpPortFieldProps {
   onConnect: () => void;
 }
 
-// The CDP port is a daemon-global value edited through /api/config, not a
-// localStorage terminal pref, so this field keeps a local text buffer and
-// commits on blur/Enter — avoiding a PUT per keystroke and letting an invalid
-// edit roll back to the last confirmed value. The Connect button triggers an
-// explicit, awaited connect (POST /api/cdp/connect) so a failure surfaces a
-// reason instead of silently staying "Not connected".
-const CdpPortField = ({ port, status, connecting, onPortChange, onConnect }: CdpPortFieldProps) => {
-  const [buffer, setBuffer] = useState(port === null ? "" : String(port));
+// A daemon-global numeric value edited through /api/config (not a localStorage
+// terminal pref), so the field keeps a local text buffer and commits on
+// blur/Enter — avoiding a PUT per keystroke and letting an invalid edit roll
+// back to the last confirmed value. An empty field commits `null` (the sentinel
+// each reusing field defines: "auto-detect" for CDP, "Off" for grace).
+interface ConfigNumberFieldProps {
+  value: number | null;
+  min: number;
+  max: number;
+  placeholder: string;
+  ariaLabel: string;
+  onCommit: (value: number | null) => void;
+}
+
+const ConfigNumberField = ({
+  value,
+  min,
+  max,
+  placeholder,
+  ariaLabel,
+  onCommit,
+}: ConfigNumberFieldProps) => {
+  const [buffer, setBuffer] = useState(value === null ? "" : String(value));
 
   useEffect(() => {
-    setBuffer(port === null ? "" : String(port));
-  }, [port]);
+    setBuffer(value === null ? "" : String(value));
+  }, [value]);
 
   const commit = () => {
     const trimmed = buffer.trim();
     if (trimmed === "") {
-      if (port !== null) onPortChange(null);
+      if (value !== null) onCommit(null);
       return;
     }
     const parsed = Number(trimmed);
-    if (Number.isInteger(parsed) && parsed > 0 && parsed <= CDP_PORT_MAX) {
-      if (parsed !== port) onPortChange(parsed);
+    if (Number.isInteger(parsed) && parsed >= min && parsed <= max) {
+      if (parsed !== value) onCommit(parsed);
     } else {
-      setBuffer(port === null ? "" : String(port));
+      setBuffer(value === null ? "" : String(value));
     }
   };
 
+  return (
+    <Input
+      type="number"
+      min={min}
+      max={max}
+      value={buffer}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      className="h-7 px-2 font-mono text-xs"
+      onChange={(event) => setBuffer(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+      }}
+    />
+  );
+};
+
+// The CDP port field pairs the numeric input with a live connection status and
+// an explicit Connect button (POST /api/cdp/connect) so a failure surfaces a
+// reason instead of silently staying "Not connected".
+const CdpPortField = ({ port, status, connecting, onPortChange, onConnect }: CdpPortFieldProps) => {
   const connected = status?.connected === true;
   const statusText = connected
     ? `Connected — ${status?.browser ?? "debug-enabled browser"}`
@@ -182,19 +223,13 @@ const CdpPortField = ({ port, status, connecting, onPortChange, onConnect }: Cdp
 
   return (
     <div className="flex flex-col gap-1.5">
-      <Input
-        type="number"
+      <ConfigNumberField
+        value={port}
         min={1}
         max={CDP_PORT_MAX}
-        value={buffer}
         placeholder="Auto-detect"
-        aria-label="CDP remote debugging port"
-        className="h-7 px-2 font-mono text-xs"
-        onChange={(event) => setBuffer(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
-        }}
+        ariaLabel="CDP remote debugging port"
+        onCommit={onPortChange}
       />
       <div className="flex items-center justify-between gap-2">
         <span
@@ -219,6 +254,29 @@ const CdpPortField = ({ port, status, connecting, onPortChange, onConnect }: Cdp
     </div>
   );
 };
+
+interface GracePeriodFieldProps {
+  seconds: number | null;
+  onSecondsChange: (seconds: number | null) => void;
+}
+
+const GracePeriodField = ({ seconds, onSecondsChange }: GracePeriodFieldProps) => (
+  <div className="flex flex-col gap-1.5">
+    <ConfigNumberField
+      value={seconds}
+      min={SESSION_GRACE_MIN_SECONDS}
+      max={SESSION_GRACE_MAX_SECONDS}
+      placeholder="Off"
+      ariaLabel="grace period in seconds"
+      onCommit={onSecondsChange}
+    />
+    <span className="min-w-0 truncate text-[10px] text-muted-foreground/60">
+      {seconds === null
+        ? "Off — dormant shells linger until killed from the switcher"
+        : `${seconds}s after the last viewer leaves`}
+    </span>
+  </div>
+);
 
 export const SettingsMenu = ({
   themeId,
@@ -257,6 +315,8 @@ export const SettingsMenu = ({
   cdpConnecting,
   onCdpPortChange,
   onCdpConnect,
+  graceSeconds,
+  onGraceSecondsChange,
   notificationsPermission,
   onNotificationsPermissionRequest,
   sessionInfo,
@@ -567,6 +627,32 @@ export const SettingsMenu = ({
                         aria-label="default launch directory"
                         className="h-7 px-2 font-mono text-xs"
                         onChange={(event) => onDefaultCwdChange(event.target.value)}
+                      />
+                    </Field>
+
+                    <Separator className="bg-border/40" />
+
+                    <Field orientation="vertical" className="gap-1.5">
+                      <FieldLabel className={SECTION_LABEL_CLASSES}>Sessions</FieldLabel>
+                      <Tooltip>
+                        <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                          Grace period
+                        </TooltipTrigger>
+                        <TooltipContent
+                          side="bottom"
+                          sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                          className="max-w-xs"
+                        >
+                          How long a shell with no viewers stays alive after you close its tab, so
+                          a transient disconnect or a tab switch can reattach. A shell still running
+                          a command is never reaped regardless. Set to Off to keep dormant shells
+                          until you kill them from the switcher (they're still evicted if the session
+                          cap is reached). 0 reaps an idle shell the moment its last viewer leaves.
+                        </TooltipContent>
+                      </Tooltip>
+                      <GracePeriodField
+                        seconds={graceSeconds}
+                        onSecondsChange={onGraceSecondsChange}
                       />
                     </Field>
 

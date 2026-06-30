@@ -14,7 +14,7 @@ const createFakeSocket = (): ClientSocket => ({
 
 const createManager = (graceMs: number): SessionManager =>
   new SessionManager({
-    graceMs,
+    getGraceMs: () => graceMs,
     sendControl: () => {},
     hooks: {
       onOutputActivity: () => {},
@@ -172,6 +172,46 @@ describe("SessionManager no-clients grace", () => {
 
     await wait(300);
     // Grace elapsed, state was "ready" → reaped. No zombie, no stuck orphan.
+    expect(manager.size()).toBe(0);
+    expect(spawned.session.isExited).toBe(true);
+  }, 10_000);
+
+  it("never reaps a dormant shell while the grace window is Off, then reaps on rearm", async () => {
+    // `null` = "never reap": detaching the last viewer parks the shell with no
+    // timer, so an idle shell lingers until killed from the switcher or evicted
+    // at the session cap. Flipping to a finite window and calling rearmGrace()
+    // (the `PUT /api/config` → applyGraceSeconds path) arms the parked shell
+    // and reaps it once idle.
+    let grace: number | null = null;
+    manager = new SessionManager({
+      getGraceMs: () => grace,
+      sendControl: () => {},
+      hooks: {
+        onOutputActivity: () => {},
+        onSessionActivity: () => {},
+        onSessionEvent: () => {},
+        onAutomationExit: () => {},
+        onClientExit: () => {},
+      },
+    });
+    const ws = createFakeSocket();
+    const spawned = manager.spawnAndAttach(ws, shellInput);
+    expect(spawned).not.toBeNull();
+    if (!spawned) return;
+
+    manager.markIdleForTest(spawned.id);
+    manager.detach(ws);
+    expect(manager.size()).toBe(1);
+
+    await wait(300);
+    // No timer was armed → the idle shell stays parked.
+    expect(manager.size()).toBe(1);
+    expect(spawned.session.isExited).toBe(false);
+
+    // Flip Off → 150ms and re-arm (mirrors `PUT /api/config`).
+    grace = 150;
+    manager.rearmGrace();
+    await wait(300);
     expect(manager.size()).toBe(0);
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);

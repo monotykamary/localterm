@@ -57,6 +57,11 @@ export const PALETTE_MODAL_MAX_HEIGHT_PX = 400;
 export const SETTINGS_MODAL_MAX_HEIGHT_CSS = "min(620px, calc(100dvh - 20vh))";
 export const SETTINGS_MODAL_CLOSE_TRANSITION_MS = 150;
 export const CDP_PORT_MAX = 65_535;
+// UI bounds for Settings → Sessions → Grace period (seconds). Mirror the
+// server's ~/.localterm/config.json grace schema; the server remains the source
+// of truth for validation. `null` (empty field) = never reap.
+export const SESSION_GRACE_MIN_SECONDS = 0;
+export const SESSION_GRACE_MAX_SECONDS = 3_600;
 
 export const DIFF_VIEWER_CLOSE_TRANSITION_MS = 150;
 // Delay before reacting to a server git-dirty signal in the open diff viewer.
