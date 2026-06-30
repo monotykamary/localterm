@@ -157,6 +157,45 @@ hostname is reserved for the built daemon). The two `tsc --watch` packages keep
 running in parallel via turbo. Escape hatch: `pnpm dev:app` runs `vp dev`
 without portless.
 
+### `localterm` binary from the working copy (workspace contributors)
+
+Iterating via `pnpm cli` is fast but leaves no `localterm` binary on PATH, so
+anything that calls `localterm ...` (scripts, docs, muscle memory) won't work.
+Link the CLI globally from your checkout to get the binary without giving up
+live rebuilds:
+
+```bash
+pnpm setup                         # once, if PNPM_HOME isn't configured yet
+pnpm link --global ./packages/cli  # from the repo root, so the workspace dep resolves
+```
+
+The shim runs `packages/cli/dist/index.js` straight out of the checkout, so
+`pnpm build` / `pnpm dev` rebuilds land on the next `localterm` call — no
+reinstall. Unlink with `pnpm remove --global @monotykamary/localterm`.
+
+Two gotchas:
+
+- `pnpm link` also writes a `link:` dependency into `package.json`,
+  `packages/cli/package.json`, and `pnpm-workspace.yaml` (and rewrites the
+  latter's `allowBuilds`). Those are side effects, not intended edits — revert
+  them so they don't get committed; the global shim lives in
+  `~/Library/pnpm/bin` and is unaffected:
+
+  ```bash
+  git checkout -- package.json packages/cli/package.json pnpm-workspace.yaml pnpm-lock.yaml
+  rm -f packages/cli/pnpm-workspace.yaml
+  ```
+
+- `prepack` (the `apps/terminal/dist` → `packages/cli/terminal` copy that ships
+  the UI with the tarball) runs only on `pnpm pack` / `pnpm publish`, **not** on
+  `pnpm build`. After a terminal-UI change, sync it manually; pure cli/server TS
+  changes just need `pnpm build` since `localterm` reads `dist` live:
+
+  ```bash
+  pnpm build
+  pnpm --filter @monotykamary/localterm run prepack
+  ```
+
 ## Automations
 
 Schedule commands as server-managed jobs. When one is due, localterm opens a new browser tab in the automation's directory and runs the command in a fresh shell — the tab stays open afterwards so you can see that it ran and whether it succeeded. The tab opens in the **background** so a scheduled run never steals your focus (via the DevTools Protocol over a connection opened once at start when a Chromium browser has remote debugging on, otherwise the OS opener / macOS `open -g`; set `LOCALTERM_DISABLE_CDP_TABS=1` to force the fallback).
