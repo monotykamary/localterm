@@ -27,6 +27,20 @@ describe("getBrowserCandidates", () => {
       profileDir: "/home/me/.config/google-chrome",
     });
   });
+
+  it("includes Aside's user-data dir (Aside exposes CDP on an ephemeral port like 52860)", () => {
+    const mac = getBrowserCandidates("/Users/me", "darwin");
+    expect(mac).toContainEqual({
+      name: "Aside",
+      profileDir: "/Users/me/Library/Application Support/Aside",
+    });
+
+    const linux = getBrowserCandidates("/home/me", "linux");
+    expect(linux).toContainEqual({
+      name: "Aside",
+      profileDir: "/home/me/.config/aside",
+    });
+  });
 });
 
 describe("detectChromiumBrowsers", () => {

@@ -20,6 +20,8 @@ import {
 } from "./caffeinate-process-match.js";
 import { CdpClient } from "./cdp/cdp-client.js";
 import type { DetectedBrowser } from "./cdp/detect-chromium.js";
+import { detectWithExplicitPort } from "./cdp/discover-explicit-endpoint.js";
+import { DaemonConfigStore } from "./daemon-config-store.js";
 import {
   AUTOMATION_EVENT_DEBOUNCE_MS,
   AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
@@ -93,6 +95,7 @@ import {
   processNameSchema,
   processSetInputSchema,
   updateAutomationInputSchema,
+  updateDaemonConfigInputSchema,
   updateWorktreeConfigInputSchema,
   worktreeIncludeFileInputSchema,
 } from "./schemas.js";
@@ -118,6 +121,7 @@ import type {
   Automation,
   AutomationLastRun,
   AutomationWithNextRun,
+  CdpConnectResult,
   PendingAutomationRun,
   ServerToClientMessage,
   TriggerInput,
@@ -163,9 +167,11 @@ export interface ServerOptions {
   tabController?: AutomationTabController;
   /**
    * Override how the daemon's persistent CDP client discovers debug-enabled
-   * Chromium browsers. Defaults to scanning known user-data dirs for a live
-   * DevToolsActivePort. Injectable so tests can drive the health endpoint's
-   * `cdp` field deterministically without a real browser on the machine.
+   * Chromium browsers. Defaults to prepending a configured explicit port (see
+   * `~/.localterm/config.json` `cdpPort`, probed via `/json/version`) ahead of
+   * the file-scan of known user-data dirs for a live DevToolsActivePort.
+   * Injectable so tests can drive the health endpoint's `cdp` field
+   * deterministically without a real browser on the machine.
    */
   cdpDetect?: () => Promise<DetectedBrowser[]>;
   /**
@@ -301,6 +307,15 @@ interface DaemonContext {
   syncSessionEventListeners: () => void;
   webhookTriggerManager: WebhookTriggerManager;
   worktreeConfigStore: WorktreeConfigStore;
+  // Live CDP port access for GET/PUT /api/config. `getCdpPort` reads the
+  // current value; `applyCdpPort` persists it and updates the live port the
+  // CdpClient's detect closure reads on the next connect(). It does NOT touch
+  // the live socket — reconnecting is the explicit Connect button's job (or
+  // the startup connect). Routed through ctx so buildApiRoutes can read/mutate
+  // the createServer-scoped `cdpPort` let.
+  getCdpPort: () => number | null;
+  applyCdpPort: (port: number | null) => number | null;
+  connectCdpNow: () => Promise<CdpConnectResult>;
   portsSnapshotProcesses: SnapshotProcesses;
   portsSnapshotListeners: SnapshotListeners;
   toAutomationWithNextRun: (automation: Automation, from: Date) => AutomationWithNextRun;
@@ -332,13 +347,20 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     toAutomationWithNextRun,
     listAutomationsWithNextRun,
     tryLaunch,
+    getCdpPort,
+    applyCdpPort,
+    connectCdpNow,
   } = ctx;
   api.get("/health", (context) =>
     context.json({
       ok: true,
       sessions: registry.size(),
       cdp: cdpClient
-        ? { connected: cdpClient.isConnected(), browser: cdpClient.connectedBrowser?.name }
+        ? {
+            connected: cdpClient.isConnected(),
+            browser: cdpClient.connectedBrowser?.name,
+            port: cdpClient.connectedBrowser?.port,
+          }
         : null,
     }),
   );
@@ -973,6 +995,24 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     return context.json({ automation: toAutomationWithNextRun(automation, new Date()) });
   });
 
+  // Daemon config (the editable CDP port). GET is a cheap read of the live
+  // value; PUT persists it, drops the persistent CDP socket so the next
+  // `connect()` re-detects against the new port, and kicks a best-effort
+  // reconnect so `/api/health` reflects the new browser promptly. A `null`
+  // cdpPort clears the override back to auto-detect.
+  api.get("/config", (context) => context.json({ cdpPort: getCdpPort() }));
+  api.put("/config", async (context) => {
+    const parsed = updateDaemonConfigInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json({ cdpPort: applyCdpPort(parsed.data.cdpPort) });
+  });
+
+  // Explicit "Connect now" for the Settings → Automation browser → Connect
+  // button: awaits a fresh connect and returns the outcome (connected browser
+  // or the error that explains a failure), unlike the fire-and-forget connect
+  // kicked by `PUT /api/config` and daemon start.
+  api.post("/cdp/connect", async (context) => context.json(await connectCdpNow()));
+
   // Fire a webhook-triggered automation. The :id is the automation's webhook
   // capability token (Discord-style: anyone with the URL can fire it). The body
   // is intentionally ignored — the command/cwd are fixed at create time, so a
@@ -1138,6 +1178,13 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // on detach.
   const wsToTargetId = new Map<ClientSocket, string>();
   const cdpBackgroundTabsDisabled = process.env.LOCALTERM_DISABLE_CDP_TABS === "1";
+  // Daemon config (~/.localterm/config.json): the editable CDP port. `null`
+  // auto-detects (file-scan); a number targets a specific debug endpoint via
+  // `/json/version` (e.g. Aside on 52860). A `let` so `PUT /api/config` can
+  // update it live, and the `cdpDetect` closure below reads it by reference so
+  // the next `connect()` picks up the new port without re-wiring.
+  const daemonConfigStore = new DaemonConfigStore(path.join(stateDirectory, "config.json"));
+  let cdpPort: number | null = daemonConfigStore.getCdpPort();
   // One persistent CDP socket for the daemon's lifetime — opened once at start
   // (below), so the user clears the browser's remote-debugging prompt a single
   // time rather than on every run. Skipped when a caller injects its own
@@ -1146,7 +1193,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     options.tabController || cdpBackgroundTabsDisabled
       ? null
       : new CdpClient({
-          detect: options.cdpDetect,
+          detect: options.cdpDetect ?? (async () => detectWithExplicitPort(cdpPort)),
           // Only page-type targets on the daemon's own origin get an ambient token
           // injected — unrelated tabs the user has open in their debugged browser
           // stay untouched. `actualPort` is bound by the http server's listen
@@ -1388,6 +1435,42 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
   };
 
+  const getCdpPort = (): number | null => cdpPort;
+  // Persist + apply a CDP port change from `PUT /api/config`: write the config
+  // file, update the live `cdpPort` the CdpClient's detect closure reads, and
+  // reconnect so `/api/health` reflects the new browser promptly. Returns the
+  // resolved (clamped) port. A no-op reconnect when the port is unchanged.
+  // Persist the configured port and update the live value the detect closure
+  // reads on the next connect(). Deliberately does not tear down or reconnect —
+  // that's the explicit Connect button's job (or the startup connect), so a
+  // port change never disrupts a working connection or flashes "Not connected".
+  const applyCdpPort = (port: number | null): number | null => {
+    cdpPort = daemonConfigStore.setCdpPort(port);
+    return cdpPort;
+  };
+  // Explicit "Connect now" (Settings → Automation browser → Connect): drop any
+  // live socket and await a fresh connect so the caller learns the outcome —
+  // connected + which browser, or the error that explains a failure (e.g. a
+  // timed-out handshake hinting at an unaccepted remote-debugging prompt).
+  // Never throws; a disabled CDP path returns a synthetic error result.
+  const connectCdpNow = async (): Promise<CdpConnectResult> => {
+    if (!cdpClient) return { connected: false, error: "CDP disabled" };
+    cdpClient.resetConnection("manual connect");
+    try {
+      await cdpClient.connect();
+      return {
+        connected: true,
+        browser: cdpClient.connectedBrowser?.name,
+        port: cdpClient.connectedBrowser?.port,
+      };
+    } catch (error) {
+      return {
+        connected: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
   const ctx: DaemonContext = {
     registry,
     cdpClient,
@@ -1407,6 +1490,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     toAutomationWithNextRun,
     listAutomationsWithNextRun,
     tryLaunch,
+    getCdpPort,
+    applyCdpPort,
+    connectCdpNow,
   };
   const api = buildApiRoutes(ctx);
   app.route("/api", api);
@@ -1858,10 +1944,12 @@ export type {
 export type * from "./types.js";
 export { DEFAULT_HOST, DEFAULT_PORT, WS_CLOSE_BACKPRESSURE } from "./constants.js";
 export { isLoopbackHost, isPrivateHost, isAllowedSourceIp } from "./security.js";
-export { healthSchema, cdpHealthSchema } from "./schemas.js";
+export { healthSchema, cdpHealthSchema, daemonConfigSchema, updateDaemonConfigInputSchema } from "./schemas.js";
 export { createDefaultSecretBackend } from "./secret-backend.js";
 export type { SecretBackend } from "./secret-backend.js";
 export { detectChromiumBrowsers } from "./cdp/detect-chromium.js";
+export { detectWithExplicitPort, discoverExplicitCdpEndpoint } from "./cdp/discover-explicit-endpoint.js";
+export { DaemonConfigStore } from "./daemon-config-store.js";
 export type { BrowserCandidate, DetectedBrowser } from "./cdp/detect-chromium.js";
 export {
   ServerErrorException,

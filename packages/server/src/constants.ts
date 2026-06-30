@@ -30,6 +30,7 @@ export const CAFFEINATE_AUTO_DEFAULT_COMMANDS: readonly string[] = [
   "pi",
 ];
 export const CAFFEINATE_PREFERENCES_FILE_VERSION = 3;
+export const DAEMON_CONFIG_FILE_VERSION = 1;
 // Automatic detection is event-driven (no timer): a `ps` snapshot is taken only
 // in response to a foreground change or a session connect/disconnect. This
 // debounce window coalesces a burst of such events into a single snapshot; it
@@ -492,6 +493,11 @@ export const AMBIENT_TAB_CLOSE_DEADLINE_MS = 1_000;
 // ports modal polls the daemon for this list while open so it reflects a dev
 // server starting/stopping in near-realtime.
 export const TCP_PORT_MAX = 65_535;
+// Deadline for the single HTTP `/json/version` probe used to turn a configured
+// CDP port (e.g. Aside's 52860) into a browser-level WebSocket URL when no
+// DevToolsActivePort file is available. Short so a dead port fails fast and
+// detection falls through to the file-scan candidates.
+export const CDP_EXPLICIT_PROBE_TIMEOUT_MS = 1_500;
 // `lsof -nP -iTCP -sTCP:LISTEN` enumerates every listening TCP socket on the
 // machine. It can be slow on a busy host and occasionally stalls, so the
 // snapshot is capped with a timeout + max buffer and degrades to an empty

@@ -6,6 +6,7 @@ import {
   CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT,
   CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT,
   CAFFEINATE_PREFERENCES_FILE_VERSION,
+  DAEMON_CONFIG_FILE_VERSION,
   MAX_AUTOMATION_COMMAND_LENGTH,
   MAX_AUTOMATION_NAME_LENGTH,
   MAX_AUTOMATION_REQUESTED_SECRETS,
@@ -53,6 +54,10 @@ export const cdpHealthSchema = z
   .object({
     connected: z.boolean(),
     browser: z.string().optional(),
+    // Port of the connected browser's debug endpoint, when known (from the
+    // DevToolsActivePort file or the explicit `/json/version` probe). Surfaced
+    // so the settings UI can show which endpoint the daemon attached to.
+    port: z.number().int().positive().optional(),
   })
   .nullable();
 
@@ -61,6 +66,20 @@ export const healthSchema = z
     ok: z.boolean(),
     sessions: z.number().int().nonnegative(),
     cdp: cdpHealthSchema,
+  })
+  .strict();
+
+// Result of an explicit `POST /api/cdp/connect` (the Settings → Automation
+// browser → Connect button). `connected` mirrors `/api/health`'s `cdp.connected`;
+// `error` carries the reason on failure (e.g. a timed-out handshake hinting at
+// an unaccepted remote-debugging prompt) so the UI can show something
+// actionable instead of a bare "Not connected".
+export const cdpConnectResultSchema = z
+  .object({
+    connected: z.boolean(),
+    browser: z.string().optional(),
+    port: z.number().int().positive().optional(),
+    error: z.string().optional(),
   })
   .strict();
 
@@ -1056,6 +1075,24 @@ export const caffeinatePreferencesFileSchema = z
     commands: z.array(caffeinateCommandSchema).max(MAX_CAFFEINATE_COMMANDS),
   })
   .strict();
+
+// Persisted daemon config (~/.localterm/config.json). The only knob today is
+// `cdpPort`: `null` auto-detects (file-scan for a DevToolsActivePort), a number
+// targets a specific debug endpoint via `/json/version` (e.g. Aside on 52860).
+export const cdpPortSchema = z.number().int().min(1).max(TCP_PORT_MAX).nullable();
+
+export const daemonConfigFileSchema = z
+  .object({
+    version: z.literal(DAEMON_CONFIG_FILE_VERSION),
+    cdpPort: cdpPortSchema,
+  })
+  .strict();
+
+// API response shape for GET/PUT /api/config.
+export const daemonConfigSchema = z.object({ cdpPort: cdpPortSchema }).strict();
+
+// PUT /api/config body — `cdpPort` is the only field today.
+export const updateDaemonConfigInputSchema = z.object({ cdpPort: cdpPortSchema }).strict();
 
 // Secret identity + the env var a shim exports it as. `name` is the secret's
 // identifier and the Keychain item label (service `localterm:<name>`) and the

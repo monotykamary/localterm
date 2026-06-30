@@ -43,6 +43,11 @@ interface SettingsMenuHarnessProps {
   onLocalEchoChange?: (enabled: boolean) => void;
   onScrollbackChange?: (scrollback: number) => void;
   onScrollOnUserInputChange?: (scrollOnUserInput: boolean) => void;
+  initialCdpPort?: number | null;
+  cdpStatus?: { connected: boolean; browser?: string; error?: string } | null;
+  cdpConnecting?: boolean;
+  onCdpPortChange?: (port: number | null) => void;
+  onCdpConnect?: () => void;
   onPaddingXChange?: (paddingX: number) => void;
   onPaddingYChange?: (paddingY: number) => void;
   onLigaturesEnabledChange?: (enabled: boolean) => void;
@@ -76,6 +81,11 @@ const renderSettingsMenu = ({
   onLocalEchoChange = () => {},
   onScrollbackChange = () => {},
   onScrollOnUserInputChange = () => {},
+  initialCdpPort = null,
+  cdpStatus = null,
+  cdpConnecting = false,
+  onCdpPortChange = () => {},
+  onCdpConnect = () => {},
   onPaddingXChange = () => {},
   onPaddingYChange = () => {},
   onLigaturesEnabledChange = () => {},
@@ -112,6 +122,11 @@ const renderSettingsMenu = ({
         onScrollbackChange={onScrollbackChange}
         scrollOnUserInput={initialScrollOnUserInput}
         onScrollOnUserInputChange={onScrollOnUserInputChange}
+        cdpPort={initialCdpPort}
+        cdpStatus={cdpStatus}
+        cdpConnecting={cdpConnecting}
+        onCdpPortChange={onCdpPortChange}
+        onCdpConnect={onCdpConnect}
         paddingX={0}
         onPaddingXChange={onPaddingXChange}
         paddingY={0}
@@ -629,5 +644,107 @@ describe("SettingsMenu shell section", () => {
     expect(screen.getByText("/opt/homebrew/bin/fish")).toBeDefined();
     expect(screen.getByText("12345")).toBeDefined();
     expect(screen.getByText("/Users/tester/Developer/localterm")).toBeDefined();
+  });
+});
+
+describe("SettingsMenu CDP port field", () => {
+  it("renders the stored port in the input", () => {
+    renderSettingsMenu({ initialCdpPort: 52860 });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("CDP remote debugging port") as HTMLInputElement;
+    expect(input.value).toBe("52860");
+  });
+
+  it("shows the Auto-detect placeholder when no port is set", () => {
+    renderSettingsMenu({ initialCdpPort: null });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("CDP remote debugging port") as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(input.placeholder).toBe("Auto-detect");
+  });
+
+  it("commits a valid port on blur", () => {
+    const onCdpPortChange = vi.fn();
+    renderSettingsMenu({ initialCdpPort: null, onCdpPortChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("CDP remote debugging port");
+    fireEvent.change(input, { target: { value: "52860" } });
+    fireEvent.blur(input);
+
+    expect(onCdpPortChange).toHaveBeenCalledTimes(1);
+    expect(onCdpPortChange.mock.calls[0]?.[0]).toBe(52860);
+  });
+
+  it("clears the override to null when the field is emptied", () => {
+    const onCdpPortChange = vi.fn();
+    renderSettingsMenu({ initialCdpPort: 9222, onCdpPortChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("CDP remote debugging port");
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+
+    expect(onCdpPortChange).toHaveBeenCalledWith(null);
+  });
+
+  it("rolls back an out-of-range value without calling onCdpPortChange", () => {
+    const onCdpPortChange = vi.fn();
+    renderSettingsMenu({ initialCdpPort: 9222, onCdpPortChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const input = screen.getByLabelText("CDP remote debugging port") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "99999" } });
+    fireEvent.blur(input);
+
+    expect(onCdpPortChange).not.toHaveBeenCalled();
+    expect(input.value).toBe("9222");
+  });
+
+  it("shows the connected browser name when status is connected", () => {
+    renderSettingsMenu({
+      initialCdpPort: 52860,
+      cdpStatus: { connected: true, browser: "Chrome (127.0.0.1:52860)" },
+    });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    expect(screen.getByText(/Connected — Chrome \(127\.0\.0\.1:52860\)/)).toBeDefined();
+  });
+
+  it("shows a not-connected hint when status is disconnected", () => {
+    renderSettingsMenu({ initialCdpPort: 52860, cdpStatus: { connected: false } });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    expect(screen.getByText(/Not connected/)).toBeDefined();
+  });
+
+  it("surfaces the connect error from status", () => {
+    renderSettingsMenu({
+      initialCdpPort: 52860,
+      cdpStatus: { connected: false, error: "timed out after 5000ms" },
+    });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    expect(screen.getByText(/Not connected — timed out after 5000ms/)).toBeDefined();
+  });
+
+  it("calls onCdpConnect when the Connect button is clicked", () => {
+    const onCdpConnect = vi.fn();
+    renderSettingsMenu({ initialCdpPort: 52860, onCdpConnect });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    fireEvent.click(screen.getByLabelText("connect to CDP endpoint"));
+
+    expect(onCdpConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the Connect button and shows Connecting… while connecting", () => {
+    renderSettingsMenu({ initialCdpPort: 52860, cdpConnecting: true });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const button = screen.getByLabelText("connect to CDP endpoint") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toContain("Connecting…");
   });
 });

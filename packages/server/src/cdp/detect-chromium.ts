@@ -50,6 +50,7 @@ export const getBrowserCandidates = (
     push("Vivaldi", `${base}/Vivaldi`);
     push("Opera", `${base}/com.operasoftware.Opera`);
     push("Comet", `${base}/Comet`);
+    push("Aside", `${base}/Aside`);
     push("Google Chrome Canary", `${base}/Google/Chrome Canary`);
   } else if (platform === "linux") {
     const cfg = `${home}/.config`;
@@ -60,10 +61,12 @@ export const getBrowserCandidates = (
     push("Brave", `${cfg}/BraveSoftware/Brave-Browser`);
     push("Vivaldi", `${cfg}/vivaldi`);
     push("Opera", `${cfg}/opera`);
+    push("Aside", `${cfg}/aside`);
     push("Google Chrome Canary", `${cfg}/google-chrome-unstable`);
   } else if (platform === "win32") {
     const local = process.env.LOCALAPPDATA ?? `${home}\\AppData\\Local`;
     push("Dia", `${local}\\Dia\\User Data`);
+    push("Aside", `${local}\\Aside`);
     push("Google Chrome", `${local}\\Google\\Chrome\\User Data`);
     push("Chromium", `${local}\\Chromium\\User Data`);
     push("Microsoft Edge", `${local}\\Microsoft\\Edge\\User Data`);

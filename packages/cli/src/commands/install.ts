@@ -26,6 +26,7 @@ import { cliEntry } from "../utils/cli-entry.js";
 import { isPortlessProxyLive } from "../utils/portless.js";
 import { configureTailscaleServe, removeTailscaleServe } from "../utils/tailscale.js";
 import { probeCdpAvailability } from "../utils/probe-cdp-availability.js";
+import { readConfiguredCdpPort } from "../utils/read-configured-cdp-port.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 
 const execFileAsync = promisify(execFile);
@@ -258,7 +259,7 @@ const setupTailscaleServe = async (port: number): Promise<void> => {
 const reportCdpAvailability = async (): Promise<void> => {
   console.log();
   console.log(kleur.cyan("chromium  — background automation tabs (no focus steal, closeable)"));
-  const availability = await probeCdpAvailability();
+  const availability = await probeCdpAvailability(readConfiguredCdpPort());
   if (availability.available) {
     console.log(
       kleur.green(

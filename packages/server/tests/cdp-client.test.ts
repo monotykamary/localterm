@@ -450,3 +450,30 @@ describe("CdpClient keepalive (wake-from-sleep)", () => {
     client.close();
   });
 });
+
+describe("CdpClient.resetConnection", () => {
+  it("drops the live socket so the next open reconnects on a fresh socket", async () => {
+    const browser = await startMockBrowser("ok");
+    const client = new CdpClient({ detect: async () => [detected(browser.wsUrl)] });
+    await client.connect();
+    expect(client.isConnected()).toBe(true);
+    expect(browser.connections).toBe(1);
+
+    client.resetConnection("port reconfigured");
+    expect(client.isConnected()).toBe(false);
+
+    // The next run re-runs detection and opens a second socket — the path a
+    // `PUT /api/config` port change takes so the new endpoint is used.
+    const handle = await client.openBackgroundTab("http://x/?run=1");
+    expect(handle).toBe("target-1");
+    expect(browser.connections).toBe(2);
+    client.close();
+  });
+
+  it("is a no-op when already disconnected", () => {
+    const client = new CdpClient({ detect: async () => [] });
+    expect(() => client.resetConnection()).not.toThrow();
+    expect(client.isConnected()).toBe(false);
+    client.close();
+  });
+});

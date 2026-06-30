@@ -40,6 +40,7 @@ import { reportCliError } from "../utils/report-cli-error.js";
 import { announceResolvedUrl, resolveDaemonUrl } from "../utils/portless.js";
 import type { ResolveUrlResult } from "../utils/portless.js";
 import { probeCdpAvailability } from "../utils/probe-cdp-availability.js";
+import { readConfiguredCdpPort } from "../utils/read-configured-cdp-port.js";
 import { runStartPreflight } from "../utils/run-start-preflight.js";
 import { sleep } from "../utils/sleep.js";
 import { spawnDaemon } from "../utils/spawn-daemon.js";
@@ -142,7 +143,7 @@ const runStartAsDaemon = async (options: StartOptions): Promise<void> => {
 };
 
 const printCdpAvailabilityLine = async (): Promise<void> => {
-  const availability = await probeCdpAvailability();
+  const availability = await probeCdpAvailability(readConfiguredCdpPort());
   if (availability.available) {
     console.log(
       `  cdp:      ${kleur.green("background tabs")} via ${availability.browserName} (no focus steal, closeable)`,

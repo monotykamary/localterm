@@ -16,6 +16,7 @@ import {
   MODAL_PANEL_CLASSES,
 } from "@/lib/animation-classes";
 import {
+  CDP_PORT_MAX,
   SETTINGS_MODAL_CLOSE_TRANSITION_MS,
   SETTINGS_MODAL_MAX_HEIGHT_CSS,
   TERMINAL_FONT_SIZE_MAX_PX,
@@ -72,6 +73,11 @@ interface SettingsMenuProps {
   onScrollbackChange: (scrollback: number) => void;
   scrollOnUserInput: boolean;
   onScrollOnUserInputChange: (scrollOnUserInput: boolean) => void;
+  cdpPort: number | null;
+  cdpStatus: { connected: boolean; browser?: string; error?: string } | null;
+  cdpConnecting: boolean;
+  onCdpPortChange: (port: number | null) => void;
+  onCdpConnect: () => void;
   notificationsPermission: NotificationPermission | "unsupported";
   onNotificationsPermissionRequest: () => void;
   sessionInfo?: TerminalSessionInfo | null;
@@ -132,6 +138,88 @@ const SessionInfoRow = ({ label, value, title, valueClassName }: SessionInfoRowP
   </div>
 );
 
+interface CdpPortFieldProps {
+  port: number | null;
+  status: { connected: boolean; browser?: string; error?: string } | null;
+  connecting: boolean;
+  onPortChange: (port: number | null) => void;
+  onConnect: () => void;
+}
+
+// The CDP port is a daemon-global value edited through /api/config, not a
+// localStorage terminal pref, so this field keeps a local text buffer and
+// commits on blur/Enter — avoiding a PUT per keystroke and letting an invalid
+// edit roll back to the last confirmed value. The Connect button triggers an
+// explicit, awaited connect (POST /api/cdp/connect) so a failure surfaces a
+// reason instead of silently staying "Not connected".
+const CdpPortField = ({ port, status, connecting, onPortChange, onConnect }: CdpPortFieldProps) => {
+  const [buffer, setBuffer] = useState(port === null ? "" : String(port));
+
+  useEffect(() => {
+    setBuffer(port === null ? "" : String(port));
+  }, [port]);
+
+  const commit = () => {
+    const trimmed = buffer.trim();
+    if (trimmed === "") {
+      if (port !== null) onPortChange(null);
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (Number.isInteger(parsed) && parsed > 0 && parsed <= CDP_PORT_MAX) {
+      if (parsed !== port) onPortChange(parsed);
+    } else {
+      setBuffer(port === null ? "" : String(port));
+    }
+  };
+
+  const connected = status?.connected === true;
+  const statusText = connected
+    ? `Connected — ${status?.browser ?? "debug-enabled browser"}`
+    : status?.error
+      ? `Not connected — ${status.error}`
+      : "Not connected — launch a Chromium browser with remote debugging on.";
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Input
+        type="number"
+        min={1}
+        max={CDP_PORT_MAX}
+        value={buffer}
+        placeholder="Auto-detect"
+        aria-label="CDP remote debugging port"
+        className="h-7 px-2 font-mono text-xs"
+        onChange={(event) => setBuffer(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
+      />
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={cn(
+            "min-w-0 truncate text-[10px]",
+            connected ? "text-muted-foreground/60" : "text-amber-400",
+          )}
+          title={statusText}
+        >
+          {statusText}
+        </span>
+        <Button
+          variant="secondary"
+          size="xs"
+          aria-label="connect to CDP endpoint"
+          disabled={connecting}
+          onClick={onConnect}
+        >
+          {connecting ? "Connecting…" : "Connect"}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
 export const SettingsMenu = ({
   themeId,
   onThemeChange,
@@ -164,6 +252,11 @@ export const SettingsMenu = ({
   onScrollbackChange,
   scrollOnUserInput,
   onScrollOnUserInputChange,
+  cdpPort,
+  cdpStatus,
+  cdpConnecting,
+  onCdpPortChange,
+  onCdpConnect,
   notificationsPermission,
   onNotificationsPermissionRequest,
   sessionInfo,
@@ -508,6 +601,35 @@ export const SettingsMenu = ({
                           }}
                         />
                       </div>
+                    </Field>
+
+                    <Separator className="bg-border/40" />
+
+                    <Field orientation="vertical" className="gap-1.5">
+                      <FieldLabel className={SECTION_LABEL_CLASSES}>Automation browser</FieldLabel>
+                      <Tooltip>
+                        <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                          Remote debugging port
+                        </TooltipTrigger>
+                        <TooltipContent
+                          side="bottom"
+                          sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                          className="max-w-xs"
+                        >
+                          Automation run tabs open in the background over the DevTools Protocol.
+                          Leave empty to auto-detect a Chromium browser launched with
+                          {" --remote-debugging-port"}; set a port to target a specific debug
+                          endpoint (e.g. Aside on 52860). Saved to the daemon and used by every
+                          tab.
+                        </TooltipContent>
+                      </Tooltip>
+                      <CdpPortField
+                        port={cdpPort}
+                        status={cdpStatus}
+                        connecting={cdpConnecting}
+                        onPortChange={onCdpPortChange}
+                        onConnect={onCdpConnect}
+                      />
                     </Field>
 
                     <Separator className="bg-border/40" />

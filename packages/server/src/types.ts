@@ -15,8 +15,11 @@ import type {
   automationWithNextRunSchema,
   caffeinateModeSchema,
   cdpHealthSchema,
+  cdpConnectResultSchema,
   clientToServerMessageSchema,
   createAutomationInputSchema,
+  daemonConfigSchema,
+  updateDaemonConfigInputSchema,
   gitBaseSourceSchema,
   gitBranchInfoSchema,
   gitBranchPrLeaseSchema,
@@ -94,6 +97,9 @@ export type ServerToClientMessage = z.infer<typeof serverToClientMessageSchema>;
 
 export type CaffeinateMode = z.infer<typeof caffeinateModeSchema>;
 export type CdpHealth = z.infer<typeof cdpHealthSchema>;
+export type CdpConnectResult = z.infer<typeof cdpConnectResultSchema>;
+export type DaemonConfig = z.infer<typeof daemonConfigSchema>;
+export type UpdateDaemonConfigInput = z.infer<typeof updateDaemonConfigInputSchema>;
 
 export type SecretEntry = z.infer<typeof secretEntrySchema>;
 export type SecretEntryResponse = z.infer<typeof secretEntryResponseSchema>;

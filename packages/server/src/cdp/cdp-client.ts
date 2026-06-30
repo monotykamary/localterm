@@ -522,6 +522,19 @@ export class CdpClient {
     this.failPending(dead, new Error(reason));
   }
 
+  /**
+   * Drop the live socket so the next `connect()` re-runs detection — used when
+   * the configured CDP endpoint changes via `PUT /api/config`, so the new port
+   * takes effect without a daemon restart. Best-effort: a no-op when already
+   * disconnected, and safe against a concurrent reconnect (the guard in
+   * failPending ignores a stale socket). The caller may follow up with
+   * `connect()` to re-establish promptly; otherwise the next
+   * `openBackgroundTab` reconnects lazily.
+   */
+  resetConnection(reason = "cdp connection reset"): void {
+    this.teardownStale(reason);
+  }
+
   close(): void {
     this.stopHeartbeat();
     try {

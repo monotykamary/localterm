@@ -162,6 +162,10 @@ import { isCoarsePointer } from "@/utils/is-coarse-pointer";
 import { loadStoredDefaultCwd } from "@/utils/stored-default-cwd";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
+import { fetchDaemonConfig } from "@/utils/fetch-daemon-config";
+import { updateDaemonConfig } from "@/utils/update-daemon-config";
+import { fetchServerHealth } from "@/utils/fetch-server-health";
+import { connectCdp } from "@/utils/connect-cdp";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
 import { computePtyViewportOverlay } from "@/utils/compute-pty-viewport-overlay";
 
@@ -348,6 +352,14 @@ export const Terminal = () => {
   const [isKeepAwakePopoverOpen, setIsKeepAwakePopoverOpen] = useState(false);
   const [isSessionsOpen, setIsSessionsOpen] = useState(false);
   const [isQrOpen, setIsQrOpen] = useState(false);
+  const [cdpPort, setCdpPort] = useState<number | null>(null);
+  const [cdpStatus, setCdpStatus] = useState<{
+    connected: boolean;
+    browser?: string;
+    port?: number;
+    error?: string;
+  } | null>(null);
+  const [cdpConnecting, setCdpConnecting] = useState(false);
   const [automations, setAutomations] = useState<AutomationWithNextRun[] | null>(null);
   const toggleAutomationsRef = useRef<(() => void) | null>(null);
   const [isWorktreesOpen, setIsWorktreesOpen] = useState(false);
@@ -1837,19 +1849,68 @@ export const Terminal = () => {
     [isSettingsOpen, isAutomationsOpen],
   );
 
-  const handleSettingsOpenChange = useCallback((open: boolean) => {
-    setIsSettingsOpen(open);
-    if (!open) {
-      setIsActionsMenuOpen(false);
-      if (toolbarHoverTimeoutRef.current !== null) {
-        window.clearTimeout(toolbarHoverTimeoutRef.current);
-      }
-      toolbarHoverTimeoutRef.current = window.setTimeout(() => {
-        toolbarHoverTimeoutRef.current = null;
-        setIsToolbarHovered(false);
-      }, TOOLBAR_HIDE_DELAY_MS);
-    }
+  const refreshCdpStatus = useCallback(() => {
+    void fetchServerHealth().then((health) => {
+      if (health) setCdpStatus(health.cdp);
+    });
   }, []);
+
+  // The CDP port lives on the daemon, so the settings field is hydrated when
+  // the modal opens (not held in localStorage like the terminal-appearance
+  // prefs). A port change PUTs to the daemon, which reconnects in the
+  // background; health is re-fetched after a short delay so the "Connected"
+  // status reflects the new endpoint.
+  // Persist the configured port. No connect and no status refresh here — a
+  // port change only updates the value the daemon's next connect reads. The
+  // explicit Connect button applies it; the live socket is left untouched.
+  const handleCdpPortChange = useCallback((next: number | null) => {
+    setCdpPort(next);
+    void updateDaemonConfig({ cdpPort: next }).then((confirmed) => {
+      if (confirmed) setCdpPort(confirmed.cdpPort);
+    });
+  }, []);
+
+  // Explicit "Connect now": await the daemon's connect and fold the result
+  // (including any error) into cdpStatus, so the field shows why a connection
+  // failed rather than silently staying "Not connected".
+  const handleCdpConnect = useCallback(() => {
+    setCdpConnecting(true);
+    void connectCdp().then((result) => {
+      setCdpConnecting(false);
+      if (result) {
+        setCdpStatus({
+          connected: result.connected,
+          browser: result.browser,
+          port: result.port,
+          error: result.error,
+        });
+      } else {
+        refreshCdpStatus();
+      }
+    });
+  }, [refreshCdpStatus]);
+
+  const handleSettingsOpenChange = useCallback(
+    (open: boolean) => {
+      setIsSettingsOpen(open);
+      if (open) {
+        void fetchDaemonConfig().then((config) => {
+          if (config) setCdpPort(config.cdpPort);
+        });
+        refreshCdpStatus();
+      } else {
+        setIsActionsMenuOpen(false);
+        if (toolbarHoverTimeoutRef.current !== null) {
+          window.clearTimeout(toolbarHoverTimeoutRef.current);
+        }
+        toolbarHoverTimeoutRef.current = window.setTimeout(() => {
+          toolbarHoverTimeoutRef.current = null;
+          setIsToolbarHovered(false);
+        }, TOOLBAR_HIDE_DELAY_MS);
+      }
+    },
+    [refreshCdpStatus],
+  );
 
   const handleAutomationsOpenChange = useCallback(
     (open: boolean) => handleOverlayOpenChange(setIsAutomationsOpen, open),
@@ -2477,6 +2538,11 @@ export const Terminal = () => {
                     onScrollbackChange={handleScrollbackChange}
                     scrollOnUserInput={activeScrollOnUserInput}
                     onScrollOnUserInputChange={handleScrollOnUserInputChange}
+                    cdpPort={cdpPort}
+                    cdpStatus={cdpStatus}
+                    cdpConnecting={cdpConnecting}
+                    onCdpPortChange={handleCdpPortChange}
+                    onCdpConnect={handleCdpConnect}
                     paddingX={activePaddingX}
                     onPaddingXChange={handlePaddingXChange}
                     paddingY={activePaddingY}
