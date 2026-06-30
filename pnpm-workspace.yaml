@@ -4,13 +4,17 @@ packages:
   - "packages/*"
 
 allowBuilds:
+  "@google/genai": true
   msw: false
   node-pty: true
+  protobufjs: true
 
 onlyBuiltDependencies:
   - "@parcel/watcher"
+  - "@google/genai"
   - esbuild
   - node-pty
+  - protobufjs
   - sharp
   - spawn-sync
   - unrs-resolver
