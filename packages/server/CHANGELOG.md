@@ -1,5 +1,17 @@
 # localterm-server
 
+## 2.32.0
+
+### Minor Changes
+
+- Terminal-use parity: `press` (named keys), `wait` (block until the pane matches), `capture --png` (screenshot via the browser over the daemon's existing CDP socket), and `mouse` (click/drag/move/scroll — by coords or `--on-text`), so an agent can drive mouse-first TUIs (NetHack, dialog installers, `mc`) headlessly.
+
+  - **press**: `localterm session press <id> F2` / `press Ctrl-C` / `press Escape : w q Enter` — named keys resolved server-side to xterm bytes (unknown tokens pass through as literal text). REST: `POST /api/sessions/:id/input` with `named:true`.
+  - **wait**: block until the rendered pane matches `--text`/`--regex` or goes `--idle`, bounded by `--timeout` — the primitive for interactive apps so an agent doesn't poll. Reuses the tmux-parity capture renderer (flushed per frame) as the source of truth. REST: `POST /api/sessions/:id/wait`.
+  - **capture --png**: rasterize the pane to a PNG via the browser over the daemon's one persistent CDP socket (the browser is the rasterizer — no new image dep). Reuses a live viewer tab when one exists; otherwise opens an ephemeral background tab, waits for xterm to render (content-equality against the server-side capture renderer — can't return stale pixels), screenshots the `.xterm` element, and closes it. Pinned sessions survive between calls with no tab burning a slot. `409 {error:"no_browser"}` when no browser is reachable (text `capture-pane` still works headlessly). REST: `GET /api/sessions/:id/pane?format=png`.
+  - **mouse**: dispatch a real mouse event through the tab's xterm.js (SGR generated natively — exact drag/scroll/click-count semantics with no encoder) over CDP; falls back to direct SGR-1006 bytes written to the PTY when no browser is reachable (true headless), gated on the session's mouse-tracking mode so bytes are never fed to an app that didn't enable mouse. `--on-text` resolves a label's coords on the server-side capture grid (no tab needed). REST: `POST /api/sessions/:id/mouse` + `GET /api/sessions/:id/mouse/state`. CLI: `localterm session mouse {click,drag,move,scroll,state}`.
+  - Every CDP call reuses the daemon's existing persistent socket (`ctx.cdpClient`) — no second connection, no per-call reconnect.
+
 ## 2.31.0
 
 ### Minor Changes
