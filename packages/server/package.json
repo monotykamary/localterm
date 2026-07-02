@@ -68,6 +68,7 @@
     "@types/node": "^26.0.1",
     "@types/picomatch": "^4.0.3",
     "@types/ws": "^8.18.1",
+    "selfsigned": "^5.5.0",
     "typescript": "^6.0.3",
     "vite-plus": "^0.2.1",
     "ws": "^8.21.0"
