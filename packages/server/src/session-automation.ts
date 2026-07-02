@@ -133,11 +133,21 @@ export const capturePanePng = async (
       return JSON.stringify({ x: r.left, y: r.top, width: r.width, height: r.height });
     })()`;
     const clipRaw = await cdpClient.evaluateInSession(tab.cdpSessionId, clipExpr);
-    const clip =
+    const parsed =
       typeof clipRaw === "string"
         ? (JSON.parse(clipRaw) as { x: number; y: number; width: number; height: number })
         : undefined;
-    return cdpClient.captureScreenshotInSession(tab.cdpSessionId, clip);
+    // A 0-size `.xterm` (a background/headless tab not yet laid out) yields a
+    // clip Page.captureScreenshot rejects; fall back to the full viewport.
+    const clip = parsed && parsed.width > 0 && parsed.height > 0 ? parsed : undefined;
+    // The first capture can come back empty when the tab hasn't committed a frame
+    // yet (the render landed just past the poll window); settle + retry once.
+    let png = await cdpClient.captureScreenshotInSession(tab.cdpSessionId, clip);
+    if (!png) {
+      await sleep(CDP_RENDER_LANDED_SETTLE_MS);
+      png = await cdpClient.captureScreenshotInSession(tab.cdpSessionId, clip);
+    }
+    return png;
   } finally {
     await tab.close();
   }
