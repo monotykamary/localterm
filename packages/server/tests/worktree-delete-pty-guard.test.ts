@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -83,9 +84,11 @@ describe("worktree delete guard (active PTY)", () => {
     stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-wtguard-"));
     repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-wtrepo-"));
     initRepo(repoDir);
-    // A linked worktree at an arbitrary temp path (not under ~/.localterm) so
-    // the test never touches the user's real worktrees dir.
-    worktreeDir = path.join(path.dirname(repoDir), "localterm-linked-wt");
+    // A linked worktree at a unique temp path (not under ~/.localterm) so the
+    // test never touches the user's real worktrees dir. Unique per run — a fixed
+    // name would collide with a crashed prior run's leftover (git worktree add
+    // refuses an existing path) and poison every future run until manually cleaned.
+    worktreeDir = path.join(os.tmpdir(), `localterm-linked-wt-${randomUUID()}`);
     runGitSync(repoDir, ["worktree", "add", "-b", "feature", worktreeDir]);
 
     server = await createServer({
