@@ -1367,6 +1367,23 @@ export const identityConfigSchema = z.discriminatedUnion("provider", [
   oidcConfigSchema,
 ]);
 
+// Unauthenticated `GET /auth/provider` response: which login flow the terminal
+// app / CLI should offer. `null` = no provider (legacy single-authority mode);
+// `header` = an external proxy owns the login (no in-app flow); `passkey` /
+// `oidc` = localterm runs its own login. `registration` is only meaningful for
+// passkey.
+export const identityProviderInfoSchema = z.object({
+  provider: z.enum(["header", "passkey", "oidc"]).nullable(),
+  registration: z.enum(["open", "closed"]).optional(),
+});
+
+// `GET /auth/<provider>/me` response: the currently-authenticated user, or
+// null when there's no session. The auth gate uses this to decide whether to
+// show the terminal or the login screen.
+export const authSessionSchema = z.object({
+  user: z.string().nullable(),
+});
+
 export const daemonConfigFileSchema = z
   .object({
     version: z.literal(DAEMON_CONFIG_FILE_VERSION),

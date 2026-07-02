@@ -69,7 +69,9 @@ export {
   cdpConnectResultSchema,
   daemonConfigFileSchema,
   daemonConfigSchema,
+  authSessionSchema,
   identityConfigSchema,
+  identityProviderInfoSchema,
   oidcConfigSchema,
   passkeyConfigSchema,
   updateDaemonConfigInputSchema,
@@ -208,3 +210,4 @@ export { compileSchedule, compileScheduleAll } from "./utils/compile-schedule.js
 export type { BrowserCandidate, DetectedBrowser } from "./cdp/detect-chromium.js";
 export { isImagePath } from "./utils/image-extensions.js";
 export type { ServerError, ServerErrorCode, ServerErrorKind } from "./errors.js";
+export type { AuthSession, IdentityProviderInfo, IdentityProviderKind } from "./identity/types.js";

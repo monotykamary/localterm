@@ -72,6 +72,24 @@ export interface OidcIdentityConfig {
 
 export type IdentityConfig = HeaderIdentityConfig | PasskeyIdentityConfig | OidcIdentityConfig;
 
+// `GET /auth/provider` response: which login flow the terminal app / CLI should
+// offer. `null` = no provider (legacy single-authority mode); `header` = an
+// external proxy owns the login (no in-app flow); `passkey`/`oidc` = localterm
+// runs its own login. `registration` is only meaningful for passkey.
+export type IdentityProviderKind = "header" | "passkey" | "oidc";
+
+export interface IdentityProviderInfo {
+  provider: IdentityProviderKind | null;
+  registration?: "open" | "closed";
+}
+
+// `GET /auth/<provider>/me` response: the currently-authenticated user, or
+// null when there's no session. The auth gate uses this to decide whether to
+// show the terminal or the login screen.
+export interface AuthSession {
+  user: string | null;
+}
+
 // Server-owned resources injected into providers that need them. The passkey
 // provider uses the persisted HMAC `secret` for its session cookie, `getOrigin`
 // for the WebAuthn RP ID / expected origin, and `stateDirectory` to place its
