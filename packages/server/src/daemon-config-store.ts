@@ -8,6 +8,7 @@ import {
   TCP_PORT_MAX,
 } from "./constants.js";
 import { daemonConfigFileSchema } from "./schemas.js";
+import type { IdentityConfig } from "./identity/types.js";
 
 interface DaemonConfig {
   // `null` = auto-detect (scan user-data dirs for a DevToolsActivePort); a
@@ -21,11 +22,18 @@ interface DaemonConfig {
   // `0` = reap an idle shell the moment its last viewer detaches. The daemon
   // reads it live, so a `PUT /api/config` re-arms already-dormant shells.
   graceSeconds: number | null;
+  // Identity provider config — scopes the session registry per authenticated
+  // user. `null` = no provider (single-authority mode, byte-identical to the
+  // no-auth behavior). Read once at daemon start (the provider is built from
+  // it); changing it requires a restart, so unlike the two knobs above it's
+  // not live-editable via `PUT /api/config`.
+  identity: IdentityConfig | null;
 }
 
 const DEFAULT_CONFIG: DaemonConfig = {
   cdpPort: null,
   graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
+  identity: null,
 };
 
 const clampPort = (port: number | null): number | null =>
@@ -71,6 +79,10 @@ export class DaemonConfigStore {
     return this.config.graceSeconds;
   }
 
+  getIdentity(): IdentityConfig | null {
+    return this.config.identity;
+  }
+
   // Returns the resolved value (clamped) and persists only on a real change.
   setGraceSeconds(seconds: number | null): number | null {
     const next = clampGraceSeconds(seconds);
@@ -102,16 +114,26 @@ export class DaemonConfigStore {
     this.config = {
       cdpPort: parsed.data.cdpPort,
       graceSeconds: parsed.data.graceSeconds ?? SESSION_GRACE_DEFAULT_SECONDS,
+      identity: parsed.data.identity ?? null,
     };
   }
 
   private persist(): void {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    const payload = {
+    // `identity` is omitted from the payload when null so a config that never
+    // set it stays byte-identical to the pre-identity file (and to the default
+    // a fresh daemon writes), keeping the persisted shape stable.
+    const payload: {
+      version: number;
+      cdpPort: number | null;
+      graceSeconds: number | null;
+      identity?: IdentityConfig;
+    } = {
       version: DAEMON_CONFIG_FILE_VERSION,
       cdpPort: this.config.cdpPort,
       graceSeconds: this.config.graceSeconds,
     };
+    if (this.config.identity) payload.identity = this.config.identity;
     const tmpPath = `${this.filePath}.tmp`;
     fs.writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     fs.renameSync(tmpPath, this.filePath);

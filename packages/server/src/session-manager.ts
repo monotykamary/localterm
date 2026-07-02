@@ -34,6 +34,7 @@ import { GitMetadataCoordinator } from "./git-metadata-coordinator.js";
 import { Session } from "./session.js";
 import type { SessionEventName } from "./session-event-manager.js";
 import type { GitBranchPr, ServerToClientMessage, SpawnPtyInput } from "./types.js";
+import type { SessionOwner } from "./identity/types.js";
 import { resolveNamedKeys } from "./utils/named-keys.js";
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 
@@ -109,6 +110,9 @@ export interface ManagedSession {
   readonly id: string;
   readonly createdAt: number;
   readonly clients: Set<ManagedClient>;
+  // The identity this session is partitioned by (`null` = operator/legacy
+  // tier, full access). Set at spawn, never mutated.
+  readonly owner: SessionOwner;
   automation: AutomationContext | null;
   outputBatch: string;
   outputBatchTimer: NodeJS.Timeout | null;
@@ -252,8 +256,10 @@ export class SessionManager {
     return false;
   }
 
-  list(): SessionListItem[] {
-    return [...this.sessions.values()].map((managed) => ({
+  list(owner: SessionOwner = null): SessionListItem[] {
+    const all = [...this.sessions.values()];
+    const scoped = owner === null ? all : all.filter((managed) => managed.owner === owner);
+    return scoped.map((managed) => ({
       id: managed.id,
       pid: managed.session.pid,
       shell: managed.session.shell,
@@ -324,7 +330,7 @@ export class SessionManager {
     managed.hasForeground = running;
   }
 
-  spawn(input: SpawnPtyInput, automation?: AutomationContext): ManagedSession | null {
+  spawn(input: SpawnPtyInput, automation?: AutomationContext, owner: SessionOwner = null): ManagedSession | null {
     if (this.sessions.size >= MAX_CONCURRENT_SESSIONS) this.evictOldestDormant();
     if (this.sessions.size >= MAX_CONCURRENT_SESSIONS) return null;
     const session = new Session(this.shimsDir ? { ...input, shimsDir: this.shimsDir } : input);
@@ -333,6 +339,7 @@ export class SessionManager {
       id: session.id,
       createdAt: session.createdAt,
       clients: new Set(),
+      owner,
       automation: automation ?? null,
       outputBatch: "",
       outputBatchTimer: null,
@@ -362,17 +369,31 @@ export class SessionManager {
     ws: ClientSocket,
     input: SpawnPtyInput,
     automation?: AutomationContext,
+    owner: SessionOwner = null,
   ): ManagedSession | null {
-    const spawned = this.spawn(input, automation);
+    const spawned = this.spawn(input, automation, owner);
     if (!spawned) return null;
-    return this.attach(ws, spawned.id);
+    return this.attach(ws, spawned.id, owner);
+  }
+
+  // Resolve a live, owned session for an id-based (REST/CLI) operation. Returns
+  // null for an unknown/exited id, or when `owner` is set (multi-user mode) and
+  // the session belongs to someone else — both surface as not-found to the
+  // caller, so a cross-tenant probe can't enumerate or hijack. `owner === null`
+  // (the operator/legacy tier) bypasses the check: full access, matching the
+  // no-auth behavior exactly.
+  private sessionFor(id: string, owner: SessionOwner): ManagedSession | null {
+    const managed = this.sessions.get(id);
+    if (!managed || managed.session.isExited) return null;
+    if (owner !== null && managed.owner !== owner) return null;
+    return managed;
   }
 
   // Attach `ws` to a live PTY by id. Returns the session to reattach to, or
   // null when the id is unknown / already exited — the caller spawns fresh.
-  attach(ws: ClientSocket, id: string): ManagedSession | null {
-    const managed = this.sessions.get(id);
-    if (!managed || managed.session.isExited) return null;
+  attach(ws: ClientSocket, id: string, owner: SessionOwner = null): ManagedSession | null {
+    const managed = this.sessionFor(id, owner);
+    if (!managed) return null;
     // Re-subscribing cancels the no-clients grace timer (if armed): the shell
     // has a viewer again, so it stays alive.
     this.cancelGrace(managed);
@@ -519,9 +540,9 @@ export class SessionManager {
     this.hooks.onSessionActivity();
   }
 
-  kill(id: string): boolean {
+  kill(id: string, owner: SessionOwner = null): boolean {
     const managed = this.sessions.get(id);
-    if (!managed) return false;
+    if (!managed || (owner !== null && managed.owner !== owner)) return false;
     for (const client of managed.clients) {
       this.hooks.onClientExit(client.ws, null);
       this.sendControl(client.ws, { type: "exit", code: null });
@@ -548,8 +569,8 @@ export class SessionManager {
   // killed or its shell exits; an unpinned one enters the no-clients grace window
   // immediately (it has no viewer to detach from), matching a browser tab nobody
   // opened. Returns the session id, or null at the capacity cap.
-  spawnDetached(input: SpawnPtyInput, pinned: boolean): string | null {
-    const managed = this.spawn(input);
+  spawnDetached(input: SpawnPtyInput, pinned: boolean, owner: SessionOwner = null): string | null {
+    const managed = this.spawn(input, undefined, owner);
     if (!managed) return null;
     managed.pinned = pinned;
     // A detached session has no client to detach from, so arm the grace now (a
@@ -561,9 +582,9 @@ export class SessionManager {
   // Write input to a session by id — the REST/CLI send-keys path. Unlike the
   // WebSocket `writeInput`, there's no pending-client handshake to promote; the
   // bytes go straight to the PTY. Returns false for an unknown/exited session.
-  writeInputById(id: string, data: string): boolean {
-    const managed = this.sessions.get(id);
-    if (!managed || managed.session.isExited) return false;
+  writeInputById(id: string, data: string, owner: SessionOwner = null): boolean {
+    const managed = this.sessionFor(id, owner);
+    if (!managed) return false;
     managed.session.write(data);
     return true;
   }
@@ -571,9 +592,9 @@ export class SessionManager {
   // Resize a session by id — the REST/CLI resize path for detached sessions
   // (those with no WebSocket client to drive recomputeResize). Also keeps the
   // capture renderer's grid in sync. Returns false for an unknown/exited session.
-  resizeById(id: string, cols: number, rows: number): boolean {
-    const managed = this.sessions.get(id);
-    if (!managed || managed.session.isExited) return false;
+  resizeById(id: string, cols: number, rows: number, owner: SessionOwner = null): boolean {
+    const managed = this.sessionFor(id, owner);
+    if (!managed) return false;
     managed.session.resize(cols, rows);
     managed.captureRenderer?.resize(cols, rows);
     return true;
@@ -584,9 +605,9 @@ export class SessionManager {
   // to the visible viewport and may extend into scrollback up to
   // CAPTURE_PANE_MAX_LINES. Returns null for an unknown/exited session. Awaits
   // the renderer's pending writes so the read never lands before a parse.
-  async capturePane(id: string, lines?: number): Promise<string | null> {
-    const managed = this.sessions.get(id);
-    if (!managed || managed.session.isExited) return null;
+  async capturePane(id: string, lines?: number, owner: SessionOwner = null): Promise<string | null> {
+    const managed = this.sessionFor(id, owner);
+    if (!managed) return null;
     const capped = lines && lines > 0 ? Math.min(lines, CAPTURE_PANE_MAX_LINES) : undefined;
     const renderer = await this.ensureCaptureRenderer(managed);
     return renderer.capture(capped);
@@ -595,9 +616,9 @@ export class SessionManager {
   // Toggle a session's pinned flag — PATCH /api/sessions/:id. Re-arms (or
   // cancels) the grace timer live for a dormant session so the change takes
   // effect immediately, not on the next detach. Returns false for an unknown id.
-  setPinned(id: string, pinned: boolean): boolean {
+  setPinned(id: string, pinned: boolean, owner: SessionOwner = null): boolean {
     const managed = this.sessions.get(id);
-    if (!managed) return false;
+    if (!managed || (owner !== null && managed.owner !== owner)) return false;
     managed.pinned = pinned;
     if (managed.clients.size === 0 && !managed.session.isExited) this.startGrace(managed);
     return true;
@@ -606,9 +627,9 @@ export class SessionManager {
   // Rename a session — PATCH /api/sessions/:id. The shell's next OSC title or
   // cwd-derived title overwrites it (as in tmux), but until then the picker and a
   // fresh attach see the renamed title. Returns false for an unknown id.
-  setTitleById(id: string, title: string): boolean {
+  setTitleById(id: string, title: string, owner: SessionOwner = null): boolean {
     const managed = this.sessions.get(id);
-    if (!managed) return false;
+    if (!managed || (owner !== null && managed.owner !== owner)) return false;
     managed.session.setTitle(title);
     return true;
   }
@@ -617,9 +638,9 @@ export class SessionManager {
   // to xterm bytes and write them to a session — the `localterm session press`
   // path. Unknown tokens pass through as literal text so `press hello` types
   // "hello". Returns false for an unknown/exited session.
-  pressKeysById(id: string, input: string): boolean {
-    const managed = this.sessions.get(id);
-    if (!managed || managed.session.isExited) return false;
+  pressKeysById(id: string, input: string, owner: SessionOwner = null): boolean {
+    const managed = this.sessionFor(id, owner);
+    if (!managed) return false;
     const data = resolveNamedKeys(input);
     if (!data) return false;
     managed.session.write(data);
@@ -637,9 +658,10 @@ export class SessionManager {
     predicate: WaitPredicate,
     timeoutMs: number,
     idleMs?: number,
+    owner: SessionOwner = null,
   ): Promise<WaitResult | null> {
-    const managed = this.sessions.get(id);
-    if (!managed || managed.session.isExited) return null;
+    const managed = this.sessionFor(id, owner);
+    if (!managed) return null;
     const session = managed.session;
     const startedAt = Date.now();
     let resolved = false;
@@ -704,9 +726,10 @@ export class SessionManager {
   async findTextInViewport(
     id: string,
     needle: string,
+    owner: SessionOwner = null,
   ): Promise<{ col: number; row: number } | null> {
-    const managed = this.sessions.get(id);
-    if (!managed || managed.session.isExited) return null;
+    const managed = this.sessionFor(id, owner);
+    if (!managed) return null;
     const renderer = await this.ensureCaptureRenderer(managed);
     await renderer.flush();
     return renderer.findTextInViewport(needle);
@@ -714,18 +737,18 @@ export class SessionManager {
 
   // Whether the session's foreground app enabled a mouse tracking mode — gates
   // the SGR-1006 fallback for `mouse` when no CDP tab is available.
-  mouseEnabledFor(id: string): boolean {
+  mouseEnabledFor(id: string, owner: SessionOwner = null): boolean {
     const managed = this.sessions.get(id);
-    return managed ? managed.session.mouseEnabled : false;
+    if (!managed || (owner !== null && managed.owner !== owner)) return false;
+    return managed.session.mouseEnabled;
   }
 
   // The session's current PTY size (cols/rows), for the mouse-state endpoint
   // and any coord-bounds check. Returns `{0,0}` for an unknown id.
-  sessionSizeFor(id: string): { cols: number; rows: number } {
+  sessionSizeFor(id: string, owner: SessionOwner = null): { cols: number; rows: number } {
     const managed = this.sessions.get(id);
-    return managed
-      ? { cols: managed.session.cols, rows: managed.session.rows }
-      : { cols: 0, rows: 0 };
+    if (!managed || (owner !== null && managed.owner !== owner)) return { cols: 0, rows: 0 };
+    return { cols: managed.session.cols, rows: managed.session.rows };
   }
 
   // Lazily create (and prime) a session's capture renderer. Fed the scrollback
@@ -756,9 +779,10 @@ export class SessionManager {
     id: string,
     command: string,
     options: ExecOptions = {},
+    owner: SessionOwner = null,
   ): Promise<ExecResult | null> {
-    const managed = this.sessions.get(id);
-    if (!managed || managed.session.isExited) return null;
+    const managed = this.sessionFor(id, owner);
+    if (!managed) return null;
     const session = managed.session;
 
     const timeoutMs = this.clampInt(

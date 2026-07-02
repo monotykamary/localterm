@@ -116,6 +116,10 @@ import {
   mouseInputSchema,
 } from "./schemas.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
+import type { Context } from "hono";
+import type { Identity, IdentityConfig, SessionOwner } from "./identity/types.js";
+import { createIdentityProvider } from "./identity/header-provider.js";
+import { createIdentityResolver, getRequestSourceIp, toSessionOwner } from "./identity/resolve.js";
 import {
   SessionManager,
   type AutomationContext,
@@ -156,6 +160,13 @@ export interface ServerOptions {
   host?: string;
   staticRoot?: string | null;
   stateDirectory?: string;
+  /**
+   * Identity provider config — scopes the session registry per authenticated
+   * user. `null`/omitted = no provider (single-authority mode, byte-identical
+   * to no-auth). Overrides the config-file `identity` for tests/embedding; the
+   * provider is built once at start, so a change requires a restart.
+   */
+  identity?: IdentityConfig | null;
   /**
    * The announced REMOTE surface origin — the URL the CLI resolved best-first
    * (tailnet `https://<node>.ts.net`, portless `https://localterm.localhost`,
@@ -321,6 +332,12 @@ const safeSend = (ws: ClientSocket, payload: ServerToClientMessage) => {
 
 interface DaemonContext {
   registry: SessionManager;
+  // Per-request identity resolution: HTTP routes call `ownerFor(context)` to
+  // scope the session registry to the authenticated user (or the operator tier
+  // when no identity resolves); the WS upgrade calls `resolveIdentity` with the
+  // raw socket's source IP directly.
+  resolveIdentity: (context: Context, sourceIp?: string | null) => Identity | null;
+  ownerFor: (context: Context) => SessionOwner;
   cdpClient: CdpClient | null;
   secretBackend: SecretBackend;
   secretStore: SecretStore;
@@ -428,6 +445,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   const api = new Hono();
   const {
     registry,
+    ownerFor,
     cdpClient,
     secretBackend,
     secretStore,
@@ -498,10 +516,10 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   // switch to one by id or kill one it no longer wants. `clients` is the count
   // of attached sockets — 0 marks a dormant shell left behind by a closed tab,
   // which is exactly the row the picker exists to surface.
-  api.get("/sessions", (context) => context.json({ sessions: registry.list() }));
+  api.get("/sessions", (context) => context.json({ sessions: registry.list(ownerFor(context)) }));
 
   api.delete("/sessions/:id", (context) => {
-    const killed = registry.kill(context.req.param("id"));
+    const killed = registry.kill(context.req.param("id"), ownerFor(context));
     if (!killed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json({ ok: true });
   });
@@ -515,7 +533,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   // network-policy middleware already on `*`; the daemon hands out unrestricted
   // shells, so driving one programmatically is no escalation.
   api.get("/sessions/:id", (context) => {
-    const managed = registry.list().find((session) => session.id === context.req.param("id"));
+    const managed = registry.list(ownerFor(context)).find((session) => session.id === context.req.param("id"));
     if (!managed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json({ session: managed });
   });
@@ -542,10 +560,11 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
         initialCommand: parsed.data.command,
       },
       parsed.data.pinned ?? true,
+      ownerFor(context),
     );
     if (!id) return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
-    if (parsed.data.name) registry.setTitleById(id, parsed.data.name);
-    const session = registry.list().find((item) => item.id === id);
+    if (parsed.data.name) registry.setTitleById(id, parsed.data.name, ownerFor(context));
+    const session = registry.list(ownerFor(context)).find((item) => item.id === id);
     return context.json({ session }, HTTP_STATUS_CREATED);
   });
 
@@ -555,9 +574,10 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     const parsed = updateSessionInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
     const id = context.req.param("id");
-    if (parsed.data.name !== undefined) registry.setTitleById(id, parsed.data.name);
-    if (parsed.data.pinned !== undefined) registry.setPinned(id, parsed.data.pinned);
-    const session = registry.list().find((item) => item.id === id);
+    const owner = ownerFor(context);
+    if (parsed.data.name !== undefined) registry.setTitleById(id, parsed.data.name, owner);
+    if (parsed.data.pinned !== undefined) registry.setPinned(id, parsed.data.pinned, owner);
+    const session = registry.list(owner).find((item) => item.id === id);
     if (!session) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json({ session });
   });
@@ -571,9 +591,10 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     const parsed = sessionInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
     const id = context.req.param("id");
+    const owner = ownerFor(context);
     const written = parsed.data.named
-      ? registry.pressKeysById(id, parsed.data.data)
-      : registry.writeInputById(id, parsed.data.data);
+      ? registry.pressKeysById(id, parsed.data.data, owner)
+      : registry.writeInputById(id, parsed.data.data, owner);
     if (!written) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json({ ok: true });
   });
@@ -585,6 +606,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
       context.req.param("id"),
       parsed.data.cols,
       parsed.data.rows,
+      ownerFor(context),
     );
     if (!resized) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json({ ok: true });
@@ -597,6 +619,13 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   // headless capture renderer's grid, which works with no browser at all.
   api.get("/sessions/:id/pane", async (context) => {
     const id = context.req.param("id");
+    // PNG is rasterized by a CDP tab the daemon opens as the operator tier, so
+    // gate both formats on ownership before delegating — a cross-tenant id
+    // surfaces as not-found, not a screenshot of someone else's shell.
+    const owner = ownerFor(context);
+    if (!registry.list(owner).some((session) => session.id === id)) {
+      return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    }
     const format = context.req.query("format");
     if (format === "png") {
       const png = await capturePanePng({ cdpClient, buildTabUrl }, registry, id);
@@ -608,7 +637,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     if (lines !== undefined && (!Number.isInteger(lines) || lines <= 0)) {
       return context.json({ error: "invalid_lines" }, HTTP_STATUS_BAD_REQUEST);
     }
-    const text = await registry.capturePane(id, lines);
+    const text = await registry.capturePane(id, lines, owner);
     if (text === null) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json({ text });
   });
@@ -626,7 +655,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     if (!predicate) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
     const idleMs =
       parsed.data.mode === "idle" ? (parsed.data.idleMs ?? SESSION_ACTIVITY_WINDOW_MS) : undefined;
-    const result = await registry.waitFor(id, predicate, timeoutMs, idleMs);
+    const result = await registry.waitFor(id, predicate, timeoutMs, idleMs, ownerFor(context));
     if (!result) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json(result);
   });
@@ -638,6 +667,12 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     const parsed = mouseInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
     const id = context.req.param("id");
+    // sendMouse drives the session via a CDP tab the daemon opens as the
+    // operator tier, so gate on ownership here (the manager calls inside
+    // sendMouse aren't owner-scoped) — a cross-tenant id surfaces as not-found.
+    if (!registry.list(ownerFor(context)).some((session) => session.id === id)) {
+      return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    }
     const action = normalizeMouseAction(parsed.data);
     if (!action) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
     const result = await sendMouse(
@@ -654,12 +689,13 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   // (gates the SGR fallback) plus the viewport size.
   api.get("/sessions/:id/mouse/state", (context) => {
     const id = context.req.param("id");
-    const managed = registry.list().find((session) => session.id === id);
+    const owner = ownerFor(context);
+    const managed = registry.list(owner).find((session) => session.id === id);
     if (!managed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json({
-      enabled: registry.mouseEnabledFor(id),
-      cols: registry.sessionSizeFor(id).cols,
-      rows: registry.sessionSizeFor(id).rows,
+      enabled: registry.mouseEnabledFor(id, owner),
+      cols: registry.sessionSizeFor(id, owner).cols,
+      rows: registry.sessionSizeFor(id, owner).rows,
     });
   });
 
@@ -670,10 +706,15 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   api.post("/sessions/:id/exec", async (context) => {
     const parsed = execInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
-    const result = await registry.execInSession(context.req.param("id"), parsed.data.command, {
-      timeoutMs: parsed.data.timeoutMs,
-      outputLimitBytes: parsed.data.outputLimitBytes,
-    });
+    const result = await registry.execInSession(
+      context.req.param("id"),
+      parsed.data.command,
+      {
+        timeoutMs: parsed.data.timeoutMs,
+        outputLimitBytes: parsed.data.outputLimitBytes,
+      },
+      ownerFor(context),
+    );
     if (!result) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json(result);
   });
@@ -693,16 +734,23 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     if (registry.atCapacity()) {
       return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
     }
+    const owner = ownerFor(context);
     const id = registry.spawnDetached(
       { cwd, cols: parsed.data.cols, rows: parsed.data.rows, env: parsed.data.env },
       false,
+      owner,
     );
     if (!id) return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
-    const result: ExecResult | null = await registry.execInSession(id, parsed.data.command, {
-      timeoutMs: parsed.data.timeoutMs,
-      outputLimitBytes: parsed.data.outputLimitBytes,
-    });
-    registry.kill(id);
+    const result: ExecResult | null = await registry.execInSession(
+      id,
+      parsed.data.command,
+      {
+        timeoutMs: parsed.data.timeoutMs,
+        outputLimitBytes: parsed.data.outputLimitBytes,
+      },
+      owner,
+    );
+    registry.kill(id, owner);
     if (!result) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json(result);
   });
@@ -857,7 +905,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   // each row carries the session's title/cwd for the modal to badge without a
   // second fetch.
   api.get("/ports", async (context) => {
-    const sessions = registry.list();
+    const sessions = registry.list(ownerFor(context));
     const sessionPids = sessions.map((session) => session.pid);
     const [snapshot, listeners] = await Promise.all([
       portsSnapshotProcesses(),
@@ -1573,6 +1621,18 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // the next `connect()` picks up the new port without re-wiring.
   const daemonConfigStore = new DaemonConfigStore(path.join(stateDirectory, "config.json"));
   let cdpPort: number | null = daemonConfigStore.getCdpPort();
+  // Identity provider (config-file `identity`, overridable via `ServerOptions`).
+  // `null` = no provider → single-authority mode: every request is the operator
+  // tier, the registry stays unscoped, byte-identical to no-auth. A configured
+  // provider resolves an `Identity` per request to partition the registry by
+  // user. Built once at start; changing it requires a restart (unlike the
+  // live cdpPort/graceSeconds knobs).
+  const identityConfig: IdentityConfig | null = options.identity ?? daemonConfigStore.getIdentity();
+  const identityProvider = identityConfig ? createIdentityProvider(identityConfig) : null;
+  const identityResolver = createIdentityResolver(identityProvider);
+  const resolveIdentity = (context: Context, sourceIp?: string | null): Identity | null =>
+    identityResolver.resolve(context, sourceIp ?? getRequestSourceIp(context));
+  const ownerFor = (context: Context): SessionOwner => toSessionOwner(resolveIdentity(context));
   // One persistent CDP socket for the daemon's lifetime — opened once at start
   // (below), so the user clears the browser's remote-debugging prompt a single
   // time rather than on every run. Skipped when a caller injects its own
@@ -1872,6 +1932,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   const ctx: DaemonContext = {
     registry,
+    resolveIdentity,
+    ownerFor,
     cdpClient,
     secretBackend,
     secretStore,
@@ -1980,18 +2042,25 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       return {
         onOpen(_event, ws) {
           activeWs = ws;
+          const remoteAddress = extractRemoteAddress(ws.raw);
           if (!isLoopbackBind) {
-            const remoteAddress = extractRemoteAddress(ws.raw);
             if (remoteAddress && !isAllowedSourceIp(remoteAddress, host)) {
               ws.close(WS_CLOSE_POLICY_VIOLATION, "source IP not allowed");
               return;
             }
           }
+          // The partition key for this tab. The WS upgrade carries the same
+          // headers as an HTTP request, so `resolveIdentity` reads the
+          // provider's header here too — using the raw socket's source IP
+          // (more authoritative than conninfo at upgrade time) for the
+          // trusted-proxy check. `null` = operator tier (full access); a
+          // non-null value scopes attach + spawn to that user.
+          const owner = toSessionOwner(resolveIdentity(context, remoteAddress));
           // Reattach if `?sid=` names a PTY the manager still has live (a
           // transient drop, or a switch from the session picker). A miss
           // (shell exited while dormant, killed, or reaped by the idle
           // sweep) falls through to a fresh spawn.
-          const attached = requestedSid ? registry.attach(ws, requestedSid) : null;
+          const attached = requestedSid ? registry.attach(ws, requestedSid, owner) : null;
           if (attached) {
             managed = attached;
             sessionId = attached.id;
@@ -2022,6 +2091,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
                 env: claimedRun?.env,
               },
               automation,
+              owner,
             );
             if (!spawned) {
               ws.close(WS_CLOSE_CAPACITY_REACHED, "session capacity reached");
@@ -2359,8 +2429,10 @@ export {
   healthSchema,
   cdpHealthSchema,
   daemonConfigSchema,
+  identityConfigSchema,
   updateDaemonConfigInputSchema,
 } from "./schemas.js";
+export type { Identity, IdentityConfig, SessionOwner } from "./identity/types.js";
 export {
   createSessionInputSchema,
   sessionResponseSchema,

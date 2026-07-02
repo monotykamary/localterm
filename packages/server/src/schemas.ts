@@ -47,6 +47,8 @@ import {
   TCP_PORT_MAX,
   WORKTREE_CONFIG_FILE_VERSION,
   WAIT_MAX_TIMEOUT_MS,
+  IDENTITY_HEADER_NAME_MAX_LENGTH,
+  IDENTITY_PROXY_SPEC_MAX_LENGTH,
 } from "./constants.js";
 
 // Live state of the daemon's persistent CDP connection (browser tab control for
@@ -1324,11 +1326,29 @@ export const graceSecondsSchema = z
   .max(SESSION_GRACE_MAX_SECONDS)
   .nullable();
 
+// Identity provider config (~/.localterm/config.json `identity`). Phase 1
+// supports only the `header` provider — a proxy-set header fronted by an
+// identity-aware reverse proxy (Cloudflare Access, Pomerium, Authelia).
+// Phase 2 (`passkey`, `oidc`) turns `identityConfigSchema` into a
+// `z.discriminatedUnion("provider", [...])` over the variants. Optional in the
+// file so an existing config without it upgrades to the no-provider
+// (single-authority) default rather than failing the strict parse.
+export const identityHeaderConfigSchema = z
+  .object({
+    provider: z.literal("header"),
+    header: z.string().trim().min(1).max(IDENTITY_HEADER_NAME_MAX_LENGTH).optional(),
+    trustedProxy: z.string().trim().min(1).max(IDENTITY_PROXY_SPEC_MAX_LENGTH).optional(),
+  })
+  .strict();
+
+export const identityConfigSchema = identityHeaderConfigSchema;
+
 export const daemonConfigFileSchema = z
   .object({
     version: z.literal(DAEMON_CONFIG_FILE_VERSION),
     cdpPort: cdpPortSchema,
     graceSeconds: graceSecondsSchema.optional(),
+    identity: identityConfigSchema.optional(),
   })
   .strict();
 

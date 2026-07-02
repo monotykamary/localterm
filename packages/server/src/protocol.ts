@@ -69,6 +69,7 @@ export {
   cdpConnectResultSchema,
   daemonConfigFileSchema,
   daemonConfigSchema,
+  identityConfigSchema,
   updateDaemonConfigInputSchema,
   gitBaseSourceSchema,
   gitBranchInfoSchema,

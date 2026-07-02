@@ -640,3 +640,15 @@ export const WAIT_IDLE_POLL_INTERVAL_MS = 100;
 // instead of `send-keys '\x1bOQ'`. Space-separated tokens; an unknown token
 // passes through as literal text so `press hello` types "hello".
 export const MAX_NAMED_KEYS_BYTES = MAX_INPUT_BYTES;
+
+// Identity: a proxy-set header (default `X-Forwarded-User`) fronted by an
+// identity-aware reverse proxy (Cloudflare Access, Pomerium, Caddy +
+// oauth2-proxy, Authelia forward-auth). The provider only trusts the header
+// when the request's source IP is inside `trustedProxy` (default `loopback` —
+// the proxy runs on the same host as the daemon, so only loopback can forge
+// it). A request with no header resolves to the operator tier (full access).
+export const IDENTITY_HEADER_DEFAULT = "X-Forwarded-User";
+export const IDENTITY_PROXY_DEFAULT = "loopback";
+export const IDENTITY_HEADER_NAME_MAX_LENGTH = 64;
+export const IDENTITY_PROXY_SPEC_MAX_LENGTH = 64;
+export const IDENTITY_USER_MAX_LENGTH = 256;
