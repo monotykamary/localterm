@@ -665,5 +665,6 @@ export const AUTH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 export const AUTH_SECRET_BYTES = 32;
 export const AUTH_SECRET_FILENAME = "auth-secret";
 export const AUTH_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+export const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 export const HTTP_STATUS_UNAUTHORIZED = 401;
 export const HTTP_STATUS_FORBIDDEN = 403;

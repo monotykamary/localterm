@@ -1350,9 +1350,21 @@ export const passkeyConfigSchema = z
   })
   .strict();
 
+export const oidcConfigSchema = z
+  .object({
+    provider: z.literal("oidc"),
+    issuer: z.string().url(),
+    clientId: z.string().min(1),
+    clientSecret: z.string().min(1).optional(),
+    claim: z.string().trim().min(1).optional(),
+    scope: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
 export const identityConfigSchema = z.discriminatedUnion("provider", [
   identityHeaderConfigSchema,
   passkeyConfigSchema,
+  oidcConfigSchema,
 ]);
 
 export const daemonConfigFileSchema = z

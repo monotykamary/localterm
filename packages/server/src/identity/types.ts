@@ -55,7 +55,22 @@ export interface PasskeyIdentityConfig {
   registration?: "open" | "closed";
 }
 
-export type IdentityConfig = HeaderIdentityConfig | PasskeyIdentityConfig;
+export interface OidcIdentityConfig {
+  provider: "oidc";
+  // The IdP issuer URL (e.g. https://accounts.google.com or a self-hosted
+  // Authentik/Zitadel). OIDC discovery is read from `<issuer>/.well-known/...`.
+  issuer: string;
+  clientId: string;
+  // Omit for a public client (PKCE-only); set for a confidential client.
+  clientSecret?: string;
+  // The userinfo claim to use as the identity (default "email"); falls back to
+  // `sub` when absent.
+  claim?: string;
+  // Space-separated scopes (default "openid email").
+  scope?: string;
+}
+
+export type IdentityConfig = HeaderIdentityConfig | PasskeyIdentityConfig | OidcIdentityConfig;
 
 // Server-owned resources injected into providers that need them. The passkey
 // provider uses the persisted HMAC `secret` for its session cookie, `getOrigin`

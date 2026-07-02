@@ -1654,6 +1654,16 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // out (denyUnauthenticated: false) — its no-header case IS the operator tier.
   app.use("*", createAuthGateMiddleware(identityProvider, resolveIdentity));
   if (identityProvider?.routes) app.route("/auth", identityProvider.routes());
+  // Unauthenticated meta endpoint the terminal app / CLI hit before login to
+  // learn which login flow to offer: the provider kind, and (for passkey)
+  // whether registration is open. Exempt from the gate (it's under /auth).
+  app.get("/auth/provider", (context) =>
+    context.json({
+      provider: identityConfig?.provider ?? null,
+      registration:
+        identityConfig?.provider === "passkey" ? identityConfig.registration ?? "open" : undefined,
+    }),
+  );
   // One persistent CDP socket for the daemon's lifetime — opened once at start
   // (below), so the user clears the browser's remote-debugging prompt a single
   // time rather than on every run. Skipped when a caller injects its own
@@ -2451,10 +2461,11 @@ export {
   cdpHealthSchema,
   daemonConfigSchema,
   identityConfigSchema,
+  oidcConfigSchema,
   passkeyConfigSchema,
   updateDaemonConfigInputSchema,
 } from "./schemas.js";
-export type { Identity, IdentityConfig, PasskeyIdentityConfig, SessionOwner } from "./identity/types.js";
+export type { Identity, IdentityConfig, OidcIdentityConfig, PasskeyIdentityConfig, SessionOwner } from "./identity/types.js";
 export {
   createSessionInputSchema,
   sessionResponseSchema,
