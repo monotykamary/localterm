@@ -1,7 +1,12 @@
 import kleur from "kleur";
 import { createDefaultSecretBackend } from "@monotykamary/localterm-server";
 import { readFileSync } from "node:fs";
-import { daemonBaseUrl, daemonFetch, reportApiError, reportDaemonDown } from "../utils/daemon-api.js";
+import {
+  daemonBaseUrl,
+  daemonFetch,
+  reportApiError,
+  reportDaemonDown,
+} from "../utils/daemon-api.js";
 
 interface SecretListItem {
   name: string;

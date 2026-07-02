@@ -216,7 +216,8 @@ describe("createAuthGateMiddleware", () => {
     ).toBe(401);
     // Valid operator token → 200 (operator tier, full access).
     expect(
-      (await app.request("/api/sessions", { headers: { authorization: "Bearer op-token" } })).status,
+      (await app.request("/api/sessions", { headers: { authorization: "Bearer op-token" } }))
+        .status,
     ).toBe(200);
   });
 

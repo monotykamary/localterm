@@ -97,7 +97,9 @@ const resolveOperatorToken = (
   const parsed = daemonConfigFileSchema.safeParse(existing);
   const existingIdentity = parsed.success ? parsed.data.identity : undefined;
   const existingToken =
-    existingIdentity && "operatorToken" in existingIdentity ? existingIdentity.operatorToken : undefined;
+    existingIdentity && "operatorToken" in existingIdentity
+      ? existingIdentity.operatorToken
+      : undefined;
   if (existingToken) return { token: existingToken, generated: null };
   const generated = randomBytes(32).toString("base64url");
   return { token: generated, generated };

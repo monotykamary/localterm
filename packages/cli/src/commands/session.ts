@@ -1,7 +1,12 @@
 import kleur from "kleur";
 import { writeFile } from "node:fs/promises";
 import open from "open";
-import { daemonBaseUrl, daemonFetch, reportApiError, reportDaemonDown } from "../utils/daemon-api.js";
+import {
+  daemonBaseUrl,
+  daemonFetch,
+  reportApiError,
+  reportDaemonDown,
+} from "../utils/daemon-api.js";
 import { resolveDaemonUrl } from "../utils/portless.js";
 import { readPort } from "../state.js";
 

@@ -68,7 +68,8 @@ const resolveTab = async (
     const cookie = deps.mintViewerCookie(owner);
     if (cookie) await cdpClient.setCookie({ ...cookie, url: tabUrl });
   }
-  const targetId = existing ?? (await cdpClient.openBackgroundTab(tabUrl));  if (!targetId) return null;
+  const targetId = existing ?? (await cdpClient.openBackgroundTab(tabUrl));
+  if (!targetId) return null;
   const cdpSessionId = await cdpClient.attachSession(targetId);
   if (!cdpSessionId) {
     if (!existing) await cdpClient.closeTab(targetId);

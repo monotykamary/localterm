@@ -648,7 +648,12 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     }
     const format = context.req.query("format");
     if (format === "png") {
-      const png = await capturePanePng({ cdpClient, buildTabUrl, mintViewerCookie }, registry, id, owner);
+      const png = await capturePanePng(
+        { cdpClient, buildTabUrl, mintViewerCookie },
+        registry,
+        id,
+        owner,
+      );
       if (!png) return context.json({ error: "no_browser" }, HTTP_STATUS_CONFLICT);
       return new Response(png, { headers: { "content-type": "image/png" } });
     }

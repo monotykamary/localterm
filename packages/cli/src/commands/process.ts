@@ -1,5 +1,10 @@
 import kleur from "kleur";
-import { daemonBaseUrl, daemonFetch, reportApiError, reportDaemonDown } from "../utils/daemon-api.js";
+import {
+  daemonBaseUrl,
+  daemonFetch,
+  reportApiError,
+  reportDaemonDown,
+} from "../utils/daemon-api.js";
 
 interface ProcessListItem {
   name: string;

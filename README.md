@@ -155,11 +155,11 @@ By default localterm is a single authority — the daemon is loopback-bound and 
 
 Three providers, from no-work to self-contained:
 
-| Provider | Who authenticates | Use when |
-|---|---|---|
-| **`header`** | An identity-aware reverse proxy in front (Cloudflare Access, Pomerium, Caddy + OAuth2-Proxy, Authelia forward-auth) | you already run a proxy/SSO; localterm just reads `X-Forwarded-User` it sets |
-| **`passkey`** | localterm itself, via WebAuthn (a passkey tap) | you want self-contained SSO with no external IdP |
-| **`oidc`** | Any OIDC IdP (Google, GitHub, or self-hosted Authentik/Zitadel/Keycloak) | you want to reuse an existing IdP |
+| Provider      | Who authenticates                                                                                                   | Use when                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| **`header`**  | An identity-aware reverse proxy in front (Cloudflare Access, Pomerium, Caddy + OAuth2-Proxy, Authelia forward-auth) | you already run a proxy/SSO; localterm just reads `X-Forwarded-User` it sets |
+| **`passkey`** | localterm itself, via WebAuthn (a passkey tap)                                                                      | you want self-contained SSO with no external IdP                             |
+| **`oidc`**    | Any OIDC IdP (Google, GitHub, or self-hosted Authentik/Zitadel/Keycloak)                                            | you want to reuse an existing IdP                                            |
 
 `header` trusts the identity header only when the request's source IP is in a `trustedProxy` allowlist (default `loopback` — the proxy runs on the same host; pass `10.0.0.0/8`, `private`, or a CIDR for a remote proxy). A trusted-proxy request with no header is the **operator tier** (full access — the CLI from loopback and the daemon's own automation keep working).
 
