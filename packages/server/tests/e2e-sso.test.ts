@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
-import { generateKeyPairSync, createSign } from "node:crypto";
+import { generateKeyPairSync, createHash, createSign } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import https from "node:https";
 import os from "node:os";
@@ -54,9 +54,17 @@ interface MockIdp {
   stop: () => Promise<void>;
 }
 
+// Two JWKS kids so the daemon exercises the multi-key JWKS a real Issuer
+// publishes for key rotation — it must look up the id_token's `kid` rather
+// than assume the first key.
 const KEY_ID = "test-key";
+const KEY_ID_2 = "test-key-2";
 
-// A minimal OIDC IdP: discovery, JWKS, authorize, token, userinfo. id_tokens
+// A Dex-shaped OIDC IdP: a realistic discovery doc (scopes/grant-types/auth-
+// methods/claims/code-challenge-methods a real Issuer advertises), a multi-key
+// JWKS (key rotation), a token response carrying expires_in + scope, and an
+// id_token + userinfo rich with email_verified/name/preferred_username/groups
+// + at_hash (the access-token-binding claim oauth4webapi validates). id_tokens
 // are signed RS256 with a generated RSA key (verified against the JWKS by the
 // daemon's processAuthorizationCodeResponse). `setUser` picks the identity the
 // next /authorize issues, so two browser-less logins yield two distinct users.
@@ -64,6 +72,8 @@ const startHttpsMockIdp = async (): Promise<MockIdp> => {
   const pems = await generate(null, { keySize: 2048, algorithm: "sha256" });
   const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const publicJwk = publicKey.export({ format: "jwk" }) as { kty: string; n: string; e: string };
+  const { publicKey: publicKey2 } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const publicJwk2 = publicKey2.export({ format: "jwk" }) as { kty: string; n: string; e: string };
   let origin = "";
   const codes = new Map<string, { user: string; nonce: string }>();
   const accessTokens = new Map<string, string>();
@@ -90,13 +100,35 @@ const startHttpsMockIdp = async (): Promise<MockIdp> => {
       token_endpoint: `${origin}/token`,
       userinfo_endpoint: `${origin}/userinfo`,
       jwks_uri: `${origin}/jwks`,
-      id_token_signing_alg_values_supported: ["RS256"],
-      response_types_supported: ["code"],
+      revocation_endpoint: `${origin}/revoke`,
+      introspection_endpoint: `${origin}/introspect`,
+      device_authorization_endpoint: `${origin}/device`,
+      grant_types_supported: ["authorization_code", "refresh_token", "implicit"],
+      response_types_supported: ["code", "token", "id_token"],
+      response_modes_supported: ["query", "fragment", "form_post"],
       subject_types_supported: ["public"],
+      id_token_signing_alg_values_supported: ["RS256"],
+      scopes_supported: ["openid", "email", "profile", "groups", "offline_access"],
+      token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+      code_challenge_methods_supported: ["S256", "plain"],
+      claims_supported: [
+        "sub",
+        "email",
+        "email_verified",
+        "name",
+        "preferred_username",
+        "groups",
+        "federated_claims",
+      ],
     }),
   );
   app.get("/jwks", (context) =>
-    context.json({ keys: [{ ...publicJwk, kid: KEY_ID, use: "sig", alg: "RS256" }] }),
+    context.json({
+      keys: [
+        { ...publicJwk, kid: KEY_ID, use: "sig", alg: "RS256" },
+        { ...publicJwk2, kid: KEY_ID_2, use: "sig", alg: "RS256" },
+      ],
+    }),
   );
   app.get("/authorize", (context) => {
     const code = `code_${Math.random().toString(36).slice(2)}`;
@@ -115,9 +147,19 @@ const startHttpsMockIdp = async (): Promise<MockIdp> => {
     const accessToken = `at_${Math.random().toString(36).slice(2)}`;
     accessTokens.set(accessToken, entry.user);
     const now = Math.floor(Date.now() / 1000);
+    // `at_hash` is the leftmost 128 bits of SHA-256(access_token), base64url —
+    // the standard claim a real Issuer (Dex included) puts in the id_token so a
+    // client can bind the access token to it; oauth4webapi validates it.
+    const atHash = createHash("sha256")
+      .update(accessToken)
+      .digest()
+      .subarray(0, 16)
+      .toString("base64url");
     return context.json({
       access_token: accessToken,
       token_type: "bearer",
+      expires_in: 3600,
+      scope: "openid email",
       id_token: signIdToken({
         iss: `${origin}/`,
         sub: entry.user,
@@ -126,6 +168,11 @@ const startHttpsMockIdp = async (): Promise<MockIdp> => {
         iat: now,
         exp: now + 3600,
         email: entry.user,
+        email_verified: true,
+        name: entry.user,
+        preferred_username: entry.user.split("@")[0],
+        groups: ["users"],
+        at_hash: atHash,
       }),
     });
   });
@@ -133,7 +180,14 @@ const startHttpsMockIdp = async (): Promise<MockIdp> => {
     const token = (context.req.header("authorization") ?? "").replace(/^Bearer /, "");
     const user = accessTokens.get(token);
     if (!user) return context.json({ error: "invalid_token" }, 401);
-    return context.json({ sub: user, email: user });
+    return context.json({
+      sub: user,
+      email: user,
+      email_verified: true,
+      name: user,
+      preferred_username: user.split("@")[0],
+      groups: ["users"],
+    });
   });
 
   return new Promise<MockIdp>((resolve, reject) => {
