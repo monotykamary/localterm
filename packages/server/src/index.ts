@@ -118,10 +118,20 @@ import {
 } from "./schemas.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
 import type { Context } from "hono";
-import type { Identity, IdentityConfig, IdentityProviderDeps, SessionOwner } from "./identity/types.js";
+import type {
+  Identity,
+  IdentityConfig,
+  IdentityProviderDeps,
+  SessionOwner,
+} from "./identity/types.js";
 import { createIdentityProvider } from "./identity/factory.js";
 import { loadOrCreateAuthSecret } from "./identity/session-cookie.js";
-import { createAuthGateMiddleware, createIdentityResolver, getRequestSourceIp, toSessionOwner } from "./identity/resolve.js";
+import {
+  createAuthGateMiddleware,
+  createIdentityResolver,
+  getRequestSourceIp,
+  toSessionOwner,
+} from "./identity/resolve.js";
 import {
   SessionManager,
   type AutomationContext,
@@ -535,7 +545,9 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   // network-policy middleware already on `*`; the daemon hands out unrestricted
   // shells, so driving one programmatically is no escalation.
   api.get("/sessions/:id", (context) => {
-    const managed = registry.list(ownerFor(context)).find((session) => session.id === context.req.param("id"));
+    const managed = registry
+      .list(ownerFor(context))
+      .find((session) => session.id === context.req.param("id"));
     if (!managed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     return context.json({ session: managed });
   });
@@ -1661,7 +1673,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     context.json({
       provider: identityConfig?.provider ?? null,
       registration:
-        identityConfig?.provider === "passkey" ? identityConfig.registration ?? "open" : undefined,
+        identityConfig?.provider === "passkey"
+          ? (identityConfig.registration ?? "open")
+          : undefined,
     }),
   );
   // One persistent CDP socket for the daemon's lifetime — opened once at start
@@ -2465,7 +2479,13 @@ export {
   passkeyConfigSchema,
   updateDaemonConfigInputSchema,
 } from "./schemas.js";
-export type { Identity, IdentityConfig, OidcIdentityConfig, PasskeyIdentityConfig, SessionOwner } from "./identity/types.js";
+export type {
+  Identity,
+  IdentityConfig,
+  OidcIdentityConfig,
+  PasskeyIdentityConfig,
+  SessionOwner,
+} from "./identity/types.js";
 export {
   createSessionInputSchema,
   sessionResponseSchema,

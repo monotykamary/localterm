@@ -76,7 +76,9 @@ describe("passkey provider", () => {
   });
 
   it("denies unauthenticated (header does not)", () => {
-    expect(createPasskeyIdentityProvider({ provider: "passkey" }, providerDeps(dir)).denyUnauthenticated).toBe(true);
+    expect(
+      createPasskeyIdentityProvider({ provider: "passkey" }, providerDeps(dir)).denyUnauthenticated,
+    ).toBe(true);
     expect(createHeaderIdentityProvider({ provider: "header" }).denyUnauthenticated).toBe(false);
   });
 
@@ -189,7 +191,9 @@ describe("createAuthGateMiddleware", () => {
     const setRes = await app.request("/set");
     const setCookie = setRes.headers.get("set-cookie");
     if (!setCookie) throw new Error("no set-cookie");
-    const res = await app.request("/api/sessions", { headers: { cookie: setCookie.split(";")[0] } });
+    const res = await app.request("/api/sessions", {
+      headers: { cookie: setCookie.split(";")[0] },
+    });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
   });

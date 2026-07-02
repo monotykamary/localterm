@@ -44,10 +44,11 @@ export const toSessionOwner = (identity: Identity | null): SessionOwner =>
 // unauthenticated caller here, so silence can't mean admin. Exempts
 // `/api/health` (readiness) and everything outside `/api` and `/ws` (the static
 // terminal app + the `/auth` login flow must load before there's a session).
-export const createAuthGateMiddleware = (
-  provider: IdentityProvider | null,
-  resolveIdentity: (context: Context, sourceIp?: string | null) => Identity | null,
-): MiddlewareHandler =>
+export const createAuthGateMiddleware =
+  (
+    provider: IdentityProvider | null,
+    resolveIdentity: (context: Context, sourceIp?: string | null) => Identity | null,
+  ): MiddlewareHandler =>
   async (context, next) => {
     if (!provider?.denyUnauthenticated) return await next();
     const requestPath = context.req.path;

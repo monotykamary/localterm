@@ -2,11 +2,13 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import * as oauth from "oauth4webapi";
 import type { AuthorizationServer, Client, ClientAuth } from "oauth4webapi";
-import {
-  AUTH_STATE_TTL_MS,
-  IDENTITY_USER_MAX_LENGTH,
-} from "../constants.js";
-import type { Identity, IdentityProvider, IdentityProviderDeps, OidcIdentityConfig } from "./types.js";
+import { AUTH_STATE_TTL_MS, IDENTITY_USER_MAX_LENGTH } from "../constants.js";
+import type {
+  Identity,
+  IdentityProvider,
+  IdentityProviderDeps,
+  OidcIdentityConfig,
+} from "./types.js";
 import { clearSessionCookie, readSessionIdentity, setSessionCookie } from "./session-cookie.js";
 
 // Ephemeral, in-memory store for an in-flight OIDC flow, keyed by `state`.
@@ -48,7 +50,8 @@ export const sanitizeReturnTo = (value: string | null): string => {
   return value;
 };
 
-const buildRedirectUri = (origin: string): string => `${origin.replace(/\/$/, "")}/auth/oidc/callback`;
+const buildRedirectUri = (origin: string): string =>
+  `${origin.replace(/\/$/, "")}/auth/oidc/callback`;
 
 interface OidcRouteDeps {
   issuerUrl: URL;
@@ -126,7 +129,12 @@ const buildOidcRoutes = (deps: OidcRouteDeps): Hono => {
     if (!stored) return context.redirect("/", 302);
     try {
       const metadata = await deps.getMetadata();
-      const validated = oauth.validateAuthResponse(metadata, deps.client, callbackUrl.searchParams, state);
+      const validated = oauth.validateAuthResponse(
+        metadata,
+        deps.client,
+        callbackUrl.searchParams,
+        state,
+      );
       const tokenResponse = await oauth.authorizationCodeGrantRequest(
         metadata,
         deps.client,
@@ -135,9 +143,14 @@ const buildOidcRoutes = (deps: OidcRouteDeps): Hono => {
         buildRedirectUri(origin),
         stored.codeVerifier,
       );
-      const tokens = await oauth.processAuthorizationCodeResponse(metadata, deps.client, tokenResponse, {
-        expectedNonce: stored.nonce,
-      });
+      const tokens = await oauth.processAuthorizationCodeResponse(
+        metadata,
+        deps.client,
+        tokenResponse,
+        {
+          expectedNonce: stored.nonce,
+        },
+      );
       const userInfo = await oauth.processUserInfoResponse(
         metadata,
         deps.client,
@@ -145,7 +158,10 @@ const buildOidcRoutes = (deps: OidcRouteDeps): Hono => {
         await oauth.userInfoRequest(metadata, deps.client, tokens.access_token),
       );
       const raw = userInfo[deps.claim];
-      const user = (typeof raw === "string" ? raw : userInfo.sub).slice(0, IDENTITY_USER_MAX_LENGTH);
+      const user = (typeof raw === "string" ? raw : userInfo.sub).slice(
+        0,
+        IDENTITY_USER_MAX_LENGTH,
+      );
       setSessionCookie(context, deps.secret, user);
       return context.redirect(stored.returnTo, 302);
     } catch {
@@ -178,7 +194,9 @@ export const createOidcIdentityProvider = (
 ): IdentityProvider => {
   const issuerUrl = new URL(config.issuer);
   const client: Client = { client_id: config.clientId };
-  const clientAuth = config.clientSecret ? oauth.ClientSecretPost(config.clientSecret) : oauth.None();
+  const clientAuth = config.clientSecret
+    ? oauth.ClientSecretPost(config.clientSecret)
+    : oauth.None();
   const claim = config.claim ?? "email";
   const scope = config.scope ?? "openid email";
   const stateStore = new OidcStateStore();
@@ -191,7 +209,8 @@ export const createOidcIdentityProvider = (
   let metadataPromise: Promise<AuthorizationServer> | null = null;
   const getMetadata = (): Promise<AuthorizationServer> => {
     if (!metadataPromise) {
-      metadataPromise = (async () => oauth.processDiscoveryResponse(issuerUrl, await oauth.discoveryRequest(issuerUrl)))();
+      metadataPromise = (async () =>
+        oauth.processDiscoveryResponse(issuerUrl, await oauth.discoveryRequest(issuerUrl)))();
       metadataPromise.catch(() => {
         metadataPromise = null;
       });

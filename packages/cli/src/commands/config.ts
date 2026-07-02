@@ -31,7 +31,10 @@ const configFilePath = (): string => path.join(getStateDirectory(), "config.json
 // `daemonConfigFileSchema.parse` does the runtime validation (URL shape,
 // strict keys); this just assembles a structurally-correct object. Undefined
 // optionals are dropped by JSON.stringify when the file is written.
-const buildIdentityConfig = (provider: string, options: ConfigIdentityOptions): IdentityConfig | null => {
+const buildIdentityConfig = (
+  provider: string,
+  options: ConfigIdentityOptions,
+): IdentityConfig | null => {
   switch (provider) {
     case "none":
       return null;
@@ -44,8 +47,10 @@ const buildIdentityConfig = (provider: string, options: ConfigIdentityOptions): 
         registration: options.registration,
       };
     case "oidc": {
-      if (!options.issuer) throw new IdentityConfigError("--issuer is required for the oidc provider");
-      if (!options.clientId) throw new IdentityConfigError("--client-id is required for the oidc provider");
+      if (!options.issuer)
+        throw new IdentityConfigError("--issuer is required for the oidc provider");
+      if (!options.clientId)
+        throw new IdentityConfigError("--client-id is required for the oidc provider");
       return {
         provider: "oidc",
         issuer: options.issuer,

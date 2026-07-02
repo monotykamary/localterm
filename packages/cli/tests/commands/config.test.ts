@@ -25,7 +25,8 @@ afterEach(() => {
 });
 
 const configPath = () => path.join(tmpHome, ".localterm", "config.json");
-const readConfig = () => daemonConfigFileSchema.parse(JSON.parse(fs.readFileSync(configPath(), "utf8")));
+const readConfig = () =>
+  daemonConfigFileSchema.parse(JSON.parse(fs.readFileSync(configPath(), "utf8")));
 
 describe("localterm config identity", () => {
   it("writes a passkey identity block (optional fields dropped)", async () => {
@@ -64,7 +65,11 @@ describe("localterm config identity", () => {
 
   it("preserves existing cdpPort/graceSeconds across the change", async () => {
     fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-    fs.writeFileSync(configPath(), JSON.stringify({ version: 1, cdpPort: 9222, graceSeconds: 45 }), "utf8");
+    fs.writeFileSync(
+      configPath(),
+      JSON.stringify({ version: 1, cdpPort: 9222, graceSeconds: 45 }),
+      "utf8",
+    );
     await runConfigIdentity("header", {});
     const config = readConfig();
     expect(config.cdpPort).toBe(9222);
@@ -77,12 +82,16 @@ describe("localterm config identity", () => {
     await runConfigIdentity("oidc", { issuer: "not-a-url", clientId: "c" });
     expect(process.exitCode).toBe(1);
     expect(fs.existsSync(configPath())).toBe(existed);
-    expect(logSpy.mock.calls.some((call: unknown[]) => /invalid identity config/.test(String(call[0])))).toBe(true);
+    expect(
+      logSpy.mock.calls.some((call: unknown[]) => /invalid identity config/.test(String(call[0]))),
+    ).toBe(true);
   });
 
   it("fails on a missing oidc --issuer", async () => {
     await runConfigIdentity("oidc", {});
     expect(process.exitCode).toBe(1);
-    expect(logSpy.mock.calls.some((call: unknown[]) => /--issuer is required/.test(String(call[0])))).toBe(true);
+    expect(
+      logSpy.mock.calls.some((call: unknown[]) => /--issuer is required/.test(String(call[0]))),
+    ).toBe(true);
   });
 });

@@ -23,7 +23,10 @@ const providerDeps = (dir: string) => ({
 
 describe("oidc config schema", () => {
   it("accepts a valid config (minimal and full)", () => {
-    expect(oidcConfigSchema.safeParse({ provider: "oidc", issuer: "https://x.com", clientId: "c" }).success).toBe(true);
+    expect(
+      oidcConfigSchema.safeParse({ provider: "oidc", issuer: "https://x.com", clientId: "c" })
+        .success,
+    ).toBe(true);
     expect(
       oidcConfigSchema.safeParse({
         provider: "oidc",
@@ -37,13 +40,22 @@ describe("oidc config schema", () => {
   });
 
   it("rejects a non-url issuer and missing clientId", () => {
-    expect(oidcConfigSchema.safeParse({ provider: "oidc", issuer: "not-a-url", clientId: "c" }).success).toBe(false);
-    expect(oidcConfigSchema.safeParse({ provider: "oidc", issuer: "https://x.com" }).success).toBe(false);
+    expect(
+      oidcConfigSchema.safeParse({ provider: "oidc", issuer: "not-a-url", clientId: "c" }).success,
+    ).toBe(false);
+    expect(oidcConfigSchema.safeParse({ provider: "oidc", issuer: "https://x.com" }).success).toBe(
+      false,
+    );
   });
 
   it("rejects extra keys (strict)", () => {
     expect(
-      oidcConfigSchema.safeParse({ provider: "oidc", issuer: "https://x.com", clientId: "c", extra: 1 }).success,
+      oidcConfigSchema.safeParse({
+        provider: "oidc",
+        issuer: "https://x.com",
+        clientId: "c",
+        extra: 1,
+      }).success,
     ).toBe(false);
   });
 });
@@ -73,7 +85,9 @@ describe("oidc provider", () => {
   });
 
   it("denies unauthenticated (like passkey)", () => {
-    expect(createOidcIdentityProvider(baseConfig, providerDeps(dir)).denyUnauthenticated).toBe(true);
+    expect(createOidcIdentityProvider(baseConfig, providerDeps(dir)).denyUnauthenticated).toBe(
+      true,
+    );
   });
 
   it("login 500s when no origin is announced (before any network call)", async () => {
@@ -100,7 +114,9 @@ describe("oidc provider", () => {
     const setRes = await app.request("/set");
     const setCookie = setRes.headers.get("set-cookie");
     if (!setCookie) throw new Error("no set-cookie");
-    const meRes = await app.request("/auth/oidc/me", { headers: { cookie: setCookie.split(";")[0] } });
+    const meRes = await app.request("/auth/oidc/me", {
+      headers: { cookie: setCookie.split(";")[0] },
+    });
     expect(meRes.status).toBe(200);
     expect(await meRes.json()).toEqual({ user: "alice@example.com" });
   });

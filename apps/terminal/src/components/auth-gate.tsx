@@ -100,7 +100,10 @@ export const AuthGate = ({ children }: { children: ReactNode }) => {
       const optionsRes = await postJson("/auth/passkey/register/options", { username: trimmed });
       const options = await optionsRes.json();
       const response: RegistrationResponseJSON = await startRegistration({ optionsJSON: options });
-      const verifyRes = await postJson("/auth/passkey/register/verify", { username: trimmed, response });
+      const verifyRes = await postJson("/auth/passkey/register/verify", {
+        username: trimmed,
+        response,
+      });
       if (!verifyRes.ok) {
         setError("Registration failed — the passkey may already be registered.");
         setBusy(false);
@@ -118,9 +121,14 @@ export const AuthGate = ({ children }: { children: ReactNode }) => {
     setError(null);
     try {
       const trimmed = username.trim();
-      const optionsRes = await postJson("/auth/passkey/login/options", trimmed ? { username: trimmed } : {});
+      const optionsRes = await postJson(
+        "/auth/passkey/login/options",
+        trimmed ? { username: trimmed } : {},
+      );
       const options = await optionsRes.json();
-      const response: AuthenticationResponseJSON = await startAuthentication({ optionsJSON: options });
+      const response: AuthenticationResponseJSON = await startAuthentication({
+        optionsJSON: options,
+      });
       const verifyRes = await postJson("/auth/passkey/login/verify", { response });
       if (!verifyRes.ok) {
         setError("Sign-in failed — register a passkey first.");
@@ -181,15 +189,20 @@ export const AuthGate = ({ children }: { children: ReactNode }) => {
                   Register a passkey
                 </Button>
               )}
-              <Button className="w-full" variant="outline" onClick={() => void signInPasskey()} disabled={busy}>
+              <Button
+                className="w-full"
+                variant="outline"
+                onClick={() => void signInPasskey()}
+                disabled={busy}
+              >
                 <Fingerprint />
                 Sign in with passkey
               </Button>
             </div>
           ) : (
             <p className="text-center text-sm text-muted-foreground">
-              This browser doesn&rsquo;t support passkeys. Use a browser with WebAuthn, or switch the
-              daemon to an identity-provider (OIDC) or proxy-header flow.
+              This browser doesn&rsquo;t support passkeys. Use a browser with WebAuthn, or switch
+              the daemon to an identity-provider (OIDC) or proxy-header flow.
             </p>
           )
         ) : (

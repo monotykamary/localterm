@@ -46,7 +46,7 @@ const identifyViaApp = async (
 };
 
 describe("createProxyAllowlist", () => {
-  it('matches loopback (127/8, ::1) and rejects a public address', () => {
+  it("matches loopback (127/8, ::1) and rejects a public address", () => {
     const allow = createProxyAllowlist("loopback");
     expect(allow.contains("127.0.0.1")).toBe(true);
     expect(allow.contains("127.0.0.2")).toBe(true);
@@ -80,9 +80,9 @@ describe("createProxyAllowlist", () => {
 describe("createHeaderIdentityProvider", () => {
   it("identifies a user from the proxy header when the source IP is trusted", async () => {
     const provider = createHeaderIdentityProvider({ provider: "header", trustedProxy: "loopback" });
-    expect(await identifyViaApp(provider, { "x-forwarded-user": "alice@example.com" }, "127.0.0.1")).toBe(
-      "alice@example.com",
-    );
+    expect(
+      await identifyViaApp(provider, { "x-forwarded-user": "alice@example.com" }, "127.0.0.1"),
+    ).toBe("alice@example.com");
   });
 
   it("ignores the header when the source IP is outside the trusted proxy", async () => {

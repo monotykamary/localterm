@@ -117,7 +117,10 @@ configCommand
   .description(
     "set the identity provider — none (single authority), header (a proxy), passkey (self-contained WebAuthn), or oidc (bring-your-own-IdP)",
   )
-  .option("--header <name>", "header to read the user from (header provider; default X-Forwarded-User)")
+  .option(
+    "--header <name>",
+    "header to read the user from (header provider; default X-Forwarded-User)",
+  )
   .option(
     "--trusted-proxy <spec>",
     "trusted proxy CIDR, 'loopback', or 'private' (header provider; default loopback)",

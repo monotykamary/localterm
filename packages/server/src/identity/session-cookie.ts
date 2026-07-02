@@ -19,7 +19,8 @@ interface SessionPayload {
 const sign = (secret: string, data: string): string =>
   createHmac("sha256", secret).update(data).digest("base64url");
 
-export const generateAuthSecret = (): string => randomBytes(AUTH_SECRET_BYTES).toString("base64url");
+export const generateAuthSecret = (): string =>
+  randomBytes(AUTH_SECRET_BYTES).toString("base64url");
 
 // Read the persisted HMAC secret, generating + persisting a fresh one on the
 // first run. Losing this file invalidates every live session (users re-log in),
@@ -40,7 +41,10 @@ export const loadOrCreateAuthSecret = (filePath: string): string => {
 };
 
 export const signSessionToken = (secret: string, user: string): string => {
-  const payload: SessionPayload = { sub: user, exp: Date.now() + AUTH_COOKIE_MAX_AGE_SECONDS * 1000 };
+  const payload: SessionPayload = {
+    sub: user,
+    exp: Date.now() + AUTH_COOKIE_MAX_AGE_SECONDS * 1000,
+  };
   const data = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${data}.${sign(secret, data)}`;
 };
@@ -87,7 +91,12 @@ const cookieOptions = (context: Context, maxAge: number) => ({
 });
 
 export const setSessionCookie = (context: Context, secret: string, user: string): void => {
-  setCookie(context, AUTH_COOKIE_NAME, signSessionToken(secret, user), cookieOptions(context, AUTH_COOKIE_MAX_AGE_SECONDS));
+  setCookie(
+    context,
+    AUTH_COOKIE_NAME,
+    signSessionToken(secret, user),
+    cookieOptions(context, AUTH_COOKIE_MAX_AGE_SECONDS),
+  );
 };
 
 export const clearSessionCookie = (context: Context): void => {

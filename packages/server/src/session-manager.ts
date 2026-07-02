@@ -330,7 +330,11 @@ export class SessionManager {
     managed.hasForeground = running;
   }
 
-  spawn(input: SpawnPtyInput, automation?: AutomationContext, owner: SessionOwner = null): ManagedSession | null {
+  spawn(
+    input: SpawnPtyInput,
+    automation?: AutomationContext,
+    owner: SessionOwner = null,
+  ): ManagedSession | null {
     if (this.sessions.size >= MAX_CONCURRENT_SESSIONS) this.evictOldestDormant();
     if (this.sessions.size >= MAX_CONCURRENT_SESSIONS) return null;
     const session = new Session(this.shimsDir ? { ...input, shimsDir: this.shimsDir } : input);
@@ -605,7 +609,11 @@ export class SessionManager {
   // to the visible viewport and may extend into scrollback up to
   // CAPTURE_PANE_MAX_LINES. Returns null for an unknown/exited session. Awaits
   // the renderer's pending writes so the read never lands before a parse.
-  async capturePane(id: string, lines?: number, owner: SessionOwner = null): Promise<string | null> {
+  async capturePane(
+    id: string,
+    lines?: number,
+    owner: SessionOwner = null,
+  ): Promise<string | null> {
     const managed = this.sessionFor(id, owner);
     if (!managed) return null;
     const capped = lines && lines > 0 ? Math.min(lines, CAPTURE_PANE_MAX_LINES) : undefined;

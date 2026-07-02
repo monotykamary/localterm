@@ -9,7 +9,10 @@ interface StoredUser {
 
 const usersFileSchema = z.object({
   version: z.literal(1).optional(),
-  users: z.record(z.string(), z.object({ username: z.string(), credentialIds: z.array(z.string()) })),
+  users: z.record(
+    z.string(),
+    z.object({ username: z.string(), credentialIds: z.array(z.string()) }),
+  ),
 });
 
 // File-backed registry of passkey users (~/.localterm/users.json): username →
