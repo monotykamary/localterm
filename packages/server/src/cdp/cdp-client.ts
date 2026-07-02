@@ -552,6 +552,62 @@ export class CdpClient {
   }
 
   /**
+   * Add a virtual WebAuthn authenticator (CTAP2, resident key, user-verified,
+   * auto-presence) on an attached page session so a test can drive a passkey
+   * register/login ceremony with no real hardware — `navigator.credentials.create/
+   * get` in that page auto-resolve against it. The WebAuthn domain is
+   * session-scoped, so this must run against a `sessionId` from `attachSession`.
+   * Returns the authenticator id (pass to `removeVirtualAuthenticator`), or null.
+   */
+  async addVirtualAuthenticator(sessionId: string): Promise<string | null> {
+    try {
+      await this.call("WebAuthn.enable", {}, sessionId);
+      const result = (await this.call("WebAuthn.addVirtualAuthenticator", {
+        options: {
+          protocol: "ctap2",
+          transport: "internal",
+          hasResidentKey: true,
+          hasUserVerification: true,
+          automaticPresenceSimulation: true,
+          isUserVerified: true,
+        },
+      }, sessionId)) as { authenticatorId?: string };
+      return typeof result?.authenticatorId === "string" ? result.authenticatorId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Remove a virtual authenticator added by `addVirtualAuthenticator`. */
+  async removeVirtualAuthenticator(sessionId: string, authenticatorId: string): Promise<void> {
+    if (!this.isConnected()) return;
+    try {
+      await this.call("WebAuthn.removeVirtualAuthenticator", { authenticatorId }, sessionId);
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /**
+   * Open `url` as a FOREGROUND (active) tab. Unlike `openBackgroundTab`, the tab
+   * receives focus — required by WebAuthn, whose `navigator.credentials.*`
+   * reject with NotAllowedError on a background tab. For test driving only.
+   */
+  async openForegroundTab(url: string): Promise<string | null> {
+    try {
+      await this.connect();
+    } catch {
+      return null;
+    }
+    try {
+      const result = (await this.call("Target.createTarget", { url })) as { targetId?: unknown };
+      return typeof result?.targetId === "string" ? result.targetId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Open `url` as a background tab. Returns the new target's id on success
    * (used later to close the tab), or null when no browser is reachable
    * (connect failed) or the call errored — the caller's cue to fall back to the
