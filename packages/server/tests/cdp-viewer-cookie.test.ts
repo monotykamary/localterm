@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { capturePanePng, type SessionAutomationDeps } from "../src/session-automation.js";
+import { capturePanePng } from "../src/session-automation.js";
 import type { CdpClient } from "../src/cdp/cdp-client.js";
 import type { SessionManager } from "../src/session-manager.js";
 import type { SessionOwner } from "../src/identity/types.js";
@@ -16,7 +16,9 @@ interface RecordedCall {
 // short-circuits the render-landed poll (evaluateInSession echoes the pane-text
 // property back) so capturePanePng resolves without a real browser. The clip
 // expr returns null (no `.xterm`) so the screenshot is full-frame.
-const createMockCdp = (opts: { existing?: string } = {}): { client: CdpClient; calls: RecordedCall[] } => {
+const createMockCdp = (
+  opts: { existing?: string } = {},
+): { client: CdpClient; calls: RecordedCall[] } => {
   const calls: RecordedCall[] = [];
   const client = {
     findTargetByUrl: async () => opts.existing ?? null,

@@ -8,5 +8,7 @@ import { timingSafeEqual } from "node:crypto";
 export const timingSafeEqualString = (received: string, expected: string): boolean => {
   const receivedBytes = Buffer.from(received);
   const expectedBytes = Buffer.from(expected);
-  return receivedBytes.length === expectedBytes.length && timingSafeEqual(receivedBytes, expectedBytes);
+  return (
+    receivedBytes.length === expectedBytes.length && timingSafeEqual(receivedBytes, expectedBytes)
+  );
 };

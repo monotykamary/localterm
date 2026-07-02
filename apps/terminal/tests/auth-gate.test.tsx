@@ -78,9 +78,9 @@ describe("AuthGate", () => {
       </AuthGate>,
     );
     expect(await screen.findByTestId("terminal")).toBeDefined();
-    expect(
-      fetchMock.mock.calls.some(([url]) => String(url).includes("/auth/header/me")),
-    ).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/auth/header/me"))).toBe(
+      false,
+    );
   });
 
   it("renders the terminal when no provider is configured (provider null)", async () => {

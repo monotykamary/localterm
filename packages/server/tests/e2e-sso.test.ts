@@ -70,7 +70,9 @@ const startHttpsMockIdp = async (): Promise<MockIdp> => {
   let currentUser = "alice@example.com";
 
   const signIdToken = (payload: Record<string, unknown>): string => {
-    const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT", kid: KEY_ID })).toString("base64url");
+    const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT", kid: KEY_ID })).toString(
+      "base64url",
+    );
     const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
     const input = `${header}.${body}`;
     const signer = createSign("RSA-SHA256");
@@ -162,7 +164,8 @@ const startHttpsMockIdp = async (): Promise<MockIdp> => {
 const loginAs = async (daemonOrigin: string, idp: MockIdp, email: string): Promise<string> => {
   idp.setUser(email);
   const loginRes = await fetch(`${daemonOrigin}/auth/oidc/login`, { redirect: "manual" });
-  if (loginRes.status !== 302) throw new Error(`login returned ${loginRes.status}: ${await loginRes.text()}`);
+  if (loginRes.status !== 302)
+    throw new Error(`login returned ${loginRes.status}: ${await loginRes.text()}`);
   const authorizeRes = await fetch(loginRes.headers.get("location")!, { redirect: "manual" });
   if (authorizeRes.status !== 302) throw new Error(`authorize returned ${authorizeRes.status}`);
   const callbackRes = await fetch(authorizeRes.headers.get("location")!, { redirect: "manual" });

@@ -562,16 +562,20 @@ export class CdpClient {
   async addVirtualAuthenticator(sessionId: string): Promise<string | null> {
     try {
       await this.call("WebAuthn.enable", {}, sessionId);
-      const result = (await this.call("WebAuthn.addVirtualAuthenticator", {
-        options: {
-          protocol: "ctap2",
-          transport: "internal",
-          hasResidentKey: true,
-          hasUserVerification: true,
-          automaticPresenceSimulation: true,
-          isUserVerified: true,
+      const result = (await this.call(
+        "WebAuthn.addVirtualAuthenticator",
+        {
+          options: {
+            protocol: "ctap2",
+            transport: "internal",
+            hasResidentKey: true,
+            hasUserVerification: true,
+            automaticPresenceSimulation: true,
+            isUserVerified: true,
+          },
         },
-      }, sessionId)) as { authenticatorId?: string };
+        sessionId,
+      )) as { authenticatorId?: string };
       return typeof result?.authenticatorId === "string" ? result.authenticatorId : null;
     } catch {
       return null;

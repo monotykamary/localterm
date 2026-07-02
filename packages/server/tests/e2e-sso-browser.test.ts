@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -113,7 +113,14 @@ const launchHeadlessChrome = async (binary: string, dataDir: string): Promise<He
           }
         };
         return {
-          detected: { name: "Headless Chrome", profileDir: dataDir, port, wsPath, wsUrl: `ws://127.0.0.1:${port}${wsPath}`, mtimeMs: Date.now() },
+          detected: {
+            name: "Headless Chrome",
+            profileDir: dataDir,
+            port,
+            wsPath,
+            wsUrl: `ws://127.0.0.1:${port}${wsPath}`,
+            mtimeMs: Date.now(),
+          },
           stop,
         };
       }
@@ -123,10 +130,16 @@ const launchHeadlessChrome = async (binary: string, dataDir: string): Promise<He
     await sleep(100);
   }
   child.kill("SIGKILL");
-  throw new Error(`headless Chrome did not expose a CDP port: ${Buffer.concat(stderrChunks).toString().slice(0, 500)}`);
+  throw new Error(
+    `headless Chrome did not expose a CDP port: ${Buffer.concat(stderrChunks).toString().slice(0, 500)}`,
+  );
 };
 
-const pollFor = async (fn: () => Promise<boolean>, attempts = 300, intervalMs = 50): Promise<boolean> => {
+const pollFor = async (
+  fn: () => Promise<boolean>,
+  attempts = 300,
+  intervalMs = 50,
+): Promise<boolean> => {
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (await fn()) return true;
     await sleep(intervalMs);
@@ -184,45 +197,68 @@ d("e2e: passkey WebAuthn + CDP cookie mint (headless Chrome)", () => {
     const authenticatorId = await driver.addVirtualAuthenticator(sessionId!);
     expect(authenticatorId).toBeTruthy();
     try {
-
       // The auth gate's probe runs → passkey login screen (the username input).
       const inputReady = await pollFor(async () =>
-        Boolean(await evalIn(driver, sessionId!, `document.querySelector("input[placeholder='username']") !== null`)),
+        Boolean(
+          await evalIn(
+            driver,
+            sessionId!,
+            `document.querySelector("input[placeholder='username']") !== null`,
+          ),
+        ),
       );
       expect(inputReady).toBe(true);
 
       // Wrap navigator.credentials.create so the gate's startRegistration (which
       // converts the daemon's base64url options to ArrayBuffers) drives the real
       // ceremony; capture the result as a diagnostic if the terminal never mounts.
-      await evalIn(driver, sessionId!, `(() => {
+      await evalIn(
+        driver,
+        sessionId!,
+        `(() => {
         window.__e2e = null;
         const orig = navigator.credentials.create.bind(navigator.credentials);
         navigator.credentials.create = async (args) => {
           try { const r = await orig(args); window.__e2e = "OK"; return r; }
           catch (e) { window.__e2e = "ERR " + (e?.name ?? "") + ": " + (e?.message ?? String(e)); throw e; }
         };
-      })()`);
+      })()`,
+      );
       // Fill the username (React-controlled: the native value setter + input event).
-      await evalIn(driver, sessionId!, `(() => {
+      await evalIn(
+        driver,
+        sessionId!,
+        `(() => {
         const el = document.querySelector("input[placeholder='username']");
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
         setter.call(el, "alice");
         el.dispatchEvent(new Event("input", { bubbles: true }));
-      })()`);
+      })()`,
+      );
       // Click "Register a passkey" → startRegistration → navigator.credentials.create
       // (auto-resolves against the virtual authenticator) → /verify → session
       // cookie → the gate re-checks → the terminal mounts.
-      await evalIn(driver, sessionId!, `(() => {
+      await evalIn(
+        driver,
+        sessionId!,
+        `(() => {
         const btn = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("Register a passkey"));
         btn?.click();
-      })()`);
+      })()`,
+      );
       const terminalMounted = await pollFor(async () =>
         Boolean(await evalIn(driver, sessionId!, `document.querySelector(".xterm") !== null`)),
       );
       if (!terminalMounted) {
         const createResult = await evalIn(driver, sessionId!, `window.__e2e`);
-        const gateError = await evalIn(driver, sessionId!, `document.querySelector(".text-destructive")?.textContent ?? null`);
-        throw new Error(`terminal did not mount — credentials.create=${createResult} gateError=${gateError}`);
+        const gateError = await evalIn(
+          driver,
+          sessionId!,
+          `document.querySelector(".text-destructive")?.textContent ?? null`,
+        );
+        throw new Error(
+          `terminal did not mount — credentials.create=${createResult} gateError=${gateError}`,
+        );
       }
       expect(terminalMounted).toBe(true);
 
