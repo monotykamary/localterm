@@ -200,8 +200,9 @@ export interface ServerOptions {
   cdpDetect?: () => Promise<DetectedBrowser[]>;
   /**
    * Override the keep-awake controller. Defaults to a `caffeinate -dims`-backed
-   * controller, enabled only on macOS. Injectable so tests never hold a real
-   * power assertion.
+   * controller on macOS and a `systemd-inhibit`-backed one on Linux (where the
+   * binary is present), enabled only on those platforms. Injectable so tests
+   * never hold a real power assertion.
    */
   caffeinateController?: CaffeinateController;
   /**
@@ -218,8 +219,9 @@ export interface ServerOptions {
   caffeinateSnapshotProcesses?: SnapshotProcesses;
   /**
    * Override how keep-awake reads the machine's battery. Defaults to a real
-   * `pmset -g batt` read. Injectable so tests can drive the battery floor
-   * deterministically without shelling out.
+   * `pmset -g batt` read on macOS and a sysfs read on Linux. Injectable so
+   * tests can drive the battery floor deterministically without shelling out or
+   * touching disk.
    */
   caffeinateBatteryProbe?: BatteryProbe;
   /**

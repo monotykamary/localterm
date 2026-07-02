@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT,
   CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT,
@@ -64,7 +66,71 @@ export const clampBatteryPercent = (percent: number): number => {
   );
 };
 
-export const defaultBatteryProbe: BatteryProbe = () =>
+// Linux reads battery state straight from sysfs (`/sys/class/power_supply`),
+// which every laptop exposes regardless of desktop environment — no `upower`
+// daemon or `acpi` dependency. Each `BAT*` (or board-specific battery) dir has
+// `capacity` (0–100), `status` (Discharging/Charging/Full/Not charging), and
+// `time_to_empty_now` (seconds, present only while discharging). A device with
+// `type` of "Battery" is the one we gate on; non-battery supplies are skipped.
+// `files` is parameterized so tests can drive the parser without touching disk.
+export const parseSysfsBattery = (files: {
+  capacity: string;
+  status: string;
+  timeToEmptyNow?: string;
+}): BatteryStatus | null => {
+  // sysfs `capacity` is an integer 0-100. Validate with a strict `\d+` match
+  // rather than `Number()` + isFinite: `Number("")` and `Number("  ")` coerce
+  // to 0 (finite), so a malformed/absent read would otherwise surface as 0%
+  // instead of failing open to null.
+  const trimmedCapacity = files.capacity.trim();
+  if (!/^\d+$/.test(trimmedCapacity)) return null;
+  const percent = Number(trimmedCapacity);
+  // sysfs `status` is one of: Charging, Discharging, Not charging, Full, Unknown.
+  // Only Discharging means drawing from battery; everything else (incl. Full
+  // while plugged in) leaves the floor off.
+  const isOnBattery = /^Discharging$/.test(files.status.trim());
+  let minutesToEmpty: number | null = null;
+  if (isOnBattery && files.timeToEmptyNow !== undefined) {
+    const seconds = Number(files.timeToEmptyNow);
+    if (Number.isFinite(seconds) && seconds > 0) minutesToEmpty = Math.floor(seconds / 60);
+  }
+  return { percent, isOnBattery, minutesToEmpty };
+};
+
+const SYSFS_POWER_SUPPLY_DIR = "/sys/class/power_supply";
+
+const probeSysfsBattery: BatteryProbe = async () => {
+  let names: string[];
+  try {
+    names = await readdir(SYSFS_POWER_SUPPLY_DIR);
+  } catch {
+    return null;
+  }
+  for (const name of names) {
+    const dir = join(SYSFS_POWER_SUPPLY_DIR, name);
+    const read = (file: string): Promise<string | undefined> =>
+      readFile(join(dir, file), "utf8")
+        .then((text) => text.trim())
+        .catch(() => undefined);
+    const type = (await read("type")) ?? "";
+    if (type.trim() !== "Battery") continue;
+    const [capacity, status, timeToEmptyNow] = await Promise.all([
+      read("capacity"),
+      read("status"),
+      read("time_to_empty_now"),
+    ]);
+    if (capacity === undefined || status === undefined) continue;
+    const parsed = parseSysfsBattery({
+      capacity,
+      status,
+      timeToEmptyNow: timeToEmptyNow ?? undefined,
+    });
+    if (parsed) return parsed;
+  }
+  return null;
+};
+
+const probePmset: BatteryProbe = () =>
   new Promise((resolve) => {
     execFile(
       "pmset",
@@ -79,3 +145,9 @@ export const defaultBatteryProbe: BatteryProbe = () =>
       },
     );
   });
+
+// macOS reads `pmset -g batt`; Linux reads sysfs (no external binary). Both
+// resolve to null on any failure so callers fail-open (a desktop or a transient
+// read error never keeps the user's keep-awake off on bad data).
+export const defaultBatteryProbe: BatteryProbe = () =>
+  process.platform === "linux" ? probeSysfsBattery() : probePmset();

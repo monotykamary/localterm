@@ -36,11 +36,11 @@ export interface CaffeinateManagerOptions {
   // is enabled, caffeinate only stays active while a recognized program is
   // producing output within the debounce window.
   hasRecentOutput?: (pids: readonly number[], withinMs: number) => boolean;
-  // Injectable battery probe for tests; defaults to a real `pmset -g batt`
-  // read. The battery floor is enforced on an adaptive schedule that mirrors
-  // the activity gate's design: status-driven (a `pmset` read only happens
-  // while a mode wants caffeinate active, and the next read's delay is derived
-  // from the latest estimate).
+  // Injectable battery probe for tests; defaults to a real `pmset` read on
+  // macOS and a sysfs read on Linux. The battery floor is enforced on an
+  // adaptive schedule that mirrors the activity gate's design: status-driven (a
+  // probe only happens while a mode wants caffeinate active, and the next read's
+  // delay is derived from the latest estimate).
   batteryProbe?: BatteryProbe;
 }
 
@@ -69,11 +69,11 @@ interface CaffeinateManagerEvents {
 // re-check.
 //
 // The battery floor is the one piece of polling in this module, and it is
-// adaptive rather than a fixed heartbeat: a `pmset -g batt` read happens only
-// while a mode wants caffeinate active (off/idle `automatic` never reads it),
-// and the delay until the next read is 1/TIME_FRACTION of the interpolated
+// adaptive rather than a fixed heartbeat: a battery read happens only while a
+// mode wants caffeinate active (off/idle `automatic` never reads it), and the
+// delay until the next read is 1/TIME_FRACTION of the interpolated
 // time-to-threshold, so polling tightens as the floor approaches and stays lax
-// far from it (capped at MAX, floored at MIN). macOS pushes no notification at
+// far from it (capped at MAX, floored at MIN). The OS pushes no notification at
 // an arbitrary percent, so a bounded polling timer is unavoidable here; the
 // adaptive schedule keeps it as cheap as it can be. While below the floor on
 // battery, the daemon refuses to hold the power assertion (it stops caffeinate
@@ -111,7 +111,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
   // Coalesces concurrent battery checks: callers (the timer, setBatteryThreshold,
   // pollBatteryNow) all funnel through runBatteryCheck, which returns the same
   // in-flight promise so they all settle on the same result without piling up
-  // `pmset` calls — the promise-tracking analogue of pollAuto's polling flag.
+  // battery reads — the promise-tracking analogue of pollAuto's polling flag.
   private batteryCheckInFlight: Promise<void> | null = null;
   private polling = false;
   private pollQueued = false;

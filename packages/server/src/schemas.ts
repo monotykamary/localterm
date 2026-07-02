@@ -1219,8 +1219,9 @@ const automationsMessageSchema = z
   .strict();
 
 // Current keep-awake state, broadcast to every tab so the coffee control stays
-// in lockstep. `supported` is false off macOS, where `caffeinate` does not
-// exist. `active` is whether the process is running right now (drives the icon
+// in lockstep. `supported` is true on macOS (always) and Linux (where
+// `systemd-inhibit` is on PATH); false elsewhere, where the coffee button is
+// hidden. `active` is whether the process is running right now (drives the icon
 // tint); `mode` is the selected off/on/automatic. `activityGate` is whether
 // automatic mode requires recent stdout from a recognized program (defaults
 // true). `batteryThreshold` is the percent floor at which keep-awake stops on

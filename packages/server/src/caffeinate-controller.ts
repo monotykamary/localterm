@@ -1,6 +1,5 @@
-import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { CAFFEINATE_ARGS, CAFFEINATE_BINARY } from "./constants.js";
+import { defaultCaffeinateSpawn, detectCaffeinateSupported } from "./caffeinate-platform.js";
 
 // A spawned keep-awake process. The controller only needs to end it and learn
 // when it dies (on its own, or because we killed it).
@@ -10,32 +9,19 @@ export interface CaffeinateProcessHandle {
 }
 
 export interface CaffeinateControllerOptions {
-  // Whether the platform can keep itself awake. Defaults to macOS detection;
-  // injectable so non-darwin hosts and tests can declare (un)support directly.
+  // Whether the platform can keep itself awake. Defaults to platform detection
+  // (macOS always; Linux when `systemd-inhibit` is on PATH); injectable so
+  // non-darwin hosts and tests can declare (un)support directly.
   supported?: boolean;
   // Spawns the keep-awake process. Injectable so tests never hold a real power
-  // assertion. Defaults to `caffeinate -dims`.
+  // assertion. Defaults to `caffeinate -dims` on macOS, `systemd-inhibit …` on
+  // Linux.
   spawnProcess?: () => CaffeinateProcessHandle;
 }
 
 interface CaffeinateControllerEvents {
   change: [];
 }
-
-const spawnCaffeinate = (): CaffeinateProcessHandle => {
-  const child = spawn(CAFFEINATE_BINARY, CAFFEINATE_ARGS, { stdio: "ignore" });
-  return {
-    kill: () => {
-      child.kill();
-    },
-    // Both events mean "no longer keeping awake": `error` covers a failed spawn
-    // (e.g. caffeinate missing), `exit` covers a normal/killed termination.
-    onExit: (listener) => {
-      child.once("exit", listener);
-      child.once("error", listener);
-    },
-  };
-};
 
 // Owns the machine's single keep-awake process. Enabling spawns it; disabling
 // kills it. Emits `change` whenever `active` flips — including when the process
@@ -47,8 +33,8 @@ export class CaffeinateController extends EventEmitter<CaffeinateControllerEvent
 
   constructor(options: CaffeinateControllerOptions = {}) {
     super();
-    this.supported = options.supported ?? process.platform === "darwin";
-    this.spawnProcess = options.spawnProcess ?? spawnCaffeinate;
+    this.supported = options.supported ?? detectCaffeinateSupported();
+    this.spawnProcess = options.spawnProcess ?? defaultCaffeinateSpawn;
   }
 
   get active(): boolean {

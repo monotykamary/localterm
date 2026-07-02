@@ -137,6 +137,7 @@ import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anc
 import { outputBatcher } from "@/utils/write-terminal-output";
 import { shouldBlockTerminalScrollbackPurge } from "@/utils/should-block-terminal-scrollback-purge";
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
+import { detectLikelyKeepAwakeSupported } from "@/utils/detect-likely-keep-awake-supported";
 import { formatDiffCount } from "@/utils/format-diff-count";
 import { shellQuoteArg } from "@/utils/shell-quote-arg";
 import { buildFileUrl } from "@/utils/build-file-url";
@@ -460,9 +461,11 @@ export const Terminal = () => {
   // Keep-awake (caffeinate) is daemon-owned global state: the server is the
   // source of truth for the mode, the live process state, and the trigger
   // commands, and broadcasts changes to every tab. Seed `supported` from the
-  // platform and `mode` from the server default ("automatic") so the control
-  // doesn't flash in before the first WS frame.
-  const [caffeinateSupported, setCaffeinateSupported] = useState(isMac);
+  // client platform (macOS/Linux, where keep-awake has an implementation) and
+  // `mode` from the server default ("automatic") so the control doesn't flash
+  // in before the first WS frame. The server's authoritative `supported`
+  // overwrites this seed on the first `{type:"caffeinate"}` frame.
+  const [caffeinateSupported, setCaffeinateSupported] = useState(detectLikelyKeepAwakeSupported);
   const [caffeinateActive, setCaffeinateActive] = useState(false);
   const [caffeinateMode, setCaffeinateMode] = useState<CaffeinateMode>("automatic");
   const [caffeinateDefaultCommands, setCaffeinateDefaultCommands] = useState<string[]>([]);

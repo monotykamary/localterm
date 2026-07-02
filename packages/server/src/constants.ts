@@ -15,10 +15,30 @@ export const LOCALTERM_VALUE = "1";
 // direnv bootstrap from the leaked PATH get re-assessed by syspolicyd per prompt.
 export const PTY_BASE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
 
-// Keep-awake (macOS only). `-d` display, `-i` idle, `-m` disk, `-s` system
-// sleep — held for as long as the spawned process lives.
+// Keep-awake on macOS. `-d` display, `-i` idle, `-m` disk, `-s` system sleep —
+// held for as long as the spawned process lives (a single process, so a plain
+// child.kill() releases it).
 export const CAFFEINATE_BINARY = "caffeinate";
 export const CAFFEINATE_ARGS: readonly string[] = ["-dims"];
+// Keep-awake on Linux. `systemd-inhibit` holds a logind inhibitor for the
+// lifetime of the process it runs; `tail -f /dev/null` is the portable
+// forever-blocker (present in both coreutils and busybox; `sleep infinity` is
+// GNU-coreutils-only). `--what` maps the macOS flags: `idle` ≈ `-d`/`-i`
+// (block idle sleep + display), `sleep` ≈ `-s` (block system suspend),
+// `handle-lid-switch` blocks lid-close suspend on laptops. `--mode=block`
+// makes the lock operational (vs `delay`, which only defers briefly). Spawned
+// detached so systemd-inhibit becomes a session/group leader: killing the
+// whole process group releases the inhibitor AND reaps the orphaned tail —
+// a plain child.kill() of just systemd-inhibit would release the lock (it's
+// tied to the registrar's D-Bus lifetime) but leave tail reparented to init.
+export const SYSTEMD_INHIBIT_BINARY = "systemd-inhibit";
+export const SYSTEMD_INHIBIT_ARGS: readonly string[] = [
+  "--what=idle:sleep:handle-lid-switch",
+  "--mode=block",
+  "tail",
+  "-f",
+  "/dev/null",
+];
 
 // Keep-awake "automatic" mode recognizes these commands out of the box and
 // caffeinates whenever one is running in any localterm session. Fixed — the
@@ -52,9 +72,10 @@ export const MAX_CAFFEINATE_COMMAND_LENGTH = 128;
 export const CAFFEINATE_BATTERY_LOW_WATER_PERCENT_DEFAULT = 20;
 export const CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT = 5;
 export const CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT = 50;
-// The battery floor is enforced by reading `pmset -g batt` on an adaptive
-// schedule rather than a fixed heartbeat. `pmset` reports the charge percent
-// and an EWMA "time to empty" estimate; the next delay is 1/TIME_FRACTION of the
+// The battery floor is enforced by reading the machine's battery state on an
+// adaptive schedule rather than a fixed heartbeat. The probe (macOS `pmset -g
+// batt`; Linux sysfs `/sys/class/power_supply`) reports the charge percent and
+// an EWMA "time to empty" estimate; the next delay is 1/TIME_FRACTION of the
 // interpolated time-to-threshold (estimate × charge fraction still above the
 // floor), so polling tightens as the floor approaches and stays lax far from
 // it. Halving (not subtracting a fixed margin) scales the buffer with the
@@ -63,9 +84,10 @@ export const CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT = 50;
 // estimate without overshooting. Clamped to [MIN, MAX]: MIN keeps a
 // near-threshold reading from busy-looping and drives fast recovery while
 // suppressed; MAX bounds the far-from-threshold and on-AC cases. The floor is
-// a courtesy guard — macOS still forces low-battery sleep at ~5% regardless of
-// caffeinate — so a multi-minute MAX is an acceptable worst-case latency for
-// noticing an unplug or a stalled estimate.
+// a courtesy guard — the OS still forces low-battery sleep regardless of
+// keep-awake (~5% on macOS, configurable via upower/logind's
+// CriticalBatteryAction on Linux) — so a multi-minute MAX is an acceptable
+// worst-case latency for noticing an unplug or a stalled estimate.
 export const CAFFEINATE_BATTERY_POLL_MIN_INTERVAL_MS = 5_000;
 export const CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS = 15 * 60_000;
 // Poll at 1/N of the interpolated time-to-threshold. N=2 gives a 2× buffer

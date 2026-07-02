@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { clampBatteryPercent, parsePmsetBatt } from "../src/caffeinate-battery.js";
+import {
+  clampBatteryPercent,
+  parsePmsetBatt,
+  parseSysfsBattery,
+} from "../src/caffeinate-battery.js";
 import {
   CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT,
   CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT,
@@ -84,5 +88,55 @@ describe("clampBatteryPercent", () => {
 
   it("passes through in-range integers", () => {
     expect(clampBatteryPercent(20)).toBe(20);
+  });
+});
+
+describe("parseSysfsBattery", () => {
+  it("parses a discharging battery with a time-to-empty estimate", () => {
+    // sysfs reports time_to_empty_now in seconds (14400s = 4h = 240min).
+    expect(
+      parseSysfsBattery({ capacity: "90", status: "Discharging", timeToEmptyNow: "14400" }),
+    ).toEqual({ percent: 90, isOnBattery: true, minutesToEmpty: 240 });
+  });
+
+  it("treats Charging/Full/Not charging as not-on-battery and drops the estimate", () => {
+    // Only Discharging gates the floor; on AC the time-to-empty is meaningless
+    // (and absent from sysfs), matching the pmset AC handling.
+    expect(
+      parseSysfsBattery({ capacity: "80", status: "Charging", timeToEmptyNow: "2520" }),
+    ).toEqual({ percent: 80, isOnBattery: false, minutesToEmpty: null });
+    expect(parseSysfsBattery({ capacity: "100", status: "Full" })).toEqual({
+      percent: 100,
+      isOnBattery: false,
+      minutesToEmpty: null,
+    });
+    expect(parseSysfsBattery({ capacity: "77", status: "Not charging" })).toEqual({
+      percent: 77,
+      isOnBattery: false,
+      minutesToEmpty: null,
+    });
+  });
+
+  it("parses a discharging battery with no time estimate as null minutes", () => {
+    expect(parseSysfsBattery({ capacity: "90", status: "Discharging" })).toEqual({
+      percent: 90,
+      isOnBattery: true,
+      minutesToEmpty: null,
+    });
+  });
+
+  it("ignores a zero time-to-empty as no estimate", () => {
+    expect(
+      parseSysfsBattery({ capacity: "90", status: "Discharging", timeToEmptyNow: "0" }),
+    ).toEqual({ percent: 90, isOnBattery: true, minutesToEmpty: null });
+  });
+
+  it("returns null when the capacity is empty, whitespace, or non-numeric", () => {
+    // Number("") and Number("  ") would both coerce to 0 (finite), so the
+    // parser must reject malformed reads explicitly rather than reading 0%.
+    expect(parseSysfsBattery({ capacity: "", status: "Discharging" })).toBeNull();
+    expect(parseSysfsBattery({ capacity: "   ", status: "Discharging" })).toBeNull();
+    expect(parseSysfsBattery({ capacity: "abc", status: "Discharging" })).toBeNull();
+    expect(parseSysfsBattery({ capacity: "12abc", status: "Discharging" })).toBeNull();
   });
 });
