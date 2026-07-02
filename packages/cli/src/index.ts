@@ -1,5 +1,6 @@
 import { DEFAULT_HOST, DEFAULT_PORT } from "@monotykamary/localterm-server";
-import { Command } from "commander";
+import { Command, Option } from "commander";
+import { runConfigIdentity, type ConfigIdentityOptions } from "./commands/config.js";
 import { runInstall, runUninstall } from "./commands/install.js";
 import { runProcessDelete, runProcessList, runProcessSet } from "./commands/process.js";
 import { runRestart } from "./commands/restart.js";
@@ -106,6 +107,38 @@ program
   .description("remove the auto-start service (launchd on macOS, systemd user unit on Linux)")
   .action(async () => {
     await runUninstall();
+  });
+
+const configCommand = program
+  .command("config")
+  .description("configure the daemon (identity provider)");
+configCommand
+  .command("identity <provider>")
+  .description(
+    "set the identity provider — none (single authority), header (a proxy), passkey (self-contained WebAuthn), or oidc (bring-your-own-IdP)",
+  )
+  .option("--header <name>", "header to read the user from (header provider; default X-Forwarded-User)")
+  .option(
+    "--trusted-proxy <spec>",
+    "trusted proxy CIDR, 'loopback', or 'private' (header provider; default loopback)",
+  )
+  .option("--rp-name <name>", "relying-party display name (passkey provider; default 'localterm')")
+  .addOption(
+    new Option(
+      "--registration <mode>",
+      "open | closed — who may register a passkey (passkey provider; default open)",
+    ).choices(["open", "closed"]),
+  )
+  .option("--issuer <url>", "IdP issuer URL (oidc provider; required)")
+  .option("--client-id <id>", "registered client id (oidc provider; required)")
+  .option(
+    "--client-secret <secret>",
+    "client secret for a confidential client (oidc provider; omit for PKCE-only)",
+  )
+  .option("--claim <name>", "userinfo claim to use as the identity (oidc provider; default email)")
+  .option("--scope <scope>", "space-separated scopes (oidc provider; default 'openid email')")
+  .action(async (provider: string, options: ConfigIdentityOptions) => {
+    await runConfigIdentity(provider, options);
   });
 
 const secret = program
