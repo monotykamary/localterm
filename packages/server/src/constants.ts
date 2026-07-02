@@ -94,6 +94,24 @@ export const PROCESSES_FILE_VERSION = 1;
 export const PROCESSES_FILENAME = "processes.json";
 export const SECRETS_SHIMS_DIRNAME = "shims";
 export const LOCALTERM_STATE_DIRNAME = ".localterm";
+// Subdir of the state dir holding one activity-signal file per watched
+// program. The program's PATH shim overwrites its file (named for the program)
+// with the shell's $PWD after the real binary exits, and the daemon's
+// ProcessActivityWatcher reacts via fs.watch — no polling. Lives under
+// ~/.localterm so the shim (which already bakes the state dir) can reach it.
+export const ACTIVITY_DIRNAME = "activity";
+// Built-in programs whose shims emit an after-exec activity signal in addition
+// to (or instead of) secret injection. The signal fires after the real binary
+// completes, so consumers read post-command state (e.g. a refreshed PR lease
+// after `gh pr merge`). The process-tree walker is the wrong tool for these —
+// they're short-lived CLIs that exit before a `ps` snapshot can catch them — so
+// the shim is the deterministic hook point. Add programs here to extend.
+export const ACTIVITY_WATCHED_PROGRAMS: readonly string[] = ["gh"];
+// Coalesces a burst of activity writes for one cwd into a single consumer
+// refresh. The signal arrives after the program exits, so this only needs to
+// collapse rapid-fire invocations (e.g. `gh pr merge && gh pr checks`), not to
+// wait for the command to finish.
+export const ACTIVITY_REFRESH_DEBOUNCE_MS = 500;
 export const SECRET_KEYCHAIN_SERVICE_PREFIX = "localterm:";
 export const MAX_SECRETS = 64;
 export const MAX_PROCESSES = 64;

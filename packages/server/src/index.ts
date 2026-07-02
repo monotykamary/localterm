@@ -24,6 +24,9 @@ import { detectWithExplicitPort } from "./cdp/discover-explicit-endpoint.js";
 import { DaemonConfigStore } from "./daemon-config-store.js";
 import { z } from "zod";
 import {
+  ACTIVITY_DIRNAME,
+  ACTIVITY_REFRESH_DEBOUNCE_MS,
+  ACTIVITY_WATCHED_PROGRAMS,
   AUTOMATION_EVENT_DEBOUNCE_MS,
   AUTOMATION_RECONCILE_MIN_DOWNTIME_MS,
   AUTOMATION_RUN_QUERY_PARAM,
@@ -79,6 +82,7 @@ import { createDefaultSecretBackend, type SecretBackend } from "./secret-backend
 import { SecretStore } from "./secret-store.js";
 import { ProcessStore } from "./process-store.js";
 import { regenerateShims } from "./secret-shims.js";
+import { ProcessActivityWatcher } from "./process-activity-watcher.js";
 import { parseCronExpression } from "./cron-expression.js";
 import { createGitWorktree, listGitWorktrees, removeGitWorktree } from "./git-worktrees.js";
 import {
@@ -1487,9 +1491,44 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     shimsDir,
   });
   const processStore = new ProcessStore(path.join(stateDirectory, PROCESSES_FILENAME));
+  const activityDir = path.join(stateDirectory, ACTIVITY_DIRNAME);
   const syncSecretShims = () =>
-    regenerateShims(processStore.list(), secretStore.envVarByName(), shimsDir, secretBackend);
+    regenerateShims(
+      processStore.list(),
+      secretStore.envVarByName(),
+      shimsDir,
+      secretBackend,
+      activityDir,
+    );
   syncSecretShims();
+  // Detect short-lived CLI invocations the process-tree walker can't catch
+  // (they exit before a `ps` snapshot observes them). Each activity-watched
+  // program's PATH shim overwrites <activityDir>/<program> with $PWD after the
+  // real binary exits; this watcher reacts via fs.watch (no polling). The
+  // built-in set starts with `gh` so running it in a viewed repo refreshes the
+  // PR lease for that cwd without the user manually refreshing — the same role
+  // the working-tree git-dirty signal plays for the diff summary. Gated on
+  // the secret backend because the activity shim is only generated where the
+  // shim feature is supported (darwin); elsewhere there is nothing to watch.
+  let processActivityWatcher: ProcessActivityWatcher | null = null;
+  if (secretBackend.supported && ACTIVITY_WATCHED_PROGRAMS.length > 0) {
+    processActivityWatcher = new ProcessActivityWatcher({
+      activityDir,
+      programs: ACTIVITY_WATCHED_PROGRAMS,
+      debounceMs: ACTIVITY_REFRESH_DEBOUNCE_MS,
+    });
+    processActivityWatcher.on("activity", (program, cwd) => {
+      if (program !== "gh") return;
+      // No subscribers in this cwd → no toolbar to update, so skip the GitHub
+      // call. getGitBranchPr's own per-(cwd, branch) in-flight dedup handles
+      // any overlap with a concurrent manual refresh.
+      if (!registry.hasCoordinatorFor(cwd)) return;
+      void (async () => {
+        const pr = await getGitBranchPr(cwd);
+        registry.broadcastGitBranchPr(cwd, pr);
+      })();
+    });
+  }
   const caffeinateManager = new CaffeinateManager({
     controller: caffeinateController,
     store: caffeinatePreferencesStore,
@@ -2241,6 +2280,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     folderWatchManager.dispose();
     webhookTriggerManager.dispose();
     caffeinateManager.dispose();
+    processActivityWatcher?.dispose();
     cdpClient?.close();
     registry.disposeAll();
     // Forcibly tear down every WS first. node-pty + ws upgraded sockets

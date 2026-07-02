@@ -1296,6 +1296,15 @@ export class SessionManager {
   broadcastGitBranchPr(cwd: string, pr: GitBranchPr | null): void {
     this.coordinatorsByCwd.get(path.resolve(cwd))?.broadcastPr(pr);
   }
+
+  // Whether any tab is currently subscribed to the per-cwd coordinator — i.e.
+  // there is a live audience for a PR lease refresh. Used to gate the
+  // gh-activity refresh so a `gh` invocation in a cwd nobody is viewing never
+  // triggers a pointless GitHub API call (mirrors broadcastGitBranchPr's
+  // non-creating philosophy).
+  hasCoordinatorFor(cwd: string): boolean {
+    return this.coordinatorsByCwd.has(path.resolve(cwd));
+  }
 }
 
 export interface SessionListItem {
