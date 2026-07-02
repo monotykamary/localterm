@@ -101,7 +101,10 @@ export class SecretStore {
       secrets: this.secrets,
     };
     const tmpPath = `${this.filePath}.tmp`;
-    fs.writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    fs.writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
     fs.renameSync(tmpPath, this.filePath);
   }
 }

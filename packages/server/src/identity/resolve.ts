@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import type { MiddlewareHandler } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { HTTP_STATUS_UNAUTHORIZED } from "../constants.js";
+import { timingSafeEqualString } from "../utils/timing-safe-equal.js";
 import type { Identity, IdentityProvider, SessionOwner } from "./types.js";
 
 // Best-effort source-IP read for an HTTP (non-WS) request. @hono/node-server's
@@ -58,9 +59,11 @@ export const createAuthGateMiddleware =
     const isProtected =
       (requestPath === "/ws" || requestPath.startsWith("/api/")) && requestPath !== "/api/health";
     if (!isProtected) return await next();
+    const authorization = context.req.header("authorization");
     if (
       provider.operatorToken &&
-      context.req.header("authorization") === `Bearer ${provider.operatorToken}`
+      authorization &&
+      timingSafeEqualString(authorization, `Bearer ${provider.operatorToken}`)
     ) {
       return await next();
     }

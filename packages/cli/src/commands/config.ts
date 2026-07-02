@@ -141,7 +141,10 @@ export const runConfigIdentity = async (
   const filePath = configFilePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp`;
-  fs.writeFileSync(tmpPath, `${JSON.stringify(validated, null, 2)}\n`, "utf8");
+  fs.writeFileSync(tmpPath, `${JSON.stringify(validated, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
   fs.renameSync(tmpPath, filePath);
 
   const label = provider === "none" ? "(none)" : provider;

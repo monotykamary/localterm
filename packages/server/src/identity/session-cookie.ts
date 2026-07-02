@@ -35,7 +35,7 @@ export const loadOrCreateAuthSecret = (filePath: string): string => {
   const secret = generateAuthSecret();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp`;
-  fs.writeFileSync(tmpPath, secret, "utf8");
+  fs.writeFileSync(tmpPath, secret, { encoding: "utf8", mode: 0o600 });
   fs.renameSync(tmpPath, filePath);
   return secret;
 };

@@ -135,7 +135,10 @@ export class DaemonConfigStore {
     };
     if (this.config.identity) payload.identity = this.config.identity;
     const tmpPath = `${this.filePath}.tmp`;
-    fs.writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    fs.writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
     fs.renameSync(tmpPath, this.filePath);
   }
 }
