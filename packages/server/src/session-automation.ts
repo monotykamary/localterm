@@ -12,6 +12,7 @@
 
 import type { CdpClient } from "./cdp/cdp-client.js";
 import type { SessionManager } from "./session-manager.js";
+import type { SessionOwner } from "./identity/types.js";
 import {
   CDP_MOUSE_TIMEOUT_MS,
   CDP_RENDER_LANDED_POLL_INTERVAL_MS,
@@ -29,6 +30,12 @@ export interface SessionAutomationDeps {
   // Builds the viewer-tab URL for a session (`?sid=<id>` at the daemon's local
   // origin so it never rides the tailnet — same as automation run tabs).
   buildTabUrl: (sessionId: string) => string;
+  // In an auth-gated mode (passkey/oidc), mint a signed session cookie for the
+  // daemon's own CDP viewer tabs so their /ws upgrade passes the gate — those
+  // tabs carry no browser session, so without this the gate 401s them and
+  // capture-pane --png / real-browser mouse degrade to no_browser/SGR. Returns
+  // null for the operator tier and is undefined when no provider is configured.
+  mintViewerCookie?: (owner: SessionOwner) => { name: string; value: string } | null;
 }
 
 // A tab resolved for automation: either an existing live viewer (reused, never
@@ -44,13 +51,24 @@ interface ResolvedTab {
 // or open an ephemeral background tab and attach it. Returns null when no
 // browser is reachable (caller falls back to the headless SGR path for mouse,
 // or reports no_browser for screenshot).
-const resolveTab = async (deps: SessionAutomationDeps, id: string): Promise<ResolvedTab | null> => {
+const resolveTab = async (
+  deps: SessionAutomationDeps,
+  id: string,
+  owner: SessionOwner,
+): Promise<ResolvedTab | null> => {
   const { cdpClient } = deps;
   if (!cdpClient) return null;
   const sidParam = `sid=${encodeURIComponent(id)}`;
   const existing = await cdpClient.findTargetByUrl((url) => url.includes(sidParam));
-  const targetId = existing ?? (await cdpClient.openBackgroundTab(deps.buildTabUrl(id)));
-  if (!targetId) return null;
+  const tabUrl = deps.buildTabUrl(id);
+  // An ephemeral tab carries no browser session; in auth-gated mode, mint it a
+  // session cookie for `owner` so its /ws upgrade passes the gate. An existing
+  // live viewer (the user's own tab) already carries the user's cookie.
+  if (!existing && deps.mintViewerCookie) {
+    const cookie = deps.mintViewerCookie(owner);
+    if (cookie) await cdpClient.setCookie({ ...cookie, url: tabUrl });
+  }
+  const targetId = existing ?? (await cdpClient.openBackgroundTab(tabUrl));  if (!targetId) return null;
   const cdpSessionId = await cdpClient.attachSession(targetId);
   if (!cdpSessionId) {
     if (!existing) await cdpClient.closeTab(targetId);
@@ -99,10 +117,11 @@ export const capturePanePng = async (
   deps: SessionAutomationDeps,
   registry: SessionManager,
   id: string,
+  owner: SessionOwner,
 ): Promise<Buffer | null> => {
   const { cdpClient } = deps;
   if (!cdpClient) return null;
-  const tab = await resolveTab(deps, id);
+  const tab = await resolveTab(deps, id, owner);
   if (!tab) return null;
   try {
     await waitForRenderLanded(cdpClient, tab.cdpSessionId, registry, id, CDP_SCREENSHOT_TIMEOUT_MS);
@@ -197,6 +216,7 @@ export const sendMouse = async (
   registry: SessionManager,
   id: string,
   action: MouseAction,
+  owner: SessionOwner,
   // Headless SGR fallback (injected from the route to avoid a circular import
   // of the encoder here): writes the encoded sequence to the session PTY.
   sgrFallback: (id: string, action: MouseAction, col: number, row: number) => boolean,
@@ -227,7 +247,7 @@ export const sendMouse = async (
 
   // Try the CDP path first: dispatch through the tab's xterm.js.
   if (cdpClient) {
-    const tab = await resolveTab(deps, id);
+    const tab = await resolveTab(deps, id, owner);
     if (tab) {
       try {
         await waitForRenderLanded(cdpClient, tab.cdpSessionId, registry, id, CDP_MOUSE_TIMEOUT_MS);

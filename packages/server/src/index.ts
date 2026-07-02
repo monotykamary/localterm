@@ -62,6 +62,7 @@ import {
   WS_HEARTBEAT_TIMEOUT_MS,
   WS_READY_STATE_OPEN,
   AUTH_SECRET_FILENAME,
+  AUTH_COOKIE_NAME,
 } from "./constants.js";
 import { getDefaultShell } from "./default-shell.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
@@ -125,7 +126,7 @@ import type {
   SessionOwner,
 } from "./identity/types.js";
 import { createIdentityProvider } from "./identity/factory.js";
-import { loadOrCreateAuthSecret } from "./identity/session-cookie.js";
+import { loadOrCreateAuthSecret, signSessionToken } from "./identity/session-cookie.js";
 import {
   createAuthGateMiddleware,
   createIdentityResolver,
@@ -375,6 +376,10 @@ interface DaemonContext {
   // ephemeral tab or match an existing one. Mirrors the run-tab URL so a
   // flapping `tailscale serve` never fails the automation tab load.
   buildTabUrl: (sessionId: string) => string;
+  // Mints a signed session cookie for the daemon's own CDP viewer tabs in
+  // auth-gated mode (passkey/oidc) so they pass the auth gate. Undefined when
+  // no provider is configured; null for the operator tier. See `capturePanePng`.
+  mintViewerCookie?: (owner: SessionOwner) => { name: string; value: string } | null;
   // Live grace-window access for GET/PUT /api/config (seconds; `null` = never
   // reap). `getGraceSeconds` reads the persisted value; `applyGraceSeconds`
   // persists it and re-arms already-dormant sessions. Routed through ctx for
@@ -481,6 +486,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     applyGraceSeconds,
     connectCdpNow,
     buildTabUrl,
+    mintViewerCookie,
   } = ctx;
 
   // Headless SGR-1006 fallback for `mouse` when no CDP tab is reachable:
@@ -633,16 +639,16 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   // headless capture renderer's grid, which works with no browser at all.
   api.get("/sessions/:id/pane", async (context) => {
     const id = context.req.param("id");
-    // PNG is rasterized by a CDP tab the daemon opens as the operator tier, so
-    // gate both formats on ownership before delegating — a cross-tenant id
-    // surfaces as not-found, not a screenshot of someone else's shell.
+    // PNG is rasterized by a CDP tab the daemon opens minted the owner's
+    // session cookie, so gate both formats on ownership before delegating — a
+    // cross-tenant id surfaces as not-found, not a screenshot of someone else's shell.
     const owner = ownerFor(context);
     if (!registry.list(owner).some((session) => session.id === id)) {
       return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     }
     const format = context.req.query("format");
     if (format === "png") {
-      const png = await capturePanePng({ cdpClient, buildTabUrl }, registry, id);
+      const png = await capturePanePng({ cdpClient, buildTabUrl, mintViewerCookie }, registry, id, owner);
       if (!png) return context.json({ error: "no_browser" }, HTTP_STATUS_CONFLICT);
       return new Response(png, { headers: { "content-type": "image/png" } });
     }
@@ -681,19 +687,21 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     const parsed = mouseInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
     const id = context.req.param("id");
-    // sendMouse drives the session via a CDP tab the daemon opens as the
-    // operator tier, so gate on ownership here (the manager calls inside
-    // sendMouse aren't owner-scoped) — a cross-tenant id surfaces as not-found.
-    if (!registry.list(ownerFor(context)).some((session) => session.id === id)) {
+    // sendMouse drives the session via a CDP tab the daemon opens minted the
+    // owner's session cookie, so gate on ownership here (the manager calls
+    // inside sendMouse aren't owner-scoped) — a cross-tenant id surfaces as not-found.
+    const owner = ownerFor(context);
+    if (!registry.list(owner).some((session) => session.id === id)) {
       return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     }
     const action = normalizeMouseAction(parsed.data);
     if (!action) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
     const result = await sendMouse(
-      { cdpClient, buildTabUrl },
+      { cdpClient, buildTabUrl, mintViewerCookie },
       registry,
       id,
       action,
+      owner,
       writeSgrMouseFallback,
     );
     return context.json(result);
@@ -1658,6 +1666,15 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const resolveIdentity = (context: Context, sourceIp?: string | null): Identity | null =>
     identityResolver.resolve(context, sourceIp ?? getRequestSourceIp(context));
   const ownerFor = (context: Context): SessionOwner => toSessionOwner(resolveIdentity(context));
+  // In an auth-gated mode, mint a signed session cookie for the daemon's own
+  // CDP viewer tabs (capture-pane --png / real-browser mouse) so their /ws
+  // upgrade passes the auth gate — those tabs carry no browser session.
+  // Undefined when no provider is configured (the gate is open); null for the
+  // operator tier (passkey mode has no operator sessions, so that degrades).
+  const mintViewerCookie = identityProvider?.denyUnauthenticated
+    ? (owner: SessionOwner): { name: string; value: string } | null =>
+        owner ? { name: AUTH_COOKIE_NAME, value: signSessionToken(authSecret, owner) } : null
+    : undefined;
   // Reject unauthenticated requests at the door for providers that own their
   // login (passkey/oidc): a request with no valid session is 401 (HTTP) or
   // never reaches the WS upgrade. Exempts `/api/health` (readiness) and
@@ -2008,6 +2025,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       url.searchParams.set(SESSION_ID_QUERY_PARAM, sessionId);
       return url.toString();
     },
+    mintViewerCookie,
   };
   const api = buildApiRoutes(ctx);
   app.route("/api", api);

@@ -526,6 +526,32 @@ export class CdpClient {
   }
 
   /**
+   * Set a cookie in the browser's jar (CDP `Network.setCookie`, a browser-level
+   * call usable before a tab is created). Used in auth-gated mode to mint the
+   * daemon's own viewer tabs a session cookie so their `/ws` upgrade passes the
+   * auth gate — those tabs carry no browser session of their own. The `url`
+   * implies the cookie's domain and secure bit. Best-effort, never throws.
+   */
+  async setCookie(cookie: {
+    name: string;
+    value: string;
+    url: string;
+    secure?: boolean;
+  }): Promise<boolean> {
+    try {
+      await this.connect();
+    } catch {
+      return false;
+    }
+    try {
+      const result = (await this.call("Network.setCookie", cookie)) as { success?: boolean };
+      return result?.success === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Open `url` as a background tab. Returns the new target's id on success
    * (used later to close the tab), or null when no browser is reachable
    * (connect failed) or the call errored — the caller's cue to fall back to the
