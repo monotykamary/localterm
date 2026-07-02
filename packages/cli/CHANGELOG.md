@@ -1,5 +1,31 @@
 # localterm
 
+## 2.35.0
+
+### Minor Changes
+
+- c3caa12: Add `localterm config identity <provider>` to set the daemon's identity provider in `~/.localterm/config.json` — `none` (single authority), `header` (a proxy-set header), `passkey` (self-contained WebAuthn), or `oidc` (bring-your-own-IdP). Identity is built once at daemon start (unlike the live `cdpPort`/`graceSeconds` knobs), so the command writes the file directly and reminds the operator to `localterm restart`; it never talks to the running daemon. The existing config (`cdpPort`, `graceSeconds`) is preserved, and the merged file is validated against the daemon schema before writing. `--registration` is restricted to `open` | `closed`; `--issuer` / `--client-id` are required for `oidc`.
+
+  Server: export `IdentityConfig` from the protocol barrel (the command validates against it).
+
+- a75f673: Add an operator bearer token so the CLI works in passkey/oidc mode, where it can't run a WebAuthn/OIDC ceremony. `localterm config identity passkey|oidc` auto-generates a token (printed once, stored in the config, preserved across re-runs; or set explicitly with `--operator-token`), and the CLI reads it from the config and sends it as `Authorization: Bearer <token>` on `/api/*` calls. The auth gate admits it as the operator tier (full access); `header`/no-provider mode is unaffected (the gate is open, and `header` has no token).
+
+  Server: `IdentityProvider` gains `operatorToken`; the gate checks it before the session cookie.
+
+### Patch Changes
+
+- e75e118: Tighten secret-bearing state-file permissions and the operator-token comparison. The auth-secret HMAC key (used to sign session cookies — if it leaks, anyone can forge a session), `config.json` (the operator token + OIDC clientSecret), and `secrets.json` are now written `0600` (owner-only) instead of default umask — a real leak risk on a shared host with a loose umask. The auth gate also now compares the operator bearer token with `crypto.timingSafeEqual` instead of plain `===`, removing a byte-by-byte timing leak against a network-reachable daemon.
+- Updated dependencies [4277058]
+- Updated dependencies [479727c]
+- Updated dependencies [c3caa12]
+- Updated dependencies [4d95f3b]
+- Updated dependencies [07d60be]
+- Updated dependencies [7b01162]
+- Updated dependencies [a75f673]
+- Updated dependencies [e75e118]
+- Updated dependencies [5390219]
+  - @monotykamary/localterm-server@2.35.0
+
 ## 2.34.0
 
 ### Minor Changes

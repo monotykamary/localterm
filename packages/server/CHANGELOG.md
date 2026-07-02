@@ -1,5 +1,39 @@
 # localterm-server
 
+## 2.35.0
+
+### Minor Changes
+
+- 479727c: In auth-gated mode (passkey/oidc), mint the daemon's own CDP viewer tabs a signed session cookie so their `/ws` upgrade passes the auth gate — without it `capture-pane --png` and real-browser `mouse` degraded to `no_browser`/SGR because those tabs carry no browser session. The cookie is minted for the session's owner (the authenticated user who triggered the capture/mouse) and set via CDP `Network.setCookie` before the tab opens; an existing live viewer tab is reused as-is (it already carries the user's cookie). Headless text capture, `exec`, `wait`, send-keys, and the SGR mouse fallback were already unaffected.
+- c3caa12: Add `localterm config identity <provider>` to set the daemon's identity provider in `~/.localterm/config.json` — `none` (single authority), `header` (a proxy-set header), `passkey` (self-contained WebAuthn), or `oidc` (bring-your-own-IdP). Identity is built once at daemon start (unlike the live `cdpPort`/`graceSeconds` knobs), so the command writes the file directly and reminds the operator to `localterm restart`; it never talks to the running daemon. The existing config (`cdpPort`, `graceSeconds`) is preserved, and the merged file is validated against the daemon schema before writing. `--registration` is restricted to `open` | `closed`; `--issuer` / `--client-id` are required for `oidc`.
+
+  Server: export `IdentityConfig` from the protocol barrel (the command validates against it).
+
+- 4d95f3b: Add an `IdentityProvider` abstraction that resolves an authenticated identity per request, plus a `header` provider that trusts a proxy-set header (`X-Forwarded-User` by default) gated by a trusted-proxy source-IP allowlist. The session registry is now partitioned by the resolved owner; with no provider configured every request is the operator tier and behavior is byte-identical to no-auth.
+
+  Multi-user access is enabled by adding an optional `identity` block to `~/.localterm/config.json`, so any identity-aware reverse proxy (Cloudflare Access, Pomerium, Caddy + oauth2-proxy, Authelia forward-auth) can front the daemon. A cross-tenant session probe surfaces as not-found; the operator tier (the CLI from loopback, the daemon's own CDP tabs) keeps full access. `passkey`/`oidc` providers slot in as new `IdentityProvider` variants.
+
+- 07d60be: Add an `oidc` identity provider — bring-your-own-IdP via `oauth4webapi` (zero-dep, PKCE authorization-code flow). Any OIDC IdP (Google, GitHub, or self-hosted Authentik/Zitadel/Keycloak) authenticates; localterm keeps no passwords. A `/auth/oidc/*` login/callback/logout flow issues the same signed session cookie as `passkey`, so `identify` and the auth gate are shared. The identity is the configured userinfo claim (default `email`, falling back to `sub`); OIDC discovery is cached and retried on failure. The `redirect_uri` is the daemon's announced origin (`/auth/oidc/callback`), which must be registered with the IdP — so OIDC needs a stable announced origin (the tailnet/local-https surface), unlike `passkey` which binds to whatever origin the browser is on.
+
+  Also adds `GET /auth/provider`, an unauthenticated meta endpoint the terminal app / CLI hit before login to learn which flow to offer (`{ provider, registration }`). `header`, `passkey`, and `oidc` now form the full `IdentityConfig` discriminated union.
+
+- 7b01162: Add a `passkey` identity provider — localterm as its own identity authority via WebAuthn, with no external IdP or proxy. A `/auth/passkey/*` register/login/logout flow (`@simplewebauthn/server`) issues a signed HMAC session cookie that `identify` reads, so every tab after the first login re-authenticates silently. An unauthenticated request is rejected at a new auth gate (401 / WS policy-violation) rather than falling through to the operator tier — unlike `header`, there's no proxy to vouch for one. Users and credential key material persist in `~/.localterm/{users,credentials}.json`; the HMAC secret in `~/.localterm/auth-secret`.
+
+  Enabled via the config-file `identity` block (`{ "provider": "passkey", "registration": "open" | "closed" }`). `header` and `passkey` are now a discriminated union; `oidc` (bring-your-own-IdP) is the next variant. `IdentityProvider` gains `denyUnauthenticated` and an optional `routes()` for login-flow providers. In passkey mode the CDP-driven `capture-pane --png` degrades to `no_browser` (the daemon's viewer tab has no session cookie) — headless text capture, `exec`, `wait`, send-keys, and the SGR mouse fallback all still work.
+
+- a75f673: Add an operator bearer token so the CLI works in passkey/oidc mode, where it can't run a WebAuthn/OIDC ceremony. `localterm config identity passkey|oidc` auto-generates a token (printed once, stored in the config, preserved across re-runs; or set explicitly with `--operator-token`), and the CLI reads it from the config and sends it as `Authorization: Bearer <token>` on `/api/*` calls. The auth gate admits it as the operator tier (full access); `header`/no-provider mode is unaffected (the gate is open, and `header` has no token).
+
+  Server: `IdentityProvider` gains `operatorToken`; the gate checks it before the session cookie.
+
+- 5390219: Add public auth-response schemas + types for the client: `identityProviderInfoSchema` / `IdentityProviderInfo` (`GET /auth/provider` → which login flow to offer) and `authSessionSchema` / `AuthSession` (`GET /auth/<provider>/me` → the current user, or null).
+
+  The terminal app (`@monotykamary/localterm-terminal`, not versioned) gains an `AuthGate` that probes those endpoints before mounting the terminal: a `header`/no-provider daemon or a valid session renders the terminal immediately; a `passkey` daemon with no session shows a register / sign-in screen (via `@simplewebauthn/browser`), and an `oidc` daemon shows a redirect button to `/auth/oidc/login`. The terminal only connects to `/ws` after auth, so it never 401s on the gate. A failed probe (daemon unreachable mid-load) falls through to the terminal so the existing connection UI surfaces the real error.
+
+### Patch Changes
+
+- 4277058: `capture-pane --png` no longer returns `no_browser` when the viewer tab's `.xterm` hasn't laid out yet: a 0-size clip falls back to a full-viewport screenshot, and an empty first capture (the tab hadn't committed a frame — the render landed just past the poll window) is retried once after a settle.
+- e75e118: Tighten secret-bearing state-file permissions and the operator-token comparison. The auth-secret HMAC key (used to sign session cookies — if it leaks, anyone can forge a session), `config.json` (the operator token + OIDC clientSecret), and `secrets.json` are now written `0600` (owner-only) instead of default umask — a real leak risk on a shared host with a loose umask. The auth gate also now compares the operator bearer token with `crypto.timingSafeEqual` instead of plain `===`, removing a byte-by-byte timing leak against a network-reachable daemon.
+
 ## 2.34.0
 
 ### Minor Changes
