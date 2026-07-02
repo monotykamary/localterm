@@ -49,6 +49,7 @@ import {
   WAIT_MAX_TIMEOUT_MS,
   IDENTITY_HEADER_NAME_MAX_LENGTH,
   IDENTITY_PROXY_SPEC_MAX_LENGTH,
+  IDENTITY_RP_NAME_MAX_LENGTH,
 } from "./constants.js";
 
 // Live state of the daemon's persistent CDP connection (browser tab control for
@@ -1327,12 +1328,12 @@ export const graceSecondsSchema = z
   .nullable();
 
 // Identity provider config (~/.localterm/config.json `identity`). Phase 1
-// supports only the `header` provider — a proxy-set header fronted by an
-// identity-aware reverse proxy (Cloudflare Access, Pomerium, Authelia).
-// Phase 2 (`passkey`, `oidc`) turns `identityConfigSchema` into a
-// `z.discriminatedUnion("provider", [...])` over the variants. Optional in the
-// file so an existing config without it upgrades to the no-provider
-// (single-authority) default rather than failing the strict parse.
+// Identity provider config (~/.localterm/config.json `identity`). A
+// discriminated union over `provider`: `header` (a proxy-set header, the
+// external-proxy escape hatch) and `passkey` (localterm is its own identity
+// authority via WebAuthn). `oidc` (bring-your-own-IdP) is the next variant.
+// Optional in the file so an existing config without it upgrades to the
+// no-provider (single-authority) default rather than failing the parse.
 export const identityHeaderConfigSchema = z
   .object({
     provider: z.literal("header"),
@@ -1341,7 +1342,18 @@ export const identityHeaderConfigSchema = z
   })
   .strict();
 
-export const identityConfigSchema = identityHeaderConfigSchema;
+export const passkeyConfigSchema = z
+  .object({
+    provider: z.literal("passkey"),
+    rpName: z.string().trim().min(1).max(IDENTITY_RP_NAME_MAX_LENGTH).optional(),
+    registration: z.enum(["open", "closed"]).optional(),
+  })
+  .strict();
+
+export const identityConfigSchema = z.discriminatedUnion("provider", [
+  identityHeaderConfigSchema,
+  passkeyConfigSchema,
+]);
 
 export const daemonConfigFileSchema = z
   .object({

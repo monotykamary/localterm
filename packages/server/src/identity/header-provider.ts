@@ -4,7 +4,7 @@ import {
   IDENTITY_PROXY_DEFAULT,
   IDENTITY_USER_MAX_LENGTH,
 } from "../constants.js";
-import type { Identity, IdentityConfig, IdentityProvider } from "./types.js";
+import type { Identity, HeaderIdentityConfig, IdentityProvider } from "./types.js";
 import { createProxyAllowlist, type ProxyAllowlist } from "./proxy-allowlist.js";
 
 // The identity provider that trusts a proxy-set header. Covers every external
@@ -17,14 +17,16 @@ import { createProxyAllowlist, type ProxyAllowlist } from "./proxy-allowlist.js"
 // AND forge the header). A request from the proxy with no header resolves to
 // the operator tier (no identity asserted): that's the CLI from loopback and
 // the daemon's own CDP automation tabs, which keep full access — the admin
-// parity a shared gateway needs.
-export const createHeaderIdentityProvider = (config: IdentityConfig): IdentityProvider => {
+// parity a shared gateway needs. So `denyUnauthenticated` is false: a
+// trusted-proxy request with no header is the operator, not a rejection.
+export const createHeaderIdentityProvider = (config: HeaderIdentityConfig): IdentityProvider => {
   const header = config.header?.trim() || IDENTITY_HEADER_DEFAULT;
   const allowlist: ProxyAllowlist = createProxyAllowlist(
     config.trustedProxy?.trim() || IDENTITY_PROXY_DEFAULT,
   );
   return {
     kind: "header",
+    denyUnauthenticated: false,
     identify: (context: Context, sourceIp: string | null): Identity | null => {
       const value = context.req.header(header);
       if (!value) return null;
@@ -34,8 +36,3 @@ export const createHeaderIdentityProvider = (config: IdentityConfig): IdentityPr
     },
   };
 };
-
-// Build the configured identity provider. Phase 1 wires only `header`; phase 2
-// switches on `config.provider` as `passkey` and `oidc` variants are added.
-export const createIdentityProvider = (config: IdentityConfig): IdentityProvider =>
-  createHeaderIdentityProvider(config);

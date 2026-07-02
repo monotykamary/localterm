@@ -70,6 +70,7 @@ export {
   daemonConfigFileSchema,
   daemonConfigSchema,
   identityConfigSchema,
+  passkeyConfigSchema,
   updateDaemonConfigInputSchema,
   gitBaseSourceSchema,
   gitBranchInfoSchema,

@@ -61,6 +61,7 @@ import {
   WS_HEARTBEAT_INTERVAL_MS,
   WS_HEARTBEAT_TIMEOUT_MS,
   WS_READY_STATE_OPEN,
+  AUTH_SECRET_FILENAME,
 } from "./constants.js";
 import { getDefaultShell } from "./default-shell.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
@@ -117,9 +118,10 @@ import {
 } from "./schemas.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
 import type { Context } from "hono";
-import type { Identity, IdentityConfig, SessionOwner } from "./identity/types.js";
-import { createIdentityProvider } from "./identity/header-provider.js";
-import { createIdentityResolver, getRequestSourceIp, toSessionOwner } from "./identity/resolve.js";
+import type { Identity, IdentityConfig, IdentityProviderDeps, SessionOwner } from "./identity/types.js";
+import { createIdentityProvider } from "./identity/factory.js";
+import { loadOrCreateAuthSecret } from "./identity/session-cookie.js";
+import { createAuthGateMiddleware, createIdentityResolver, getRequestSourceIp, toSessionOwner } from "./identity/resolve.js";
 import {
   SessionManager,
   type AutomationContext,
@@ -1628,11 +1630,30 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // user. Built once at start; changing it requires a restart (unlike the
   // live cdpPort/graceSeconds knobs).
   const identityConfig: IdentityConfig | null = options.identity ?? daemonConfigStore.getIdentity();
-  const identityProvider = identityConfig ? createIdentityProvider(identityConfig) : null;
+  // The HMAC secret for the passkey provider's signed session cookie.
+  // Generated once and persisted; losing it invalidates every live session
+  // (users re-log in) — never silently reused. Unused by the `header` provider.
+  const authSecret = loadOrCreateAuthSecret(path.join(stateDirectory, AUTH_SECRET_FILENAME));
+  const identityProviderDeps: IdentityProviderDeps = {
+    secret: authSecret,
+    getOrigin: () => localOrigin ?? publicOrigin ?? null,
+    stateDirectory,
+  };
+  const identityProvider = identityConfig
+    ? createIdentityProvider(identityConfig, identityProviderDeps)
+    : null;
   const identityResolver = createIdentityResolver(identityProvider);
   const resolveIdentity = (context: Context, sourceIp?: string | null): Identity | null =>
     identityResolver.resolve(context, sourceIp ?? getRequestSourceIp(context));
   const ownerFor = (context: Context): SessionOwner => toSessionOwner(resolveIdentity(context));
+  // Reject unauthenticated requests at the door for providers that own their
+  // login (passkey/oidc): a request with no valid session is 401 (HTTP) or
+  // never reaches the WS upgrade. Exempts `/api/health` (readiness) and
+  // everything outside `/api` and `/ws` (the static terminal app + the `/auth`
+  // login flow must load before there's a session). The `header` provider opts
+  // out (denyUnauthenticated: false) — its no-header case IS the operator tier.
+  app.use("*", createAuthGateMiddleware(identityProvider, resolveIdentity));
+  if (identityProvider?.routes) app.route("/auth", identityProvider.routes());
   // One persistent CDP socket for the daemon's lifetime — opened once at start
   // (below), so the user clears the browser's remote-debugging prompt a single
   // time rather than on every run. Skipped when a caller injects its own
@@ -2430,9 +2451,10 @@ export {
   cdpHealthSchema,
   daemonConfigSchema,
   identityConfigSchema,
+  passkeyConfigSchema,
   updateDaemonConfigInputSchema,
 } from "./schemas.js";
-export type { Identity, IdentityConfig, SessionOwner } from "./identity/types.js";
+export type { Identity, IdentityConfig, PasskeyIdentityConfig, SessionOwner } from "./identity/types.js";
 export {
   createSessionInputSchema,
   sessionResponseSchema,

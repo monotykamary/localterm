@@ -1,5 +1,7 @@
 import type { Context } from "hono";
+import type { MiddlewareHandler } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
+import { HTTP_STATUS_UNAUTHORIZED } from "../constants.js";
 import type { Identity, IdentityProvider, SessionOwner } from "./types.js";
 
 // Best-effort source-IP read for an HTTP (non-WS) request. @hono/node-server's
@@ -34,3 +36,25 @@ export const createIdentityResolver = (provider: IdentityProvider | null): Ident
 
 export const toSessionOwner = (identity: Identity | null): SessionOwner =>
   identity ? identity.user : null;
+
+// The auth gate for providers that own their own login (passkey/oidc): reject a
+// request with no valid session at the door (401) so it never reaches the
+// session registry — unlike `header`, whose no-header case is the operator
+// tier (denyUnauthenticated: false), there's no external proxy to vouch for an
+// unauthenticated caller here, so silence can't mean admin. Exempts
+// `/api/health` (readiness) and everything outside `/api` and `/ws` (the static
+// terminal app + the `/auth` login flow must load before there's a session).
+export const createAuthGateMiddleware = (
+  provider: IdentityProvider | null,
+  resolveIdentity: (context: Context, sourceIp?: string | null) => Identity | null,
+): MiddlewareHandler =>
+  async (context, next) => {
+    if (!provider?.denyUnauthenticated) return await next();
+    const requestPath = context.req.path;
+    const isProtected =
+      (requestPath === "/ws" || requestPath.startsWith("/api/")) && requestPath !== "/api/health";
+    if (!isProtected) return await next();
+    const identity = resolveIdentity(context, getRequestSourceIp(context));
+    if (!identity) return context.json({ error: "unauthorized" }, HTTP_STATUS_UNAUTHORIZED);
+    await next();
+  };

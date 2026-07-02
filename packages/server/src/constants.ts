@@ -652,3 +652,18 @@ export const IDENTITY_PROXY_DEFAULT = "loopback";
 export const IDENTITY_HEADER_NAME_MAX_LENGTH = 64;
 export const IDENTITY_PROXY_SPEC_MAX_LENGTH = 64;
 export const IDENTITY_USER_MAX_LENGTH = 256;
+// Passkey (self-contained) provider: localterm is its own identity authority via
+// WebAuthn. A signed session cookie carries the identity after a register/login
+// ceremony so subsequent tabs (and WS upgrades) re-authenticate silently. The
+// HMAC secret is generated once and persisted; challenges are short-lived.
+export const IDENTITY_RP_NAME_DEFAULT = "localterm";
+export const IDENTITY_RP_NAME_MAX_LENGTH = 64;
+export const IDENTITY_USERNAME_MIN_LENGTH = 1;
+export const IDENTITY_USERNAME_MAX_LENGTH = 256;
+export const AUTH_COOKIE_NAME = "localterm-auth";
+export const AUTH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+export const AUTH_SECRET_BYTES = 32;
+export const AUTH_SECRET_FILENAME = "auth-secret";
+export const AUTH_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+export const HTTP_STATUS_UNAUTHORIZED = 401;
+export const HTTP_STATUS_FORBIDDEN = 403;
