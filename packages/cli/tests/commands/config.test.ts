@@ -38,7 +38,7 @@ describe("localterm config identity", () => {
     await runConfigIdentity("passkey", { registration: "open" });
     const identity = readConfig().identity;
     expect(identity?.provider).toBe("passkey");
-    expect(identity?.registration).toBe("open");
+    if (identity?.provider === "passkey") expect(identity.registration).toBe("open");
     expect(operatorTokenOf(readConfig())).toBeTruthy();
     expect(
       logSpy.mock.calls.some((call: unknown[]) => /operator token/.test(String(call[0]))),
