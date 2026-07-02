@@ -1,4 +1,4 @@
-import { ChevronDown, Settings, X } from "lucide-react";
+import { ChevronDown, ExternalLink, Settings, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { NumberStepper } from "@/components/number-stepper";
@@ -80,6 +80,7 @@ interface SettingsMenuProps {
   cdpConnecting: boolean;
   onCdpPortChange: (port: number | null) => void;
   onCdpConnect: () => void;
+  onOpenInspect: () => void;
   graceSeconds: number | null;
   onGraceSecondsChange: (seconds: number | null) => void;
   notificationsPermission: NotificationPermission | "unsupported";
@@ -148,6 +149,7 @@ interface CdpPortFieldProps {
   connecting: boolean;
   onPortChange: (port: number | null) => void;
   onConnect: () => void;
+  onOpenInspect: () => void;
 }
 
 // A daemon-global numeric value edited through /api/config (not a localStorage
@@ -213,7 +215,14 @@ const ConfigNumberField = ({
 // The CDP port field pairs the numeric input with a live connection status and
 // an explicit Connect button (POST /api/cdp/connect) so a failure surfaces a
 // reason instead of silently staying "Not connected".
-const CdpPortField = ({ port, status, connecting, onPortChange, onConnect }: CdpPortFieldProps) => {
+const CdpPortField = ({
+  port,
+  status,
+  connecting,
+  onPortChange,
+  onConnect,
+  onOpenInspect,
+}: CdpPortFieldProps) => {
   const connected = status?.connected === true;
   const statusText = connected
     ? `Connected — ${status?.browser ?? "debug-enabled browser"}`
@@ -231,25 +240,46 @@ const CdpPortField = ({ port, status, connecting, onPortChange, onConnect }: Cdp
         ariaLabel="CDP remote debugging port"
         onCommit={onPortChange}
       />
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-start justify-between gap-2">
         <span
           className={cn(
-            "min-w-0 truncate text-[10px]",
+            "min-w-0 flex-1 text-[10px] leading-tight",
             connected ? "text-muted-foreground/60" : "text-amber-400",
           )}
           title={statusText}
         >
           {statusText}
         </span>
-        <Button
-          variant="secondary"
-          size="xs"
-          aria-label="connect to CDP endpoint"
-          disabled={connecting}
-          onClick={onConnect}
-        >
-          {connecting ? "Connecting…" : "Connect"}
-        </Button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  aria-label="open chrome://inspect"
+                  onClick={onOpenInspect}
+                />
+              }
+            >
+              <ExternalLink className="size-3" />
+              Inspect
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX} className="max-w-xs">
+              Open chrome://inspect to toggle “Discover network targets” and enable remote debugging
+              in your browser.
+            </TooltipContent>
+          </Tooltip>
+          <Button
+            variant="secondary"
+            size="xs"
+            aria-label="connect to CDP endpoint"
+            disabled={connecting}
+            onClick={onConnect}
+          >
+            {connecting ? "Connecting…" : "Connect"}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -315,6 +345,7 @@ export const SettingsMenu = ({
   cdpConnecting,
   onCdpPortChange,
   onCdpConnect,
+  onOpenInspect,
   graceSeconds,
   onGraceSecondsChange,
   notificationsPermission,
@@ -414,6 +445,7 @@ export const SettingsMenu = ({
   };
 
   const isVisible = isOpen && settled;
+  const cdpDisconnected = cdpStatus !== null && !cdpStatus.connected;
 
   return (
     <>
@@ -421,10 +453,16 @@ export const SettingsMenu = ({
         variant="ghost"
         size="icon-sm"
         aria-label="terminal settings"
-        className="hover:text-foreground"
+        className="relative hover:text-foreground"
         onClick={() => handleOpenChange(!isOpen)}
       >
         <Settings />
+        {cdpDisconnected && (
+          <span
+            aria-hidden="true"
+            className="absolute right-1 top-1 size-1.5 rounded-full bg-amber-400"
+          />
+        )}
       </Button>
       {mounted
         ? createPortal(
@@ -467,6 +505,35 @@ export const SettingsMenu = ({
                 </div>
                 <div className="flex-1 overflow-y-auto overscroll-contain p-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   <FieldGroup className="gap-3">
+                    <Field orientation="vertical" className="gap-1.5">
+                      <FieldLabel className={SECTION_LABEL_CLASSES}>Automation browser</FieldLabel>
+                      <Tooltip>
+                        <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                          Remote debugging port
+                        </TooltipTrigger>
+                        <TooltipContent
+                          side="bottom"
+                          sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                          className="max-w-xs"
+                        >
+                          Automation run tabs open in the background over the DevTools Protocol.
+                          Leave empty to auto-detect a Chromium browser launched with
+                          {" --remote-debugging-port"}; set a port to target a specific debug
+                          endpoint (e.g. Aside on 52860). Saved to the daemon and used by every tab.
+                        </TooltipContent>
+                      </Tooltip>
+                      <CdpPortField
+                        port={cdpPort}
+                        status={cdpStatus}
+                        connecting={cdpConnecting}
+                        onPortChange={onCdpPortChange}
+                        onConnect={onCdpConnect}
+                        onOpenInspect={onOpenInspect}
+                      />
+                    </Field>
+
+                    <Separator className="bg-border/40" />
+
                     <Field orientation="vertical" className="gap-1.5">
                       <FieldLabel className={SECTION_LABEL_CLASSES}>Theme</FieldLabel>
                       <SettingsSelect
@@ -688,34 +755,6 @@ export const SettingsMenu = ({
                           }}
                         />
                       </div>
-                    </Field>
-
-                    <Separator className="bg-border/40" />
-
-                    <Field orientation="vertical" className="gap-1.5">
-                      <FieldLabel className={SECTION_LABEL_CLASSES}>Automation browser</FieldLabel>
-                      <Tooltip>
-                        <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
-                          Remote debugging port
-                        </TooltipTrigger>
-                        <TooltipContent
-                          side="bottom"
-                          sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-                          className="max-w-xs"
-                        >
-                          Automation run tabs open in the background over the DevTools Protocol.
-                          Leave empty to auto-detect a Chromium browser launched with
-                          {" --remote-debugging-port"}; set a port to target a specific debug
-                          endpoint (e.g. Aside on 52860). Saved to the daemon and used by every tab.
-                        </TooltipContent>
-                      </Tooltip>
-                      <CdpPortField
-                        port={cdpPort}
-                        status={cdpStatus}
-                        connecting={cdpConnecting}
-                        onPortChange={onCdpPortChange}
-                        onConnect={onCdpConnect}
-                      />
                     </Field>
 
                     <Separator className="bg-border/40" />

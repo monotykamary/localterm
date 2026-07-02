@@ -17,12 +17,12 @@ describe("probeCdpAvailability", () => {
       browser("Google Chrome", 9222, 2),
       browser("Brave", 9223, 1),
     ];
-    const result = await probeCdpAvailability(detect);
+    const result = await probeCdpAvailability(null, detect);
     expect(result).toEqual({ available: true, browserName: "Google Chrome" });
   });
 
   it("reports unavailable when no debug-enabled browser is detected", async () => {
-    const result = await probeCdpAvailability(async () => []);
+    const result = await probeCdpAvailability(null, async () => []);
     expect(result).toEqual({ available: false });
   });
 });

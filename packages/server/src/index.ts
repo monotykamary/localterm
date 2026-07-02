@@ -64,6 +64,7 @@ import {
 } from "./constants.js";
 import { getDefaultShell } from "./default-shell.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
+import { openChromeInspect } from "./utils/open-chrome-inspect.js";
 import { ServerErrorException, serverError } from "./errors.js";
 import { FolderWatchManager } from "./folder-watch-manager.js";
 import { SessionEventManager } from "./session-event-manager.js";
@@ -1347,6 +1348,17 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   // or the error that explains a failure), unlike the fire-and-forget connect
   // kicked by `PUT /api/config` and daemon start.
   api.post("/cdp/connect", async (context) => context.json(await connectCdpNow()));
+
+  // Open chrome://inspect in the user's browser. This is the bootstrap path
+  // for users who haven't enabled remote debugging yet — they open the inspect
+  // page to toggle "Discover network targets" — so it must NOT go through CDP
+  // (CDP isn't available to those users). chrome:// URLs can't be navigated to
+  // from a web page, so the daemon opens it (AppleScript `open location` on
+  // macOS to reuse the running profile; OS opener elsewhere).
+  api.post("/cdp/open-inspect", async (context) => {
+    await openChromeInspect();
+    return context.json({ ok: true });
+  });
 
   // Fire a webhook-triggered automation. The :id is the automation's webhook
   // capability token (Discord-style: anyone with the URL can fire it). The body

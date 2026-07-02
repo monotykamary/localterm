@@ -48,6 +48,7 @@ interface SettingsMenuHarnessProps {
   cdpConnecting?: boolean;
   onCdpPortChange?: (port: number | null) => void;
   onCdpConnect?: () => void;
+  onOpenInspect?: () => void;
   initialGraceSeconds?: number | null;
   onGraceSecondsChange?: (seconds: number | null) => void;
   onPaddingXChange?: (paddingX: number) => void;
@@ -88,6 +89,7 @@ const renderSettingsMenu = ({
   cdpConnecting = false,
   onCdpPortChange = () => {},
   onCdpConnect = () => {},
+  onOpenInspect = () => {},
   initialGraceSeconds = null,
   onGraceSecondsChange = () => {},
   onPaddingXChange = () => {},
@@ -131,6 +133,7 @@ const renderSettingsMenu = ({
         cdpConnecting={cdpConnecting}
         onCdpPortChange={onCdpPortChange}
         onCdpConnect={onCdpConnect}
+        onOpenInspect={onOpenInspect}
         graceSeconds={initialGraceSeconds}
         onGraceSecondsChange={onGraceSecondsChange}
         paddingX={0}
@@ -743,6 +746,15 @@ describe("SettingsMenu CDP port field", () => {
     fireEvent.click(screen.getByLabelText("connect to CDP endpoint"));
 
     expect(onCdpConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onOpenInspect when the Inspect button is clicked", () => {
+    const onOpenInspect = vi.fn();
+    renderSettingsMenu({ initialCdpPort: 52860, onOpenInspect });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    fireEvent.click(screen.getByLabelText("open chrome://inspect"));
+
+    expect(onOpenInspect).toHaveBeenCalledTimes(1);
   });
 
   it("disables the Connect button and shows Connecting… while connecting", () => {

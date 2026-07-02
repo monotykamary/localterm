@@ -168,6 +168,7 @@ import { fetchDaemonConfig } from "@/utils/fetch-daemon-config";
 import { updateDaemonConfig } from "@/utils/update-daemon-config";
 import { fetchServerHealth } from "@/utils/fetch-server-health";
 import { connectCdp } from "@/utils/connect-cdp";
+import { openInspectPage } from "@/utils/open-inspect-page";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
 import { computePtyViewportOverlay } from "@/utils/compute-pty-viewport-overlay";
 
@@ -1945,6 +1946,10 @@ export const Terminal = () => {
     });
   }, [refreshCdpStatus]);
 
+  const handleOpenInspect = useCallback(() => {
+    void openInspectPage();
+  }, []);
+
   const handleSettingsOpenChange = useCallback(
     (open: boolean) => {
       setIsSettingsOpen(open);
@@ -2601,6 +2606,7 @@ export const Terminal = () => {
                     cdpConnecting={cdpConnecting}
                     onCdpPortChange={handleCdpPortChange}
                     onCdpConnect={handleCdpConnect}
+                    onOpenInspect={handleOpenInspect}
                     graceSeconds={graceSeconds}
                     onGraceSecondsChange={handleGraceSecondsChange}
                     paddingX={activePaddingX}
