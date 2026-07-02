@@ -27,6 +27,7 @@ export const createHeaderIdentityProvider = (config: HeaderIdentityConfig): Iden
   return {
     kind: "header",
     denyUnauthenticated: false,
+    operatorToken: null,
     identify: (context: Context, sourceIp: string | null): Identity | null => {
       const value = context.req.header(header);
       if (!value) return null;

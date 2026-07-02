@@ -24,6 +24,11 @@ export interface Identity {
 export interface IdentityProvider {
   readonly kind: string;
   readonly denyUnauthenticated: boolean;
+  // A static bearer token (from the config file) that grants the operator tier
+  // — full access, no session cookie — so the CLI can use `/api/*` in
+  // passkey/oidc mode, where it can't run a WebAuthn/OIDC ceremony. `null` for
+  // `header` (no gate) and when no token is configured.
+  readonly operatorToken: string | null;
   identify(context: Context, sourceIp: string | null): Identity | null;
   // Optional route group mounted at `/auth` for providers that run a login
   // flow (`passkey`, `oidc`). `header` returns undefined — the proxy owns the
@@ -53,6 +58,9 @@ export interface PasskeyIdentityConfig {
   // every other route inherits, so it's "anyone already trusted enough to use
   // localterm", not the open internet.
   registration?: "open" | "closed";
+  // Optional bearer token granting the operator tier (the CLI); see
+  // `IdentityProvider.operatorToken`.
+  operatorToken?: string;
 }
 
 export interface OidcIdentityConfig {
@@ -68,6 +76,9 @@ export interface OidcIdentityConfig {
   claim?: string;
   // Space-separated scopes (default "openid email").
   scope?: string;
+  // Optional bearer token granting the operator tier (the CLI); see
+  // `IdentityProvider.operatorToken`.
+  operatorToken?: string;
 }
 
 export type IdentityConfig = HeaderIdentityConfig | PasskeyIdentityConfig | OidcIdentityConfig;

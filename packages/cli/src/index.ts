@@ -140,6 +140,10 @@ configCommand
   )
   .option("--claim <name>", "userinfo claim to use as the identity (oidc provider; default email)")
   .option("--scope <scope>", "space-separated scopes (oidc provider; default 'openid email')")
+  .option(
+    "--operator-token <token>",
+    "bearer token for the CLI to use /api/* in passkey/oidc mode (auto-generated if omitted)",
+  )
   .action(async (provider: string, options: ConfigIdentityOptions) => {
     await runConfigIdentity(provider, options);
   });

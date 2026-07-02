@@ -1347,6 +1347,7 @@ export const passkeyConfigSchema = z
     provider: z.literal("passkey"),
     rpName: z.string().trim().min(1).max(IDENTITY_RP_NAME_MAX_LENGTH).optional(),
     registration: z.enum(["open", "closed"]).optional(),
+    operatorToken: z.string().min(1).optional(),
   })
   .strict();
 
@@ -1358,6 +1359,7 @@ export const oidcConfigSchema = z
     clientSecret: z.string().min(1).optional(),
     claim: z.string().trim().min(1).optional(),
     scope: z.string().trim().min(1).optional(),
+    operatorToken: z.string().min(1).optional(),
   })
   .strict();
 

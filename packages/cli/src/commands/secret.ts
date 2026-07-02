@@ -1,7 +1,7 @@
 import kleur from "kleur";
 import { createDefaultSecretBackend } from "@monotykamary/localterm-server";
 import { readFileSync } from "node:fs";
-import { daemonBaseUrl, reportApiError, reportDaemonDown } from "../utils/daemon-api.js";
+import { daemonBaseUrl, daemonFetch, reportApiError, reportDaemonDown } from "../utils/daemon-api.js";
 
 interface SecretListItem {
   name: string;
@@ -25,7 +25,7 @@ const runList = async (): Promise<void> => {
     process.exitCode = 1;
     return;
   }
-  const response = await fetch(`${base}/secrets`);
+  const response = await daemonFetch(`${base}/secrets`);
   if (!response.ok) {
     reportApiError(response.status, await response.text());
     process.exitCode = 1;
@@ -103,7 +103,7 @@ const runSet = async (options: { name: string; envVar: string; value?: string })
     process.exitCode = 1;
     return;
   }
-  const response = await fetch(`${base}/secrets/${encodeURIComponent(options.name)}`, {
+  const response = await daemonFetch(`${base}/secrets/${encodeURIComponent(options.name)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -132,7 +132,7 @@ const runDelete = async (name: string): Promise<void> => {
     process.exitCode = 1;
     return;
   }
-  const response = await fetch(`${base}/secrets/${encodeURIComponent(name)}`, {
+  const response = await daemonFetch(`${base}/secrets/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });
   if (!response.ok) {

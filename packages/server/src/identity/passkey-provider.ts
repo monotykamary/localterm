@@ -275,6 +275,7 @@ export const createPasskeyIdentityProvider = (
   return {
     kind: "passkey",
     denyUnauthenticated: true,
+    operatorToken: config.operatorToken ?? null,
     identify: (context: Context): Identity | null => readSessionIdentity(context, secret),
     routes: () =>
       buildPasskeyRoutes({

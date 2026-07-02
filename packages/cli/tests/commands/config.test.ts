@@ -28,32 +28,46 @@ const configPath = () => path.join(tmpHome, ".localterm", "config.json");
 const readConfig = () =>
   daemonConfigFileSchema.parse(JSON.parse(fs.readFileSync(configPath(), "utf8")));
 
+const operatorTokenOf = (config: ReturnType<typeof readConfig>): string | undefined => {
+  const identity = config.identity;
+  return identity && "operatorToken" in identity ? identity.operatorToken : undefined;
+};
+
 describe("localterm config identity", () => {
-  it("writes a passkey identity block (optional fields dropped)", async () => {
+  it("writes a passkey identity block and auto-generates an operator token", async () => {
     await runConfigIdentity("passkey", { registration: "open" });
-    expect(readConfig().identity).toEqual({ provider: "passkey", registration: "open" });
+    const identity = readConfig().identity;
+    expect(identity?.provider).toBe("passkey");
+    expect(identity?.registration).toBe("open");
+    expect(operatorTokenOf(readConfig())).toBeTruthy();
+    expect(
+      logSpy.mock.calls.some((call: unknown[]) => /operator token/.test(String(call[0]))),
+    ).toBe(true);
   });
 
-  it("writes a header identity block with options", async () => {
+  it("writes a header identity block with options (no operator token)", async () => {
     await runConfigIdentity("header", { header: "X-User", trustedProxy: "10.0.0.0/8" });
     expect(readConfig().identity).toEqual({
       provider: "header",
       header: "X-User",
       trustedProxy: "10.0.0.0/8",
     });
+    expect(operatorTokenOf(readConfig())).toBeUndefined();
   });
 
-  it("writes an oidc identity block", async () => {
+  it("writes an oidc identity block with the provided operator token", async () => {
     await runConfigIdentity("oidc", {
       issuer: "https://accounts.example.com",
       clientId: "localterm",
       clientSecret: "secret",
+      operatorToken: "tok",
     });
     expect(readConfig().identity).toEqual({
       provider: "oidc",
       issuer: "https://accounts.example.com",
       clientId: "localterm",
       clientSecret: "secret",
+      operatorToken: "tok",
     });
   });
 
@@ -75,6 +89,17 @@ describe("localterm config identity", () => {
     expect(config.cdpPort).toBe(9222);
     expect(config.graceSeconds).toBe(45);
     expect(config.identity?.provider).toBe("header");
+  });
+
+  it("preserves the operator token across re-runs (no rotation)", async () => {
+    await runConfigIdentity("passkey", { operatorToken: "fixed-token" });
+    expect(operatorTokenOf(readConfig())).toBe("fixed-token");
+    logSpy.mockClear();
+    await runConfigIdentity("passkey", {});
+    expect(operatorTokenOf(readConfig())).toBe("fixed-token");
+    expect(
+      logSpy.mock.calls.some((call: unknown[]) => /operator token/.test(String(call[0]))),
+    ).toBe(false);
   });
 
   it("fails on a bad oidc issuer URL without writing", async () => {

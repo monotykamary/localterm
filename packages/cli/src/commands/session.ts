@@ -1,7 +1,7 @@
 import kleur from "kleur";
 import { writeFile } from "node:fs/promises";
 import open from "open";
-import { daemonBaseUrl, reportApiError, reportDaemonDown } from "../utils/daemon-api.js";
+import { daemonBaseUrl, daemonFetch, reportApiError, reportDaemonDown } from "../utils/daemon-api.js";
 import { resolveDaemonUrl } from "../utils/portless.js";
 import { readPort } from "../state.js";
 
@@ -39,7 +39,7 @@ const fetchOrReport = async (path: string, init: RequestInit): Promise<Response 
     process.exitCode = 1;
     return null;
   }
-  const response = await fetch(`${base}${path}`, init);
+  const response = await daemonFetch(`${base}${path}`, init);
   if (!response.ok) {
     reportApiError(response.status, await response.text());
     process.exitCode = 1;

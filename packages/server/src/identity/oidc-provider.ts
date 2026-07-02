@@ -221,6 +221,7 @@ export const createOidcIdentityProvider = (
   return {
     kind: "oidc",
     denyUnauthenticated: true,
+    operatorToken: config.operatorToken ?? null,
     identify: (context: Context): Identity | null => readSessionIdentity(context, secret),
     routes: () =>
       buildOidcRoutes({

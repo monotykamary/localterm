@@ -198,6 +198,28 @@ describe("createAuthGateMiddleware", () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
+  it("admits an operator bearer token (CLI) as the operator tier", async () => {
+    const provider = createPasskeyIdentityProvider(
+      { provider: "passkey", operatorToken: "op-token" },
+      providerDeps(dir),
+    );
+    const resolveIdentity = (c: Context) => readSessionIdentity(c, secret);
+    const app = new Hono();
+    app.use("*", createAuthGateMiddleware(provider, resolveIdentity));
+    app.get("/api/sessions", (c) => c.json({ ok: true }));
+
+    // No cookie, no token → 401.
+    expect((await app.request("/api/sessions")).status).toBe(401);
+    // Wrong token → 401.
+    expect(
+      (await app.request("/api/sessions", { headers: { authorization: "Bearer wrong" } })).status,
+    ).toBe(401);
+    // Valid operator token → 200 (operator tier, full access).
+    expect(
+      (await app.request("/api/sessions", { headers: { authorization: "Bearer op-token" } })).status,
+    ).toBe(200);
+  });
+
   it("exempts /api/health and the static/login surface", async () => {
     const provider = createPasskeyIdentityProvider({ provider: "passkey" }, providerDeps(dir));
     const resolveIdentity = (c: Context) => readSessionIdentity(c, secret);

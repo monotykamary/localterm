@@ -1,5 +1,5 @@
 import kleur from "kleur";
-import { daemonBaseUrl, reportApiError, reportDaemonDown } from "../utils/daemon-api.js";
+import { daemonBaseUrl, daemonFetch, reportApiError, reportDaemonDown } from "../utils/daemon-api.js";
 
 interface ProcessListItem {
   name: string;
@@ -26,7 +26,7 @@ const runList = async (): Promise<void> => {
     process.exitCode = 1;
     return;
   }
-  const response = await fetch(`${base}/processes`);
+  const response = await daemonFetch(`${base}/processes`);
   if (!response.ok) {
     reportApiError(response.status, await response.text());
     process.exitCode = 1;
@@ -61,7 +61,7 @@ const runSet = async (options: { name: string; secrets?: string }): Promise<void
     return;
   }
   const requestedSecrets = parseSecretNames(options.secrets);
-  const response = await fetch(`${base}/processes/${encodeURIComponent(options.name)}`, {
+  const response = await daemonFetch(`${base}/processes/${encodeURIComponent(options.name)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ requestedSecrets }),
@@ -89,7 +89,7 @@ const runDelete = async (name: string): Promise<void> => {
     process.exitCode = 1;
     return;
   }
-  const response = await fetch(`${base}/processes/${encodeURIComponent(name)}`, {
+  const response = await daemonFetch(`${base}/processes/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });
   if (!response.ok) {
