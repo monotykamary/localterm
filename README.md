@@ -206,7 +206,7 @@ Open `https://<node>.ts.net` — the login screen redirects through Google and b
 ### Notes
 
 - Identity is built once at daemon start, so changing it needs a `localterm restart` (unlike `cdpPort`/`graceSeconds`, which are live).
-- `passkey` needs a WebAuthn-capable browser; `oidc` needs a stable announced origin (a registered redirect URI). On a loopback-only `http://localhost:port` surface (dynamic port, not registerable), neither works — use `header`, or expose the daemon on a tailnet/https origin first.
+- `passkey` needs a WebAuthn-capable browser and a **hostname** origin (`localhost` or a real domain) — WebAuthn RP IDs must be registrable domains, so a bare IP like `127.0.0.1` fails ("This is an invalid domain"), but `http://localhost:port` works fine for the local user. `oidc` needs a stable, registerable announced origin (its redirect URI is that origin + `/auth/oidc/callback`), so a dynamic `http://localhost:port` can't work. For a shared gateway reachable by others, expose the daemon on a stable tailnet/https origin first; `header` works behind a proxy on any origin.
 
 ### Dev server (workspace contributors)
 
