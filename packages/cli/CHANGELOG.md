@@ -1,5 +1,16 @@
 # localterm
 
+## 2.37.1
+
+### Patch Changes
+
+- c6602bf: Add a knip-backed `lint:dead` script and sweep unused code across the terminal,
+  CLI, and server: drop the dead `@xterm/addon-canvas` devDependency, remove
+  unused declarations, un-export internal-only symbols, and dedupe
+  `isPortlessMissing` in the CLI.
+- Updated dependencies [c6602bf]
+  - @monotykamary/localterm-server@2.37.1
+
 ## 2.37.0
 
 ### Minor Changes
