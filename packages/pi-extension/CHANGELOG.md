@@ -1,5 +1,11 @@
 # @monotykamary/pi-localterm
 
+## 0.1.1
+
+### Patch Changes
+
+- b1ef114: Update dev dependencies to their latest within-range versions: turbo to 2.10.2, @types/node to 26.1.0, and portless to 0.15.1.
+
 ## 0.1.0
 
 ### Minor Changes

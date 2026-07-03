@@ -1,5 +1,13 @@
 # localterm
 
+## 2.35.2
+
+### Patch Changes
+
+- b1ef114: Update dev dependencies to their latest within-range versions: turbo to 2.10.2, @types/node to 26.1.0, and portless to 0.15.1.
+- Updated dependencies [b1ef114]
+  - @monotykamary/localterm-server@2.35.2
+
 ## 2.35.1
 
 ### Patch Changes
