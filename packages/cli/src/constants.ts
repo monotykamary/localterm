@@ -73,3 +73,17 @@ export const getFriendlyUrl = (port: number): string => `http://${FRIENDLY_HOSTN
 export const getPortlessUrl = (): string => `https://${FRIENDLY_HOSTNAME}`;
 
 export const getDirectUrl = (port: number, host = "127.0.0.1"): string => `http://${host}:${port}`;
+
+export const COMPLETION_SUPPORTED_SHELLS = ["bash", "zsh", "fish"] as const;
+
+// Upper bound on a dynamic completion fetch (session ids, secret names, …).
+// Completion runs on every <Tab>, so it must never block the shell or print an
+// error — on timeout, daemon-down, or any failure the resolvers return [].
+export const COMPLETION_DAEMON_FETCH_TIMEOUT_MS = 1500;
+
+// RC-file block markers used by `localterm install`/`uninstall` to wire the
+// completion source line idempotently. Everything between (and including) the
+// two lines is managed, so re-running install is a no-op and uninstall removes
+// exactly what install added.
+export const COMPLETION_RC_BLOCK_BEGIN = "# >>> localterm completions >>>";
+export const COMPLETION_RC_BLOCK_END = "# <<< localterm completions <<<";

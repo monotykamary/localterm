@@ -57,6 +57,7 @@ localterm status
 localterm restart
 localterm install [-p 3417] [-H 127.0.0.1]  # auto-start (launchd on macOS, systemd user unit on Linux)
 localterm uninstall                              # remove auto-start service
+localterm completions <bash|zsh|fish> [--install|--uninstall]  # print/install/uninstall shell completions
 localterm exec "<command>" [--cwd <path>] [--timeout 60] [--json]  # one-shot: run, capture, exit with its code
 localterm session ls [--json]                    # list live PTYs
 localterm session new [--cwd <path>] [--cmd <c>] [--name <t>] [--no-pin] [--json]  # spawn a detached shell
@@ -123,6 +124,8 @@ localterm install
 ```
 
 Remove with `localterm uninstall` (also tears down the Tailscale serve rule).
+
+`localterm install` also wires shell tab-completion (subcommands, live session ids, secret names) — into your shell's completion drop-directory when it has one (fish always; zsh/bash when configured), else a guarded, lazy-loaded line in your rc file. `localterm completions <shell> --install`/`--uninstall` wires just one shell without the full install; `localterm uninstall` removes it.
 
 ## Auto-start (Linux)
 

@@ -28,6 +28,7 @@ import { configureTailscaleServe, removeTailscaleServe } from "../utils/tailscal
 import { probeCdpAvailability } from "../utils/probe-cdp-availability.js";
 import { readConfiguredCdpPort } from "../utils/read-configured-cdp-port.js";
 import { reportCliError } from "../utils/report-cli-error.js";
+import { setupShellCompletions, teardownShellCompletions } from "../utils/shell-completions.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -396,6 +397,7 @@ const runInstallMac = async (options: InstallOptions): Promise<void> => {
   await setupPortlessProxy();
   await setupTailscaleServe(options.port);
   await reportCdpAvailability();
+  await setupShellCompletions();
 };
 
 const runInstallLinux = async (options: InstallOptions): Promise<void> => {
@@ -428,6 +430,7 @@ const runInstallLinux = async (options: InstallOptions): Promise<void> => {
   await enableSystemdUserUnit();
   await setupTailscaleServe(options.port);
   await reportCdpAvailability();
+  await setupShellCompletions();
   console.log();
   console.log(`  remove with ${kleur.bold("localterm uninstall")}`);
 };
@@ -464,6 +467,7 @@ const runUninstallMac = async (): Promise<void> => {
   }
 
   await removeTailscaleServe();
+  await teardownShellCompletions();
 
   try {
     unlinkSync(plistPath);
@@ -496,6 +500,7 @@ const runUninstallLinux = async (): Promise<void> => {
   }
 
   await removeTailscaleServe();
+  await teardownShellCompletions();
 
   if (!existsSync(unitPath)) {
     console.log(kleur.dim("systemd user unit is not installed."));
