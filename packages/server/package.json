@@ -40,6 +40,14 @@
     "./protocol": {
       "types": "./dist/protocol.d.ts",
       "import": "./dist/protocol.js"
+    },
+    "./constants": {
+      "types": "./dist/constants.d.ts",
+      "import": "./dist/constants.js"
+    },
+    "./completion": {
+      "types": "./dist/completion/index.d.ts",
+      "import": "./dist/completion/index.js"
     }
   },
   "publishConfig": {

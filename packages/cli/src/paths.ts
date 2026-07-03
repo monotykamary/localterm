@@ -7,6 +7,7 @@ export const getPidFile = (): string => path.join(getStateDirectory(), "server.p
 export const getPortFile = (): string => path.join(getStateDirectory(), "server.port");
 export const getHostFile = (): string => path.join(getStateDirectory(), "server.host");
 export const getLogFile = (): string => path.join(getStateDirectory(), "server.log");
+export const getCommandSpecFile = (): string => path.join(getStateDirectory(), "command-spec.json");
 export const getLaunchdPlistPath = (): string =>
   path.join(os.homedir(), "Library", "LaunchAgents", LAUNCHD_PLIST_FILENAME);
 export const getSystemdUserUnitDir = (): string =>

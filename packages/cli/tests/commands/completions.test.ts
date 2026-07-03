@@ -130,16 +130,14 @@ describe("runCompletion (dynamic candidates from the daemon)", () => {
   it("lists live session ids by calling the daemon", async () => {
     vi.spyOn(state, "readPort").mockReturnValue(3417);
     vi.spyOn(state, "readHost").mockReturnValue("127.0.0.1");
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            sessions: [{ id: "aaaa1111" }, { id: "bbbb2222" }, { id: "cccc3333" }],
-          }),
-          { headers: { "content-type": "application/json" } },
-        ),
-      );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          sessions: [{ id: "aaaa1111" }, { id: "bbbb2222" }, { id: "cccc3333" }],
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
     await runCompletion(createProgram(), ["localterm", "session", "kill", ""]);
     expect(fetchSpy).toHaveBeenCalledWith(
       "http://127.0.0.1:3417/api/sessions",

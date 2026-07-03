@@ -1,4 +1,4 @@
-import { DEFAULT_HOST, DEFAULT_PORT } from "@monotykamary/localterm-server";
+import { DEFAULT_HOST, DEFAULT_PORT } from "@monotykamary/localterm-server/constants";
 import { Command, Option } from "commander";
 import {
   runCompletionsPrint,
@@ -6,35 +6,8 @@ import {
   wireCompletions,
   unwireCompletions,
 } from "./commands/completions.js";
-import { runConfigIdentity, type ConfigIdentityOptions } from "./commands/config.js";
-import { runInstall, runUninstall } from "./commands/install.js";
-import { runProcessDelete, runProcessList, runProcessSet } from "./commands/process.js";
-import { runRestart } from "./commands/restart.js";
-import {
-  parseInteger,
-  runOneShotExec,
-  runSessionAttach,
-  runSessionCapture,
-  runSessionExec,
-  runSessionKill,
-  runSessionList,
-  runSessionMouseClick,
-  runSessionMouseDrag,
-  runSessionMouseMove,
-  runSessionMouseScroll,
-  runSessionMouseState,
-  runSessionNew,
-  runSessionPin,
-  runSessionPress,
-  runSessionRename,
-  runSessionResize,
-  runSessionSendKeys,
-  runSessionWait,
-} from "./commands/session.js";
-import { runSecretDelete, runSecretGet, runSecretList, runSecretSet } from "./commands/secret.js";
-import { runStart } from "./commands/start.js";
-import { runStatus } from "./commands/status.js";
-import { runStop } from "./commands/stop.js";
+import type { ConfigIdentityOptions } from "./commands/config.js";
+import { parseInteger } from "./utils/parse-integer.js";
 import { parsePortOption } from "./utils/parse-port-option.js";
 import { readPackageVersion } from "./utils/read-package-version.js";
 
@@ -64,6 +37,7 @@ export const createProgram = (): Command => {
     .option("--open", "open browser on start")
     .option("-F, --foreground", "stay attached to this terminal (do not daemonize)", false)
     .action(async (options: { port: number; host: string; open: boolean; foreground: boolean }) => {
+      const { runStart } = await import("./commands/start.js");
       await runStart({
         port: options.port,
         host: options.host,
@@ -76,6 +50,7 @@ export const createProgram = (): Command => {
     .command("stop")
     .description("stop the localterm server")
     .action(async () => {
+      const { runStop } = await import("./commands/stop.js");
       await runStop();
     });
 
@@ -83,6 +58,7 @@ export const createProgram = (): Command => {
     .command("status")
     .description("show server status")
     .action(async () => {
+      const { runStatus } = await import("./commands/status.js");
       await runStatus();
     });
 
@@ -93,6 +69,7 @@ export const createProgram = (): Command => {
     .option("-H, --host <host>", "host to bind", DEFAULT_HOST)
     .option("--open", "open browser on restart")
     .action(async (options: { port: number; host: string; open: boolean }) => {
+      const { runRestart } = await import("./commands/restart.js");
       await runRestart({
         port: options.port,
         host: options.host,
@@ -106,6 +83,7 @@ export const createProgram = (): Command => {
     .option("-p, --port <port>", "port to bind", parsePortOption, resolveInitialPort())
     .option("-H, --host <host>", "host to bind", DEFAULT_HOST)
     .action(async (options: { port: number; host: string }) => {
+      const { runInstall } = await import("./commands/install.js");
       await runInstall({ port: options.port, host: options.host });
     });
 
@@ -113,6 +91,7 @@ export const createProgram = (): Command => {
     .command("uninstall")
     .description("remove the auto-start service (launchd on macOS, systemd user unit on Linux)")
     .action(async () => {
+      const { runUninstall } = await import("./commands/install.js");
       await runUninstall();
     });
 
@@ -158,6 +137,7 @@ export const createProgram = (): Command => {
       "bearer token for the CLI to use /api/* in passkey/oidc mode (auto-generated if omitted)",
     )
     .action(async (provider: string, options: ConfigIdentityOptions) => {
+      const { runConfigIdentity } = await import("./commands/config.js");
       await runConfigIdentity(provider, options);
     });
 
@@ -168,12 +148,14 @@ export const createProgram = (): Command => {
     .command("list")
     .description("list secrets (names + env var; never values)")
     .action(async () => {
+      const { runSecretList } = await import("./commands/secret.js");
       await runSecretList();
     });
   secret
     .command("get <name>")
     .description("print a secret's value (resolved from Keychain, not the daemon)")
     .action(async (name: string) => {
+      const { runSecretGet } = await import("./commands/secret.js");
       await runSecretGet(name);
     });
   secret
@@ -182,6 +164,7 @@ export const createProgram = (): Command => {
     .requiredOption("-e, --env-var <var>", "environment variable to inject")
     .option("-v, --value <value>", 'secret value (use "-" to read from stdin)')
     .action(async (name: string, options: { envVar: string; value?: string }) => {
+      const { runSecretSet } = await import("./commands/secret.js");
       await runSecretSet({
         name,
         envVar: options.envVar,
@@ -192,6 +175,7 @@ export const createProgram = (): Command => {
     .command("delete <name>")
     .description("delete a secret and its stored value")
     .action(async (name: string) => {
+      const { runSecretDelete } = await import("./commands/secret.js");
       await runSecretDelete(name);
     });
 
@@ -202,6 +186,7 @@ export const createProgram = (): Command => {
     .command("list")
     .description("list processes (binary + the secrets each receives)")
     .action(async () => {
+      const { runProcessList } = await import("./commands/process.js");
       await runProcessList();
     });
   processCommand
@@ -209,12 +194,14 @@ export const createProgram = (): Command => {
     .description("set the secrets a binary receives (generates its PATH shim)")
     .option("-s, --secrets <list>", "comma-separated secret names to inject")
     .action(async (name: string, options: { secrets?: string }) => {
+      const { runProcessSet } = await import("./commands/process.js");
       await runProcessSet({ name, secrets: options.secrets });
     });
   processCommand
     .command("delete <name>")
     .description("delete a process and its shim")
     .action(async (name: string) => {
+      const { runProcessDelete } = await import("./commands/process.js");
       await runProcessDelete(name);
     });
 
@@ -232,6 +219,7 @@ export const createProgram = (): Command => {
         command: string,
         options: { cwd?: string; cols?: number; rows?: number; timeout?: number; json: boolean },
       ) => {
+        const { runOneShotExec } = await import("./commands/session.js");
         await runOneShotExec(command, options);
       },
     );
@@ -244,6 +232,7 @@ export const createProgram = (): Command => {
     .description("list live PTYs")
     .option("--json", "emit the list as JSON")
     .action(async (options: { json: boolean }) => {
+      const { runSessionList } = await import("./commands/session.js");
       await runSessionList(options);
     });
   session
@@ -266,6 +255,7 @@ export const createProgram = (): Command => {
         pin: boolean;
         json: boolean;
       }) => {
+        const { runSessionNew } = await import("./commands/session.js");
         await runSessionNew(options);
       },
     );
@@ -273,18 +263,21 @@ export const createProgram = (): Command => {
     .command("attach <id>")
     .description("open a browser tab onto a live PTY by id")
     .action(async (id: string) => {
+      const { runSessionAttach } = await import("./commands/session.js");
       await runSessionAttach(id);
     });
   session
     .command("kill <id>")
     .description("kill a session and its shell")
     .action(async (id: string) => {
+      const { runSessionKill } = await import("./commands/session.js");
       await runSessionKill(id);
     });
   session
     .command("send-keys <id> <keys>")
     .description("write raw input to a session (\\n=Enter, \\xHH=control byte)")
     .action(async (id: string, keys: string) => {
+      const { runSessionSendKeys } = await import("./commands/session.js");
       await runSessionSendKeys(id, keys);
     });
   session
@@ -305,6 +298,7 @@ export const createProgram = (): Command => {
         id: string,
         options: { lines?: number; png?: boolean; output?: string; json: boolean },
       ) => {
+        const { runSessionCapture } = await import("./commands/session.js");
         await runSessionCapture(id, options);
       },
     );
@@ -314,6 +308,7 @@ export const createProgram = (): Command => {
     .option("--timeout <seconds>", "timeout in seconds", parseInteger)
     .option("--json", "emit the result as JSON; CLI exits 0 (exit code in the payload)")
     .action(async (id: string, command: string, options: { timeout?: number; json: boolean }) => {
+      const { runSessionExec } = await import("./commands/session.js");
       await runSessionExec(id, command, options);
     });
   session
@@ -322,30 +317,35 @@ export const createProgram = (): Command => {
     .requiredOption("--cols <n>", "terminal columns", parseInteger)
     .requiredOption("--rows <n>", "terminal rows", parseInteger)
     .action(async (id: string, options: { cols: number; rows: number }) => {
+      const { runSessionResize } = await import("./commands/session.js");
       await runSessionResize(id, options);
     });
   session
     .command("rename <id> <name>")
     .description("set a session's title (the shell may overwrite it)")
     .action(async (id: string, name: string) => {
+      const { runSessionRename } = await import("./commands/session.js");
       await runSessionRename(id, name);
     });
   session
     .command("pin <id>")
     .description("exempt a session from the idle reap")
     .action(async (id: string) => {
+      const { runSessionPin } = await import("./commands/session.js");
       await runSessionPin(id, true);
     });
   session
     .command("unpin <id>")
     .description("subject a session to the idle reap")
     .action(async (id: string) => {
+      const { runSessionPin } = await import("./commands/session.js");
       await runSessionPin(id, false);
     });
   session
     .command("press <id> <keys...>")
     .description("send named keys (F2, Enter, Ctrl-C, Escape : w q Enter, or literal text)")
     .action(async (id: string, keys: string[]) => {
+      const { runSessionPress } = await import("./commands/session.js");
       await runSessionPress(id, keys);
     });
   session
@@ -369,6 +369,7 @@ export const createProgram = (): Command => {
           json: boolean;
         },
       ) => {
+        const { runSessionWait } = await import("./commands/session.js");
         await runSessionWait(id, options);
       },
     );
@@ -396,6 +397,7 @@ export const createProgram = (): Command => {
           json: boolean;
         },
       ) => {
+        const { runSessionMouseClick } = await import("./commands/session.js");
         await runSessionMouseClick(id, options);
       },
     );
@@ -420,6 +422,7 @@ export const createProgram = (): Command => {
           json: boolean;
         },
       ) => {
+        const { runSessionMouseDrag } = await import("./commands/session.js");
         await runSessionMouseDrag(id, options);
       },
     );
@@ -430,6 +433,7 @@ export const createProgram = (): Command => {
     .requiredOption("--row <n>", "row", parseInteger)
     .option("--json", "emit the result as JSON")
     .action(async (id: string, options: { col: number; row: number; json: boolean }) => {
+      const { runSessionMouseMove } = await import("./commands/session.js");
       await runSessionMouseMove(id, options);
     });
   mouse
@@ -446,6 +450,7 @@ export const createProgram = (): Command => {
         direction: string,
         options: { amount?: number; col?: number; row?: number; json: boolean },
       ) => {
+        const { runSessionMouseScroll } = await import("./commands/session.js");
         await runSessionMouseScroll(id, direction, options);
       },
     );
@@ -453,6 +458,7 @@ export const createProgram = (): Command => {
     .command("state <id>")
     .description("show whether mouse tracking is enabled + viewport size")
     .action(async (id: string) => {
+      const { runSessionMouseState } = await import("./commands/session.js");
       await runSessionMouseState(id);
     });
 

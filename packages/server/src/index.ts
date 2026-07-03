@@ -22,6 +22,13 @@ import { CdpClient } from "./cdp/cdp-client.js";
 import type { DetectedBrowser } from "./cdp/detect-chromium.js";
 import { detectWithExplicitPort } from "./cdp/discover-explicit-endpoint.js";
 import { DaemonConfigStore } from "./daemon-config-store.js";
+import {
+  formatCandidates,
+  resolveCandidates,
+  resolveCompletionContext,
+  type CommandSpec,
+  type ValueSource,
+} from "./completion/index.js";
 import { z } from "zod";
 import {
   ACTIVITY_DIRNAME,
@@ -355,6 +362,7 @@ interface DaemonContext {
   secretBackend: SecretBackend;
   secretStore: SecretStore;
   shimsDir: string;
+  stateDirectory: string;
   processStore: ProcessStore;
   syncSecretShims: () => void;
   automationStore: AutomationStore;
@@ -487,6 +495,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     connectCdpNow,
     buildTabUrl,
     mintViewerCookie,
+    stateDirectory,
   } = ctx;
 
   // Headless SGR-1006 fallback for `mouse` when no CDP tab is reachable:
@@ -529,6 +538,35 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
         : null,
     }),
   );
+
+  // Completion fast path: the shell scripts curl this with the command line
+  // (repeated `argv=` query params) so the daemon resolves candidates
+  // in-process — no Node startup per <Tab>. Auth-gated like the rest of /api/*
+  // (passkey/oidc mode returns 401 for a tokenless curl, so the shell then falls
+  // back to `localterm _completion`). 404 when no command-spec has been written
+  // yet, which the shell also falls back from. Static candidates come from the
+  // spec; dynamic ones from the same in-memory stores /sessions, /secrets,
+  // /processes expose — no self-HTTP.
+  api.get("/completion", async (context) => {
+    let spec: CommandSpec | null = null;
+    try {
+      spec = JSON.parse(
+        fs.readFileSync(path.join(stateDirectory, "command-spec.json"), "utf8"),
+      ) as CommandSpec;
+    } catch {
+      // missing or unparseable spec → 404 (shell falls back to the CLI)
+    }
+    if (spec === null) return context.json({ error: "no_command_spec" }, HTTP_STATUS_NOT_FOUND);
+    const words = new URL(context.req.url).searchParams.getAll("argv");
+    const completionContext = resolveCompletionContext(spec, words);
+    const source: ValueSource = {
+      sessions: async () => registry.list(ownerFor(context)).map((session) => session.id),
+      secrets: async () => secretStore.list().map((entry) => entry.name),
+      processes: async () => processStore.list().map((entry) => entry.name),
+    };
+    const candidates = await resolveCandidates(completionContext, source);
+    return context.text(formatCandidates(candidates, completionContext.currentWord));
+  });
 
   // The session picker: every live PTY (attached or dormant), so a tab can
   // switch to one by id or kill one it no longer wants. `clients` is the count
@@ -2031,6 +2069,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       return url.toString();
     },
     mintViewerCookie,
+    stateDirectory,
   };
   const api = buildApiRoutes(ctx);
   app.route("/api", api);

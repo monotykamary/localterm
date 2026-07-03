@@ -81,6 +81,12 @@ export const COMPLETION_SUPPORTED_SHELLS = ["bash", "zsh", "fish"] as const;
 // error — on timeout, daemon-down, or any failure the resolvers return [].
 export const COMPLETION_DAEMON_FETCH_TIMEOUT_MS = 1500;
 
+// Upper bound on the shell's curl to the daemon's /api/completion fast path.
+// The endpoint reads a small spec file + in-memory names, so loopback is ms;
+// this only bounds the pathological case (a hung daemon) so <Tab> still falls
+// back to the CLI instead of hanging the shell. Seconds (curl --max-time).
+export const COMPLETION_DAEMON_CURL_TIMEOUT_SECONDS = 0.3;
+
 // RC-file block markers used by `localterm install`/`uninstall` to wire the
 // completion source line idempotently. Everything between (and including) the
 // two lines is managed, so re-running install is a no-op and uninstall removes

@@ -423,8 +423,6 @@ const runAttach = async (id: string): Promise<void> => {
   console.log(kleur.green(`✓ opening ${shortId(id)} at ${url.href}`));
 };
 
-const parseInteger = (raw: string): number => Number.parseInt(raw, 10);
-
 interface MouseResult {
   ok: boolean;
   mode: "cdp" | "sgr";
@@ -584,4 +582,3 @@ export const runSessionMouseMove = runMouseMove;
 export const runSessionMouseScroll = runMouseScroll;
 export const runSessionMouseState = runMouseState;
 export const runOneShotExec = runOneShotExecImpl;
-export { parseInteger };

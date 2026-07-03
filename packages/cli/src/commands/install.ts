@@ -29,6 +29,7 @@ import { probeCdpAvailability } from "../utils/probe-cdp-availability.js";
 import { readConfiguredCdpPort } from "../utils/read-configured-cdp-port.js";
 import { reportCliError } from "../utils/report-cli-error.js";
 import { setupShellCompletions, teardownShellCompletions } from "../utils/shell-completions.js";
+import { writeCommandSpec } from "../utils/command-spec.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -436,6 +437,7 @@ const runInstallLinux = async (options: InstallOptions): Promise<void> => {
 };
 
 export const runInstall = async (options: InstallOptions): Promise<void> => {
+  writeCommandSpec();
   if (process.platform === "darwin") {
     await runInstallMac(options);
     return;

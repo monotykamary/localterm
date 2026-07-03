@@ -44,6 +44,7 @@ import { readConfiguredCdpPort } from "../utils/read-configured-cdp-port.js";
 import { runStartPreflight } from "../utils/run-start-preflight.js";
 import { sleep } from "../utils/sleep.js";
 import { spawnDaemon } from "../utils/spawn-daemon.js";
+import { writeCommandSpec } from "../utils/command-spec.js";
 import { runStop } from "./stop.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -71,6 +72,7 @@ const isRunningAsDaemonChild = (): boolean => process.env[DAEMON_CHILD_ENV_FLAG]
 const isRunningAsRestartDaemon = (): boolean => process.env[RESTART_DAEMON_ENV_FLAG] === "1";
 
 export const runStart = async (options: StartOptions): Promise<void> => {
+  writeCommandSpec();
   if (options.foreground || isRunningAsDaemonChild()) {
     await runStartInForeground(options);
     return;

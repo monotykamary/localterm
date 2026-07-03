@@ -1,19 +1,11 @@
-import type { Command, Option } from "commander";
+import type { CommandSpec, CommandSpecNode, OptionSpec } from "./spec.js";
 
 export interface CompletionContext {
-  command: Command;
-  commandPath: readonly string[];
+  command: CommandSpecNode;
   positionalIndex: number;
   currentWord: string;
-  completingOptionValue: Option | null;
+  completingOptionValue: OptionSpec | null;
 }
-
-// Commander tracks a command's hidden flag on an internal `_hidden` field with
-// no public getter in the typings, so completion filters internal commands by
-// the `_`-prefix convention (our hidden commands, e.g. `_completion`, follow it).
-export const isInternalCommand = (command: Command): boolean => command.name().startsWith("_");
-
-const optionTakesValue = (option: Option): boolean => option.required || option.optional;
 
 const splitFlag = (token: string): [string, string | undefined] => {
   const equalsIndex = token.indexOf("=");
@@ -21,18 +13,16 @@ const splitFlag = (token: string): [string, string | undefined] => {
   return [token.slice(0, equalsIndex), token.slice(equalsIndex + 1)];
 };
 
-const findOption = (command: Command, flag: string): Option | null => {
-  for (const option of command.options) {
+const findOption = (node: CommandSpecNode, flag: string): OptionSpec | null => {
+  for (const option of node.options) {
     if (option.long === flag || option.short === flag) return option;
   }
   return null;
 };
 
-const findSubcommand = (command: Command, name: string): Command | null => {
-  for (const child of command.commands) {
-    if (isInternalCommand(child)) continue;
-    if (child.name() === name) return child;
-    if (child.aliases().includes(name)) return child;
+const findSubcommand = (node: CommandSpecNode, name: string): CommandSpecNode | null => {
+  for (const child of node.subcommands) {
+    if (child.name === name || child.aliases.includes(name)) return child;
   }
   return null;
 };
@@ -45,16 +35,15 @@ const findSubcommand = (command: Command, name: string): Command | null => {
 // Options that take a value skip their following token; subcommands descend and
 // reset the positional count; anything else is a positional argument.
 export const resolveCompletionContext = (
-  program: Command,
+  spec: CommandSpec,
   words: readonly string[],
 ): CompletionContext => {
   const previousTokens = words.slice(1, -1);
   const currentWord = words[words.length - 1] ?? "";
 
-  let current = program;
-  let commandPath: string[] = [];
+  let current = spec;
   let positionalIndex = 0;
-  let expectingOptionValue: Option | null = null;
+  let expectingOptionValue: OptionSpec | null = null;
 
   for (const token of previousTokens) {
     if (token === "--") continue;
@@ -65,7 +54,7 @@ export const resolveCompletionContext = (
     if (token.startsWith("--")) {
       const [flag, inlineValue] = splitFlag(token);
       const option = findOption(current, flag);
-      if (option && optionTakesValue(option) && inlineValue === undefined) {
+      if (option && option.takesValue && inlineValue === undefined) {
         expectingOptionValue = option;
       }
       continue;
@@ -73,7 +62,7 @@ export const resolveCompletionContext = (
     if (token.startsWith("-") && token.length > 1) {
       const [flag, inlineValue] = splitFlag(token);
       const option = findOption(current, flag);
-      if (option && optionTakesValue(option) && inlineValue === undefined) {
+      if (option && option.takesValue && inlineValue === undefined) {
         expectingOptionValue = option;
       }
       continue;
@@ -81,7 +70,6 @@ export const resolveCompletionContext = (
     const subcommand = findSubcommand(current, token);
     if (subcommand) {
       current = subcommand;
-      commandPath = [...commandPath, subcommand.name()];
       positionalIndex = 0;
       continue;
     }
@@ -89,17 +77,10 @@ export const resolveCompletionContext = (
   }
 
   if (currentWord.startsWith("-")) {
-    return {
-      command: current,
-      commandPath,
-      positionalIndex,
-      currentWord,
-      completingOptionValue: null,
-    };
+    return { command: current, positionalIndex, currentWord, completingOptionValue: null };
   }
   return {
     command: current,
-    commandPath,
     positionalIndex,
     currentWord,
     completingOptionValue: expectingOptionValue,

@@ -19,6 +19,7 @@ import { reportCliError } from "../utils/report-cli-error.js";
 import { sleep } from "../utils/sleep.js";
 import { spawnDaemon } from "../utils/spawn-daemon.js";
 import { verifyPidIsLocalterm } from "../utils/verify-pid-is-localterm.js";
+import { writeCommandSpec } from "../utils/command-spec.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -142,6 +143,7 @@ const restartViaSystemd = async (_options: RestartOptions): Promise<void> => {
 };
 
 export const runRestart = async (options: RestartOptions): Promise<void> => {
+  writeCommandSpec();
   if (process.platform === "darwin" && (await isLaunchdServiceLoaded())) {
     await restartViaLaunchd(options);
     return;
