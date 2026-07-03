@@ -557,6 +557,13 @@ export const TCP_PORT_MAX = 65_535;
 // DevToolsActivePort file is available. Short so a dead port fails fast and
 // detection falls through to the file-scan candidates.
 export const CDP_EXPLICIT_PROBE_TIMEOUT_MS = 1_500;
+// Per-candidate deadline for the TCP liveness probe used by `probeCdpLiveness`
+// (and the CLI install/start banner). Short so a stale `DevToolsActivePort`
+// file — left behind by a crashed/force-quit browser, pointing at a port
+// nothing is listening on — fails fast (ECONNREFUSED is near-instant) and the
+// probe falls through to the next candidate. Matches the explicit-port HTTP
+// probe's deadline so a dead configured port fails at the same speed.
+export const CDP_LIVENESS_PROBE_TIMEOUT_MS = 1_500;
 // `lsof -nP -iTCP -sTCP:LISTEN` enumerates every listening TCP socket on the
 // machine. It can be slow on a busy host and occasionally stalls, so the
 // snapshot is capped with a timeout + max buffer and degrades to an empty

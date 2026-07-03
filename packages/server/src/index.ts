@@ -2568,6 +2568,7 @@ export {
   detectWithExplicitPort,
   discoverExplicitCdpEndpoint,
 } from "./cdp/discover-explicit-endpoint.js";
+export { probeCdpLiveness } from "./cdp/probe-cdp-liveness.js";
 export { DaemonConfigStore } from "./daemon-config-store.js";
 export type { BrowserCandidate, DetectedBrowser } from "./cdp/detect-chromium.js";
 export {
