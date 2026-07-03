@@ -1679,6 +1679,19 @@ export const DiffViewer = ({
     return refs;
   }, [branchInfo, displayBase]);
 
+  // The picker's <select> renders more than `displayBase`: with `value=""`
+  // (no base resolved — a no-remote repo whose current branch is the only
+  // candidate) no option matches, so React selects the first non-disabled
+  // option and the box shows a real branch name while `displayBase` is null.
+  // The select width is measured from this actually-rendered text, otherwise
+  // a null base sizes the box to the empty string and clips the name.
+  const effectiveBaseLabel =
+    branchInfo === null
+      ? "Loading…"
+      : baseOptions.length === 0
+        ? "No branches"
+        : (displayBase ?? baseOptions[0] ?? "");
+
   const annotationList = useMemo(() => Object.values(annotations), [annotations]);
 
   const annotationCounts = useMemo(() => {
@@ -1712,7 +1725,7 @@ export const DiffViewer = ({
       availableWidth: headerWidth,
       pr,
       isBranchMode,
-      selectedBranch: displayBase,
+      selectedBranch: effectiveBaseLabel,
       additions: totals.additions,
       deletions: totals.deletions,
       binaryCount: totals.binaries,
@@ -1720,7 +1733,7 @@ export const DiffViewer = ({
     });
     headerConfigIndexRef.current = result.configIndex;
     return result;
-  }, [headerWidth, pr, isBranchMode, displayBase, totals]);
+  }, [headerWidth, pr, isBranchMode, effectiveBaseLabel, totals]);
 
   if (!mounted) return null;
 
