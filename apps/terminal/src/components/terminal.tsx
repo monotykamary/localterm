@@ -1519,27 +1519,36 @@ export const Terminal = () => {
             // with the target's own cursor state, and an empty replay keeps it on.
             terminal.write("\x1b[?25h");
           }
-          // Re-seed the favicon from the PTY's current foreground state. The
-          // server's foreground watcher only emits on change, so without this
-          // snapshot a reattaching client (page refresh, silent reattach) or a
-          // fresh PTY after a daemon restart would keep the icon at its prior
-          // value — stuck blue after a restart (stale hasForegroundProcess) or
-          // grey-after-green on refresh (the deduped watcher never re-emits).
-          // Seed alive-quiet when a process is running so a quiet program (an
-          // open editor) shows blue with no output to drive the transition.
-          if (faviconRunningTimer !== null) {
-            window.clearTimeout(faviconRunningTimer);
-            faviconRunningTimer = null;
-          }
-          if (faviconReadyTimer !== null) {
-            window.clearTimeout(faviconReadyTimer);
-            faviconReadyTimer = null;
-          }
+          // Re-sync the foreground flag from the PTY's current state, then re-seed
+          // the favicon to match. The server's foreground watcher only emits on
+          // change, so without this a reattaching client (page refresh, silent
+          // reattach) or a fresh PTY after a daemon restart keeps hasForegroundProcess
+          // at its stale prior value — stuck blue after a restart (stale true) or
+          // grey-after-green on refresh (stale false, the deduped watcher never
+          // re-emits). On a switch to a different PTY, drop the prior PTY's pending
+          // favicon timers so they don't fire against the new one. A same-PTY
+          // reattach keeps its timers — clearing the ready timer would interrupt
+          // an in-progress green→blue quiet transition (leaving the icon stuck
+          // green, never blue). Never clobber an active "running" (green): output
+          // drives that, and checkReadyAfterOutput picks up the re-synced
+          // hasForegroundProcess when output goes quiet.
           hasForegroundProcess = message.foreground !== null;
           hadForegroundThisCycle = hasForegroundProcess;
-          faviconBadge = false;
-          faviconState = hasForegroundProcess ? "alive-quiet" : "ready";
-          setTabFaviconState(faviconState);
+          if (isSwitch) {
+            if (faviconRunningTimer !== null) {
+              window.clearTimeout(faviconRunningTimer);
+              faviconRunningTimer = null;
+            }
+            if (faviconReadyTimer !== null) {
+              window.clearTimeout(faviconReadyTimer);
+              faviconReadyTimer = null;
+            }
+          }
+          if (isSwitch || faviconState !== "running") {
+            faviconBadge = false;
+            faviconState = hasForegroundProcess ? "alive-quiet" : "ready";
+            setTabFaviconState(faviconState);
+          }
           setSessionInfo({
             shell: message.shell,
             shellName: message.shellName,
