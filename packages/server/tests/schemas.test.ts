@@ -179,8 +179,36 @@ describe("serverToClientMessageSchema", () => {
       pid: 12345,
       cwd: "/Users/tester",
       title: "~",
+      foreground: "vim",
     });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts a session frame with null foreground (idle shell)", () => {
+    const result = serverToClientMessageSchema.safeParse({
+      type: "session",
+      shell: "/bin/zsh",
+      shellName: "zsh",
+      pid: 12345,
+      cwd: "/Users/tester",
+      title: "~",
+      foreground: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects session frames with oversized foreground", () => {
+    const oversized = "a".repeat(MAX_FOREGROUND_LENGTH + 1);
+    const result = serverToClientMessageSchema.safeParse({
+      type: "session",
+      shell: "/bin/zsh",
+      shellName: "zsh",
+      pid: 1,
+      cwd: "/Users/tester",
+      title: "~",
+      foreground: oversized,
+    });
+    expect(result.success).toBe(false);
   });
 
   it("rejects session frames missing required fields", () => {
@@ -201,6 +229,7 @@ describe("serverToClientMessageSchema", () => {
       pid: -1,
       cwd: "/Users/tester",
       title: "~",
+      foreground: null,
     });
     expect(result.success).toBe(false);
   });
@@ -213,6 +242,7 @@ describe("serverToClientMessageSchema", () => {
       pid: 1,
       cwd: "/Users/tester",
       title: "~",
+      foreground: null,
     });
     expect(result.success).toBe(false);
   });

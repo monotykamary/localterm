@@ -2269,6 +2269,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             pid: liveSession.pid,
             cwd: liveSession.lastEmittedCwd || liveSession.cwd,
             title: liveSession.currentTitle || liveSession.initialDocumentTitle,
+            foreground: liveSession.lastEmittedForeground,
             id: sessionId ?? undefined,
           });
           // Tell this tab the current keep-awake state so its coffee toggle

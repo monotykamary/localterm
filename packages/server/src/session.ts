@@ -76,7 +76,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private initialTitle = "";
   private lastEmittedTitle = "";
   private lastEmittedCwdValue = "";
-  private lastEmittedForeground: string | null | undefined = undefined;
+  private lastEmittedForegroundValue: string | null | undefined = undefined;
   private pixelResizeSupported: boolean | null = null;
   private hookCleanupPaths: string[] = [];
   private pendingParse = "";
@@ -248,6 +248,15 @@ export class Session extends EventEmitter<SessionEvents> {
     return this.lastEmittedCwdValue;
   }
 
+  // Current foreground process name (or null at the shell prompt), snapshotted
+  // at attach time alongside cwd/title so a reattaching client re-syncs the
+  // favicon state the watcher won't re-emit (it dedups consecutive equal
+  // values). `undefined` is coerced to null for the protocol — only possible
+  // mid-construction before emitInitialMetadata() runs.
+  get lastEmittedForeground(): string | null {
+    return this.lastEmittedForegroundValue ?? null;
+  }
+
   // Force the session's title from the REST/CLI rename surface. The shell's
   // next OSC 0/2 title or cwd-derived title overwrites it (matching tmux, where
   // a shell that sets its own title can override `rename-session`), but until
@@ -372,7 +381,7 @@ export class Session extends EventEmitter<SessionEvents> {
       this.lastEmittedTitle = initialTitle;
     }
     this.lastEmittedCwdValue = this.cwd;
-    this.lastEmittedForeground = null;
+    this.lastEmittedForegroundValue = null;
   }
 
   private onPtyOutput(data: string): void {
@@ -574,8 +583,8 @@ export class Session extends EventEmitter<SessionEvents> {
   }
 
   private handleForegroundChange(next: string | null): void {
-    const hadForeground = this.lastEmittedForeground != null;
-    this.lastEmittedForeground = next;
+    const hadForeground = this.lastEmittedForegroundValue != null;
+    this.lastEmittedForegroundValue = next;
     this.emit("foreground", next);
     if (hadForeground && next === null) {
       const cwdTitle = formatWorkingDirectoryTitle(this.lastEmittedCwdValue);

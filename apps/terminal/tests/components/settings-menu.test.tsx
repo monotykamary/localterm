@@ -627,6 +627,7 @@ describe("SettingsMenu shell section", () => {
         pid: 12345,
         cwd: "/Users/tester/Developer/localterm",
         title: "~",
+        foreground: null,
       },
     });
     fireEvent.click(screen.getByLabelText("terminal settings"));
@@ -644,6 +645,7 @@ describe("SettingsMenu shell section", () => {
         pid: 12345,
         cwd: "/Users/tester/Developer/localterm",
         title: "~",
+        foreground: null,
       },
     });
     fireEvent.click(screen.getByLabelText("terminal settings"));

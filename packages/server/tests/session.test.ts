@@ -84,6 +84,7 @@ describe("Session", () => {
         pid: session.pid,
         cwd: session.cwd,
         title: session.initialDocumentTitle,
+        foreground: session.lastEmittedForeground,
       };
       const parsed = serverToClientMessageSchema.safeParse(frame);
       expect(parsed.success).toBe(true);

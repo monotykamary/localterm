@@ -18,6 +18,7 @@ import {
 } from "../../src/lib/constants";
 import { DEFAULT_TERMINAL_CURSOR_STYLE } from "../../src/lib/terminal-cursor";
 import { DEFAULT_TERMINAL_SCROLLBACK_LINES } from "../../src/lib/terminal-scrollback";
+import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 
 interface FakeWebSocketHandle {
   url: string;
@@ -307,6 +308,10 @@ vi.mock("@xterm/addon-progress", () => {
   }
   return { ProgressAddon: FakeProgressAddon };
 });
+
+vi.mock("@/utils/set-tab-favicon-state", () => ({
+  setTabFaviconState: vi.fn(),
+}));
 
 const stubBrowserGlobals = () => {
   Object.defineProperty(document, "fonts", {
@@ -896,6 +901,7 @@ describe("Terminal scrollback replay suppression", () => {
         pid: 1,
         cwd: "/",
         title: "sh",
+        foreground: null,
         id: "12345678-1234-4234-8234-123456789012",
       });
     });
@@ -1405,6 +1411,7 @@ describe("Terminal shell info", () => {
         pid: 54321,
         cwd: "/Users/tester/Developer/localterm",
         title: "~",
+        foreground: null,
       });
     });
 
@@ -1428,6 +1435,7 @@ describe("Terminal refresh reattach", () => {
       pid: 111,
       cwd: "/tmp",
       title: "zsh",
+      foreground: null,
       id,
     });
   };
@@ -1488,6 +1496,46 @@ describe("Terminal refresh reattach", () => {
     });
 
     expect(secondWs?.send).toHaveBeenCalledWith(JSON.stringify({ type: "ready", replay: false }));
+  });
+});
+
+describe("Terminal favicon foreground re-seed on attach", () => {
+  beforeEach(() => {
+    vi.mocked(setTabFaviconState).mockClear();
+  });
+
+  it("seeds alive-quiet (blue) when the session frame reports a foreground process", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({
+        type: "session",
+        shell: "/bin/zsh",
+        shellName: "zsh",
+        pid: 1,
+        cwd: "/tmp",
+        title: "zsh",
+        foreground: "vim",
+      });
+    });
+    expect(vi.mocked(setTabFaviconState)).toHaveBeenCalledWith("alive-quiet");
+  });
+
+  it("seeds ready (grey) when the session frame reports an idle shell", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({
+        type: "session",
+        shell: "/bin/zsh",
+        shellName: "zsh",
+        pid: 1,
+        cwd: "/tmp",
+        title: "zsh",
+        foreground: null,
+      });
+    });
+    expect(vi.mocked(setTabFaviconState)).toHaveBeenCalledWith("ready");
   });
 });
 

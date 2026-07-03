@@ -1519,12 +1519,34 @@ export const Terminal = () => {
             // with the target's own cursor state, and an empty replay keeps it on.
             terminal.write("\x1b[?25h");
           }
+          // Re-seed the favicon from the PTY's current foreground state. The
+          // server's foreground watcher only emits on change, so without this
+          // snapshot a reattaching client (page refresh, silent reattach) or a
+          // fresh PTY after a daemon restart would keep the icon at its prior
+          // value — stuck blue after a restart (stale hasForegroundProcess) or
+          // grey-after-green on refresh (the deduped watcher never re-emits).
+          // Seed alive-quiet when a process is running so a quiet program (an
+          // open editor) shows blue with no output to drive the transition.
+          if (faviconRunningTimer !== null) {
+            window.clearTimeout(faviconRunningTimer);
+            faviconRunningTimer = null;
+          }
+          if (faviconReadyTimer !== null) {
+            window.clearTimeout(faviconReadyTimer);
+            faviconReadyTimer = null;
+          }
+          hasForegroundProcess = message.foreground !== null;
+          hadForegroundThisCycle = hasForegroundProcess;
+          faviconBadge = false;
+          faviconState = hasForegroundProcess ? "alive-quiet" : "ready";
+          setTabFaviconState(faviconState);
           setSessionInfo({
             shell: message.shell,
             shellName: message.shellName,
             pid: message.pid,
             cwd: message.cwd,
             title: message.title,
+            foreground: message.foreground,
           });
           setLiveCwd(message.cwd);
           applyIncomingTitle(message.title);

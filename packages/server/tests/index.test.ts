@@ -133,6 +133,7 @@ describe("createServer WS lifecycle", () => {
           type: "session",
           shell: expect.any(String),
           pid: expect.any(Number),
+          foreground: null,
         }),
       );
     } finally {

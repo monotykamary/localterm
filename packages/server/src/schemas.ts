@@ -503,6 +503,13 @@ const sessionMessageSchema = z
     pid: z.number().int().nonnegative(),
     cwd: z.string().min(1),
     title: z.string().max(MAX_TITLE_LENGTH),
+    // Current foreground process (or null at the shell prompt), snapshotted at
+    // attach time. The watcher only emits foreground on change, so without
+    // this a reattaching client (page refresh, silent reattach) or a fresh
+    // PTY after a daemon restart would never learn the current state — the
+    // icon would stay stale (stuck blue after a restart, or grey-after-green
+    // on refresh). Mirrors the cwd/title snapshots already on this frame.
+    foreground: z.string().max(MAX_FOREGROUND_LENGTH).nullable(),
     // Server-side id for the live PTY. A reconnecting or switching client
     // carries it back as the `sid` query param on the WS url so the daemon
     // attaches to the live PTY instead of spawning a fresh shell. Optional
