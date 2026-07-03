@@ -146,15 +146,6 @@ export const getCachedTokens = (
   return entry.result;
 };
 
-export const prefetchTokens = (
-  filePath: string,
-  lines: readonly string[],
-  langId: string,
-): void => {
-  if (getCachedTokens(filePath, lines) !== undefined) return;
-  void tokenizeDiffLines(filePath, lines, langId);
-};
-
 export const tokenizeDiffLines = async (
   filePath: string,
   lines: readonly string[],

@@ -18,7 +18,7 @@ import type { CreateWorktreeInput, GitWorktree, GitWorktreeListResponse } from "
 // main worktree can't be removed, …). The route catches this and surfaces
 // `message` (git's own stderr) so the client can show something actionable
 // instead of an opaque code.
-export class WorktreeError extends Error {
+class WorktreeError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "WorktreeError";

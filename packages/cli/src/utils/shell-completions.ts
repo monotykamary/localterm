@@ -132,7 +132,7 @@ export const resolveZshDropFile = (fpathDirs: readonly string[]): string | null 
   return null;
 };
 
-export const queryZshFpath = async (): Promise<readonly string[]> => {
+const queryZshFpath = async (): Promise<readonly string[]> => {
   try {
     const { stdout } = await execFileAsync("zsh", ["-c", "print -l $fpath"], { timeout: 3000 });
     return stdout

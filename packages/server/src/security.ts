@@ -80,7 +80,7 @@ export const isPrivateHost = (host: string): boolean => {
   return false;
 };
 
-export const enforceLoopback = (context: Context): Response | null => {
+const enforceLoopback = (context: Context): Response | null => {
   const hostHeader = context.req.header("host");
   const hostname = stripPort(hostHeader);
   if (!isLoopback(hostname)) {

@@ -81,4 +81,4 @@ const resolveNamedKeys = (input: string): string => {
   return result;
 };
 
-export { resolveNamedKeys, resolveToken };
+export { resolveNamedKeys };

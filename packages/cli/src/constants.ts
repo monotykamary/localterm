@@ -8,7 +8,7 @@ export const VERIFY_PID_TIMEOUT_MS = 1000;
 export const MIN_TCP_PORT = 1;
 export const MAX_TCP_PORT = 65535;
 
-export const FRIENDLY_HOSTNAME = "localterm.localhost";
+const FRIENDLY_HOSTNAME = "localterm.localhost";
 export const PORTLESS_APP_NAME = "localterm";
 export const PORTLESS_ALIAS_TIMEOUT_MS = 5_000;
 export const PORTLESS_SERVICE_TIMEOUT_MS = 30_000;

@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 
-export interface PtyViewportOverlayRect {
+interface PtyViewportOverlayRect {
   left: number;
   top: number;
   width: number;

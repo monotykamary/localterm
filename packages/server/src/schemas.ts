@@ -929,7 +929,7 @@ export const automationScheduleSchema = z.discriminatedUnion("kind", [
 // Session events that can drive an event-triggered automation. These are the
 // user-selectable events; internal signals such as `git-dirty` are deliberately
 // excluded because they are too coarse for automation triggers.
-export const AUTOMATION_SESSION_EVENTS = [
+const AUTOMATION_SESSION_EVENTS = [
   "git-head-change",
   "git-branch-change",
   "git-tag-change",
@@ -1067,7 +1067,7 @@ export const automationLastRunSchema = z
 // references it for `requestedSecrets`, so it must initialize before that shape
 // is evaluated (zod reads the schema at object-literal time, so a forward
 // `const` reference would hit the temporal dead zone).
-export const secretNameSchema = z
+const secretNameSchema = z
   .string()
   .trim()
   .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, "must be alphanumeric with - or _")
@@ -1319,8 +1319,8 @@ export const caffeinatePreferencesFileSchema = z
 // no-clients grace window in seconds (`null` = never reap, `0` = reap idle
 // immediately); optional in the file so an existing config without it upgrades
 // to the default rather than failing the strict parse.
-export const cdpPortSchema = z.number().int().min(1).max(TCP_PORT_MAX).nullable();
-export const graceSecondsSchema = z
+const cdpPortSchema = z.number().int().min(1).max(TCP_PORT_MAX).nullable();
+const graceSecondsSchema = z
   .number()
   .int()
   .min(SESSION_GRACE_MIN_SECONDS)
@@ -1334,7 +1334,7 @@ export const graceSecondsSchema = z
 // authority via WebAuthn). `oidc` (bring-your-own-IdP) is the next variant.
 // Optional in the file so an existing config without it upgrades to the
 // no-provider (single-authority) default rather than failing the parse.
-export const identityHeaderConfigSchema = z
+const identityHeaderConfigSchema = z
   .object({
     provider: z.literal("header"),
     header: z.string().trim().min(1).max(IDENTITY_HEADER_NAME_MAX_LENGTH).optional(),
@@ -1414,7 +1414,7 @@ export const updateDaemonConfigInputSchema = z
 // editable. Values NEVER appear here — only in the backend — so the policy
 // file is safe to read and lists in the UI without leaking secrets. `hasValue`
 // in the API response is probed from the backend, not stored.
-export const secretEnvVarSchema = z
+const secretEnvVarSchema = z
   .string()
   .trim()
   .regex(/^[A-Z_][A-Z0-9_]*$/, "must be uppercase with _")

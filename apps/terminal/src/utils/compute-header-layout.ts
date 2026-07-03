@@ -103,7 +103,7 @@ const branchAreaMinWidth = (branchName: string | null): number =>
 const branchAreaFullWidth = (branchName: string | null): number =>
   S.vs + GAP_1_5_PX + branchAreaMinWidth(branchName);
 
-export interface HeaderLayout {
+interface HeaderLayout {
   showTitle: boolean;
   compareLabels: "full" | "abbreviated";
   showVs: boolean;

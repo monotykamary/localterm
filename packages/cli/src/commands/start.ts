@@ -3,8 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createServer,
-  DEFAULT_HOST,
-  DEFAULT_PORT,
   isLoopbackHost,
   isServerErrorException,
 } from "@monotykamary/localterm-server";
@@ -348,11 +346,4 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGHUP", () => void shutdown("SIGHUP"));
-};
-
-export const startDefaults: StartOptions = {
-  port: DEFAULT_PORT,
-  host: DEFAULT_HOST,
-  open: false,
-  foreground: false,
 };

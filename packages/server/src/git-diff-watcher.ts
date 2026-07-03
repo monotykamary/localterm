@@ -56,7 +56,7 @@ export const GIT_DIFF_WATCHER_EVENT_NAMES = [
   "git-tag",
 ] as const satisfies [string, ...string[]];
 
-export type GitDiffWatcherEventName = (typeof GIT_DIFF_WATCHER_EVENT_NAMES)[number];
+type GitDiffWatcherEventName = (typeof GIT_DIFF_WATCHER_EVENT_NAMES)[number];
 
 export type GitDiffWatcherEvents = {
   [K in GitDiffWatcherEventName]: [];
@@ -64,7 +64,7 @@ export type GitDiffWatcherEvents = {
 
 export type GitRefEventName = Exclude<GitDiffWatcherEventName, "git-dirty">;
 
-export interface GitSpecialSnapshot {
+interface GitSpecialSnapshot {
   fetchHead: string | null;
   origHead: string | null;
   mergeHead: string | null;

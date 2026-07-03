@@ -3,9 +3,9 @@ import { createStringValidatedStoredSetting } from "@/utils/create-stored-settin
 
 export type DiffViewMode = "unified" | "split";
 
-export const DEFAULT_DIFF_VIEW_MODE: DiffViewMode = "unified";
+const DEFAULT_DIFF_VIEW_MODE: DiffViewMode = "unified";
 
-export const isDiffViewMode = (value: string): value is DiffViewMode =>
+const isDiffViewMode = (value: string): value is DiffViewMode =>
   value === "unified" || value === "split";
 
 const setting = createStringValidatedStoredSetting(

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "vite": false,
+  "vitest": { "config": [] },
+  "ignoreBinaries": ["pmset", "ps", "xattr", "codesign", "lsof", "osascript"],
+  "ignoreDependencies": [
+    "vitest",
+    "@voidzero-dev/vite-plus-core",
+    "@azurity/pure-nerd-font",
+    "jsdom"
+  ],
+  "ignoreWorkspaces": ["apps/harness", "apps/harness/alpha-mask"],
+  "ignoreIssues": {
+    "apps/terminal/src/lib/constants.ts": ["duplicates"],
+    "packages/server/src/constants.ts": ["duplicates"],
+    "packages/server/src/schemas.ts": ["duplicates"]
+  },
+  "workspaces": {
+    ".": {
+      "entry": ["vite.config.ts"],
+      "ignore": ["harness/**"]
+    },
+    "apps/terminal": {
+      "entry": [
+        "src/main.tsx",
+        "vite.config.ts",
+        "vitest.config.ts",
+        "tests/setup.ts"
+      ],
+      "ignore": [
+        "src/components/ui/**",
+        "scripts/sw-template.js",
+        "scripts/generate-bun-width-table.ts"
+      ]
+    },
+    "packages/server": {
+      "entry": [
+        "src/index.ts",
+        "src/protocol.ts",
+        "src/constants.ts",
+        "src/completion/index.ts",
+        "vitest.config.ts"
+      ]
+    },
+    "packages/cli": {
+      "entry": ["src/index.ts", "vitest.config.ts"]
+    },
+    "packages/pi-extension": {
+      "entry": ["extensions/index.ts", "vitest.config.ts"]
+    }
+  }
+}

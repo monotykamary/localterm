@@ -20,7 +20,7 @@ export type ScheduleFrequency =
   | "everyNHours"
   | "cron";
 
-export interface TimeOfDay {
+interface TimeOfDay {
   hour: number;
   minute: number;
 }

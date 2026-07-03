@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import os from "node:os";
 import { promisify } from "node:util";
 import {
   MAX_SECRET_VALUE_LENGTH,
@@ -43,7 +42,7 @@ const keychainService = (name: string): string => `${SECRET_KEYCHAIN_SERVICE_PRE
 // for the ~ms the `security` process lives. That is the standard `security`-CLI
 // trade-off (it has no stdin path for the password) and matches every script
 // that shells out to `security`; the value never touches disk.
-export class KeychainSecretBackend implements SecretBackend {
+class KeychainSecretBackend implements SecretBackend {
   readonly supported: boolean;
 
   constructor() {
@@ -149,6 +148,3 @@ class UnsupportedBackend implements SecretBackend {
     return ":";
   }
 }
-
-export const keychainAccountForTest = KEYCHAIN_ACCOUNT;
-export const homedirForTest = os.homedir;

@@ -98,7 +98,7 @@ const computeConfigWidth = (config: LayoutConfig, showCreateButton: boolean): nu
   return leftContent + rightDiv + gapsWidth + config.headerPadding + SAFETY_MARGIN_PX;
 };
 
-export interface AutomationsHeaderLayout {
+interface AutomationsHeaderLayout {
   showIcon: boolean;
   showTitle: boolean;
   tabLabels: "full" | "abbreviated";

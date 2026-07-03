@@ -1,5 +1,4 @@
 import type {
-  AutomationLastRun,
   AutomationLifecycle,
   AutomationRunStatus,
 } from "@monotykamary/localterm-server/protocol";
@@ -35,10 +34,7 @@ export const runStatusBadge = (status: AutomationRunStatus, exitCode: number | n
   }
 };
 
-export const lastRunBadge = (lastRun: AutomationLastRun): RunBadge =>
-  runStatusBadge(lastRun.status, lastRun.exitCode);
-
-export const FINISHED_BADGE: RunBadge = { label: "finished", className: "text-violet-400" };
+const FINISHED_BADGE: RunBadge = { label: "finished", className: "text-violet-400" };
 
 export const lifecycleBadge = (lifecycle: AutomationLifecycle): RunBadge | null =>
   lifecycle === "finished" ? FINISHED_BADGE : null;

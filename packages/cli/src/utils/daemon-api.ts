@@ -9,7 +9,7 @@ import { getStateDirectory } from "../paths.js";
 // these helpers just resolve the base URL and render the two failure shapes
 // (daemon down, non-2xx response) the same way across every command.
 
-export class DaemonDownError extends Error {
+class DaemonDownError extends Error {
   constructor() {
     super("localterm daemon is not running");
   }

@@ -23,7 +23,7 @@ import {
   getSystemdUserUnitPath,
 } from "../paths.js";
 import { cliEntry } from "../utils/cli-entry.js";
-import { isPortlessProxyLive } from "../utils/portless.js";
+import { isPortlessMissing, isPortlessProxyLive } from "../utils/portless.js";
 import { configureTailscaleServe, removeTailscaleServe } from "../utils/tailscale.js";
 import { probeCdpAvailability } from "../utils/probe-cdp-availability.js";
 import { readConfiguredCdpPort } from "../utils/read-configured-cdp-port.js";
@@ -152,9 +152,6 @@ WantedBy=default.target
 const launchctl = async (...args: string[]): Promise<{ stdout: string; stderr: string }> => {
   return execFileAsync("launchctl", args, { timeout: 10_000 });
 };
-
-const isPortlessMissing = (error: unknown): boolean =>
-  error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT";
 
 type PortlessStepResult = { ok: true } | { ok: false; missing: boolean; message: string };
 
