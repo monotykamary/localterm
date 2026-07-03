@@ -1,5 +1,7 @@
 # localterm-server
 
+## 2.37.3
+
 ## 2.37.2
 
 ### Patch Changes
