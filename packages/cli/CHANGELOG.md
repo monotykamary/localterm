@@ -1,5 +1,20 @@
 # localterm
 
+## 2.38.0
+
+### Minor Changes
+
+- Add a lazy chunk builder (`buildLazyRenderChunks`) for the diff viewer: defers
+  chunk construction until a visible range is requested so large diffs no longer
+  block the main thread building every chunk up front before first paint. Ships
+  with always-on equivalence/laziness unit tests and an env-gated stress harness
+  (`STRESS_TEST=1`) benchmarking lazy vs eager at multi-million-line scale.
+
+### Patch Changes
+
+- Updated dependencies
+  - @monotykamary/localterm-server@2.38.0
+
 ## 2.37.4
 
 ### Patch Changes
