@@ -20,7 +20,8 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
-  vite: npm:@voidzero-dev/vite-plus-core@^0.2.1
+  vite: npm:@voidzero-dev/vite-plus-core@^0.2.2
+  "@voidzero-dev/vite-plus-core": "^0.2.2"
 
 patchedDependencies:
   "@xterm/addon-webgl@0.20.0-beta.286": patches/@xterm__addon-webgl@0.20.0-beta.286.patch
