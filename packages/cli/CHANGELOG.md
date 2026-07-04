@@ -1,5 +1,13 @@
 # localterm
 
+## 2.38.1
+
+### Patch Changes
+
+- edf6a41: Bump vite-plus dev dependency to 0.2.2.
+- Updated dependencies [edf6a41]
+  - @monotykamary/localterm-server@2.38.1
+
 ## 2.38.0
 
 ### Minor Changes

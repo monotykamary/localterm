@@ -1,5 +1,11 @@
 # @monotykamary/pi-localterm
 
+## 0.1.2
+
+### Patch Changes
+
+- edf6a41: Bump vite-plus dev dependency to 0.2.2.
+
 ## 0.1.1
 
 ### Patch Changes

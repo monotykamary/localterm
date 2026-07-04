@@ -1,6 +1,6 @@
 {
   "name": "@monotykamary/pi-localterm",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "localterm <-> pi integration: Kitty graphics for the browser renderer, and scrubbing localterm-managed secret env vars from the agent's bash-tool children.",
   "keywords": [
     "localterm",
