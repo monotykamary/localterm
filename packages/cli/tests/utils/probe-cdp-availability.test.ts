@@ -47,7 +47,11 @@ describe("probeCdpAvailability", () => {
   });
 
   it("reports unavailable when no debug-enabled browser is detected", async () => {
-    const result = await probeCdpAvailability(null, async () => [], async () => undefined);
+    const result = await probeCdpAvailability(
+      null,
+      async () => [],
+      async () => undefined,
+    );
     expect(result).toEqual({ available: false });
   });
 });

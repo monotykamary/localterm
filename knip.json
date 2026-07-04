@@ -21,12 +21,7 @@
       "ignore": ["harness/**"]
     },
     "apps/terminal": {
-      "entry": [
-        "src/main.tsx",
-        "vite.config.ts",
-        "vitest.config.ts",
-        "tests/setup.ts"
-      ],
+      "entry": ["src/main.tsx", "vite.config.ts", "vitest.config.ts", "tests/setup.ts"],
       "ignore": [
         "src/components/ui/**",
         "scripts/sw-template.js",

@@ -92,10 +92,7 @@ describe("buildLazyRenderChunks", () => {
       const hunks = Array.from({ length: 40 }, (_, hunkIndex) =>
         [
           `@@ -${hunkIndex * 50 + 1},50 +${hunkIndex * 50 + 1},50 @@`,
-          ...Array.from(
-            { length: 50 },
-            (_, lineIndex) => ` context ${hunkIndex}-${lineIndex}`,
-          ),
+          ...Array.from({ length: 50 }, (_, lineIndex) => ` context ${hunkIndex}-${lineIndex}`),
           `-removed ${hunkIndex}`,
           `+added ${hunkIndex}`,
         ].join("\n"),
@@ -115,7 +112,9 @@ describe("buildLazyRenderChunks", () => {
 
   describe("laziness", () => {
     it("exposes totalRows and chunkCount without building any chunk", () => {
-      const hunks = parseUnifiedDiff("@@ -0,0 +1,100 @@\n" + Array.from({ length: 100 }, (_, i) => `+l${i}`).join("\n") + "\n");
+      const hunks = parseUnifiedDiff(
+        "@@ -0,0 +1,100 @@\n" + Array.from({ length: 100 }, (_, i) => `+l${i}`).join("\n") + "\n",
+      );
       const collection = buildLazyRenderChunks(hunks, "unified", CHUNK_SIZE);
       expect(collection.builtCount()).toBe(0);
       expect(collection.chunkCount).toBe(50);
@@ -124,7 +123,9 @@ describe("buildLazyRenderChunks", () => {
     });
 
     it("visibleUpTo builds only chunks inside the requested range", () => {
-      const hunks = parseUnifiedDiff("@@ -0,0 +1,100 @@\n" + Array.from({ length: 100 }, (_, i) => `+l${i}`).join("\n") + "\n");
+      const hunks = parseUnifiedDiff(
+        "@@ -0,0 +1,100 @@\n" + Array.from({ length: 100 }, (_, i) => `+l${i}`).join("\n") + "\n",
+      );
       const collection = buildLazyRenderChunks(hunks, "unified", CHUNK_SIZE);
       const firstWindow = collection.visibleUpTo(CHUNK_SIZE);
       expect(firstWindow).toHaveLength(1);

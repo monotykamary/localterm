@@ -170,7 +170,9 @@ const collectTimings = (scenario: Scenario): PhaseTimings => {
 
   // Materialize the rest of the file via the lazy API. Done after capturing the
   // first-chunk phase so the first-paint measurement isn't polluted by it.
-  const { durationMs: lazyFullMs } = withTimer(() => collection.visibleUpTo(Number.POSITIVE_INFINITY));
+  const { durationMs: lazyFullMs } = withTimer(() =>
+    collection.visibleUpTo(Number.POSITIVE_INFINITY),
+  );
 
   return {
     parseMs,
