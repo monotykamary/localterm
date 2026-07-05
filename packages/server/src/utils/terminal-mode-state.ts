@@ -23,6 +23,7 @@ const RESTORABLE_PRIVATE_MODES = new Set([
   1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1015, 1047, 1048, 1049, 2004,
 ]);
 
+/* eslint-disable-next-line no-control-regex -- matches ANSI DECRQM mode-set sequences; control char is intentional */
 const DECRQM_PATTERN = /\x1b\[\?(\d+)([hl])/g;
 
 const sortedRestorableModes = (modes: Set<number>): number[] =>

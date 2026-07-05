@@ -37,10 +37,12 @@
 // split across PTY chunks simply isn't matched (DA queries are single small
 // writes, one per chunk), so it passes through unchanged — no corruption.
 
+/* eslint-disable no-control-regex -- these match ANSI Device Attribute query/response sequences; control char is intentional */
 const DA_REQUEST = /\x1b\[(>?)0?c/g;
 
 const DA1_RESPONSE = /\x1b\[\?\d+(?:;\d+)*c/;
 const DA2_RESPONSE = /\x1b\[>\d+(?:;\d+)*c/;
+/* eslint-enable no-control-regex */
 
 class TerminalQueryResponder {
   // xterm.js's responses, captured the first time xterm answers each query
