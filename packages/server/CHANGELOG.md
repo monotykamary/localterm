@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.39.0
+
+### Minor Changes
+
+- Application-level output compression (brotli/gzip) fixes the mobile redraw crawl. permessage-deflate is a no-op for browsers (they never advertise the extension header), so the server now compresses each binary output frame — brotli q6 if the browser can decode it, else gzip L3, else raw — with a 1-byte header (0x00 raw / 0x01 gzip / 0x02 brotli); the client decompresses via DecompressionStream. ~10x on a 64KB frame: a 200KB redraw crosses 10Mbps 5G in ~16ms instead of ~160ms (one paint, not a crawl). Backward-compatible via a `compress` capability in the {ready} handshake (old/no-support clients get raw frames); the reconnect scrollback replay goes through the same path.
+
 ## 2.38.2
 
 ### Patch Changes
