@@ -9,7 +9,7 @@ const makeAutomation = (overrides: Partial<Automation> = {}): Automation => ({
   name: "on webhook",
   trigger: { kind: "webhook", id: "abc123" },
   cwd: "/virtual/h1",
-  command: "true",
+  runner: { kind: "shell", command: "true" },
   enabled: true,
   limit: { kind: "forever" },
   closeOnFinish: false,

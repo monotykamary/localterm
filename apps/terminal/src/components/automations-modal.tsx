@@ -3,6 +3,7 @@ import {
   compileScheduleAll,
   nextCronOccurrence,
   parseCronExpression,
+  type AgentSessionEntry,
   type AutomationRunRecord,
   type AutomationSessionEvent,
   type AutomationWithNextRun,
@@ -10,13 +11,19 @@ import {
   type SecretEntryResponse,
 } from "@monotykamary/localterm-server/protocol";
 import {
+  ArrowUpRight,
   CalendarClock,
   ChevronDown,
+  ChevronLeft,
+  Eraser,
+  ExternalLink,
+  Minimize2,
   Pencil,
   Play,
   Plus,
   RotateCcw,
   Search,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -37,7 +44,12 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { EventTriggerSelector } from "@/components/event-trigger-selector";
+import { ModelSelector } from "@/components/model-selector";
+import { PromptSkillsAutocomplete } from "@/components/prompt-skills-autocomplete";
 import { SecretSelector } from "@/components/secret-selector";
+import { fetchAgentSession } from "@/utils/fetch-agent-session";
+import { fetchAgentSessionUrl } from "@/utils/fetch-agent-session-url";
+import { Markdown } from "@/components/markdown";
 import { NumberStepper } from "@/components/number-stepper";
 import { SettingsSelect } from "@/components/settings-select";
 import {
@@ -47,10 +59,12 @@ import {
 } from "@/lib/animation-classes";
 import {
   AUTOMATIONS_MODAL_CLOSE_TRANSITION_MS,
+  AUTOMATIONS_LIVE_POLL_MS,
   AUTOMATIONS_RELATIVE_TIME_REFRESH_MS,
   AUTOMATIONS_SIDEBAR_COLLAPSE_WIDTH_PX,
   AUTOMATIONS_SIDEBAR_WIDTH_PX,
   AUTOMATIONS_SORT_DEFAULT,
+  TOOL_OUTPUT_PREVIEW_LINES,
   AUTOMATIONS_SORT_STORAGE_KEY,
   COPY_FEEDBACK_MS,
   RECENT_RUNS_LIMIT,
@@ -58,6 +72,8 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
 import { computeAutomationsHeaderLayout } from "@/utils/compute-automations-header-layout";
+import { clearAutomationHistory } from "@/utils/clear-automation-history";
+import { compactAutomation } from "@/utils/compact-automation";
 import { createAutomation } from "@/utils/create-automation";
 import { deleteAutomation } from "@/utils/delete-automation";
 import { fetchAutomations } from "@/utils/fetch-automations";
@@ -65,6 +81,19 @@ import { fetchSecrets } from "@/utils/fetch-secrets";
 import { fetchServerHealth, type ServerHealth } from "@/utils/fetch-server-health";
 import { formatRelativeTime } from "@/utils/format-relative-time";
 import { resetAutomation } from "@/utils/reset-automation";
+import {
+  buildRunnerFromForm,
+  defaultRunnerForm,
+  isRunnerFormValid,
+  recognizeRunnerForm,
+  runnerSummary,
+  runnerTypeLabel,
+  type AgentThinkingLevel,
+  type HarnessKind,
+  type RunnerFormState,
+} from "@/utils/runner-form";
+import { markAllTriageRead } from "@/utils/mark-all-triage-read";
+import { markAutomationRunRead } from "@/utils/mark-automation-run-read";
 import {
   buildScheduleFromForm,
   buildTriggerFromForm,
@@ -103,7 +132,7 @@ type AutomationsSort = "last-run" | "created" | "name";
 interface AutomationFormState {
   id: string | null;
   name: string;
-  command: string;
+  runner: RunnerFormState;
   cwd: string;
   enabled: boolean;
   triggerType: TriggerType;
@@ -128,7 +157,7 @@ const runTimestamp = (run: AutomationRunRecord): number =>
 const emptyForm = (defaultCwd: string | null): AutomationFormState => ({
   id: null,
   name: "",
-  command: "",
+  runner: defaultRunnerForm(),
   cwd: defaultCwd ?? "",
   enabled: true,
   triggerType: "schedule",
@@ -147,7 +176,7 @@ const formForAutomation = (automation: AutomationWithNextRun): AutomationFormSta
   return {
     id: automation.id,
     name: automation.name,
-    command: automation.command,
+    runner: recognizeRunnerForm(automation.runner),
     cwd: automation.cwd,
     enabled: automation.enabled,
     triggerType: trigger.triggerType,
@@ -162,27 +191,262 @@ const formForAutomation = (automation: AutomationWithNextRun): AutomationFormSta
   };
 };
 
-const RunRow = ({ run, nowMs }: { run: AutomationRunRecord; nowMs: number }) => {
+const RunRow = ({
+  run,
+  nowMs,
+  onOpenLog,
+}: {
+  run: AutomationRunRecord;
+  nowMs: number;
+  onOpenLog: (run: AutomationRunRecord) => void;
+}) => {
   const badge = runStatusBadge(run.status, run.exitCode);
+  const preview = findFirstFindingsLine(run.findings);
+  const hasLog = Boolean(run.log || run.findings);
   return (
-    <div className="flex items-center justify-between gap-2 px-2 py-1 font-mono text-[10px]">
-      <span className={cn("w-16 shrink-0", badge.className)}>{badge.label}</span>
-      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+    <button
+      type="button"
+      onClick={() => onOpenLog(run)}
+      disabled={!hasLog}
+      className="flex w-full items-center gap-5 px-2.5 py-1.5 text-left text-xs outline-none transition-colors enabled:hover:bg-foreground/5 disabled:cursor-default"
+    >
+      <span className="flex shrink-0 items-center gap-1.5">
+        <span
+          className={cn("size-1.5 rounded-full", run.unread ? "bg-foreground" : "bg-transparent")}
+          aria-hidden="true"
+        />
+        <span className={cn("font-mono text-[10px] tabular-nums", badge.className)}>
+          {badge.label}
+        </span>
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/80">
         {run.status === "skipped"
           ? `was due ${formatClockTime(new Date(run.scheduledFor).getHours(), new Date(run.scheduledFor).getMinutes())} · machine off`
-          : run.trigger === "manual"
-            ? "manual run"
-            : run.trigger === "watch"
-              ? "on change"
-              : run.trigger === "event"
-                ? "on event"
-                : run.trigger === "webhook"
-                  ? "on webhook"
-                  : "scheduled"}
+          : preview}
       </span>
-      <span className="shrink-0 text-muted-foreground/70 tabular-nums">
-        {formatRelativeTime(runTimestamp(run), nowMs)}
+      <span className="flex shrink-0 items-center gap-2">
+        <span className="min-w-[4.5rem] text-right text-[11px] text-muted-foreground/70">
+          {triggerChip(run.trigger)}
+        </span>
+        <span className="min-w-[4rem] text-right font-mono text-[10px] tabular-nums text-muted-foreground/70">
+          {formatRelativeTime(runTimestamp(run), nowMs)}
+        </span>
       </span>
+    </button>
+  );
+};
+
+// A tool entry collapses its output to a pi-like preview (first N lines) with
+// an expand toggle; a short output renders in full.
+const ToolLogEntry = ({ entry }: { entry: Extract<AgentSessionEntry, { type: "tool" }> }) => {
+  const [expanded, setExpanded] = useState(false);
+  const lines = entry.text.split("\n");
+  const collapsible = lines.length > TOOL_OUTPUT_PREVIEW_LINES;
+  const visible =
+    collapsible && !expanded ? lines.slice(0, TOOL_OUTPUT_PREVIEW_LINES).join("\n") : entry.text;
+  return (
+    <div className="rounded-sm border border-emerald-800/40 bg-emerald-950/50 p-2">
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-[10px] uppercase tracking-wide text-emerald-300">{entry.name}</span>
+        {entry.input ? (
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-emerald-200/70">
+            {entry.input}
+          </span>
+        ) : null}
+      </div>
+      <pre className="mt-0.5 whitespace-pre-wrap break-words text-zinc-400">{visible}</pre>
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-0.5 text-[10px] text-emerald-400/70 transition-colors hover:text-emerald-300"
+        >
+          {expanded ? "Show less" : `Show all ${lines.length} lines`}
+        </button>
+      ) : null}
+    </div>
+  );
+};
+
+// A full-pane log page for a single run: a back chevron + the automation name
+// and run metadata, then the full log (or findings) in a scrollable block. Long
+// logs scroll here instead of expanding inline, which invited bad UX.
+// Colors follow pi's transcript conventions: grey for user, transparent for
+// assistant, green for tool, purple for compaction.
+const renderLogEntry = (entry: AgentSessionEntry, index: number) => {
+  if (entry.type === "compaction") {
+    return (
+      <div key={index} className="rounded-sm border border-purple-800/40 bg-purple-950/50 p-2">
+        <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-purple-300">
+          <Sparkles className="size-3" aria-hidden="true" />
+          compaction
+          {typeof entry.tokensBefore === "number"
+            ? ` · ${entry.tokensBefore.toLocaleString()} tokens`
+            : ""}
+        </div>
+        <div className="mt-0.5 text-zinc-400">
+          <Markdown>{entry.summary}</Markdown>
+        </div>
+      </div>
+    );
+  }
+  if (entry.type === "user") {
+    return (
+      <div key={index} className="rounded-sm bg-zinc-800/60 p-2">
+        <span className="text-[10px] uppercase tracking-wide text-zinc-400">user</span>
+        <div className="mt-0.5 whitespace-pre-wrap break-words text-zinc-200">{entry.text}</div>
+      </div>
+    );
+  }
+  if (entry.type === "assistant") {
+    return (
+      <div key={index} className="px-1">
+        <span className="text-[10px] uppercase tracking-wide text-zinc-500">assistant</span>
+        {entry.thinking ? (
+          <div className="mb-2 mt-1 border-l-2 border-zinc-700/60 pl-2 whitespace-pre-wrap break-words italic text-zinc-500">
+            {entry.thinking}
+          </div>
+        ) : null}
+        <div className="mt-0.5 text-zinc-200">
+          <Markdown>{entry.text}</Markdown>
+        </div>
+      </div>
+    );
+  }
+  return <ToolLogEntry key={index} entry={entry} />;
+};
+
+const RunLogView = ({
+  automationId,
+  runId,
+  automations,
+  nowMs,
+  onBack,
+  onOpenAutomation,
+}: {
+  automationId: string;
+  runId: string;
+  automations: AutomationWithNextRun[];
+  nowMs: number;
+  onBack: () => void;
+  onOpenAutomation: (id: string) => void;
+}) => {
+  const [sessionEntries, setSessionEntries] = useState<AgentSessionEntry[] | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const automation = automations.find((candidate) => candidate.id === automationId);
+  const run = automation?.runs.find((candidate) => candidate.runId === runId) ?? null;
+  const runner = automation?.runner;
+  const isThread = runner?.kind === "agent" && runner.sessionMode === "thread";
+
+  // Thread-mode runs resume a pi session file; show its transcript (the whole
+  // branch up to this run's point in time, including compactions) instead of
+  // just the current run's log. The transcript is truncated at the run's
+  // finishedAt so an older run shows the branch as it was then, not the latest
+  // state.
+  useEffect(() => {
+    if (!isThread) {
+      setSessionEntries(null);
+      return;
+    }
+    let cancelled = false;
+    setSessionEntries(null);
+    void fetchAgentSession(automationId, runId).then((entries) => {
+      if (!cancelled) setSessionEntries(entries);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [automationId, runId, isThread]);
+
+  // Land on the latest message when the thread transcript loads.
+  useEffect(() => {
+    if (!isThread || sessionEntries === null) return;
+    const node = scrollRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [isThread, sessionEntries]);
+
+  if (!automation || !run) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-3 py-2">
+          <Button variant="ghost" size="icon-sm" aria-label="back" onClick={onBack}>
+            <ChevronLeft />
+          </Button>
+          <span className="text-xs text-muted-foreground">Run not found.</span>
+        </div>
+      </div>
+    );
+  }
+  const badge = runStatusBadge(run.status, run.exitCode);
+  const entries = Array.isArray(run.log) ? run.log : null;
+  const textLog = typeof run.log === "string" ? run.log : run.findings;
+  const displayEntries: AgentSessionEntry[] | null = isThread ? sessionEntries : entries;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-3 py-2">
+        <Button variant="ghost" size="icon-sm" aria-label="back to automations" onClick={onBack}>
+          <ChevronLeft />
+        </Button>
+        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{automation.name}</span>
+        <span className={cn("shrink-0 text-[10px] tabular-nums", badge.className)}>
+          {badge.label}
+        </span>
+        {run.exitCode !== null ? (
+          <span className="shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
+            exit {run.exitCode}
+          </span>
+        ) : null}
+        <span className="shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
+          {formatRelativeTime(runTimestamp(run), nowMs)}
+        </span>
+        {isThread ? (
+          <button
+            type="button"
+            aria-label="open session in pi"
+            title="Open this thread in pi (new terminal tab)"
+            onClick={() => {
+              void fetchAgentSessionUrl(automationId).then((url) => {
+                if (url) window.open(url, "_blank", "noopener,noreferrer");
+              });
+            }}
+            className="shrink-0 rounded-sm text-muted-foreground/70 outline-none transition-colors hover:text-foreground"
+          >
+            <ExternalLink className="size-3.5" aria-hidden="true" />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          aria-label="open automation"
+          title="Open automation"
+          onClick={() => onOpenAutomation(automation.id)}
+          className="shrink-0 rounded-sm text-muted-foreground/70 outline-none transition-colors hover:text-foreground"
+        >
+          <ArrowUpRight className="size-3.5" aria-hidden="true" />
+        </button>
+      </div>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto p-3">
+        {isThread && displayEntries === null ? (
+          <div className="flex h-full items-center justify-center">
+            <Spinner className="size-4" aria-label="loading session" />
+          </div>
+        ) : displayEntries !== null && displayEntries.length === 0 ? (
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            {isThread ? "No session history yet." : "No log recorded for this run."}
+          </p>
+        ) : displayEntries ? (
+          <div className="flex flex-col gap-2 font-mono text-[11px] leading-relaxed">
+            {displayEntries.map((entry, index) => renderLogEntry(entry, index))}
+          </div>
+        ) : textLog ? (
+          <pre className="whitespace-pre-wrap break-words rounded-sm bg-foreground/5 p-3 font-mono text-[11px] leading-relaxed text-foreground/80">
+            {textLog}
+          </pre>
+        ) : (
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            No log recorded for this run.
+          </p>
+        )}
+      </div>
     </div>
   );
 };
@@ -481,11 +745,15 @@ export const AutomationsModal = ({
   const [tab, setTab] = useState<ModalTab>("automations");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<FormMode>("view");
+  // A run whose log is shown full-pane (a dedicated log page with a back
+  // chevron), or null for the normal tab/detail content. Set by clicking a
+  // Triage row or a per-automation history row; cleared by the back chevron.
+  const [logView, setLogView] = useState<{ automationId: string; runId: string } | null>(null);
   const [form, setForm] = useState<AutomationFormState>(() => emptyForm(defaultCwd));
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
-  const [runFilter, setRunFilter] = useState<"all" | "failed" | "skipped">("all");
+  const [runFilter, setRunFilter] = useState<"all" | "unread" | "failed" | "skipped">("all");
   const loadSortFromStorage = (): AutomationsSort => {
     try {
       return (
@@ -556,7 +824,16 @@ export const AutomationsModal = ({
       () => setNowMs(Date.now()),
       AUTOMATIONS_RELATIVE_TIME_REFRESH_MS,
     );
-    return () => window.clearInterval(tick);
+    // Re-fetch automations on a short cadence so a run that finishes shows its
+    // final status even if the WS broadcast was missed (dropped/reconnecting
+    // socket). The fetch is cheap + only runs while the modal is open.
+    const poll = window.setInterval(() => {
+      void refreshAutomations();
+    }, AUTOMATIONS_LIVE_POLL_MS);
+    return () => {
+      window.clearInterval(tick);
+      window.clearInterval(poll);
+    };
   }, [open, refreshAutomations, refreshCdpHealth, refreshSecrets]);
 
   // Keep a valid selection across refreshes, falling back to the first item.
@@ -578,7 +855,7 @@ export const AutomationsModal = ({
       ? automations.filter(
           (automation) =>
             automation.name.toLowerCase().includes(lower) ||
-            automation.command.toLowerCase().includes(lower),
+            runnerSummary(automation.runner).toLowerCase().includes(lower),
         )
       : automations;
     const sorted = [...filtered];
@@ -614,6 +891,10 @@ export const AutomationsModal = ({
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
+      if (logView) {
+        setLogView(null);
+        return;
+      }
       if (mode !== "view") {
         closeForm();
         return;
@@ -622,11 +903,17 @@ export const AutomationsModal = ({
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [open, mounted, mode, closeForm, onClose]);
+  }, [open, mounted, mode, logView, closeForm, onClose]);
 
   useEffect(() => {
     if (open && settled) panelRef.current?.focus();
   }, [open, settled]);
+
+  // Drop the log page when the modal closes so reopening lands on the normal
+  // tab/detail content instead of a stale (possibly deleted) run.
+  useEffect(() => {
+    if (!open) setLogView(null);
+  }, [open]);
 
   useLayoutEffect(() => {
     const header = headerRef.current;
@@ -706,7 +993,7 @@ export const AutomationsModal = ({
 
   const isFormValid =
     form.name.trim().length > 0 &&
-    form.command.trim().length > 0 &&
+    isRunnerFormValid(form.runner) &&
     form.cwd.trim().length > 0 &&
     (form.triggerType === "watch" ||
       form.triggerType === "event" ||
@@ -722,7 +1009,7 @@ export const AutomationsModal = ({
       name: form.name.trim(),
       trigger: buildTriggerFromForm(form),
       cwd: form.cwd.trim(),
-      command: form.command.trim(),
+      runner: buildRunnerFromForm(form.runner),
       enabled: form.enabled,
       limit:
         form.limitMode === "count"
@@ -767,6 +1054,22 @@ export const AutomationsModal = ({
     await refreshAutomations();
   };
 
+  const handleCompact = async (automation: AutomationWithNextRun) => {
+    await compactAutomation(automation.id);
+    await refreshAutomations();
+  };
+
+  // Open the full-pane log page for a run, marking it read first so opening
+  // from either the Triage inbox or the per-automation history clears the
+  // unread badge (it's the same log entry).
+  const openRunLog = async (automationId: string, run: AutomationRunRecord) => {
+    setLogView({ automationId, runId: run.runId });
+    if (run.unread) {
+      await markAutomationRunRead(automationId, run.runId);
+      await refreshAutomations();
+    }
+  };
+
   const recentRuns = useMemo(() => {
     if (!automations) return [];
     const flattened = automations.flatMap((automation) =>
@@ -774,12 +1077,22 @@ export const AutomationsModal = ({
     );
     flattened.sort((a, b) => runTimestamp(b.run) - runTimestamp(a.run));
     const filtered = flattened.filter(({ run }) => {
+      if (runFilter === "unread") return run.unread;
       if (runFilter === "failed") return run.status === "failed";
       if (runFilter === "skipped") return run.status === "skipped";
       return true;
     });
     return filtered.slice(0, RECENT_RUNS_LIMIT);
   }, [automations, runFilter]);
+
+  const unreadCount = useMemo(
+    () =>
+      automations?.reduce(
+        (total, automation) => total + automation.runs.filter((run) => run.unread).length,
+        0,
+      ) ?? 0,
+    [automations],
+  );
 
   if (!mounted) return null;
 
@@ -832,11 +1145,11 @@ export const AutomationsModal = ({
             {(headerLayout.tabLabels === "full"
               ? ([
                   ["automations", "Automations"],
-                  ["recent-runs", "Recent runs"],
+                  ["recent-runs", "Triage"],
                 ] as const)
               : ([
                   ["automations", "A"],
-                  ["recent-runs", "R"],
+                  ["recent-runs", "T"],
                 ] as const)
             ).map(([value, label]) => (
               <button
@@ -844,7 +1157,10 @@ export const AutomationsModal = ({
                 type="button"
                 role="tab"
                 aria-selected={tab === value}
-                onClick={() => setTab(value)}
+                onClick={() => {
+                  setLogView(null);
+                  setTab(value);
+                }}
                 className={cn(
                   "rounded-sm px-2 py-0.5 text-xs transition-colors",
                   tab === value
@@ -853,6 +1169,11 @@ export const AutomationsModal = ({
                 )}
               >
                 {label}
+                {value === "recent-runs" && unreadCount > 0 ? (
+                  <span className="ml-1 inline-flex items-center rounded-full bg-foreground/15 px-1.5 text-[10px] tabular-nums text-foreground">
+                    {unreadCount}
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -881,16 +1202,43 @@ export const AutomationsModal = ({
           </div>
         </header>
 
-        {tab === "recent-runs" ? (
+        {logView ? (
+          <RunLogView
+            automationId={logView.automationId}
+            runId={logView.runId}
+            automations={automations ?? []}
+            nowMs={nowMs}
+            onBack={() => setLogView(null)}
+            onOpenAutomation={(id) => {
+              setLogView(null);
+              setSelectedId(id);
+              setTab("automations");
+              setMode("view");
+            }}
+          />
+        ) : tab === "recent-runs" ? (
           <RecentRunsView
             runs={recentRuns}
             nowMs={nowMs}
             filter={runFilter}
             onFilterChange={setRunFilter}
-            onSelect={(automationId) => {
+            onSelect={async (automationId, run) => {
+              if (run.unread) {
+                await markAutomationRunRead(automationId, run.runId);
+                await refreshAutomations();
+              }
               setSelectedId(automationId);
               setTab("automations");
               setMode("view");
+            }}
+            onOpenLog={(automationId, run) => void openRunLog(automationId, run)}
+            onMarkAllRead={async () => {
+              await markAllTriageRead();
+              await refreshAutomations();
+            }}
+            onClearHistory={async () => {
+              await clearAutomationHistory();
+              await refreshAutomations();
             }}
           />
         ) : (
@@ -979,6 +1327,8 @@ export const AutomationsModal = ({
                     onDelete={() => void handleDelete(selected)}
                     onToggleEnabled={(enabled) => void handleToggleEnabled(selected, enabled)}
                     onReset={() => void handleReset(selected)}
+                    onCompact={() => void handleCompact(selected)}
+                    onOpenLog={(run) => void openRunLog(selected.id, run)}
                   />
                 ) : filteredAutomations !== null && filteredAutomations.length === 0 ? (
                   <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -1007,6 +1357,8 @@ const AutomationDetail = ({
   onDelete,
   onToggleEnabled,
   onReset,
+  onCompact,
+  onOpenLog,
 }: {
   automation: AutomationWithNextRun;
   nowMs: number;
@@ -1016,9 +1368,13 @@ const AutomationDetail = ({
   onDelete: () => void;
   onToggleEnabled: (enabled: boolean) => void;
   onReset: () => void;
+  onCompact?: () => void;
+  onOpenLog: (run: AutomationRunRecord) => void;
 }) => {
   const finished = lifecycleBadge(automation.lifecycle);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
+  const compactable =
+    automation.runner.kind === "agent" && automation.runner.sessionMode === "thread";
   const webhookUrl =
     automation.trigger.kind === "webhook" && typeof window !== "undefined"
       ? `${window.location.origin}/api/webhooks/${automation.trigger.id}`
@@ -1041,7 +1397,7 @@ const AutomationDetail = ({
         <div className="min-w-0">
           <h3 className="truncate text-sm font-medium text-foreground">{automation.name}</h3>
           <p className="truncate font-mono text-[11px] text-muted-foreground">
-            {automation.command}
+            {runnerTypeLabel(automation.runner)}: {runnerSummary(automation.runner)}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
@@ -1054,6 +1410,18 @@ const AutomationDetail = ({
           >
             <Play />
           </Button>
+          {compactable && onCompact ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`compact ${automation.name} thread`}
+              title="Compact the thread session now"
+              className="hover:text-foreground"
+              onClick={onCompact}
+            >
+              <Minimize2 />
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             size="icon-sm"
@@ -1201,7 +1569,7 @@ const AutomationDetail = ({
           ) : (
             <div className="mt-1 flex flex-col divide-y divide-border/30 rounded-md border border-border/40">
               {automation.runs.map((run) => (
-                <RunRow key={run.runId} run={run} nowMs={nowMs} />
+                <RunRow key={run.runId} run={run} nowMs={nowMs} onOpenLog={onOpenLog} />
               ))}
             </div>
           )}
@@ -1259,16 +1627,192 @@ const AutomationForm = ({
           onChange={(event) => onChange({ ...form, name: event.target.value })}
         />
       </label>
-      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-        Command
-        <Input
-          value={form.command}
-          placeholder="pnpm build"
-          aria-label="automation command"
-          className={cn(FORM_INPUT_CLASSES, "font-mono")}
-          onChange={(event) => onChange({ ...form, command: event.target.value })}
+      <div className="flex flex-col gap-1.5">
+        <span className={SECTION_LABEL_CLASSES}>Runner</span>
+        <SettingsSelect
+          value={form.runner.runnerType}
+          items={[
+            { id: "shell", label: "Shell command" },
+            { id: "agent", label: "Agent" },
+          ]}
+          ariaLabel="runner type"
+          placeholder="Runner"
+          onValueChange={(next) =>
+            onChange({ ...form, runner: { ...form.runner, runnerType: next as "shell" | "agent" } })
+          }
         />
-      </label>
+        {form.runner.runnerType === "shell" ? (
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Command
+            <Input
+              value={form.runner.command}
+              placeholder="pnpm build"
+              aria-label="automation command"
+              className={cn(FORM_INPUT_CLASSES, "font-mono")}
+              onChange={(event) =>
+                onChange({ ...form, runner: { ...form.runner, command: event.target.value } })
+              }
+            />
+          </label>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              Prompt
+              <PromptSkillsAutocomplete
+                value={form.runner.prompt}
+                placeholder="Review the latest commits on origin/main and post an exec briefing."
+                ariaLabel="agent prompt"
+                rows={4}
+                cwd={form.cwd}
+                className={cn(
+                  "w-full min-w-0 resize-y rounded-md border border-border/50 bg-transparent px-2 py-1 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-ring",
+                )}
+                onChange={(prompt) => onChange({ ...form, runner: { ...form.runner, prompt } })}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              Session
+              <SettingsSelect
+                value={form.runner.agentSessionMode}
+                items={[
+                  { id: "fresh", label: "Fresh (ephemeral)" },
+                  { id: "thread", label: "Thread (resume + compact)" },
+                ]}
+                ariaLabel="agent session mode"
+                placeholder="Session"
+                onValueChange={(next) =>
+                  onChange({
+                    ...form,
+                    runner: { ...form.runner, agentSessionMode: next as "fresh" | "thread" },
+                  })
+                }
+              />
+            </label>
+            <div className="flex gap-2">
+              <label className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
+                Model (optional)
+                <ModelSelector
+                  value={form.runner.agentModel}
+                  onChange={(agentModel) =>
+                    onChange({ ...form, runner: { ...form.runner, agentModel } })
+                  }
+                />
+              </label>
+              <label className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
+                Thinking (optional)
+                <SettingsSelect
+                  value={form.runner.agentThinking || "default"}
+                  items={[
+                    { id: "default", label: "default" },
+                    { id: "off", label: "off" },
+                    { id: "minimal", label: "minimal" },
+                    { id: "low", label: "low" },
+                    { id: "medium", label: "medium" },
+                    { id: "high", label: "high" },
+                    { id: "xhigh", label: "xhigh" },
+                  ]}
+                  ariaLabel="agent thinking"
+                  placeholder="Thinking"
+                  onValueChange={(next) =>
+                    onChange({
+                      ...form,
+                      runner: {
+                        ...form.runner,
+                        agentThinking: next === "default" ? "" : (next as AgentThinkingLevel),
+                      },
+                    })
+                  }
+                />
+              </label>
+            </div>
+            <p className="text-[10px] text-muted-foreground/70">
+              Runs the agent headlessly. Fresh = ephemeral; Thread = resumes one session per fire.
+              Findings + a transcript log land in Triage.
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <span className={SECTION_LABEL_CLASSES}>Harness</span>
+              <SettingsSelect
+                value={form.runner.harnessKind}
+                items={[
+                  { id: "pi", label: "pi (built-in)" },
+                  { id: "custom", label: "Custom command" },
+                ]}
+                ariaLabel="agent harness"
+                placeholder="Harness"
+                onValueChange={(next) =>
+                  onChange({
+                    ...form,
+                    runner: { ...form.runner, harnessKind: next as HarnessKind },
+                  })
+                }
+              />
+              {form.runner.harnessKind === "custom" ? (
+                <div className="flex flex-col gap-2">
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Run command
+                    <Input
+                      value={form.runner.customCommand}
+                      placeholder='claude -p "$LOCALTERM_AGENT_PROMPT"'
+                      aria-label="custom harness command"
+                      className={cn(FORM_INPUT_CLASSES, "font-mono")}
+                      onChange={(event) =>
+                        onChange({
+                          ...form,
+                          runner: { ...form.runner, customCommand: event.target.value },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Compact command (optional, thread only)
+                    <Input
+                      value={form.runner.customCompactCommand}
+                      placeholder='claude --session "$LOCALTERM_AGENT_SESSION_FILE" --compact'
+                      aria-label="custom harness compact command"
+                      className={cn(FORM_INPUT_CLASSES, "font-mono")}
+                      onChange={(event) =>
+                        onChange({
+                          ...form,
+                          runner: { ...form.runner, customCompactCommand: event.target.value },
+                        })
+                      }
+                    />
+                  </label>
+                  <p className="text-[10px] text-muted-foreground/70">
+                    Your command runs in the automation's cwd with the prompt + metadata as
+                    <code className="font-mono"> LOCALTERM_AGENT_*</code> env vars. stdout =
+                    findings; stdout+stderr = the log.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {(
+                    [
+                      ["piExtensions", "extensions"],
+                      ["piSkills", "skills"],
+                      ["piContextFiles", "context files"],
+                    ] as const
+                  ).map(([field, label]) => (
+                    <label
+                      key={field}
+                      className="flex items-center justify-between text-xs text-muted-foreground"
+                    >
+                      <span className="capitalize">Load {label}</span>
+                      <Switch
+                        aria-label={`pi ${label}`}
+                        checked={form.runner[field]}
+                        onCheckedChange={(value) =>
+                          onChange({ ...form, runner: { ...form.runner, [field]: value } })
+                        }
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
       <label className="flex flex-col gap-1 text-xs text-muted-foreground">
         Directory
         <Input
@@ -1418,28 +1962,30 @@ const AutomationForm = ({
         />
       </div>
 
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span className="flex flex-col">
-          Close tab when finished
-          <span
-            className={
-              closeOnFinishSupported
-                ? "text-[10px] text-muted-foreground/60"
-                : "text-[10px] text-amber-400"
-            }
-          >
-            {closeOnFinishSupported
-              ? "Closes the run's tab once the command exits."
-              : "Needs a Chromium browser with remote debugging enabled — run tabs won't close until it's on."}
+      {form.runner.runnerType === "shell" ? (
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span className="flex flex-col">
+            Close tab when finished
+            <span
+              className={
+                closeOnFinishSupported
+                  ? "text-[10px] text-muted-foreground/60"
+                  : "text-[10px] text-amber-400"
+              }
+            >
+              {closeOnFinishSupported
+                ? "Closes the run's tab once the command exits."
+                : "Needs a Chromium browser with remote debugging enabled — run tabs won't close until it's on."}
+            </span>
           </span>
-        </span>
-        <Switch
-          aria-label="close tab when finished"
-          checked={form.closeOnFinish}
-          disabled={closeOnFinishDisabled}
-          onCheckedChange={(closeOnFinish) => onChange({ ...form, closeOnFinish })}
-        />
-      </div>
+          <Switch
+            aria-label="close tab when finished"
+            checked={form.closeOnFinish}
+            disabled={closeOnFinishDisabled}
+            onCheckedChange={(closeOnFinish) => onChange({ ...form, closeOnFinish })}
+          />
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-1.5">
         <span className={SECTION_LABEL_CLASSES}>Secrets to expose</span>
@@ -1483,77 +2029,153 @@ const AutomationForm = ({
   );
 };
 
+const TRIAGE_FILTERS = ["all", "unread", "failed", "skipped"] as const;
+type TriageFilter = (typeof TRIAGE_FILTERS)[number];
+
+const findFirstFindingsLine = (findings: string | null): string => {
+  if (!findings) return "";
+  const line = findings.split("\n").find((candidate) => candidate.trim().length > 0) ?? "";
+  return line.trim().slice(0, 140);
+};
+
+const triggerChip = (trigger: AutomationRunRecord["trigger"]): string =>
+  trigger === "manual"
+    ? "manual"
+    : trigger === "watch"
+      ? "watch"
+      : trigger === "event"
+        ? "event"
+        : trigger === "webhook"
+          ? "webhook"
+          : "scheduled";
+
 const RecentRunsView = ({
   runs,
   nowMs,
   filter,
   onFilterChange,
   onSelect,
+  onOpenLog,
+  onMarkAllRead,
+  onClearHistory,
 }: {
   runs: Array<{ automation: AutomationWithNextRun; run: AutomationRunRecord }>;
   nowMs: number;
-  filter: "all" | "failed" | "skipped";
-  onFilterChange: (filter: "all" | "failed" | "skipped") => void;
-  onSelect: (automationId: string) => void;
-}) => (
-  <div className="flex min-h-0 flex-1 flex-col">
-    <div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 py-2">
-      {(["all", "failed", "skipped"] as const).map((value) => (
-        <button
-          key={value}
-          type="button"
-          onClick={() => onFilterChange(value)}
-          className={cn(
-            "rounded-sm px-2 py-0.5 text-[11px] capitalize transition-colors",
-            filter === value
-              ? "bg-foreground/10 text-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {value}
-        </button>
-      ))}
+  filter: TriageFilter;
+  onFilterChange: (filter: TriageFilter) => void;
+  onSelect: (automationId: string, run: AutomationRunRecord) => void;
+  onOpenLog: (automationId: string, run: AutomationRunRecord) => void;
+  onMarkAllRead: () => void;
+  onClearHistory: () => void;
+}) => {
+  const hasUnread = runs.some(({ run }) => run.unread);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 py-2">
+        {TRIAGE_FILTERS.map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => onFilterChange(value)}
+            className={cn(
+              "rounded-sm px-2 py-0.5 text-[11px] capitalize transition-colors",
+              filter === value
+                ? "bg-foreground/10 text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {value}
+          </button>
+        ))}
+        {hasUnread ? (
+          <button
+            type="button"
+            onClick={onMarkAllRead}
+            className="ml-auto rounded-sm px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Mark all read
+          </button>
+        ) : null}
+        {runs.length > 0 ? (
+          <button
+            type="button"
+            onClick={onClearHistory}
+            title="Clear all run history (keeps the automations)"
+            className={cn(
+              "rounded-sm px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground",
+              hasUnread ? "ml-1" : "ml-auto",
+            )}
+          >
+            <Eraser className="size-3" aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5">
+        {runs.length === 0 ? (
+          <p className="py-6 text-center text-xs text-muted-foreground">No runs to show.</p>
+        ) : (
+          runs.map(({ automation, run }) => {
+            const badge = runStatusBadge(run.status, run.exitCode);
+            const findingsPreview = findFirstFindingsLine(run.findings);
+            const key = `${automation.id}:${run.runId}`;
+            return (
+              <div
+                key={key}
+                className="flex items-center gap-3 rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-foreground/5"
+              >
+                <button
+                  type="button"
+                  aria-label={`open ${automation.name} run log`}
+                  title="Open run log"
+                  onClick={() => {
+                    onOpenLog(automation.id, run);
+                  }}
+                  className="flex min-w-0 flex-1 items-center gap-5 text-left outline-none"
+                >
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    <span
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        run.unread ? "bg-foreground" : "bg-transparent",
+                      )}
+                      aria-hidden="true"
+                    />
+                    <span className={cn("font-mono text-[10px] tabular-nums", badge.className)}>
+                      {badge.label}
+                    </span>
+                  </span>
+                  <span className="min-w-0 shrink-0 truncate text-foreground/90">
+                    {automation.name}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/80">
+                    {findingsPreview}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <span className="min-w-[4.5rem] text-right text-[11px] text-muted-foreground/70">
+                      {triggerChip(run.trigger)}
+                    </span>
+                    <span className="min-w-[4rem] text-right font-mono text-[10px] tabular-nums text-muted-foreground">
+                      {formatRelativeTime(runTimestamp(run), nowMs)}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`open ${automation.name} automation`}
+                  title="Open automation"
+                  onClick={() => onSelect(automation.id, run)}
+                  className="shrink-0 rounded-sm text-muted-foreground/60 outline-none transition-colors hover:text-foreground"
+                >
+                  <ArrowUpRight className="size-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5">
-      {runs.length === 0 ? (
-        <p className="py-6 text-center text-xs text-muted-foreground">No runs to show.</p>
-      ) : (
-        runs.map(({ automation, run }) => {
-          const badge = runStatusBadge(run.status, run.exitCode);
-          return (
-            <button
-              key={`${automation.id}:${run.runId}`}
-              type="button"
-              onClick={() => onSelect(automation.id)}
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left outline-none transition-colors hover:bg-foreground/5"
-            >
-              <span className={cn("w-16 shrink-0 text-[10px] tabular-nums", badge.className)}>
-                {badge.label}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-xs text-foreground/90">
-                {automation.name}
-              </span>
-              <span className="shrink-0 text-[10px] text-muted-foreground/70">
-                {run.trigger === "manual"
-                  ? "manual"
-                  : run.trigger === "watch"
-                    ? "watch"
-                    : run.trigger === "event"
-                      ? "event"
-                      : run.trigger === "webhook"
-                        ? "webhook"
-                        : "scheduled"}
-              </span>
-              <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
-                {formatRelativeTime(runTimestamp(run), nowMs)}
-              </span>
-            </button>
-          );
-        })
-      )}
-    </div>
-  </div>
-);
+  );
+};
 
 interface AutomationListPopoverProps {
   automations: AutomationWithNextRun[] | null;
@@ -1576,7 +2198,7 @@ const AutomationListPopover = ({
       ? automations.filter(
           (automation) =>
             automation.name.toLowerCase().includes(lower) ||
-            automation.command.toLowerCase().includes(lower),
+            runnerSummary(automation.runner).toLowerCase().includes(lower),
         )
       : automations;
   }, [automations, search]);

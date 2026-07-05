@@ -42,7 +42,7 @@ const automation = (overrides: Partial<AutomationWithNextRun> = {}): AutomationW
   trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 0 } },
   cron: "0 2 * * *",
   cwd: "/tmp/project",
-  command: "pnpm build",
+  runner: { kind: "shell", command: "pnpm build" },
   enabled: true,
   limit: { kind: "forever" },
   closeOnFinish: false,
@@ -107,7 +107,7 @@ describe("AutomationsModal", () => {
     // The name appears in the list row and the detail header.
     expect((await screen.findAllByText("nightly build")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Daily at 2:00 AM").length).toBeGreaterThan(0);
-    expect(screen.getByText("pnpm build")).toBeDefined();
+    expect(screen.getByText("Shell: pnpm build")).toBeDefined();
   });
 
   it("renders a watch automation with its trigger label and on-change next run", async () => {
@@ -189,7 +189,7 @@ describe("AutomationsModal", () => {
         name: "demo",
         trigger: { kind: "schedule", schedule: { kind: "daily", hour: 9, minute: 0 } },
         cwd: "/tmp/project",
-        command: "echo hi",
+        runner: { kind: "shell", command: "echo hi" },
         enabled: true,
         limit: { kind: "forever" },
         closeOnFinish: false,

@@ -11,6 +11,7 @@ import {
   EXEC_MAX_TIMEOUT_MS,
   EXEC_RAW_ACCUMULATE_CAP_BYTES,
   EXEC_TIMEOUT_INTERRUPT_GRACE_MS,
+  MAX_AUTOMATION_LOG_LENGTH,
   MAX_CONCURRENT_SESSIONS,
   MAX_OUTPUT_BYTES,
   OUTPUT_BATCH_FLUSH_BYTES,
@@ -94,6 +95,7 @@ const makeBrotliEncoder = (level: number): BrotliEncoder => {
   return { flush, release };
 };
 import { resolveNamedKeys } from "./utils/named-keys.js";
+import { stripAnsi } from "./utils/strip-ansi.js";
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 
 export interface AutomationContext {
@@ -174,6 +176,10 @@ export interface ManagedSession {
   // tier, full access). Set at spawn, never mutated.
   readonly owner: SessionOwner;
   automation: AutomationContext | null;
+  // ANSI-stripped PTY output accumulated for an automation shell run, stored as
+  // the run's log on automation-exit. Bounded to the tail (most recent output)
+  // so a long-running command's final output survives the cap.
+  automationLog: string;
   outputBatch: string;
   outputBatchTimer: NodeJS.Timeout | null;
   drainPollTimer: NodeJS.Timeout | null;
@@ -221,7 +227,7 @@ export interface SessionManagerHooks {
   onOutputActivity: () => void;
   onSessionActivity: () => void;
   onSessionEvent: (event: SessionEventName, cwd: string) => void;
-  onAutomationExit: (automationId: string, runId: string, exitCode: number) => void;
+  onAutomationExit: (automationId: string, runId: string, exitCode: number, log: string) => void;
   onClientExit: (ws: ClientSocket, exitCode: number | null) => void;
 }
 
@@ -416,6 +422,7 @@ export class SessionManager {
       clients: new Set(),
       owner,
       automation: automation ?? null,
+      automationLog: "",
       outputBatch: "",
       outputBatchTimer: null,
       drainPollTimer: null,
@@ -1171,6 +1178,7 @@ export class SessionManager {
   private onSessionOutput(managed: ManagedSession, data: string): void {
     managed.outputBatch += data;
     managed.lastOutputAt = Date.now();
+    if (managed.automation) this.appendAutomationLog(managed, data);
     this.noteOutput(managed.session.pid);
     this.hooks.onOutputActivity();
     // Keep the capture renderer (if one exists) in lockstep with the PTY so a
@@ -1204,6 +1212,20 @@ export class SessionManager {
       this.flushOutput(managed);
     }, OUTPUT_BATCH_WINDOW_MS);
     managed.outputBatchTimer.unref?.();
+  }
+
+  // Accumulate ANSI-stripped PTY output for an automation shell run, keeping
+  // the tail within the log cap so a long command's final output survives.
+  private appendAutomationLog(managed: ManagedSession, data: string): void {
+    const stripped = stripAnsi(data);
+    if (stripped.length === 0) return;
+    const combined = managed.automationLog + stripped;
+    if (combined.length <= MAX_AUTOMATION_LOG_LENGTH) {
+      managed.automationLog = combined;
+      return;
+    }
+    const overflow = combined.length - MAX_AUTOMATION_LOG_LENGTH;
+    managed.automationLog = combined.slice(overflow);
   }
 
   private flushOutput(managed: ManagedSession): void {
@@ -1341,7 +1363,12 @@ export class SessionManager {
     const automation = managed.automation;
     if (automation) {
       session.on("automation-exit", (exitCode: number) =>
-        this.hooks.onAutomationExit(automation.automationId, automation.runId, exitCode),
+        this.hooks.onAutomationExit(
+          automation.automationId,
+          automation.runId,
+          exitCode,
+          managed.automationLog,
+        ),
       );
     }
     managed.gitWatcher.on("git-dirty", () => {

@@ -489,15 +489,24 @@ export const MAX_AUTOMATION_REQUESTED_SECRETS = 32;
 // schedule (with a derived cron computed on the fly), a run-count limit, a
 // lifecycle, and a capped run-history array. v3 wraps the schedule in a
 // top-level `trigger` union so an automation can fire on a schedule OR when a
-// folder changes. AutomationStore.load() migrates v1/v2 -> v3 in place on first
-// boot so existing automations are never lost.
-export const AUTOMATIONS_FILE_VERSION = 3;
+// folder changes. v4 replaces the top-level `command` with a discriminated
+// `runner` union (shell command vs agent prompt) and adds findings/changed-
+// files/unread to run records. AutomationStore.load() migrates v1/v2/v3 -> v4
+// in place on first boot so existing automations are never lost.
+export const AUTOMATIONS_FILE_VERSION = 4;
 // Largest "stop after N runs" budget. Generous — a limit is opt-in; the common
 // case is "forever".
 export const AUTOMATION_RUN_LIMIT_MAX = 100_000;
 // Per-automation run-history ring. Newest-first; appendRun trims to this. At
 // MAX_AUTOMATIONS the whole history file stays around 1 MB in the worst case.
-export const AUTOMATION_RUN_HISTORY_CAP = 50;
+// Lowered once agent runs started keeping a full log per run — the log (not
+// the status badge) is the storage driver now.
+export const AUTOMATION_RUN_HISTORY_CAP = 20;
+// Schema-level sanity bound on the runs array — far above the trim cap so a
+// file written under an older (higher) cap still loads. The actual storage
+// bound is the trim cap above, enforced at write time (and normalized on
+// load). Decoupled so lowering the trim cap never rejects existing files.
+export const AUTOMATION_RUN_HISTORY_SCHEMA_MAX = 1000;
 // Most-recent "skipped" entries reconstructed per automation per outage. A
 // frequent schedule (every minute) over a multi-day sleep would otherwise
 // record thousands of skips and evict every real run from the ring.
@@ -555,6 +564,46 @@ export const MAX_WEBHOOK_ID_LENGTH = 64;
 export const CRON_NEXT_OCCURRENCE_SCAN_LIMIT_DAYS = 1466;
 export const MAX_AUTOMATION_EXIT_CODE_DIGITS = 4;
 export const MAX_AUTOMATION_WATCH_FILTER_LENGTH = 255;
+// Largest agent-runner prompt (the prompt sent to `pi -p`). Generous like a
+// prompt template; shell commands use MAX_AUTOMATION_COMMAND_LENGTH.
+export const MAX_AUTOMATION_PROMPT_LENGTH = 4096;
+// `--model` pattern passed to `pi`. A short provider/id pattern; not a path.
+export const MAX_AUTOMATION_MODEL_LENGTH = 128;
+// Truncated stdout captured from an agent run and stored as the run's
+// `findings` (the Triage inbox content). Bounded so the run-history ring stays
+// small; a longer output is truncated with a marker.
+export const MAX_AUTOMATION_FINDINGS_LENGTH = 8000;
+// Full per-run log kept on the run record. For shell runs this is a string
+// (ANSI-stripped PTY output); for agent runs it's a structured array of
+// user/assistant/tool entries (so the UI can render a user/assistant/tool
+// transcript and hide thinking behind a toggle). The array branch is bounded
+// by entry count here; the agent runner bounds total bytes to the value below.
+export const MAX_AUTOMATION_LOG_LENGTH = 65536;
+// Defensive cap on the number of structured log entries per agent run.
+export const MAX_AUTOMATION_LOG_ENTRIES = 500;
+// Truncated tool result text stored in a structured log entry (tool calls can
+// emit huge outputs; the assistant/user text is kept full).
+export const MAX_AUTOMATION_TOOL_RESULT_LENGTH = 1000;
+// Truncated tool-call input (the path/command a tool was invoked with) shown in
+// a log entry's header. A short display preview, not the full arguments.
+export const MAX_AUTOMATION_TOOL_INPUT_LENGTH = 200;
+// Session-transcript tool result caps — match pi core's tool-output truncation
+// (core/tools/truncate.js): 2000 lines or 50 KB, whichever hits first. The
+// session file is already pi-truncated; these are a safety net for the
+// transcript returned over the API (which isn't stored in our file).
+export const AUTOMATION_SESSION_TOOL_MAX_LINES = 2000;
+export const AUTOMATION_SESSION_TOOL_MAX_BYTES = 50_000;
+// Cap on the per-run `changedFiles` list (git status diff before/after). A
+// sprawling run won't blow up the history file.
+export const MAX_AUTOMATION_CHANGED_FILES = 64;
+// Subdirectory of the daemon state dir holding one pi session file per
+// thread-mode agent automation (resumed each fire). Fresh-mode runs are
+// ephemeral (--no-session) and never land here.
+export const AUTOMATION_AGENT_SESSIONS_DIRNAME = "agent-sessions";
+// Wall-clock cap on a single agent run. An agent that hangs (stuck tool, a
+// model that never stops) is killed and marked failed rather than leaking a
+// process and a "running" run forever.
+export const AUTOMATION_AGENT_RUN_TIMEOUT_MS = 10 * 60 * 1000;
 
 export const WS_READY_STATE_OPEN = 1;
 export const WS_CLOSE_POLICY_VIOLATION = 1008;

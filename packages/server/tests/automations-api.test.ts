@@ -35,7 +35,7 @@ const createInput = () => ({
   name: "nightly build",
   trigger: { kind: "schedule", schedule: "0 2 * * *" },
   cwd: os.tmpdir(),
-  command: "pnpm build",
+  runner: { kind: "shell", command: "pnpm build" },
 });
 
 describe("automations REST API", () => {
@@ -177,7 +177,7 @@ describe("automations REST API", () => {
         schedule: { kind: "weekdaysPreset", preset: "weekdays", hour: 9, minute: 0 },
       },
       cwd: os.tmpdir(),
-      command: "echo standup",
+      runner: { kind: "shell", command: "echo standup" },
     });
     expect(status).toBe(201);
     const automation = automationWithNextRunSchema.parse(body.automation);
@@ -209,7 +209,7 @@ describe("automations REST API", () => {
       name: "on git commit",
       trigger: { kind: "event", events: ["git-commit"] },
       cwd: os.tmpdir(),
-      command: "echo commit",
+      runner: { kind: "shell", command: "echo commit" },
     });
     expect(status).toBe(201);
     const automation = automationWithNextRunSchema.parse(body.automation);
@@ -241,7 +241,7 @@ describe("automations REST API", () => {
         name: "on change",
         trigger: { kind: "watch", recursive: true },
         cwd: watchDir,
-        command: "echo changed",
+        runner: { kind: "shell", command: "echo changed" },
       });
       expect(status).toBe(201);
       const automation = automationWithNextRunSchema.parse(body.automation);
@@ -260,25 +260,28 @@ describe("automations REST API", () => {
         name: "on change",
         trigger: { kind: "watch", recursive: true },
         cwd: watchDir,
-        command: "true",
+        runner: { kind: "shell", command: "true" },
         limit: { kind: "count", max: 1 },
       });
       expect(created.status).toBe(201);
 
-      // Let the watcher arm, then a single change fires one debounced run that
-      // counts toward the limit and finishes the automation.
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      fs.writeFileSync(path.join(watchDir, "touched.txt"), "hi");
-
+      // fs.watch arms asynchronously (FSEvents on macOS has startup latency), so
+      // a single write can land before the watcher is ready and be missed.
+      // Retry the change each poll until a run fires — writes are spaced past
+      // the watch debounce so each is its own debounced run; the limit is 1 so
+      // the first one the watcher catches finishes the automation.
       await vi.waitFor(
         async () => {
           const [listed] = (await request("GET", "")).body.automations as Array<
             Record<string, unknown>
           >;
+          if ((listed.runCount as number) === 0) {
+            fs.writeFileSync(path.join(watchDir, `touched-${Date.now()}.txt`), "hi");
+          }
           expect(listed.runCount).toBe(1);
           expect(listed.lifecycle).toBe("finished");
         },
-        { timeout: 15_000, interval: 100 },
+        { timeout: 15_000, interval: 600 },
       );
       expect(testContext.openedUrls).toHaveLength(1);
       const [listed] = (await request("GET", "")).body.automations as Array<
@@ -305,7 +308,7 @@ describe("automations REST API", () => {
       name: "on webhook",
       trigger: { kind: "webhook" },
       cwd: os.tmpdir(),
-      command: "true",
+      runner: { kind: "shell", command: "true" },
     });
     expect(status).toBe(201);
     const automation = automationWithNextRunSchema.parse(body.automation);
@@ -320,7 +323,7 @@ describe("automations REST API", () => {
       name: "on webhook",
       trigger: { kind: "webhook" },
       cwd: os.tmpdir(),
-      command: "true",
+      runner: { kind: "shell", command: "true" },
       limit: { kind: "count", max: 1 },
     });
     expect(created.status).toBe(201);
@@ -348,7 +351,7 @@ describe("automations REST API", () => {
       name: "on webhook",
       trigger: { kind: "webhook" },
       cwd: os.tmpdir(),
-      command: "true",
+      runner: { kind: "shell", command: "true" },
     });
     const automation = automationWithNextRunSchema.parse(created.body.automation);
     const url = webhookUrl(webhookIdOf(automation));
@@ -370,7 +373,7 @@ describe("automations REST API", () => {
       name: "on webhook",
       trigger: { kind: "webhook" },
       cwd: os.tmpdir(),
-      command: "true",
+      runner: { kind: "shell", command: "true" },
     });
     const automation = automationWithNextRunSchema.parse(created.body.automation);
     const originalId = webhookIdOf(automation);
@@ -391,7 +394,7 @@ describe("automations REST API", () => {
       name: "on webhook",
       trigger: { kind: "webhook" },
       cwd: os.tmpdir(),
-      command: "true",
+      runner: { kind: "shell", command: "true" },
     });
     const automation = automationWithNextRunSchema.parse(created.body.automation);
     await request("PATCH", `/${automation.id}`, { enabled: false });
@@ -504,7 +507,7 @@ describe("automations REST API", () => {
         name: "marker",
         trigger: { kind: "schedule", schedule: "0 2 * * *" },
         cwd: automationCwd,
-        command: "echo automation-ran-marker",
+        runner: { kind: "shell", command: "echo automation-ran-marker" },
       });
       const automation = automationWithNextRunSchema.parse(created.body.automation);
       const run = await request("POST", `/${automation.id}/run`);
@@ -608,7 +611,7 @@ describe("automations REST API", () => {
         name: "closer",
         trigger: { kind: "schedule", schedule: "0 2 * * *" },
         cwd: dir,
-        command: "echo automation-ran-marker",
+        runner: { kind: "shell", command: "echo automation-ran-marker" },
         closeOnFinish: true,
       })) as { automation: { id: string } };
       const run = (await post(`/${created.automation.id}/run`)) as { runId: string };
@@ -655,7 +658,7 @@ describe("automations REST API", () => {
             name: "no-closer",
             trigger: { kind: "schedule", schedule: "0 2 * * *" },
             cwd: dir,
-            command: "echo automation-ran-marker",
+            runner: { kind: "shell", command: "echo automation-ran-marker" },
           }),
         })
       ).json()) as { automation: { id: string } };
@@ -689,6 +692,384 @@ describe("automations REST API", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 90_000);
+
+  it("records a shell run's stdout and stderr as the run log", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-shell-log-"));
+    const server = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      stateDirectory: dir,
+      tabController: { open: async () => null, close: async () => {} },
+    });
+    try {
+      const base = `http://127.0.0.1:${server.port}/api/automations`;
+      const created = (await (
+        await fetch(base, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: "loggy",
+            trigger: { kind: "schedule", schedule: "0 2 * * *" },
+            cwd: dir,
+            runner: {
+              kind: "shell",
+              command: "echo shell-out-marker; echo shell-err-marker 1>&2",
+            },
+          }),
+        })
+      ).json()) as { automation: { id: string } };
+      const run = (await (
+        await fetch(`${base}/${created.automation.id}/run`, { method: "POST" })
+      ).json()) as { runId: string };
+
+      const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws?run=${run.runId}`);
+      socket.binaryType = "arraybuffer";
+      try {
+        // Claim the run so the command runs; the OSC marker fires
+        // automation-exit, which stores the ANSI-stripped PTY output as the
+        // run's log.
+        await vi.waitFor(
+          async () => {
+            const automation = (
+              (await (await fetch(`${base}`)).json()) as {
+                automations: Array<{ runs: Array<{ status: string; log: string | null }> }>;
+              }
+            ).automations[0];
+            const latest = automation.runs[0];
+            expect(latest?.status).toBe("completed");
+            expect(latest?.log).not.toBeNull();
+            expect(latest?.log).toContain("shell-out-marker");
+            expect(latest?.log).toContain("shell-err-marker");
+          },
+          { timeout: 30_000, interval: 100 },
+        );
+      } finally {
+        socket.close();
+        await new Promise<void>((resolve) => socket.once("close", () => resolve()));
+      }
+    } finally {
+      await server.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  it("creates an agent automation and stores the runner", async () => {
+    const created = await request("POST", "", {
+      name: "reviewer",
+      trigger: { kind: "schedule", schedule: "0 9 * * *" },
+      cwd: os.tmpdir(),
+      runner: { kind: "agent", prompt: "review commits", sessionMode: "thread" },
+    });
+    const automation = automationWithNextRunSchema.parse(created.body.automation);
+    expect(automation.runner).toMatchObject({
+      kind: "agent",
+      prompt: "review commits",
+      sessionMode: "thread",
+    });
+    expect(automation.runner.kind).toBe("agent");
+    if (automation.runner.kind === "agent") {
+      expect(automation.runner.harness.kind).toBe("pi");
+    }
+  });
+
+  it("marks a run read and clears all unread via the triage endpoints", async () => {
+    const seedDir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-triage-"));
+    const now = Date.now();
+    fs.writeFileSync(
+      path.join(seedDir, "automations.json"),
+      JSON.stringify({
+        version: 4,
+        automations: [
+          {
+            id: "triage-1",
+            name: "reviewer",
+            trigger: { kind: "schedule", schedule: { kind: "daily", hour: 9, minute: 0 } },
+            cwd: os.tmpdir(),
+            runner: { kind: "agent", prompt: "review", sessionMode: "fresh" },
+            enabled: true,
+            limit: { kind: "forever" },
+            closeOnFinish: false,
+            requestedSecrets: [],
+            runCount: 2,
+            lifecycle: "active",
+            runs: [
+              {
+                runId: "r1",
+                scheduledFor: now,
+                startedAt: now,
+                finishedAt: now,
+                status: "completed",
+                exitCode: 0,
+                trigger: "schedule",
+                countsTowardLimit: true,
+                findings: "nothing to report",
+                changedFiles: [],
+                unread: true,
+                log: null,
+              },
+              {
+                runId: "r2",
+                scheduledFor: now - 60_000,
+                startedAt: now - 60_000,
+                finishedAt: now - 60_000,
+                status: "completed",
+                exitCode: 0,
+                trigger: "schedule",
+                countsTowardLimit: true,
+                findings: "found a bug",
+                changedFiles: ["src/a.ts"],
+                unread: true,
+                log: null,
+              },
+            ],
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        ],
+      }),
+    );
+    const triageServer = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      stateDirectory: seedDir,
+      tabController: { open: async () => null, close: async () => {} },
+    });
+    try {
+      const base = `http://127.0.0.1:${triageServer.port}/api`;
+      const before = (
+        (await (await fetch(`${base}/automations`)).json()) as {
+          automations: Array<{ runs: Array<{ runId: string; unread: boolean }> }>;
+        }
+      ).automations[0];
+      expect(before.runs.every((run) => run.unread)).toBe(true);
+
+      const one = await fetch(`${base}/automations/triage-1/runs/r1/read`, {
+        method: "POST",
+      });
+      expect(one.status).toBe(200);
+      const afterOne = (
+        (await (await fetch(`${base}/automations`)).json()) as {
+          automations: Array<{ runs: Array<{ runId: string; unread: boolean }> }>;
+        }
+      ).automations[0];
+      expect(afterOne.runs.find((run) => run.runId === "r1")?.unread).toBe(false);
+      expect(afterOne.runs.find((run) => run.runId === "r2")?.unread).toBe(true);
+
+      const all = await fetch(`${base}/triage/mark-all-read`, { method: "POST" });
+      expect(all.status).toBe(200);
+      const afterAll = (
+        (await (await fetch(`${base}/automations`)).json()) as {
+          automations: Array<{ runs: Array<{ unread: boolean }> }>;
+        }
+      ).automations[0];
+      expect(afterAll.runs.every((run) => !run.unread)).toBe(true);
+    } finally {
+      await triageServer.stop();
+      fs.rmSync(seedDir, { recursive: true, force: true });
+    }
+  });
+
+  it("clears every automation's run history via /triage/clear-history, keeping the automations", async () => {
+    const seedDir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-clear-history-"));
+    const triageServer = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      stateDirectory: seedDir,
+      tabController: { open: async () => null, close: async () => {} },
+    });
+    const base = `http://127.0.0.1:${triageServer.port}/api`;
+    try {
+      const a = await fetch(`${base}/automations`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "with history",
+          trigger: { kind: "schedule", schedule: "0 9 * * *" },
+          cwd: os.tmpdir(),
+          runner: { kind: "shell", command: "echo hi" },
+        }),
+      });
+      const automationId = ((await a.json()) as { automation: { id: string } }).automation.id;
+      await fetch(`${base}/automations/${automationId}/run`, { method: "POST" });
+      const before = (
+        (await (await fetch(`${base}/automations`)).json()) as {
+          automations: Array<{ runs: unknown[]; runCount: number }>;
+        }
+      ).automations[0];
+      expect(before.runs.length).toBeGreaterThan(0);
+
+      const res = await fetch(`${base}/triage/clear-history`, { method: "POST" });
+      expect(res.status).toBe(200);
+      const after = (
+        (await (await fetch(`${base}/automations`)).json()) as {
+          automations: Array<{ id: string; runs: unknown[]; runCount: number }>;
+        }
+      ).automations[0];
+      expect(after.runs).toEqual([]);
+      expect(after.id).toBe(automationId);
+      // The automation survives; its run-count (limit progress) is preserved.
+      expect(after.runCount).toBe(before.runCount);
+    } finally {
+      await triageServer.stop();
+      fs.rmSync(seedDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns the thread-mode session transcript for an agent automation", async () => {
+    const created = await request("POST", "", {
+      name: "reviewer",
+      trigger: { kind: "schedule", schedule: "0 9 * * *" },
+      cwd: os.tmpdir(),
+      runner: { kind: "agent", prompt: "review commits", sessionMode: "thread" },
+    });
+    const automationId = (created.body.automation as { id: string }).id;
+    const sessionsDir = path.join(testContext.stateDirectory, "agent-sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionsDir, `${automationId}.jsonl`),
+      [
+        JSON.stringify({ type: "session", id: "s1", cwd: os.tmpdir() }),
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          message: { role: "user", content: [{ type: "text", text: "hi" }] },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m2",
+          message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
+        }),
+        JSON.stringify({ type: "compaction", id: "c1", summary: "summarized", tokensBefore: 9000 }),
+        JSON.stringify({
+          type: "message",
+          id: "m3",
+          message: { role: "user", content: [{ type: "text", text: "again" }] },
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    const { status, body } = await request("GET", `/${automationId}/session`);
+    expect(status).toBe(200);
+    expect(body).toEqual({
+      entries: [
+        { type: "user", text: "hi" },
+        { type: "assistant", text: "hello" },
+        { type: "compaction", summary: "summarized", tokensBefore: 9000 },
+        { type: "user", text: "again" },
+      ],
+    });
+  });
+
+  it("returns an empty transcript when the session file does not exist yet", async () => {
+    const created = await request("POST", "", {
+      name: "reviewer",
+      trigger: { kind: "schedule", schedule: "0 9 * * *" },
+      cwd: os.tmpdir(),
+      runner: { kind: "agent", prompt: "review commits", sessionMode: "thread" },
+    });
+    const automationId = (created.body.automation as { id: string }).id;
+    const { status, body } = await request("GET", `/${automationId}/session`);
+    expect(status).toBe(200);
+    expect(body).toEqual({ entries: [] });
+  });
+
+  it("builds a tab URL that opens the thread session in pi for a thread agent", async () => {
+    const created = await request("POST", "", {
+      name: "reviewer",
+      trigger: { kind: "schedule", schedule: "0 9 * * *" },
+      cwd: os.tmpdir(),
+      runner: { kind: "agent", prompt: "review commits", sessionMode: "thread" },
+    });
+    const automationId = (created.body.automation as { id: string }).id;
+    const { status, body } = await request("GET", `/${automationId}/agent-session-url`);
+    expect(status).toBe(200);
+    const url = body.url as string;
+    expect(url.startsWith("/?cwd=")).toBe(true);
+    const params = new URLSearchParams(url.slice(2));
+    const cmd = params.get("cmd") ?? "";
+    const cwd = params.get("cwd") ?? "";
+    expect(cwd).toBe(os.tmpdir());
+    expect(cmd.startsWith("pi --session '")).toBe(true);
+    expect(cmd).toContain(`agent-sessions/${automationId}.jsonl`);
+    expect(cmd).toMatch(/ && exit$/);
+  });
+
+  it("rejects the agent-session-url for a fresh agent (no session to resume)", async () => {
+    const created = await request("POST", "", {
+      name: "reviewer",
+      trigger: { kind: "schedule", schedule: "0 9 * * *" },
+      cwd: os.tmpdir(),
+      runner: { kind: "agent", prompt: "review commits", sessionMode: "fresh" },
+    });
+    const automationId = (created.body.automation as { id: string }).id;
+    const { status } = await request("GET", `/${automationId}/agent-session-url`);
+    expect(status).toBe(409);
+  });
+  it("truncates the transcript at the run's finishedAt so an older run sees the branch as it was then", async () => {
+    const created = await request("POST", "", {
+      name: "reviewer",
+      trigger: { kind: "schedule", schedule: "0 9 * * *" },
+      cwd: os.tmpdir(),
+      runner: { kind: "agent", prompt: "review commits", sessionMode: "thread" },
+    });
+    const automationId = (created.body.automation as { id: string }).id;
+    const sessionsDir = path.join(testContext.stateDirectory, "agent-sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const finishedAt = Date.parse("2026-07-05T17:21:00.000Z");
+    fs.writeFileSync(
+      path.join(sessionsDir, `${automationId}.jsonl`),
+      [
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          timestamp: "2026-07-05T17:20:45.147Z",
+          message: { role: "user", content: [{ type: "text", text: "old" }] },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m2",
+          timestamp: "2026-07-05T17:21:00.000Z",
+          message: { role: "assistant", content: [{ type: "text", text: "old answer" }] },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m3",
+          timestamp: "2026-07-05T17:26:16.000Z",
+          message: { role: "user", content: [{ type: "text", text: "new" }] },
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    const runId = "run-trunc-1";
+    testContext.server.automationStore.appendRun(automationId, {
+      runId,
+      scheduledFor: finishedAt,
+      startedAt: finishedAt - 60_000,
+      finishedAt,
+      status: "completed",
+      exitCode: 0,
+      trigger: "manual",
+      countsTowardLimit: false,
+      findings: null,
+      changedFiles: [],
+      unread: false,
+      log: null,
+    });
+    const truncated = await request("GET", `/${automationId}/session?runId=${runId}`);
+    expect(truncated.body).toEqual({
+      entries: [
+        { type: "user", text: "old" },
+        { type: "assistant", text: "old answer" },
+      ],
+    });
+    // No runId → the full branch.
+    const full = await request("GET", `/${automationId}/session`);
+    expect((full.body as { entries: Array<{ type: string }> }).entries.map((e) => e.type)).toEqual([
+      "user",
+      "assistant",
+      "user",
+    ]);
+  });
 });
 
 describe("automation run tab surface", () => {

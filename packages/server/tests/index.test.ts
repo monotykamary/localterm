@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { spawn } from "node:child_process";
 import { createServer, healthSchema, type RunningServer } from "../src/index.js";
+import { pollFor } from "./helpers/poll-for.js";
 import type { ProcessSnapshotEntry } from "../src/caffeinate-process-match.js";
 import type { ListeningSocketEntry } from "../src/listening-ports.js";
 import { WebSocket } from "ws";
@@ -153,8 +154,8 @@ describe("createServer WS lifecycle", () => {
   });
 
   it("keeps the PTY alive (dormant) on WS close", async () => {
-    const { socket } = await connectAndCollect(server.port);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    const { socket, waitForSession } = await connectAndCollect(server.port);
+    await waitForSession();
     expect(server.registry.size()).toBe(1);
     await closeWs(socket);
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -253,7 +254,21 @@ describe("createServer WS lifecycle", () => {
         const { socket } = await connectAndCollect(server.port);
         sockets.push(socket);
       }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Wait for the server to register all 64 sockets before opening the
+      // 65th — under load, registering them can outlast a fixed delay, and a
+      // 65th opened too early would be accepted (count still < 64) instead of
+      // rejected with the capacity code.
+      expect(
+        await pollFor(
+          async () => {
+            const response = await fetch(`http://127.0.0.1:${server.port}/api/health`);
+            const body = (await response.json()) as { sessions?: number };
+            return (body.sessions ?? 0) >= 64;
+          },
+          5_000,
+          50,
+        ),
+      ).toBe(true);
       const rejected = new WebSocket(`ws://127.0.0.1:${server.port}/ws`);
       const closeEvent = await new Promise<WebSocket.CloseEvent>((resolve) => {
         rejected.addEventListener("close", (event) => resolve(event));

@@ -10,7 +10,7 @@ export class AutomationRunTracker {
       runId: randomUUID(),
       automationId: automation.id,
       cwd: automation.cwd,
-      command: automation.command,
+      runner: automation.runner,
       createdAt: now,
     };
     this.pendingRuns.set(run.runId, run);

@@ -27,7 +27,7 @@ describe("AutomationScheduler", () => {
       name: "every minute",
       trigger: { kind: "schedule", schedule: { kind: "everyNMinutes", step: 1 } },
       cwd: os.tmpdir(),
-      command: "true",
+      runner: { kind: "shell", command: "true" },
       ...overrides,
     });
 

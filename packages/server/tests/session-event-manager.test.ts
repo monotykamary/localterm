@@ -10,7 +10,7 @@ const makeAutomation = (overrides: Partial<Automation> = {}): Automation => ({
   name: "on event",
   trigger: { kind: "event", events: ["git-commit"] },
   cwd: "/virtual/e1",
-  command: "true",
+  runner: { kind: "shell", command: "true" },
   enabled: true,
   limit: { kind: "forever" },
   closeOnFinish: false,

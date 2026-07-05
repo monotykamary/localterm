@@ -10,7 +10,7 @@ const createInput: CreateAutomationInput = {
   name: "nightly build",
   trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 0 } },
   cwd: os.tmpdir(),
-  command: "pnpm build",
+  runner: { kind: "shell", command: "pnpm build" },
 };
 
 const runRecord = (overrides: Partial<AutomationRunRecord> = {}): AutomationRunRecord => ({
@@ -22,6 +22,10 @@ const runRecord = (overrides: Partial<AutomationRunRecord> = {}): AutomationRunR
   exitCode: null,
   trigger: "schedule",
   countsTowardLimit: true,
+  findings: null,
+  changedFiles: [],
+  unread: false,
+  log: null,
   ...overrides,
 });
 
@@ -42,6 +46,94 @@ describe("AutomationStore", () => {
     const store = new AutomationStore(filePath);
     expect(store.list()).toEqual([]);
     expect(store.size()).toBe(0);
+  });
+
+  it("loads a v4 file whose run history exceeds the trim cap, trimming to the cap and persisting", () => {
+    // Regression: the runs array schema must not reject files written under an
+    // older (higher) cap. Lowering the trim cap once stranded every automation
+    // behind a schema `too_big` rejection — the whole list vanished.
+    const over = 30;
+    const runs = Array.from({ length: over }, (_, index) =>
+      runRecord({
+        runId: `r${index}`,
+        startedAt: 1000 + index,
+        finishedAt: 1001 + index,
+        status: "completed",
+        exitCode: 0,
+      }),
+    );
+    const seed = new AutomationStore(filePath);
+    const automation = { ...seed.create(createInput), runs };
+    fs.writeFileSync(filePath, JSON.stringify({ version: 4, automations: [automation] }), "utf8");
+    const loaded = new AutomationStore(filePath);
+    expect(loaded.list()).toHaveLength(1);
+    expect(loaded.list()[0].runs).toHaveLength(AUTOMATION_RUN_HISTORY_CAP);
+    // The persisted file is rewritten with the trimmed history.
+    const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(persisted.automations[0].runs).toHaveLength(AUTOMATION_RUN_HISTORY_CAP);
+  });
+
+  it("repairs a v4 file with a stored log text above the per-entry cap instead of rejecting it", () => {
+    // Regression: an older build truncated a tool result to `cap` then appended a
+    // marker, so the stored text was `cap + marker.length` — over the schema's
+    // `.max(cap)` — and the whole automations file failed to load (every
+    // automation vanished). The store must truncate the oversized text in place
+    // and recover the file.
+    const seed = new AutomationStore(filePath);
+    const automation = { ...seed.create(createInput), runs: [] };
+    const oversize = "x".repeat(1000) + "…[truncated]"; // 1012 chars
+    const runs = [
+      runRecord({
+        runId: "r1",
+        finishedAt: 1001,
+        status: "completed",
+        exitCode: 0,
+        log: [{ type: "tool", name: "read", text: oversize }],
+      }),
+    ];
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({ version: 4, automations: [{ ...automation, runs }] }),
+      "utf8",
+    );
+    const loaded = new AutomationStore(filePath);
+    expect(loaded.list()).toHaveLength(1);
+    const log = loaded.list()[0].runs[0]?.log;
+    expect(Array.isArray(log)).toBe(true);
+    if (Array.isArray(log)) {
+      expect((log[0] as { text: string }).text.length).toBeLessThanOrEqual(1000);
+    }
+    const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(persisted.automations[0].runs[0].log[0].text.length).toBeLessThanOrEqual(1000);
+  });
+
+  it("strips the removed autoCompact flag from an agent runner on load", () => {
+    // The auto-compaction toggle was removed (the harness handles compaction by
+    // default); an existing file with `autoCompact` on its runner must still load
+    // — the repair strips the flag so the strict v4 schema accepts it.
+    const seed = new AutomationStore(filePath);
+    const automation = seed.create({
+      ...createInput,
+      runner: {
+        kind: "agent",
+        prompt: "review",
+        sessionMode: "thread",
+        harness: { kind: "pi", extensions: true, skills: true, contextFiles: true },
+      },
+    });
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 4,
+        automations: [{ ...automation, runner: { ...automation.runner, autoCompact: false } }],
+      }),
+      "utf8",
+    );
+    const loaded = new AutomationStore(filePath);
+    expect(loaded.list()).toHaveLength(1);
+    expect("autoCompact" in (loaded.list()[0].runner as Record<string, unknown>)).toBe(false);
+    const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect("autoCompact" in persisted.automations[0].runner).toBe(false);
   });
 
   it("creates an automation with v3 defaults and persists it", () => {
@@ -91,7 +183,7 @@ describe("AutomationStore", () => {
             name: "legacy",
             trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 0 } },
             cwd: "/tmp",
-            command: "echo hi",
+            runner: { kind: "shell", command: "echo hi" },
             enabled: true,
             limit: { kind: "forever" },
             runCount: 0,
@@ -113,7 +205,7 @@ describe("AutomationStore", () => {
     const automation = store.create({
       name: createInput.name,
       cwd: createInput.cwd,
-      command: createInput.command,
+      runner: createInput.runner,
       trigger: { kind: "schedule", schedule: "0 9 * * 1-5" },
     });
     expect(automation.trigger).toEqual({
@@ -128,7 +220,7 @@ describe("AutomationStore", () => {
     const automation = store.create({
       name: createInput.name,
       cwd: createInput.cwd,
-      command: createInput.command,
+      runner: createInput.runner,
       trigger: { kind: "schedule", schedule: "0 9 1 * 1" },
     });
     expect(automation.trigger).toEqual({
@@ -144,7 +236,7 @@ describe("AutomationStore", () => {
     expect(updated).not.toBeNull();
     expect(updated?.enabled).toBe(false);
     expect(updated?.name).toBe("renamed");
-    expect(updated?.command).toBe(createInput.command);
+    expect(updated?.runner).toBe(createInput.runner);
     expect(updated?.updatedAt).toBeGreaterThanOrEqual(automation.updatedAt);
   });
 
@@ -267,12 +359,16 @@ describe("AutomationStore", () => {
         exitCode: 0,
         trigger: "schedule",
         countsTowardLimit: true,
+        findings: null,
+        changedFiles: [],
+        unread: false,
+        log: null,
       },
     ]);
 
-    // The migration persists as v3 so later loads hit the fast path.
+    // The migration persists as v4 so later loads hit the fast path.
     const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    expect(persisted.version).toBe(3);
+    expect(persisted.version).toBe(4);
   });
 
   it("migrates a v1 automation with a null lastRun to empty history", () => {
@@ -375,9 +471,9 @@ describe("AutomationStore", () => {
       schedule: { kind: "daily", hour: 9, minute: 0 },
     });
 
-    // The migration persists as v3 (no leftover top-level schedule).
+    // The migration persists as v4 (no leftover top-level schedule).
     const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    expect(persisted.version).toBe(3);
+    expect(persisted.version).toBe(4);
     expect(persisted.automations[0].schedule).toBeUndefined();
   });
 
@@ -426,5 +522,89 @@ describe("AutomationStore", () => {
     fs.writeFileSync(filePath, JSON.stringify({ version: 999, automations: "nope" }), "utf8");
     const store = new AutomationStore(filePath);
     expect(store.list()).toEqual([]);
+  });
+
+  it("migrates a v3 file to v4, wrapping the bare command in a shell runner", () => {
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 3,
+        automations: [
+          {
+            id: "a3",
+            name: "legacy",
+            trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 0 } },
+            cwd: os.tmpdir(),
+            command: "pnpm build",
+            enabled: true,
+            limit: { kind: "forever" },
+            closeOnFinish: false,
+            requestedSecrets: [],
+            runCount: 1,
+            lifecycle: "active",
+            runs: [],
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const store = new AutomationStore(filePath);
+    const automation = store.get("a3");
+    expect(automation?.runner).toEqual({ kind: "shell", command: "pnpm build" });
+    // Persisted as v4 so later loads hit the fast path.
+    const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(persisted.version).toBe(AUTOMATIONS_FILE_VERSION);
+    expect(persisted.automations[0].command).toBeUndefined();
+  });
+
+  it("marks a single run read and clears unread across all runs", () => {
+    const store = new AutomationStore(filePath);
+    const automation = store.create(createInput);
+    store.appendRun(automation.id, runRecord({ runId: "r1", unread: true, findings: "hi" }));
+    store.appendRun(automation.id, runRecord({ runId: "r2", unread: true, findings: "yo" }));
+
+    const afterOne = store.markRunRead(automation.id, "r1");
+    expect(afterOne?.runs.find((r) => r.runId === "r1")?.unread).toBe(false);
+    expect(afterOne?.runs.find((r) => r.runId === "r2")?.unread).toBe(true);
+
+    // Idempotent: marking an already-read run stays read (no-op persist).
+    store.markRunRead(automation.id, "r1");
+    expect(store.get(automation.id)?.runs.find((r) => r.runId === "r1")?.unread).toBe(false);
+
+    expect(store.markAllRunsRead()).toBe(true);
+    const cleared = store.get(automation.id);
+    expect(cleared?.runs.every((r) => !r.unread)).toBe(true);
+    // A second mark-all-read reports no change.
+    expect(store.markAllRunsRead()).toBe(false);
+  });
+
+  it("clears every automation's run history while keeping the automations and run count", () => {
+    const store = new AutomationStore(filePath);
+    const automation = store.create(createInput);
+    store.appendRun(automation.id, runRecord({ runId: "r1", status: "completed", exitCode: 0 }));
+    store.incrementRunCount(automation.id);
+    store.appendRun(automation.id, runRecord({ runId: "r2", status: "completed", exitCode: 0 }));
+    store.incrementRunCount(automation.id);
+    const other = store.create({ ...createInput, name: "other" });
+    store.appendRun(other.id, runRecord({ runId: "r3", status: "completed", exitCode: 0 }));
+
+    expect(store.clearAllRuns()).toBe(true);
+    expect(store.get(automation.id)?.runs).toEqual([]);
+    expect(store.get(other.id)?.runs).toEqual([]);
+    // The automations themselves survive.
+    expect(store.size()).toBe(2);
+    // runCount (limit progress) is preserved.
+    expect(store.get(automation.id)?.runCount).toBe(2);
+    // Idempotent.
+    expect(store.clearAllRuns()).toBe(false);
+  });
+
+  it("returns null when marking an unknown run or automation", () => {
+    const store = new AutomationStore(filePath);
+    const automation = store.create(createInput);
+    expect(store.markRunRead("missing", "r1")).toBeNull();
+    expect(store.markRunRead(automation.id, "missing")).toBeNull();
   });
 });

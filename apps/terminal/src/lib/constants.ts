@@ -1,5 +1,8 @@
 export const RECONNECT_DELAY_MS = 1000;
 export const RESIZE_DEBOUNCE_MS = 80;
+// Collapsed tool-output preview (lines) in the agent log, matching pi core's
+// bash preview. A tool with more lines collapses to this + offers an expand.
+export const TOOL_OUTPUT_PREVIEW_LINES = 5;
 export const TERMINAL_SCROLLBACK_PURGE_ERASE_DISPLAY_PARAM = 3;
 export const DEFAULT_TERMINAL_FONT_SIZE_PX = 13;
 export const TERMINAL_FONT_SIZE_MIN_PX = 9;
@@ -86,6 +89,10 @@ export const PATCH_PREFETCH_NEIGHBOR_RADIUS = 5;
 export const AUTOMATIONS_SORT_STORAGE_KEY = "localterm:automations-sort";
 export const AUTOMATIONS_SORT_DEFAULT = "last-run" as const;
 export const AUTOMATIONS_RELATIVE_TIME_REFRESH_MS = 30_000;
+// While the modal is open, re-fetch automations on this cadence so a run that
+// finishes flips to its final status even if the WS broadcast was missed (a
+// dropped/reconnecting socket left a completed run showing "running…").
+export const AUTOMATIONS_LIVE_POLL_MS = 4_000;
 export const AUTOMATIONS_MODAL_CLOSE_TRANSITION_MS = 150;
 // Most-recent runs shown in the cross-automation "Recent runs" feed.
 export const RECENT_RUNS_LIMIT = 50;

@@ -6,13 +6,20 @@ import type {
   automationRunLimitSchema,
   automationRunRecordSchema,
   automationRunStatusSchema,
+  automationRunnerSchema,
   automationScheduleSchema,
   automationSchema,
   automationSessionEventSchema,
   automationTriggerSchema,
   automationV1Schema,
   automationV2Schema,
+  automationV3Schema,
   automationWithNextRunSchema,
+  agentHarnessSchema,
+  agentLogEntrySchema,
+  agentModelInfoSchema,
+  agentSkillInfoSchema,
+  agentSessionEntrySchema,
   caffeinateModeSchema,
   cdpHealthSchema,
   cdpConnectResultSchema,
@@ -50,6 +57,7 @@ import type {
   worktreeSweepResultSchema,
   launchInputSchema,
   resetAutomationInputSchema,
+  runnerInputSchema,
   serverToClientMessageSchema,
   sessionListItemSchema,
   sessionsListResponseSchema,
@@ -92,7 +100,10 @@ export interface PendingAutomationRun {
   runId: string;
   automationId: string;
   cwd: string;
-  command: string;
+  // What to run. A shell runner is typed into the PTY as `initialCommand` when
+  // the WS claims this run; an agent runner never reaches the WS (agent runs
+  // are headless) so this is only meaningful for shell runs.
+  runner: AutomationRunner;
   createdAt: number;
   // Secret env vars resolved from the backend at launch time, injected into
   // the run's PTY at spawn. Populated after `create()` once resolution settles;
@@ -120,6 +131,13 @@ export type ProcessesListResponse = z.infer<typeof processesListResponseSchema>;
 
 export type AutomationLastRunStatus = z.infer<typeof automationLastRunStatusSchema>;
 export type AutomationLastRun = z.infer<typeof automationLastRunSchema>;
+export type AutomationRunner = z.infer<typeof automationRunnerSchema>;
+export type AgentHarnessConfig = z.infer<typeof agentHarnessSchema>;
+export type AgentLogEntry = z.infer<typeof agentLogEntrySchema>;
+export type AgentModelInfo = z.infer<typeof agentModelInfoSchema>;
+export type AgentSkillInfo = z.infer<typeof agentSkillInfoSchema>;
+export type AgentSessionEntry = z.infer<typeof agentSessionEntrySchema>;
+export type RunnerInput = z.infer<typeof runnerInputSchema>;
 export type AutomationSchedule = z.infer<typeof automationScheduleSchema>;
 export type AutomationSessionEvent = z.infer<typeof automationSessionEventSchema>;
 export type AutomationTrigger = z.infer<typeof automationTriggerSchema>;
@@ -131,6 +149,7 @@ export type AutomationRunRecord = z.infer<typeof automationRunRecordSchema>;
 export type Automation = z.infer<typeof automationSchema>;
 export type AutomationV1 = z.infer<typeof automationV1Schema>;
 export type AutomationV2 = z.infer<typeof automationV2Schema>;
+export type AutomationV3 = z.infer<typeof automationV3Schema>;
 export type AutomationWithNextRun = z.infer<typeof automationWithNextRunSchema>;
 export type CreateAutomationInput = z.infer<typeof createAutomationInputSchema>;
 export type UpdateAutomationInput = z.infer<typeof updateAutomationInputSchema>;

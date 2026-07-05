@@ -219,7 +219,7 @@ describe("secret-delete cascade", () => {
         name: "uses secrets",
         trigger: { kind: "schedule", schedule: "0 2 * * *" },
         cwd: os.tmpdir(),
-        command: "echo hi",
+        runner: { kind: "shell", command: "echo hi" },
         requestedSecrets,
       }),
     });

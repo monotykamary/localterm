@@ -5,6 +5,7 @@ import path from "node:path";
 import { SessionManager } from "../src/session-manager.js";
 import type { ClientSocket } from "../src/utils/ws-socket.js";
 import type { ServerToClientMessage } from "../src/types.js";
+import { pollFor } from "./helpers/poll-for.js";
 
 const createFakeSocket = (): ClientSocket => ({
   readyState: 1,
@@ -53,9 +54,8 @@ describe("SessionManager no-clients grace", () => {
     expect(manager.size()).toBe(1);
     expect(manager.list()[0]?.clients).toBe(0);
 
-    await wait(150);
     // Grace elapsed with no re-attach → reaped. No zombie.
-    expect(manager.size()).toBe(0);
+    expect(await pollFor(() => manager.size() === 0)).toBe(true);
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
 
@@ -85,8 +85,7 @@ describe("SessionManager no-clients grace", () => {
     // real shell's prompt output doesn't reschedule the reap.
     manager.detach(joining);
     manager.markIdleForTest(sid);
-    await wait(150);
-    expect(manager.size()).toBe(0);
+    expect(await pollFor(() => manager.size() === 0)).toBe(true);
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
 
@@ -108,8 +107,7 @@ describe("SessionManager no-clients grace", () => {
     expect(spawned.session.isExited).toBe(false);
     // Output goes quiet → the next grace fires and reaps.
     manager.markIdleForTest(spawned.id);
-    await wait(120);
-    expect(manager.size()).toBe(0);
+    expect(await pollFor(() => manager.size() === 0)).toBe(true);
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
 
@@ -132,8 +130,7 @@ describe("SessionManager no-clients grace", () => {
 
     // Foreground program exits → only output idleness is left (ready) → reaped.
     manager.markForegroundForTest(spawned.id, false);
-    await wait(150);
-    expect(manager.size()).toBe(0);
+    expect(await pollFor(() => manager.size() === 0)).toBe(true);
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
 
@@ -170,9 +167,8 @@ describe("SessionManager no-clients grace", () => {
     manager.detach(ws);
     expect(manager.size()).toBe(1);
 
-    await wait(300);
     // Grace elapsed, state was "ready" → reaped. No zombie, no stuck orphan.
-    expect(manager.size()).toBe(0);
+    expect(await pollFor(() => manager.size() === 0)).toBe(true);
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
 
@@ -211,8 +207,7 @@ describe("SessionManager no-clients grace", () => {
     // Flip Off → 150ms and re-arm (mirrors `PUT /api/config`).
     grace = 150;
     manager.rearmGrace();
-    await wait(300);
-    expect(manager.size()).toBe(0);
+    expect(await pollFor(() => manager.size() === 0)).toBe(true);
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
 
@@ -309,8 +304,9 @@ describe("SessionManager pending promote", () => {
     const ws = createFakeSocket();
     manager.spawnAndAttach(ws, shellInput);
     // Never send {ready} — the pending timer auto-promotes after 40ms.
-    await wait(120);
-    expect(sentControl).toContainEqual({ type: "replay-end" });
+    expect(await pollFor(() => sentControl.some((message) => message.type === "replay-end"))).toBe(
+      true,
+    );
   }, 10_000);
 
   it("sends replay-end even when the client asks for no scrollback replay", () => {

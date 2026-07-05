@@ -36,7 +36,7 @@ const makeAutomation = (overrides: Partial<Automation> = {}): Automation => ({
   name: "on change",
   trigger: { kind: "watch", recursive: true },
   cwd: "/virtual/w1",
-  command: "true",
+  runner: { kind: "shell", command: "true" },
   enabled: true,
   limit: { kind: "forever" },
   closeOnFinish: false,

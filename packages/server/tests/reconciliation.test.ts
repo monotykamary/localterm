@@ -15,7 +15,7 @@ const automationWith = (schedule: AutomationSchedule): Automation => ({
   name: "n",
   trigger: { kind: "schedule", schedule },
   cwd: os.tmpdir(),
-  command: "x",
+  runner: { kind: "shell", command: "x" },
   enabled: true,
   limit: { kind: "forever" },
   closeOnFinish: false,
@@ -123,7 +123,7 @@ describe("startup downtime reconciliation (integration)", () => {
         name: "hourly",
         trigger: { kind: "schedule", schedule: { kind: "hourly", minute: 30 } },
         cwd: os.tmpdir(),
-        command: "true",
+        runner: { kind: "shell", command: "true" },
       }),
     });
     return ((await response.json()) as { automation: { id: string } }).automation.id;

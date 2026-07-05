@@ -8,7 +8,7 @@ const automation: Automation = {
   name: "nightly build",
   trigger: { kind: "schedule", schedule: { kind: "daily", hour: 2, minute: 0 } },
   cwd: "/tmp",
-  command: "pnpm build",
+  runner: { kind: "shell", command: "pnpm build" },
   enabled: true,
   limit: { kind: "forever" },
   closeOnFinish: false,
@@ -26,7 +26,7 @@ describe("AutomationRunTracker", () => {
     const run = tracker.create(automation, 1000);
     expect(run.automationId).toBe(automation.id);
     expect(run.cwd).toBe(automation.cwd);
-    expect(run.command).toBe(automation.command);
+    expect(run.runner).toBe(automation.runner);
     expect(run.createdAt).toBe(1000);
     expect(tracker.size()).toBe(1);
   });

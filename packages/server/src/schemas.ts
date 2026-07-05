@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  AUTOMATION_RUN_HISTORY_CAP,
+  AUTOMATION_RUN_HISTORY_SCHEMA_MAX,
   AUTOMATION_RUN_LIMIT_MAX,
   AUTOMATIONS_FILE_VERSION,
   CAFFEINATE_BATTERY_LOW_WATER_MAX_PERCENT,
@@ -9,8 +9,16 @@ import {
   DAEMON_CONFIG_FILE_VERSION,
   EXEC_MAX_OUTPUT_LIMIT_BYTES,
   EXEC_MAX_TIMEOUT_MS,
+  MAX_AUTOMATION_CHANGED_FILES,
   MAX_AUTOMATION_COMMAND_LENGTH,
+  MAX_AUTOMATION_FINDINGS_LENGTH,
+  MAX_AUTOMATION_LOG_ENTRIES,
+  MAX_AUTOMATION_LOG_LENGTH,
+  MAX_AUTOMATION_MODEL_LENGTH,
   MAX_AUTOMATION_NAME_LENGTH,
+  MAX_AUTOMATION_PROMPT_LENGTH,
+  MAX_AUTOMATION_TOOL_INPUT_LENGTH,
+  MAX_AUTOMATION_TOOL_RESULT_LENGTH,
   MAX_AUTOMATION_REQUESTED_SECRETS,
   MAX_AUTOMATION_TIMES_PER_DAY,
   MAX_AUTOMATION_WATCH_FILTER_LENGTH,
@@ -1040,6 +1048,149 @@ export const triggerInputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("webhook") }).strict(),
 ]);
 
+// What an automation runs. A "shell" runner types an arbitrary shell command
+// into a PTY tab (the original model: exit code drives the run status). An
+// "agent" runner runs an agent session headlessly — fresh (ephemeral) or
+// thread (resumes a persistent session file). The agent runner is orthogonal
+// to the trigger, so an agent automation can fire on any schedule/watch/event/
+// webhook trigger.
+//
+// The `harness` selects the agent implementation: the built-in `pi` harness
+// drives `pi --mode rpc` (compaction controls + a transcript log), or a
+// `custom` harness runs a user-supplied command (claude/codex/your own) with
+// the request passed as env vars. This keeps the architecture ready to swap
+// the agent without touching the rest of the automation pipeline.
+const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
+const agentSessionModeSchema = z.enum(["fresh", "thread"]);
+
+// The built-in pi harness: `extensions` (default true) toggles `--no-extensions`
+// for runs whose provider extensions misbehave headless; `skills` and
+// `contextFiles` do the same for `--no-skills`/`--no-context-files`.
+const piHarnessSchema = z
+  .object({
+    kind: z.literal("pi"),
+    extensions: z.boolean().default(true),
+    skills: z.boolean().default(true),
+    contextFiles: z.boolean().default(true),
+  })
+  .strict();
+
+// A user-supplied harness: `command` runs an agent fire (the prompt + metadata
+// arrive as env vars — see agent-runner.ts); `compactCommand` optionally
+// compacts a thread session in place. Both run with the automation's cwd and
+// resolved secrets in env. Blank `compactCommand` = compaction unsupported for
+// this harness.
+const customHarnessSchema = z
+  .object({
+    kind: z.literal("custom"),
+    command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
+    compactCommand: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH).optional(),
+  })
+  .strict();
+
+export const agentHarnessSchema = z.discriminatedUnion("kind", [
+  piHarnessSchema,
+  customHarnessSchema,
+]);
+
+// A model the agent harness can run, surfaced by GET /api/agent-models (via pi's
+// RPC get_available_models). The form's model selector searches these.
+export const agentModelInfoSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    provider: z.string(),
+    contextWindow: z.number().optional(),
+    reasoning: z.boolean().optional(),
+  })
+  .strict();
+
+export const agentSkillInfoSchema = z
+  .object({
+    name: z.string(),
+    description: z.string(),
+    disabled: z.boolean(),
+    source: z.enum(["global-pi", "global-agents", "project-pi", "project-agents"]),
+  })
+  .strict();
+
+// A flattened transcript entry from a thread-mode agent session file, surfaced
+// by GET /api/automations/:id/session so the Triage log page can show the full
+// session history (user / assistant / tool / compaction) instead of just the
+// current run. Mirrors AgentLogEntry's shape + a purple compaction entry.
+export const agentSessionEntrySchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("user"), text: z.string() }).strict(),
+  z
+    .object({ type: z.literal("assistant"), text: z.string(), thinking: z.string().optional() })
+    .strict(),
+  z
+    .object({
+      type: z.literal("tool"),
+      name: z.string(),
+      input: z.string().max(MAX_AUTOMATION_TOOL_INPUT_LENGTH).optional(),
+      text: z.string(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("compaction"),
+      summary: z.string(),
+      tokensBefore: z.number().optional(),
+    })
+    .strict(),
+]);
+
+// A single structured entry in an agent run's transcript log. The UI renders a
+// user/assistant/tool transcript and hides `thinking` behind a toggle. Tool
+// result text is truncated by the agent runner; user/assistant text is kept
+// full (bounded by the overall log byte cap).
+export const agentLogEntrySchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("user"), text: z.string().max(MAX_AUTOMATION_LOG_LENGTH) }).strict(),
+  z
+    .object({
+      type: z.literal("assistant"),
+      text: z.string().max(MAX_AUTOMATION_LOG_LENGTH),
+      thinking: z.string().max(MAX_AUTOMATION_LOG_LENGTH).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("tool"),
+      name: z.string().max(MAX_AUTOMATION_NAME_LENGTH),
+      input: z.string().max(MAX_AUTOMATION_TOOL_INPUT_LENGTH).optional(),
+      text: z.string().max(MAX_AUTOMATION_TOOL_RESULT_LENGTH),
+    })
+    .strict(),
+]);
+
+export const automationRunnerSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("shell"),
+      command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("agent"),
+      prompt: z.string().min(1).max(MAX_AUTOMATION_PROMPT_LENGTH),
+      sessionMode: agentSessionModeSchema,
+      model: z.string().min(1).max(MAX_AUTOMATION_MODEL_LENGTH).optional(),
+      thinking: thinkingLevelSchema.optional(),
+      harness: agentHarnessSchema.default({
+        kind: "pi",
+        extensions: true,
+        skills: true,
+        contextFiles: true,
+      }),
+    })
+    .strict(),
+]);
+
+// The wire shape equals the stored shape.
+export const runnerInputSchema = automationRunnerSchema;
+
 export const automationRunLimitSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("forever") }).strict(),
   z
@@ -1081,6 +1232,32 @@ export const automationRunRecordSchema = z
     trigger: z.enum(["schedule", "manual", "watch", "event", "webhook"]),
     // false for manual + skipped; true for scheduled + watch launches.
     countsTowardLimit: z.boolean(),
+    // Agent-runner findings: the truncated final assistant text (pi harness, via
+    // get_last_assistant_text) or stdout (custom harness), shown as the Triage
+    // row preview + a quick detail glance. null for shell runs and agent runs
+    // that produced no output. The agent runner truncates before storing; the
+    // max is a defensive cap.
+    findings: z.string().max(MAX_AUTOMATION_FINDINGS_LENGTH).nullable().default(null),
+    // Files whose working-tree status changed across an agent run (git status
+    // diff before vs after), capped. Empty for shell runs and non-repo cwds.
+    changedFiles: z.array(z.string().min(1)).max(MAX_AUTOMATION_CHANGED_FILES).default([]),
+    // Triage unread flag for agent runs with findings or a log; cleared when the
+    // user opens the run. Always false for shell runs (no findings to triage).
+    unread: z.boolean().default(false),
+    // Full per-run log: the agent transcript (pi harness) or stdout+stderr
+    // (custom harness), truncated. Shown in an expandable log view. null for
+    // shell runs and agent runs that produced no output.
+    // Full per-run log: a string (ANSI-stripped PTY output) for shell runs, or
+    // a structured user/assistant/tool transcript for agent runs (so the UI
+    // can hide thinking behind a toggle). Discriminated at runtime by
+    // Array.isArray. null for runs that produced no output.
+    log: z
+      .union([
+        z.string().max(MAX_AUTOMATION_LOG_LENGTH),
+        z.array(agentLogEntrySchema).max(MAX_AUTOMATION_LOG_ENTRIES),
+      ])
+      .nullable()
+      .default(null),
   })
   .strict();
 
@@ -1104,27 +1281,29 @@ const secretNameSchema = z
   .min(1)
   .max(MAX_SECRET_NAME_LENGTH);
 
-// Stored shape (automations.json v3). No derived fields (cron/lastRun/nextRunAt
+// Stored shape (automations.json v4). No derived fields (cron/lastRun/nextRunAt
 // live only on the wire).
 const automationStoredShape = {
   id: z.string().min(1),
   name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
   trigger: automationTriggerSchema,
   cwd: z.string().min(1),
-  command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
+  runner: automationRunnerSchema,
   enabled: z.boolean(),
   limit: automationRunLimitSchema,
   // When true, the run's browser tab is closed once the command finishes
-  // (only honored for tabs opened via CDP). Defaults false → tab stays open.
-  // Optional in the persisted shape so pre-existing v2 files load unchanged.
+  // (only honored for shell runs opened via CDP). Defaults false → tab stays
+  // open. Optional in the persisted shape so pre-existing v3 files load
+  // unchanged. Meaningless for agent runs (no tab) but stored as-is.
   closeOnFinish: z.boolean().default(false),
   // Names of secrets to inject as env vars when this automation's run spawns.
-  // Resolved from the backend at launch and baked into the PTY env, never
-  // returned over HTTP. Defaults to [] so pre-existing v3 files load unchanged.
+  // Resolved from the backend and baked into the run env (PTY for shell,
+  // subprocess for agent), never returned over HTTP. Defaults to [] so
+  // pre-existing v3 files load unchanged.
   requestedSecrets: z.array(secretNameSchema).max(MAX_AUTOMATION_REQUESTED_SECRETS).default([]),
   runCount: z.number().int().nonnegative(),
   lifecycle: automationLifecycleSchema,
-  runs: z.array(automationRunRecordSchema).max(AUTOMATION_RUN_HISTORY_CAP),
+  runs: z.array(automationRunRecordSchema).max(AUTOMATION_RUN_HISTORY_SCHEMA_MAX),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 };
@@ -1197,7 +1376,7 @@ export const automationV2Schema = z
     closeOnFinish: z.boolean().default(false),
     runCount: z.number().int().nonnegative(),
     lifecycle: automationLifecycleSchema,
-    runs: z.array(automationRunRecordSchema).max(AUTOMATION_RUN_HISTORY_CAP),
+    runs: z.array(automationRunRecordSchema).max(AUTOMATION_RUN_HISTORY_SCHEMA_MAX),
     createdAt: z.number().int().nonnegative(),
     updatedAt: z.number().int().nonnegative(),
   })
@@ -1210,12 +1389,42 @@ export const automationsFileV2Schema = z
   })
   .strict();
 
+// Frozen v3 file shape — read only by the v3->v4 migrator. v3 stored the
+// runner as a bare top-level `command` (shell-only); v4 wraps it in a
+// discriminated `runner` union. The v4 run-record schema's defaulted
+// findings/changedFiles/unread fill in for v3 runs that lack them.
+export const automationV3Schema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
+    trigger: automationTriggerSchema,
+    cwd: z.string().min(1),
+    command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
+    enabled: z.boolean(),
+    limit: automationRunLimitSchema,
+    closeOnFinish: z.boolean().default(false),
+    requestedSecrets: z.array(secretNameSchema).max(MAX_AUTOMATION_REQUESTED_SECRETS).default([]),
+    runCount: z.number().int().nonnegative(),
+    lifecycle: automationLifecycleSchema,
+    runs: z.array(automationRunRecordSchema).max(AUTOMATION_RUN_HISTORY_SCHEMA_MAX),
+    createdAt: z.number().int().nonnegative(),
+    updatedAt: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const automationsFileV3Schema = z
+  .object({
+    version: z.literal(3),
+    automations: z.array(automationV3Schema),
+  })
+  .strict();
+
 export const createAutomationInputSchema = z
   .object({
     name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
     trigger: triggerInputSchema,
     cwd: z.string().min(1),
-    command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH),
+    runner: runnerInputSchema,
     enabled: z.boolean().optional(),
     limit: automationRunLimitSchema.optional(),
     closeOnFinish: z.boolean().optional(),
@@ -1228,7 +1437,7 @@ export const updateAutomationInputSchema = z
     name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH).optional(),
     trigger: triggerInputSchema.optional(),
     cwd: z.string().min(1).optional(),
-    command: z.string().min(1).max(MAX_AUTOMATION_COMMAND_LENGTH).optional(),
+    runner: runnerInputSchema.optional(),
     enabled: z.boolean().optional(),
     limit: automationRunLimitSchema.optional(),
     closeOnFinish: z.boolean().optional(),

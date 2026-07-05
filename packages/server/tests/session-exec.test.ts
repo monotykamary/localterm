@@ -111,7 +111,11 @@ describe("SessionManager exec + programmatic PTY control", () => {
     manager = createManager(30_000);
     const id = manager.spawnDetached(shellInput, true);
     if (!id) throw new Error("spawn failed");
-    const result = await manager.execInSession(id, "sleep 5", { timeoutMs: 200 });
+    // A 1000ms timeout is generous enough to fire reliably under concurrent
+    // suite load (a 200ms timeout raced the event loop + occasionally resolved
+    // as a normal completion); sleep 30 can't finish before it, so the call
+    // resolves as timed out.
+    const result = await manager.execInSession(id, "sleep 30", { timeoutMs: 1000 });
     expect(result?.timedOut).toBe(true);
     expect(result?.exitCode).toBeNull();
   }, 10_000);

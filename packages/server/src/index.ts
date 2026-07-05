@@ -10,6 +10,8 @@ import open from "open";
 import { AutomationRunTracker } from "./automation-run-tracker.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
+import { runAgent, compactAgent, listAgentModels, readAgentSession } from "./agent-runner.js";
+import { listAgentSkills } from "./agent-skills.js";
 import type { BatteryProbe } from "./caffeinate-battery.js";
 import { CaffeinateController } from "./caffeinate-controller.js";
 import { CaffeinateManager } from "./caffeinate-manager.js";
@@ -56,6 +58,7 @@ import {
   PROCESSES_FILENAME,
   SECRETS_FILENAME,
   SECRETS_SHIMS_DIRNAME,
+  AUTOMATION_AGENT_SESSIONS_DIRNAME,
   SERVER_STOP_GRACE_MS,
   SESSION_ID_QUERY_PARAM,
   SESSION_ACTIVITY_WINDOW_MS,
@@ -170,7 +173,6 @@ import type {
   AutomationLastRun,
   AutomationWithNextRun,
   CdpConnectResult,
-  PendingAutomationRun,
   ServerToClientMessage,
   TriggerInput,
 } from "./types.js";
@@ -286,6 +288,9 @@ export interface RunningServer {
   port: number;
   host: string;
   registry: SessionManager;
+  // Exposed for tests to seed run history (e.g. a completed run with a known
+  // finishedAt) without spawning a real agent run.
+  automationStore: AutomationStore;
   /**
    * Update the announced REMOTE surface origin (mobile/remote tabs + the
    * `--open` browser + the network-policy host allowlist). Called by the CLI
@@ -402,7 +407,7 @@ interface DaemonContext {
   tryLaunch: (
     automation: Automation,
     trigger: "schedule" | "manual" | "watch" | "event" | "webhook",
-  ) => PendingAutomationRun | null;
+  ) => string | null;
 }
 
 type ParsedWait = z.infer<typeof waitInputSchema>;
@@ -1406,8 +1411,26 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   });
 
   api.delete("/automations/:id", (context) => {
-    if (!automationStore.remove(context.req.param("id"))) {
+    const id = context.req.param("id");
+    const automation = automationStore.get(id);
+    if (!automation || !automationStore.remove(id)) {
       return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    }
+    // A thread-mode agent automation owns a pi session file under the daemon's
+    // agent-sessions dir; delete it so the automation doesn't leave an orphan
+    // a future (recreated) automation with the same id could otherwise resume.
+    if (automation.runner.kind === "agent" && automation.runner.sessionMode === "thread") {
+      const sessionFile = path.join(
+        stateDirectory,
+        AUTOMATION_AGENT_SESSIONS_DIRNAME,
+        `${id}.jsonl`,
+      );
+      fs.promises.rm(sessionFile, { force: true }).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `failed to remove agent session file for automation "${automation.name}": ${message}`,
+        );
+      });
     }
     broadcastAutomations();
     syncFolderWatchers();
@@ -1419,11 +1442,10 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     const automation = automationStore.get(context.req.param("id"));
     if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     // tryLaunch only returns null for non-manual triggers (the finished/disabled
-    // guard); a manual launch always succeeds. The guard satisfies the shared
-    // nullable return type before reading run.runId.
-    const run = tryLaunch(automation, "manual");
-    if (!run) return context.json({ error: "launch_failed" }, HTTP_STATUS_BAD_REQUEST);
-    return context.json({ runId: run.runId });
+    // guard); a manual launch always succeeds and returns the runId.
+    const runId = tryLaunch(automation, "manual");
+    if (!runId) return context.json({ error: "launch_failed" }, HTTP_STATUS_BAD_REQUEST);
+    return context.json({ runId });
   });
 
   api.post("/automations/:id/reset", async (context) => {
@@ -1436,6 +1458,140 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     syncFolderWatchers();
     syncSessionEventListeners();
     return context.json({ automation: toAutomationWithNextRun(automation, new Date()) });
+  });
+
+  // Triage inbox: mark a single agent run's findings as read (the user opened
+  // it). Idempotent — a missing/already-read run is a no-op success.
+  api.post("/automations/:id/runs/:runId/read", (context) => {
+    const automation = automationStore.markRunRead(
+      context.req.param("id"),
+      context.req.param("runId"),
+    );
+    if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    broadcastAutomations();
+    return context.json({ ok: true });
+  });
+
+  // Triage inbox: clear every run's unread flag across all automations.
+  api.post("/triage/mark-all-read", (context) => {
+    if (automationStore.markAllRunsRead()) broadcastAutomations();
+    return context.json({ ok: true });
+  });
+
+  // Triage inbox: clear every automation's run history (the runs arrays) while
+  // keeping the automations and their run-count/lifecycle. Drops pre-log runs
+  // that have no transcript to show.
+  api.post("/triage/clear-history", (context) => {
+    if (automationStore.clearAllRuns()) broadcastAutomations();
+    return context.json({ ok: true });
+  });
+
+  // Models available to the pi agent harness (via pi's RPC get_available_models),
+  // for the form's model selector. Cached server-side; spawns pi on the first
+  // call.
+  api.get("/agent-models", async (context) => {
+    const models = await listAgentModels(shimsDir);
+    return context.json({ models });
+  });
+
+  // Skills discoverable by the pi agent harness for a given project cwd (scans
+  // ~/.pi/agent/skills, ~/.agents/skills, and the project's .pi/skills +
+  // .agents/skills). For the prompt area's slash-command autocomplete. Cached
+  // server-side; the first call scans the filesystem.
+  api.get("/agent-skills", (context) => {
+    const cwd = context.req.query("cwd") ?? "";
+    const skills = listAgentSkills(cwd);
+    return context.json({ skills });
+  });
+
+  // Thread-mode session transcript (the full branch history: user / assistant /
+  // tool / compaction) for the Triage log page. Fresh-mode automations have no
+  // session file and get an empty list.
+  api.get("/automations/:id/session", async (context) => {
+    const automation = automationStore.get(context.req.param("id"));
+    if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    const sessionFile = path.join(
+      stateDirectory,
+      AUTOMATION_AGENT_SESSIONS_DIRNAME,
+      `${automation.id}.jsonl`,
+    );
+    // Truncate the transcript at the run's point in time so an older run shows
+    // the branch as it was when that run finished, not the latest state. A
+    // running run (finishedAt null) shows everything written so far (now).
+    const runId = context.req.query("runId");
+    let untilMs: number | undefined;
+    if (runId) {
+      const run = automation.runs.find((candidate) => candidate.runId === runId);
+      untilMs = run?.finishedAt ?? Date.now();
+    }
+    const entries = await readAgentSession(sessionFile, untilMs);
+    return context.json({ entries });
+  });
+
+  // Build a tab URL that opens the thread session interactively in pi (a new
+  // terminal tab in the automation's cwd running `pi --session <file>`). The
+  // client window.open()s it; the new tab forwards ?cwd/?cmd to the WS, which
+  // spawns a shell in the cwd + writes the pi command to the PTY. Thread-only;
+  // fresh/shell runs have no session file to resume.
+  api.get("/automations/:id/agent-session-url", async (context) => {
+    const automation = automationStore.get(context.req.param("id"));
+    if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    if (automation.runner.kind !== "agent" || automation.runner.sessionMode !== "thread") {
+      return context.json({ error: "not_thread" }, HTTP_STATUS_CONFLICT);
+    }
+    const sessionFile = path.join(
+      stateDirectory,
+      AUTOMATION_AGENT_SESSIONS_DIRNAME,
+      `${automation.id}.jsonl`,
+    );
+    const cmd = `pi --session '${sessionFile.replace(/'/g, "'\\''")}' && exit`;
+    const params = new URLSearchParams();
+    params.set("cwd", automation.cwd);
+    params.set("cmd", cmd);
+    return context.json({ url: `/?${params.toString()}` });
+  });
+
+  // Manually compact a thread-mode agent automation's session in place. Runs
+  // the harness's compact operation (pi: a short-lived `pi --mode rpc` that
+  // sends `compact`; custom: the configured compact command). Fresh runs and
+  // shell runs have nothing to compact — a 409 tells the client to hide the
+  // button.
+  api.post("/automations/:id/compact", async (context) => {
+    const automation = automationStore.get(context.req.param("id"));
+    if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    if (automation.runner.kind !== "agent" || automation.runner.sessionMode !== "thread") {
+      return context.json({ error: "not_compactable" }, HTTP_STATUS_CONFLICT);
+    }
+    const sessionFile = path.join(
+      stateDirectory,
+      AUTOMATION_AGENT_SESSIONS_DIRNAME,
+      `${automation.id}.jsonl`,
+    );
+    let secretEnv: Record<string, string> = {};
+    try {
+      secretEnv = await buildAutomationSecretEnv(
+        automation.requestedSecrets,
+        secretStore,
+        secretBackend,
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`failed to resolve secrets for compaction of "${automation.name}": ${message}`);
+    }
+    const result = await compactAgent({
+      harness: automation.runner.harness,
+      cwd: automation.cwd,
+      env: secretEnv,
+      sessionFile,
+      shimsDir,
+    });
+    if (!result.ok) {
+      return context.json(
+        { error: "compact_failed", message: result.message },
+        HTTP_STATUS_BAD_REQUEST,
+      );
+    }
+    return context.json({ ok: true, message: result.message });
   });
 
   // Daemon config (the editable CDP port). GET is a cheap read of the live
@@ -1522,6 +1678,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   // (attach/detach/output/exit), so referencing the later consts here is safe.
   const stateDirectory = options.stateDirectory ?? path.join(os.homedir(), ".localterm");
   const shimsDir = path.join(stateDirectory, SECRETS_SHIMS_DIRNAME);
+  // One pi session file per thread-mode agent automation, resumed each fire.
+  const agentSessionsDir = path.join(stateDirectory, AUTOMATION_AGENT_SESSIONS_DIRNAME);
   const registry = new SessionManager({
     shimsDir,
     getGraceMs: () => {
@@ -1533,11 +1691,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       onOutputActivity: () => caffeinateManager.noteOutputActivity(),
       onSessionActivity: () => caffeinateManager.pokeAuto(),
       onSessionEvent: (event, cwd) => sessionEventManager.onSessionEvent(event, cwd),
-      onAutomationExit: (automationId, runId, exitCode) => {
+      onAutomationExit: (automationId, runId, exitCode, log) => {
         automationStore.updateRun(automationId, runId, {
           status: exitCode === 0 ? "completed" : "failed",
           exitCode,
           finishedAt: Date.now(),
+          log: log.length > 0 ? log : null,
         });
         broadcastAutomations();
         closeRunTabIfRequested(automationId, runId);
@@ -1870,17 +2029,94 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   caffeinateManager.on("change", broadcastCaffeinate);
 
+  // Run an agent automation headlessly via `pi -p`. No tab, no PTY, no WS
+  // claim — the daemon spawns the subprocess, captures its stdout as the
+  // run's findings, diffs git status for changedFiles, and lands a completed/
+  // failed run with an unread Triage flag (when there are findings). The run
+  // goes straight to "running" (there is no "launched -> tab claim" step), so
+  // reconcileOnStartup's running->missed sweep covers a daemon restart mid-run.
+  const launchAgentRun = (
+    automation: Automation,
+    trigger: "schedule" | "manual" | "watch" | "event" | "webhook",
+  ): string => {
+    const now = Date.now();
+    const runId = randomUUID();
+    const counts = trigger !== "manual";
+    automationStore.appendRun(automation.id, {
+      runId,
+      scheduledFor: trigger === "schedule" ? Math.floor(now / MS_PER_MINUTE) * MS_PER_MINUTE : now,
+      startedAt: now,
+      finishedAt: null,
+      status: "running",
+      exitCode: null,
+      trigger,
+      countsTowardLimit: counts,
+      findings: null,
+      changedFiles: [],
+      unread: false,
+      log: null,
+    });
+    if (counts) automationStore.incrementRunCount(automation.id);
+    broadcastAutomations();
+    syncFolderWatchers();
+    syncSessionEventListeners();
+    if (automation.runner.kind !== "agent") return runId;
+    const runner = automation.runner;
+    const sessionFile =
+      runner.sessionMode === "thread"
+        ? path.join(agentSessionsDir, `${automation.id}.jsonl`)
+        : null;
+    void (async () => {
+      let secretEnv: Record<string, string> = {};
+      try {
+        secretEnv = await buildAutomationSecretEnv(
+          automation.requestedSecrets,
+          secretStore,
+          secretBackend,
+        );
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`failed to resolve secrets for automation "${automation.name}": ${message}`);
+      }
+      const result = await runAgent({
+        runner,
+        cwd: automation.cwd,
+        env: secretEnv,
+        sessionFile,
+        shimsDir,
+      });
+      // The automation may have been deleted mid-run; drop the result.
+      if (!automationStore.get(automation.id)) return;
+      automationStore.updateRun(automation.id, runId, {
+        status: result.exitCode === 0 ? "completed" : "failed",
+        exitCode: result.exitCode,
+        finishedAt: Date.now(),
+        findings: result.findings,
+        changedFiles: result.changedFiles,
+        log: result.log,
+        unread: result.findings !== null,
+      });
+      broadcastAutomations();
+      folderWatchManager.notifyRunFinished(automation.id);
+      sessionEventManager.notifyRunFinished(automation.id);
+    })();
+    return runId;
+  };
+
   // Open a browser tab for a run and record it in history. Scheduled and watch
   // launches count toward the limit (and can finish the automation); manual
   // launches never count and are allowed even on a finished/disabled automation.
+  // Agent runs bypass the tab/PTY path entirely (headless). Returns the runId
+  // (null only when a non-manual trigger hits the finished/disabled guard).
   const tryLaunch = (
     automation: Automation,
     trigger: "schedule" | "manual" | "watch" | "event" | "webhook",
-  ): PendingAutomationRun | null => {
+  ): string | null => {
     if (trigger !== "manual") {
       const current = automationStore.get(automation.id);
       if (!current || !current.enabled || current.lifecycle === "finished") return null;
     }
+    if (automation.runner.kind === "agent") return launchAgentRun(automation, trigger);
     const run = automationRunTracker.create(automation);
     const counts = trigger !== "manual";
     automationStore.appendRun(automation.id, {
@@ -1895,6 +2131,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       exitCode: null,
       trigger,
       countsTowardLimit: counts,
+      findings: null,
+      changedFiles: [],
+      unread: false,
+      log: null,
     });
     if (counts) automationStore.incrementRunCount(automation.id);
     broadcastAutomations();
@@ -1946,7 +2186,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
         );
       }
     })();
-    return run;
+    return run.runId;
   };
 
   // Close a finished run's tab when the automation opted into closeOnFinish.
@@ -1992,6 +2232,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           exitCode: null,
           trigger: "schedule",
           countsTowardLimit: false,
+          findings: null,
+          changedFiles: [],
+          unread: false,
+          log: null,
         });
       }
     }
@@ -2203,7 +2447,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               ws,
               {
                 cwd: sessionCwd,
-                initialCommand: claimedRun?.command ?? requestedInitialCommand,
+                initialCommand:
+                  claimedRun && claimedRun.runner.kind === "shell"
+                    ? claimedRun.runner.command
+                    : requestedInitialCommand,
                 env: claimedRun?.env,
               },
               automation,
@@ -2528,7 +2775,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     });
   };
 
-  return { port: actualPort, host, registry, setPublicUrl, setLocalUrl, stop };
+  return { port: actualPort, host, registry, automationStore, setPublicUrl, setLocalUrl, stop };
 };
 
 export type { Session } from "./session.js";
