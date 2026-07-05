@@ -14,6 +14,7 @@ import {
   MAX_OUTPUT_BYTES,
   OUTPUT_BATCH_FLUSH_BYTES,
   OUTPUT_BATCH_WINDOW_MS,
+  OUTPUT_STREAM_THRESHOLD_MS,
   SESSION_ACTIVITY_WINDOW_MS,
   SESSION_GRACE_MS,
   SESSION_PENDING_PROMOTE_TIMEOUT_MS,
@@ -91,12 +92,15 @@ export type SessionActivityState = "running" | "alive-quiet" | "ready";
 interface ManagedClient {
   ws: ClientSocket;
   pending: boolean;
-  // Buffered while pending: live output bytes and control messages are queued
-  // here (not sent) until the client sends {type:"ready"} or the pending
-  // timeout auto-promotes it. Flushed in order on promote so nothing is lost
-  // and the scrollback replay (when requested) lands first.
-  pendingControl: ServerToClientMessage[];
-  pendingBytes: Uint8Array<ArrayBuffer>[];
+  // Buffered while pending: live output and control messages are queued here
+  // (not sent) until the client sends {type:"ready"} or the pending timeout
+  // auto-promotes it. A single ordered queue (not separate control/bytes
+  // arrays) so a frame's output bytes and its trailing output-flush marker
+  // stay in arrival order — the client stages the bytes and flushes on the
+  // marker, so the order across the two WebSocket frame types must be
+  // preserved. Flushed in order on promote so nothing is lost and the
+  // scrollback replay (when requested) lands first.
+  pendingQueue: PendingQueueItem[];
   pendingTimer: NodeJS.Timeout | null;
   cols: number;
   rows: number;
@@ -104,6 +108,10 @@ interface ManagedClient {
   pixelHeight?: number;
   coordinator: GitMetadataCoordinator | null;
 }
+
+type PendingQueueItem =
+  | { kind: "control"; payload: ServerToClientMessage }
+  | { kind: "bytes"; data: Uint8Array<ArrayBuffer> };
 
 export interface ManagedSession {
   readonly session: Session;
@@ -116,6 +124,13 @@ export interface ManagedSession {
   automation: AutomationContext | null;
   outputBatch: string;
   outputBatchTimer: NodeJS.Timeout | null;
+  // Timestamp of the first chunk of the current output burst (reset to null on
+  // the idle-flush that ends a frame). A size-cap flush mid-burst uses it to tell
+  // a frame split (the burst is still going, under OUTPUT_STREAM_THRESHOLD_MS —
+  // no frame-end marker, the client keeps staging) from a sustained stream
+  // (continuous past the threshold — mark the chunk so the client flushes it
+  // progressively instead of staging forever). See onSessionOutput/flushOutput.
+  frameBurstStartAt: number | null;
   drainPollTimer: NodeJS.Timeout | null;
   gitWatcher: GitDiffWatcher;
   // Last PTY output time + whether a foreground program is running, the inputs
@@ -347,6 +362,7 @@ export class SessionManager {
       automation: automation ?? null,
       outputBatch: "",
       outputBatchTimer: null,
+      frameBurstStartAt: null,
       drainPollTimer: null,
       gitWatcher: new GitDiffWatcher(),
       lastOutputAt: Date.now(),
@@ -411,8 +427,7 @@ export class SessionManager {
     const client: ManagedClient = {
       ws,
       pending: true,
-      pendingControl: [],
-      pendingBytes: [],
+      pendingQueue: [],
       pendingTimer: null,
       cols: 0,
       rows: 0,
@@ -484,10 +499,11 @@ export class SessionManager {
     // snapshot was empty or replay wasn't requested — so the client always
     // exits its suppressed-replay window and never deadlocks on a slow link.
     this.sendControl(ws, { type: "replay-end" });
-    for (const payload of client.pendingControl) this.sendControl(ws, payload);
-    for (const bytes of client.pendingBytes) this.sendOutputBytes(ws, bytes);
-    client.pendingControl = [];
-    client.pendingBytes = [];
+    for (const item of client.pendingQueue) {
+      if (item.kind === "control") this.sendControl(ws, item.payload);
+      else this.sendOutputBytes(ws, item.data);
+    }
+    client.pendingQueue = [];
     client.pending = false;
   }
 
@@ -532,8 +548,7 @@ export class SessionManager {
       clearTimeout(client.pendingTimer);
       client.pendingTimer = null;
     }
-    client.pendingControl = [];
-    client.pendingBytes = [];
+    client.pendingQueue = [];
     if (client.coordinator) {
       client.coordinator.remove(ws);
       this.releaseCoordinator(client.coordinator);
@@ -965,7 +980,7 @@ export class SessionManager {
   private broadcastBytes(managed: ManagedSession, bytes: Uint8Array<ArrayBuffer>): void {
     for (const client of managed.clients) {
       if (client.pending) {
-        client.pendingBytes.push(bytes);
+        client.pendingQueue.push({ kind: "bytes", data: bytes });
         continue;
       }
       this.sendOutputBytes(client.ws, bytes);
@@ -974,7 +989,7 @@ export class SessionManager {
 
   private sendToClient(client: ManagedClient, payload: ServerToClientMessage): void {
     if (client.pending) {
-      client.pendingControl.push(payload);
+      client.pendingQueue.push({ kind: "control", payload });
       return;
     }
     this.sendControl(client.ws, payload);
@@ -985,6 +1000,10 @@ export class SessionManager {
   }
 
   private onSessionOutput(managed: ManagedSession, data: string): void {
+    // The first chunk after a frame's idle-flush opens a new burst; a size-cap
+    // flush mid-burst measures against this start to tell a frame split (still
+    // going, under the stream threshold) from a sustained stream.
+    if (managed.frameBurstStartAt === null) managed.frameBurstStartAt = Date.now();
     managed.outputBatch += data;
     managed.lastOutputAt = Date.now();
     this.noteOutput(managed.session.pid);
@@ -998,7 +1017,16 @@ export class SessionManager {
         clearTimeout(managed.outputBatchTimer);
         managed.outputBatchTimer = null;
       }
-      this.flushOutput(managed);
+      // Size-cap flush mid-burst. A frame split (the burst is still going, under
+      // OUTPUT_STREAM_THRESHOLD_MS) carries NO marker — the client keeps
+      // staging until the burst's idle-flush lands, then renders the whole
+      // frame as one paint (no crawl over a bandwidth-limited link). A
+      // sustained stream never idles, so its size-cap flushes would stage
+      // forever; once the burst has run continuously past the threshold, mark
+      // the chunk so the client flushes it progressively instead. The burst
+      // start is NOT reset here — the burst continues until the idle-flush.
+      const markFlush = Date.now() - managed.frameBurstStartAt >= OUTPUT_STREAM_THRESHOLD_MS;
+      this.flushOutput(managed, markFlush);
       return;
     }
     // Reset the coalescing window on every chunk so the flush lands
@@ -1007,22 +1035,25 @@ export class SessionManager {
     // emits across more than the window (node-pty delivers it as many
     // 1024-byte data events over successive event-loop turns); a one-shot
     // window flushed mid-redraw and split the frame across multiple WebSocket
-    // messages. Over a bandwidth-limited link each split arrives as its own
-    // atomic message and xterm paints it separately — the visible
-    // top-to-bottom crawl. A resetting window holds the whole burst until the
-    // PTY goes idle, then sends one message; the browser receives it atomically
-    // and xterm renders it in a single paint regardless of link bandwidth.
-    // Sustained high-throughput output never idles, so OUTPUT_BATCH_FLUSH_BYTES
-    // still gates the message rate there (unchanged).
+    // messages. The resetting window holds the whole burst until the PTY goes
+    // idle, then flushes — and marks the frame end so the client commits any
+    // mid-burst splits it staged plus this tail as one render. Sustained
+    // high-throughput output never idles, so OUTPUT_BATCH_FLUSH_BYTES still
+    // gates the message rate there (the size-cap path above).
     if (managed.outputBatchTimer !== null) clearTimeout(managed.outputBatchTimer);
     managed.outputBatchTimer = setTimeout(() => {
       managed.outputBatchTimer = null;
-      this.flushOutput(managed);
+      // Idle-flush: the burst ended (no chunk for OUTPUT_BATCH_WINDOW_MS) — a
+      // frame boundary. Mark it so the client flushes all staged mid-burst splits
+      // plus this tail as one paint, then reset the burst start so the next
+      // chunk begins a new frame.
+      this.flushOutput(managed, true);
+      managed.frameBurstStartAt = null;
     }, OUTPUT_BATCH_WINDOW_MS);
     managed.outputBatchTimer.unref?.();
   }
 
-  private flushOutput(managed: ManagedSession): void {
+  private flushOutput(managed: ManagedSession, markFlush: boolean): void {
     const batch = managed.outputBatch;
     managed.outputBatch = "";
     if (!batch) return;
@@ -1034,6 +1065,13 @@ export class SessionManager {
         this.broadcastBytes(managed, bytes.subarray(offset, offset + MAX_OUTPUT_BYTES));
       }
     }
+    // The output-flush marker follows the bytes in arrival order (broadcastBytes
+    // before broadcast) so a staging client — which appends each binary frame and
+    // flushes on this marker — commits the whole frame in one terminal.write.
+    // Sent on a frame's idle-flush (frame end) and on a sustained stream's
+    // size-cap flush; a mid-frame size-cap flush sends no marker so the client
+    // keeps staging.
+    if (markFlush) this.broadcast(managed, { type: "output-flush" });
     this.maybePauseAfterFlush(managed);
   }
 
@@ -1188,7 +1226,7 @@ export class SessionManager {
   }
 
   private handleExit(managed: ManagedSession, code: number | null): void {
-    this.flushOutput(managed);
+    this.flushOutput(managed, true);
     for (const client of managed.clients) {
       this.hooks.onClientExit(client.ws, code);
       this.sendControl(client.ws, { type: "exit", code });
@@ -1224,8 +1262,7 @@ export class SessionManager {
         clearTimeout(client.pendingTimer);
         client.pendingTimer = null;
       }
-      client.pendingControl = [];
-      client.pendingBytes = [];
+      client.pendingQueue = [];
       if (client.coordinator) {
         client.coordinator.remove(client.ws);
         this.releaseCoordinator(client.coordinator);

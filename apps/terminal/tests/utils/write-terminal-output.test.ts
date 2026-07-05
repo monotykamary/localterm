@@ -57,6 +57,8 @@ describe("OutputBatcher staging buffer growth", () => {
     for (let index = 0; index < oversized; index += 1) bytes[index] = index & 0xff;
 
     batcher.pushBytes(bytes);
+    // Staged, not yet flushed.
+    expect(writes).toHaveLength(0);
     batcher.detach();
 
     expect(writes).toHaveLength(1);
@@ -65,78 +67,83 @@ describe("OutputBatcher staging buffer growth", () => {
   });
 });
 
-describe("OutputBatcher raw in/out (flush on arrival)", () => {
-  it("flushes small output synchronously so xterm answers queries in the same task", () => {
+describe("OutputBatcher stage-until-flush (the frame-end marker)", () => {
+  it("stages output on pushBytes without flushing (the server marks the boundary)", () => {
     const writes: Uint8Array[] = [];
     const batcher = new OutputBatcher();
     batcher.attach(createFakeTerminal(writes));
 
-    // A small frame (a terminal query plus a prompt redraw) flushes
-    // immediately — no deferral — so xterm parses and answers it in the same
-    // task and the probing program reads the response before its short read
-    // timeout, instead of the response leaking into the shell as typed text.
     batcher.pushBytes(new Uint8Array([65, 66, 67]));
-    expect(writes).toHaveLength(1);
-    expect(Array.from(writes[0])).toEqual([65, 66, 67]);
-    // A keep-warm rAF is armed (not a deferred flush) so the compositor stays
-    // warm; its onKeepWarm no-ops on an empty buffer.
+    // No flush on arrival — the server's output-flush marker (a separate WS
+    // message) commits the staged frame as one render. So nothing writes yet.
+    expect(writes).toHaveLength(0);
+    // A keep-warm rAF is armed (compositor warmth) so the frame loop stays warm
+    // while the frame stages.
     expect(rafCount).toBe(1);
-    expect(pendingCb).not.toBeNull();
     batcher.detach();
   });
 
-  it("flushes each push separately (no coalescing) for lowest latency", () => {
+  it("flushStaged commits the staged frame as one terminal.write", () => {
+    const writes: Uint8Array[] = [];
+    const batcher = new OutputBatcher();
+    batcher.attach(createFakeTerminal(writes));
+
+    batcher.pushBytes(new Uint8Array([65, 66, 67]));
+    expect(writes).toHaveLength(0);
+    batcher.flushStaged();
+
+    expect(writes).toHaveLength(1);
+    expect(Array.from(writes[0])).toEqual([65, 66, 67]);
+    batcher.detach();
+  });
+
+  it("coalesces a split frame: stages each message, renders all at flushStaged", () => {
+    const writes: Uint8Array[] = [];
+    const batcher = new OutputBatcher();
+    batcher.attach(createFakeTerminal(writes));
+
+    // A frame the server split across messages at the 64KB cap: the client
+    // stages each split and renders the whole frame in one paint when the end
+    // marker lands — no progressive crawl over a bandwidth-limited link.
+    batcher.pushBytes(new Uint8Array(LARGE_BYTES).fill(1));
+    batcher.pushBytes(new Uint8Array(LARGE_BYTES).fill(2));
+    batcher.pushBytes(new Uint8Array([7, 8, 9]));
+    expect(writes).toHaveLength(0);
+
+    batcher.flushStaged();
+    expect(writes).toHaveLength(1);
+    expect(writes[0].byteLength).toBe(LARGE_BYTES * 2 + 3);
+    // The staged splits concatenate in arrival order.
+    expect(writes[0][0]).toBe(1);
+    expect(writes[0][LARGE_BYTES]).toBe(2);
+    expect(writes[0][LARGE_BYTES * 2]).toBe(7);
+    batcher.detach();
+  });
+
+  it("flushStaged on an empty buffer is a no-op (no zero-length write)", () => {
+    const writes: Uint8Array[] = [];
+    const batcher = new OutputBatcher();
+    batcher.attach(createFakeTerminal(writes));
+
+    batcher.flushStaged();
+    expect(writes).toHaveLength(0);
+    batcher.detach();
+  });
+
+  it("flushStaged resets staging so the next frame stages fresh", () => {
     const writes: Uint8Array[] = [];
     const batcher = new OutputBatcher();
     batcher.attach(createFakeTerminal(writes));
 
     batcher.pushBytes(new Uint8Array([1, 2, 3]));
-    batcher.pushBytes(new Uint8Array([4, 5, 6, 7]));
-    batcher.pushBytes(new Uint8Array([8]));
-
-    // The server coalesces one logical frame per WebSocket message, so the
-    // client does not coalesce — each push flushes on arrival (lowest latency
-    // beats coalescing for interactive/animated output), so three writes land.
-    expect(writes).toHaveLength(3);
-    expect(Array.from(writes[0])).toEqual([1, 2, 3]);
-    expect(Array.from(writes[1])).toEqual([4, 5, 6, 7]);
-    expect(Array.from(writes[2])).toEqual([8]);
-    batcher.detach();
-  });
-
-  it("flushes large output immediately, not deferred to a timer or rAF", () => {
-    const writes: Uint8Array[] = [];
-    const batcher = new OutputBatcher();
-    batcher.attach(createFakeTerminal(writes));
-
-    batcher.pushBytes(new Uint8Array(LARGE_BYTES).fill(1));
-    batcher.pushBytes(new Uint8Array(LARGE_BYTES).fill(2));
-
-    // Large frames flush on arrival (no rAF/idle-debounce deferral), so both
-    // writes land immediately. Only the no-op keep-warm rAF is armed.
-    expect(writes).toHaveLength(2);
-    expect(writes[0].byteLength).toBe(LARGE_BYTES);
-    expect(writes[1].byteLength).toBe(LARGE_BYTES);
-    expect(rafCount).toBe(1);
-    batcher.detach();
-  });
-
-  it("flushes a small interactive write immediately even during a stream", () => {
-    const writes: Uint8Array[] = [];
-    const batcher = new OutputBatcher();
-    batcher.attach(createFakeTerminal(writes));
-
-    // A high-throughput stream message flushes on arrival, then a keystroke
-    // echo / terminal query that lands right after it flushes in its own
-    // task — xterm answers the query before the probing program's read times
-    // out, and the echo paints without waiting on anything.
-    batcher.pushBytes(new Uint8Array(LARGE_BYTES).fill(1));
+    batcher.flushStaged();
     expect(writes).toHaveLength(1);
 
-    batcher.pushBytes(new Uint8Array([65, 66, 67]));
+    batcher.pushBytes(new Uint8Array([4, 5, 6]));
+    expect(writes).toHaveLength(1);
+    batcher.flushStaged();
     expect(writes).toHaveLength(2);
-    expect(writes[1].byteLength).toBe(3);
-    expect(Array.from(writes[1])).toEqual([65, 66, 67]);
+    expect(Array.from(writes[1])).toEqual([4, 5, 6]);
     batcher.detach();
   });
 });
@@ -154,9 +161,8 @@ describe("OutputBatcher keep-warm rAF cadence", () => {
 
     firstFrame!(performance.now());
 
-    expect(writes).toHaveLength(1);
+    expect(writes).toHaveLength(0); // keep-warm carries no flush work
     expect(rafCount).toBe(2);
-    expect(pendingCb).not.toBeNull();
     batcher.detach();
   });
 
@@ -175,13 +181,12 @@ describe("OutputBatcher keep-warm rAF cadence", () => {
     await new Promise((resolve) => setTimeout(resolve, OUTPUT_KEEP_WARM_MS + 50));
     firstFrame!(performance.now());
 
-    expect(writes).toHaveLength(1);
     expect(rafCount).toBe(1);
   });
 });
 
-describe("OutputBatcher background-tab flush", () => {
-  it("flushes synchronously (no rAF) while the document is hidden", () => {
+describe("OutputBatcher background-tab stage/flush", () => {
+  it("stages while hidden with no rAF, and flushStaged writes synchronously", () => {
     const writes: Uint8Array[] = [];
     const batcher = new OutputBatcher();
     batcher.attach(createFakeTerminal(writes));
@@ -190,32 +195,13 @@ describe("OutputBatcher background-tab flush", () => {
 
     try {
       batcher.pushBytes(new Uint8Array([65, 66, 67]));
-      // A hidden document must not arm a (paused) rAF: it writes immediately so
-      // xterm can answer a query before the probing program's read times out.
+      // A hidden document must not arm a (paused) rAF: it stages without one.
       expect(rafCount).toBe(0);
+      expect(writes).toHaveLength(0);
+
+      batcher.flushStaged();
       expect(writes).toHaveLength(1);
       expect(Array.from(writes[0])).toEqual([65, 66, 67]);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-    batcher.detach();
-  });
-
-  it("flushes each hidden push separately with no rAF", () => {
-    const writes: Uint8Array[] = [];
-    const batcher = new OutputBatcher();
-    batcher.attach(createFakeTerminal(writes));
-
-    vi.stubGlobal("document", { hidden: true });
-
-    try {
-      batcher.pushBytes(new Uint8Array([65]));
-      batcher.pushBytes(new Uint8Array([66, 67]));
-      // Each hidden push flushes on arrival — two writes — and no rAF is armed.
-      expect(rafCount).toBe(0);
-      expect(writes).toHaveLength(2);
-      expect(Array.from(writes[0])).toEqual([65]);
-      expect(Array.from(writes[1])).toEqual([66, 67]);
     } finally {
       vi.unstubAllGlobals();
     }
