@@ -1,7 +1,4 @@
-import {
-  OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES,
-  OUTPUT_KEEP_WARM_MS,
-} from "@/lib/constants";
+import { OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES, OUTPUT_KEEP_WARM_MS } from "@/lib/constants";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 
 const performanceNow = () => performance.now();

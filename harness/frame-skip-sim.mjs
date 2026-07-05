@@ -135,8 +135,8 @@ class Sim {
         for (let i = 0; i < 8 && this.heap.size; i++) peek.push(this.heap.pop());
         for (const e of peek) this.heap.push(e);
         throw new Error(
-          `sim runaway: ${this.heap.size} left, clock=${this.clock.toFixed(3)} busy=${this.busyUntil.toFixed(3)} slots=${JSON.stringify(Object.fromEntries(Object.entries(this.slots).map(([k,v])=>[k,v.pending])))}
-next: ${peek.map(e=>`t=${e.t.toFixed(2)} pri=${e.pri} ${e.kind}${e.kind==='raf'?`(${e.data})`:'(task)'}`).join(' | ')}`,
+          `sim runaway: ${this.heap.size} left, clock=${this.clock.toFixed(3)} busy=${this.busyUntil.toFixed(3)} slots=${JSON.stringify(Object.fromEntries(Object.entries(this.slots).map(([k, v]) => [k, v.pending])))}
+next: ${peek.map((e) => `t=${e.t.toFixed(2)} pri=${e.pri} ${e.kind}${e.kind === "raf" ? `(${e.data})` : "(task)"}`).join(" | ")}`,
         );
       }
       const ev = this.heap.pop();
@@ -438,7 +438,9 @@ const face2 = (mode) => {
   const id = 2;
   // single chunk delivered instantly (all bytes arrive together) — isolates
   // the parse-yield partial renders from any network split.
-  const sends = [{ frameId: id, frameBytes: 2 * 1024 * 1024, bytes: 2 * 1024 * 1024, isLast: true, sendT: 0 }];
+  const sends = [
+    { frameId: id, frameBytes: 2 * 1024 * 1024, bytes: 2 * 1024 * 1024, isLast: true, sendT: 0 },
+  ];
   const link = { latency: 0, bandwidth: 1e9 };
   const { out } = runScenario("Face2 local", sends, link, mode, id);
   return out;
@@ -458,7 +460,14 @@ const stream = (link, mode) => {
   const chunkBytes = SERVER_BATCH_FLUSH_BYTES;
   let fid = 100;
   for (let t = 0; t <= duration; t += gap) {
-    sends.push({ frameId: fid++, frameBytes: chunkBytes, bytes: chunkBytes, isLast: false, stream: true, sendT: t });
+    sends.push({
+      frameId: fid++,
+      frameBytes: chunkBytes,
+      bytes: chunkBytes,
+      isLast: false,
+      stream: true,
+      sendT: t,
+    });
   }
   const pressT = 150;
   const echoId = 999;
@@ -480,12 +489,15 @@ const stream = (link, mode) => {
   const { frames, metrics, sim } = runPipeline(mode, arrivals, {});
   const out = { label: `Stream ${link === LAN ? "LAN" : "SLOW"}`, mode };
   out.rafEvents = sim.rafEvents;
-  const echoRender = metrics.echoCommittedT != null
-    ? metrics.renders.find((r) => r.t >= metrics.echoCommittedT - 1e-9)
-    : null;
+  const echoRender =
+    metrics.echoCommittedT != null
+      ? metrics.renders.find((r) => r.t >= metrics.echoCommittedT - 1e-9)
+      : null;
   out.echoLatencyMs = echoRender ? echoRender.t - pressT : null;
   const streamRenders = metrics.renders.filter((r) => r.frameId !== echoId);
-  const span = streamRenders.length ? streamRenders[streamRenders.length - 1].t - streamRenders[0].t : 0;
+  const span = streamRenders.length
+    ? streamRenders[streamRenders.length - 1].t - streamRenders[0].t
+    : 0;
   out.renderFps = span > 0 ? streamRenders.length / (span / 1000) : 0;
   out.streamRenders = streamRenders.length;
   out.streamPartials = streamRenders.filter((r) => !r.complete).length;
@@ -495,8 +507,9 @@ const stream = (link, mode) => {
   return out;
 };
 
-const fmtCell = (c) => (typeof c === "number" ? c.toFixed(1) : c ?? "");
-const printRow = (cols) => console.log(cols.map((c) => String(fmtCell(c)).padStart(13)).join(" | "));
+const fmtCell = (c) => (typeof c === "number" ? c.toFixed(1) : (c ?? ""));
+const printRow = (cols) =>
+  console.log(cols.map((c) => String(fmtCell(c)).padStart(13)).join(" | "));
 const printTable = (title, rows, headers) => {
   console.log(`\n=== ${title} ===`);
   printRow(headers);
@@ -509,25 +522,33 @@ const main = () => {
     ["Face 1 (LAN)", () => face1(LAN, "current"), () => face1(LAN, "frameskip")],
     ["Face 1 (SLOW)", () => face1(SLOW, "current"), () => face1(SLOW, "frameskip")],
     ["Face 2 (local big write)", () => face2("current"), () => face2("frameskip")],
-    ["Stream + keyboard (LAN, saturated)", () => stream(LAN, "current"), () => stream(LAN, "frameskip")],
+    [
+      "Stream + keyboard (LAN, saturated)",
+      () => stream(LAN, "current"),
+      () => stream(LAN, "frameskip"),
+    ],
   ];
 
   for (const [label, curFn, skipFn] of scenarios) {
     const cur = { ...curFn(), mode: "current" };
     const skip = { ...skipFn(), mode: "frameskip" };
     console.log(`\n### ${label}`);
-    printTable(label, [cur, skip], [
-      "mode",
-      "renders",
-      "partials",
-      "ttcMs",
-      "progressive",
-      "renderFps",
-      "echoLatencyMs",
-      "streamPartials",
-      "parseBusyMs",
-      "rafEvents",
-    ]);
+    printTable(
+      label,
+      [cur, skip],
+      [
+        "mode",
+        "renders",
+        "partials",
+        "ttcMs",
+        "progressive",
+        "renderFps",
+        "echoLatencyMs",
+        "streamPartials",
+        "parseBusyMs",
+        "rafEvents",
+      ],
+    );
   }
 };
 
