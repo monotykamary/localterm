@@ -999,13 +999,27 @@ export class SessionManager {
         managed.outputBatchTimer = null;
       }
       this.flushOutput(managed);
-    } else if (managed.outputBatchTimer === null) {
-      managed.outputBatchTimer = setTimeout(() => {
-        managed.outputBatchTimer = null;
-        this.flushOutput(managed);
-      }, OUTPUT_BATCH_WINDOW_MS);
-      managed.outputBatchTimer.unref?.();
+      return;
     }
+    // Reset the coalescing window on every chunk so the flush lands
+    // OUTPUT_BATCH_WINDOW_MS after the LAST chunk of a burst, not a fixed
+    // window after the first. A full-screen TUI redraw of a large session
+    // emits across more than the window (node-pty delivers it as many
+    // 1024-byte data events over successive event-loop turns); a one-shot
+    // window flushed mid-redraw and split the frame across multiple WebSocket
+    // messages. Over a bandwidth-limited link each split arrives as its own
+    // atomic message and xterm paints it separately — the visible
+    // top-to-bottom crawl. A resetting window holds the whole burst until the
+    // PTY goes idle, then sends one message; the browser receives it atomically
+    // and xterm renders it in a single paint regardless of link bandwidth.
+    // Sustained high-throughput output never idles, so OUTPUT_BATCH_FLUSH_BYTES
+    // still gates the message rate there (unchanged).
+    if (managed.outputBatchTimer !== null) clearTimeout(managed.outputBatchTimer);
+    managed.outputBatchTimer = setTimeout(() => {
+      managed.outputBatchTimer = null;
+      this.flushOutput(managed);
+    }, OUTPUT_BATCH_WINDOW_MS);
+    managed.outputBatchTimer.unref?.();
   }
 
   private flushOutput(managed: ManagedSession): void {

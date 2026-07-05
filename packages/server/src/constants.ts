@@ -201,25 +201,31 @@ export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 // logical frame into a single message, which xterm.js parses atomically —
 // splitting a frame causes the half-erased frame to render and flicker (visible
 // on every keypress in cmd/Claude Code). TUI frames never approach this
-// threshold, so the timer governs them.
+// threshold, so the timer governs them — EXCEPT a full-screen repaint of a
+// large session (a big pi/Claude Code conversation, a wide terminal with heavy
+// SGR styling), which can exceed the old 32KB threshold and split across
+// messages. Over a bandwidth-limited link each split arrives as its own atomic
+// WebSocket message and xterm paints it separately — the visible top-to-bottom
+// crawl. Raising the threshold to 64KB keeps a big single redraw as one message
+// (the browser receives it atomically, one paint) while staying under xterm's
+// 12ms parse-yield budget (a 64KB write parses in ~4–6ms, measured), so a
+// single message never spills to xterm's async drain (no partial paint).
 //
-// This threshold only governs high-throughput output (cat of large files, full
+// This threshold also governs high-throughput output (cat of large files, full
 // TTY repaints, `gcc -v`, ~15MB/s), where the threshold not the timer sets the
 // message rate. There the dominant cost is per-message RunTask plumbing on the
 // renderer main thread: every WS message arrives in its own V8 task whose
 // median 0.30ms body is ~88% fixed V8/Chrome task-lifecycle overhead and only
-// ~12% the onmessage JS (measured 1364 msg/sec => 36.5% of main thread busy on
-// pure per-message overhead). The 8KB threshold made 15MB/s => ~1880 msg/sec,
-// burning ~9.4ms of every 16.6ms frame on invisible plumbing. Coalescing four
-// times more (>32KB) reduces that to ~470 msg/sec => ~2.4ms/frame, freeing
-// ~7ms/frame and bringing per-frame busy from ~12.5ms down under the 60Hz
-// budget. xterm's own parser amortises the parse cost across batched bytes —
-// its internal chunk cap is ~15ms — so a 32KB batch at sustained 15MB/s parses
-// in ~6ms, under the cap. Batch latency at this size is ~2ms at 15MB/s,
-// imperceptible; the keep-warm rAF on the client holds needsBeginFrame=1 across
-// inter-arrival gaps regardless of burst heaviness (traced and verified), so
-// fatter-but-rarer batches do not reintroduce the 122ms hibernation stalls.
-export const OUTPUT_BATCH_FLUSH_BYTES = 32 * 1024;
+// ~12% the onmessage JS (measured 1364 msg/sec => 36.5% main thread on pure
+// per-message overhead). At 64KB the message rate halves vs the old 32KB (~470
+// => ~235 msg/sec at 15MB/s), halving that fixed overhead to ~1.2ms/frame.
+// xterm's own parser amortises the parse cost across batched bytes; a 64KB
+// batch parses in ~4–6ms (under its 12ms chunk cap), so no yield, no partial.
+// Batch latency at this size is ~4ms at 15MB/s, imperceptible; the keep-warm
+// rAF on the client holds needsBeginFrame=1 across inter-arrival gaps
+// regardless of burst heaviness, so fatter-but-rarer batches do not reintroduce
+// the 122ms hibernation stalls.
+export const OUTPUT_BATCH_FLUSH_BYTES = 64 * 1024;
 
 // Output batching window. The kernel PTY delivers child writes in 1024-byte
 // chunks on macOS, and node-pty emits each chunk as a separate data event in
@@ -228,10 +234,18 @@ export const OUTPUT_BATCH_FLUSH_BYTES = 32 * 1024;
 // split a single ink/TUI redraw frame (erase + repaint, ~3KB) across multiple
 // WebSocket messages, and xterm.js rendering between them flashed the
 // half-erased frame (visible flicker in cmd/Claude Code on every keypress).
-// A small timer window lets all chunks of one frame (measured 0.02–0.8ms
-// apart) coalesce into one message, which xterm.js parses atomically.
-// For continuous high-throughput output, OUTPUT_BATCH_FLUSH_BYTES triggers an
-// immediate flush regardless of the timer, keeping the data flowing.
+// The window RESETS on every chunk (onSessionOutput clears and re-arms the
+// timer per data event), so it flushes OUTPUT_BATCH_WINDOW_MS after the LAST
+// chunk of a burst — not a fixed window after the first. A full-screen
+// repaint of a large session emits over more than the window; a one-shot
+// window split it mid-redraw, and over a bandwidth-limited link each split
+// arrived as its own atomic message and painted separately (the visible
+// top-to-bottom crawl). The resetting window coalesces the whole burst into
+// one message so the browser receives it atomically and xterm renders it in
+// a single paint regardless of link bandwidth.
+// For continuous high-throughput output the window never idles, so
+// OUTPUT_BATCH_FLUSH_BYTES triggers an immediate flush regardless of the
+// timer, keeping the data flowing.
 export const OUTPUT_BATCH_WINDOW_MS = 2;
 
 // Heartbeat: send a WS ping every N ms; if no pong arrives within the timeout
