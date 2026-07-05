@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.40.0
+
+### Minor Changes
+
+- Context-takeover delta compression (br-ctx): a persistent Brotli stream per client/PTY compresses each output frame against the prior screen — the delta. The prior screen primes the LZ77 window so unchanged rows compress to back-references, adding 1.24–3.7x on top of the per-frame Brotli (3.7x for a 1-row TUI update, 1.24x for a SIGWINCH re-wrap). A 200KB redraw's ~20KB per-frame drops to ~5–16KB. New 5-byte header (0x03 + 4-byte LE raw size) for context-takeover frames (the persistent DecompressionStream doesn't end per frame); the 0x00/0x01/0x02 per-frame modes keep their 1-byte header. Negotiated via a new {compress} frame before the scrollback replay; backward-compatible (old server → raw, old client → per-frame 0x02). The persistent compressor/decompressor resets on every promote.
+
 ## 2.39.0
 
 ### Minor Changes
