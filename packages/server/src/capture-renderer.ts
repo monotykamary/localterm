@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import type { ITerminalAddon } from "@xterm/headless";
 import { CAPTURE_RENDERER_SCROLLBACK } from "./constants.js";
 
 // @xterm/headless ships a CJS `main` with no `exports` field and a broken
@@ -9,6 +10,25 @@ import { CAPTURE_RENDERER_SCROLLBACK } from "./constants.js";
 // it to the package's own exported shape — fully type-safe, no `as any`.
 const require = createRequire(import.meta.url);
 const { Terminal } = require("@xterm/headless") as typeof import("@xterm/headless");
+
+// @xterm/addon-serialize's runtime loads the same way, but its `.d.ts` imports
+// from '@xterm/xterm' (the DOM-typed browser terminal). Pulling that in would
+// shift the global BodyInit/Buffer resolution and break unrelated `Response`
+// call sites. So type the addon with a local interface extending the DOM-free
+// ITerminalAddon from @xterm/headless — the runtime is still the real addon,
+// the type is just a minimal local shape. The `as` is necessary: createRequire
+// returns `any`, and `typeof import("@xterm/addon-serialize")` is the very thing
+// that drags in @xterm/xterm's types.
+interface SerializeAddonInstance extends ITerminalAddon {
+  serialize(options?: {
+    scrollback?: number;
+    excludeModes?: boolean;
+    excludeAltBuffer?: boolean;
+  }): string;
+}
+const { SerializeAddon } = require("@xterm/addon-serialize") as {
+  SerializeAddon: new () => SerializeAddonInstance;
+};
 
 // A server-side terminal emulator fed from a session's raw PTY output so a
 // `capture-pane`-style read returns clean, ANSI-processed cell text instead of
@@ -26,6 +46,7 @@ const { Terminal } = require("@xterm/headless") as typeof import("@xterm/headles
 // OSC, SGR, and line-wrap are interpreted identically to what a tab shows.
 export class CaptureRenderer {
   private readonly terminal: InstanceType<typeof Terminal>;
+  private readonly serializeAddon: SerializeAddonInstance;
   private disposed = false;
   // xterm parses `write()` asynchronously (batched on a timer), so a buffer read
   // immediately after write returns blank. Serialize writes into a promise
@@ -41,6 +62,8 @@ export class CaptureRenderer {
       scrollback,
       allowProposedApi: true,
     });
+    this.serializeAddon = new SerializeAddon();
+    this.terminal.loadAddon(this.serializeAddon);
   }
 
   write(data: string): void {
@@ -62,6 +85,19 @@ export class CaptureRenderer {
   // that read the buffer (capture, exec extraction) await this first.
   async flush(): Promise<void> {
     await this.writeChain;
+  }
+
+  // Serialize the terminal's current state (both buffers + modes) as an ANSI
+  // stream that, written to a viewer's xterm, reproduces the screen — the
+  // render-skip payload. `scrollback: 0` limits the normal buffer to its
+  // viewport (the alt buffer has no scrollback so it is always just the
+  // viewport), so this is a compact ~viewport-sized snapshot, not the whole
+  // session. The modes are included by default so a viewer that missed a
+  // mode-set while raw bytes were being skipped (alt-screen entry, mouse,
+  // cursor hide) re-syncs from the snapshot. The caller MUST flush() first so
+  // every write so far has parsed into the grid.
+  serializeViewport(): string {
+    return this.serializeAddon.serialize({ scrollback: 0 });
   }
 
   resize(cols: number, rows: number): void {
@@ -148,6 +184,15 @@ export class CaptureRenderer {
 
   get rows(): number {
     return this.terminal.rows;
+  }
+
+  // Whether the PTY's foreground app is in the alternate screen (DECSET 1049).
+  // Render-skip gates on this: a TUI redraw lives in the alt buffer, where a
+  // viewport snapshot is the right payload (no scrollback history to lose); a
+  // shell stream lives in the normal buffer, where the raw bytes ARE the
+  // history the user scrolls, so a snapshot would blank a continuous stream.
+  get isAlternateBuffer(): boolean {
+    return this.terminal.buffer.active.type === "alternate";
   }
 
   dispose(): void {

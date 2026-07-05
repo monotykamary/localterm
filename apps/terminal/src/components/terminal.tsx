@@ -1655,6 +1655,16 @@ export const Terminal = () => {
           // effective width through the wash. pty-size frames are infrequent
           // (peer attach/detach/resize), so the synchronous reflow cost is fine.
           fitToContainer();
+        } else if (message.type === "viewport-snapshot") {
+          // Render-skip: the uplink couldn't keep up with a raw TUI redraw, so
+          // the server serialized the terminal state with the official
+          // @xterm/addon-serialize and sent it instead of the raw burst. Write
+          // it as one block so xterm paints the whole screen in a single write
+          // — no progressive crawl. Routed through the same OutputBatcher as
+          // raw output so the keep-warm rAF and the afterFlush hook (scrollbar)
+          // stay consistent.
+          outputBatcher.pushBytes(new TextEncoder().encode(message.data));
+          noteOutputActivity();
         }
       });
 
