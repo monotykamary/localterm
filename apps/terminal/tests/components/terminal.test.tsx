@@ -90,21 +90,17 @@ const installFakeWebSocket = () => {
           this.dispatch("open", {});
         },
         fireMessage: (payload) => {
-          // Output frames travel as binary ArrayBuffers to match the production
-          // wire format: a 1-byte header (0x00 raw / 0x01 gzip / 0x02 brotli)
-          // then the UTF-8 payload. Tests send uncompressed frames (0x00 raw).
-          // Everything else goes out as JSON text.
+          // Output frames travel as binary ArrayBuffers to match the production wire
+          // format. Tests don't send a {compress} frame, so negotiatedCompressMode
+          // stays null and the binary handler reads frames as raw (no header byte) —
+          // exactly the back-compat/old-server path. Everything else goes out as JSON.
           if (
             typeof payload === "object" &&
             payload !== null &&
             (payload as Record<string, unknown>).type === "output"
           ) {
             const data = (payload as { data: string }).data;
-            const bytes = new TextEncoder().encode(data);
-            const framed = new Uint8Array(bytes.length + 1);
-            framed[0] = 0x00;
-            framed.set(bytes, 1);
-            this.dispatch("message", { data: framed.buffer });
+            this.dispatch("message", { data: new TextEncoder().encode(data).buffer });
             return;
           }
           this.dispatch("message", { data: JSON.stringify(payload) });
@@ -1461,7 +1457,9 @@ describe("Terminal refresh reattach", () => {
     });
 
     expect(new URL(window.location.href).searchParams.get("sid")).toBe(TEST_SID);
-    expect(firstWs?.send).toHaveBeenCalledWith(expect.stringMatching(/"type":"ready","replay":true/));
+    expect(firstWs?.send).toHaveBeenCalledWith(
+      expect.stringMatching(/"type":"ready","replay":true/),
+    );
 
     unmount();
     render(<Terminal />);
@@ -1473,7 +1471,9 @@ describe("Terminal refresh reattach", () => {
       fireSessionFrame(secondWs, TEST_SID);
     });
 
-    expect(secondWs?.send).toHaveBeenCalledWith(expect.stringMatching(/"type":"ready","replay":true/));
+    expect(secondWs?.send).toHaveBeenCalledWith(
+      expect.stringMatching(/"type":"ready","replay":true/),
+    );
   });
 
   it("does not replay scrollback on a silent reattach of the same PTY", () => {
@@ -1500,7 +1500,9 @@ describe("Terminal refresh reattach", () => {
       fireSessionFrame(secondWs, TEST_SID);
     });
 
-    expect(secondWs?.send).toHaveBeenCalledWith(expect.stringMatching(/"type":"ready","replay":false/));
+    expect(secondWs?.send).toHaveBeenCalledWith(
+      expect.stringMatching(/"type":"ready","replay":false/),
+    );
   });
 });
 

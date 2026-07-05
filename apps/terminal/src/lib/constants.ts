@@ -268,8 +268,13 @@ export const OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES = 8 * 1024;
 export const OUTPUT_KEEP_WARM_MS = 150;
 
 // Server->client output compression frame-header bytes (see the server's
-// WS_OUTPUT_* constants). The server prepends one byte to each compressed
-// binary output frame: 0x00 = raw, 0x01 = gzip, 0x02 = brotli.
+// WS_OUTPUT_* constants). The server prepends a header to each compressed
+// binary output frame: 0x00 = raw, 0x01 = gzip, 0x02 = brotli (per-frame, all
+// 1-byte headers), 0x03 = brotli context-takeover (a 5-byte header: 0x03 + 4-byte
+// LE raw size, so the client can size-delimit a frame out of the persistent
+// DecompressionStream that doesn't end per frame).
 export const WS_OUTPUT_RAW = 0x00;
 export const WS_OUTPUT_GZIP = 0x01;
 export const WS_OUTPUT_BROTLI = 0x02;
+export const WS_OUTPUT_BROTLI_CTX = 0x03;
+export const WS_OUTPUT_CTX_HEADER_BYTES = 5;

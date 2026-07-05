@@ -107,6 +107,8 @@ import {
   TOOLBAR_HIDE_DELAY_MS,
   TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS,
   WS_OUTPUT_BROTLI,
+  WS_OUTPUT_BROTLI_CTX,
+  WS_OUTPUT_CTX_HEADER_BYTES,
   WS_OUTPUT_GZIP,
   WS_OUTPUT_RAW,
 } from "@/lib/constants";
@@ -179,6 +181,7 @@ import { computePtyViewportOverlay } from "@/utils/compute-pty-viewport-overlay"
 import {
   MAX_INPUT_BYTES,
   type ClientToServerMessage,
+  type CompressMode,
 } from "@monotykamary/localterm-server/protocol";
 import "@xterm/xterm/css/xterm.css";
 
@@ -202,7 +205,7 @@ const SEARCH_DECORATION_OPTIONS = {
 // permessage-deflate, so this is application-level. The TS DOM lib's
 // CompressionFormat omits "br" (runtime-supported in Chrome 105+/Safari 16.4+),
 // so the format string is cast.
-const detectCompressMode = (): "br" | "gzip" | null => {
+const detectCompressMode = (): "br-ctx" | "gzip" | null => {
   const tryFormat = (format: string): boolean => {
     try {
       new DecompressionStream(format as CompressionFormat);
@@ -211,7 +214,10 @@ const detectCompressMode = (): "br" | "gzip" | null => {
       return false;
     }
   };
-  if (tryFormat("br")) return "br";
+  // "br-ctx" advertises the context-takeover (a persistent DecompressionStream
+  // per PTY): the same DecompressionStream("br") support as per-frame brotli,
+  // but the server compresses each frame against the prior screen (the delta).
+  if (tryFormat("br")) return "br-ctx";
   if (tryFormat("gzip")) return "gzip";
   return null;
 };
@@ -247,6 +253,80 @@ const decompressFrame = async (
     offset += chunk.length;
   }
   return out;
+};
+
+// Persistent Brotli decompressor for the context-takeover mode ("br-ctx"). One
+// per PTY (created on the {compress} frame, released on {session} or teardown).
+// The DecompressionStream doesn't end per frame, so a concurrent reader runs for
+// the socket's lifetime pushing decoded bytes into a buffer; each decompress()
+// feeds a compressed chunk and waits for `rawSize` bytes (the size-delimited
+// frame boundary — the decoder emits in arbitrary 16KB chunks, so the raw-size
+// bound, not a read() boundary, recovers the frame).
+const makeCtxDecoder = () => {
+  const stream = new DecompressionStream("br" as CompressionFormat);
+  const writer = stream.writable.getWriter();
+  const reader = stream.readable.getReader();
+  const chunks: Uint8Array[] = [];
+  let len = 0;
+  let waitingFor = 0;
+  let resolver: (() => void) | null = null;
+  void (async () => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value);
+          len += value.length;
+        }
+        if (resolver !== null && len >= waitingFor) {
+          const r = resolver!;
+          resolver = null;
+          r();
+        }
+      }
+    } catch {
+      /* the no-finish close error at socket teardown — ignore */
+    }
+  })();
+  const decompress = async (
+    compressed: Uint8Array<ArrayBuffer>,
+    rawSize: number,
+  ): Promise<Uint8Array> => {
+    await writer.write(compressed);
+    if (len < rawSize) {
+      waitingFor = rawSize;
+      await new Promise<void>((r) => {
+        resolver = r;
+      });
+    }
+    const out = new Uint8Array(rawSize);
+    let offset = 0;
+    while (offset < rawSize) {
+      const chunk = chunks[0];
+      const need = rawSize - offset;
+      if (chunk.length <= need) {
+        out.set(chunk, offset);
+        offset += chunk.length;
+        chunks.shift();
+        len -= chunk.length;
+      } else {
+        out.set(chunk.subarray(0, need), offset);
+        chunks[0] = chunk.subarray(need);
+        offset = rawSize;
+        len -= need;
+      }
+    }
+    return out;
+  };
+  const release = async () => {
+    try {
+      await writer.close();
+    } catch {
+      /* the persistent stream has no finish marker — the close errors */
+    }
+  };
+  return { decompress, release };
 };
 
 const CWD_QUERY_PARAM = "cwd";
@@ -1506,6 +1586,14 @@ export const Terminal = () => {
       // PTY (after terminal.reset()).
       let decompressQueue: Promise<void> = Promise.resolve();
       let ptyGeneration = 0;
+      // The server's chosen compress mode (from the {compress} frame on promote),
+      // NOT the client's advertisement. null = raw (no header) — either a no-
+      // support browser or an old server that never sent {compress}.
+      let negotiatedCompressMode: CompressMode = null;
+      // The persistent Brotli decompressor for "br-ctx" (one per PTY, reset on
+      // {session} and {compress}); its LZ77 window holds the prior screen so each
+      // frame decompresses as a delta.
+      let ctxDecoder: ReturnType<typeof makeCtxDecoder> | null = null;
       const enqueueDecompress = (task: () => Promise<void> | void): void => {
         decompressQueue = decompressQueue.then(task).catch((error: unknown) => {
           console.warn("[localterm] output decompress error", error);
@@ -1520,9 +1608,9 @@ export const Terminal = () => {
         // an ArrayBuffer goes through the schema parser.
         if (isBinaryMessageData(event.data)) {
           const data = new Uint8Array(event.data);
-          if (COMPRESS_MODE === null) {
-            // Raw passthrough (no compression negotiated — a back-compat or
-            // no-DecompressionStream browser): the frame has no header byte.
+          if (negotiatedCompressMode === null) {
+            // Raw passthrough (no compression — a no-DecompressionStream browser,
+            // or an old server that never sent a {compress} frame): no header byte.
             if (inReplay) {
               replayChunks.push(data);
               return;
@@ -1531,21 +1619,33 @@ export const Terminal = () => {
             noteOutputActivity();
             return;
           }
-          // Compressed frame: 1-byte header (0x00 raw / 0x01 gzip / 0x02 brotli)
-          // then the payload. Decompress is async (DecompressionStream), so
-          // enqueue per socket — frames reach xterm in PTY order and the
-          // replay-end flush waits for the replay frames' decompresses. Capture
-          // the PTY generation so a {session} switch drops a prior PTY's frame
-          // still mid-decompress (it would otherwise land after terminal.reset()).
+          // Compressed frame. 0x00/0x01/0x02 use a 1-byte header (per-frame
+          // independent — a fresh DecompressionStream per frame reads to done).
+          // 0x03 is the context-takeover: a 5-byte header (0x03 + 4-byte LE raw
+          // size) then the compressed payload, fed to the per-socket persistent
+          // DecompressionStream and size-delimited by the raw size (the stream
+          // doesn't end per frame). Decompress is async, so enqueue per socket —
+          // frames reach xterm in PTY order and the replay-end flush waits for
+          // the replay frames' decompresses. Capture the PTY generation so a
+          // {session} switch drops a prior PTY's frame still mid-decompress.
           const generationAtEnqueue = ptyGeneration;
           enqueueDecompress(async () => {
             const header = data[0];
-            const payload = data.subarray(1);
             let bytes: Uint8Array;
-            if (header === WS_OUTPUT_BROTLI) bytes = await decompressFrame("br", payload);
-            else if (header === WS_OUTPUT_GZIP) bytes = await decompressFrame("gzip", payload);
-            else if (header === WS_OUTPUT_RAW) bytes = payload;
-            else return; // unknown header — a version mismatch; drop the frame
+            if (header === WS_OUTPUT_BROTLI_CTX) {
+              const rawSize = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(
+                1,
+                true,
+              );
+              const compressed = data.subarray(WS_OUTPUT_CTX_HEADER_BYTES);
+              bytes = await ctxDecoder!.decompress(compressed, rawSize);
+            } else {
+              const payload = data.subarray(1);
+              if (header === WS_OUTPUT_BROTLI) bytes = await decompressFrame("br", payload);
+              else if (header === WS_OUTPUT_GZIP) bytes = await decompressFrame("gzip", payload);
+              else if (header === WS_OUTPUT_RAW) bytes = payload;
+              else return; // unknown header — a version mismatch; drop the frame
+            }
             if (ptyGeneration !== generationAtEnqueue) return;
             if (inReplay) {
               // Buffer the DECOMPRESSED bytes; replay-end writes them as one
@@ -1572,6 +1672,15 @@ export const Terminal = () => {
         } else if (message.type === "session") {
           ptyGeneration += 1;
           const priorSessionId = liveSessionId;
+          // A new session frame is a fresh attach: reset the negotiated compress
+          // mode (the server sends a new {compress} frame on promote) and release
+          // the prior PTY's persistent Brotli decompressor (its LZ77 context is
+          // stale for the new PTY).
+          negotiatedCompressMode = null;
+          if (ctxDecoder !== null) {
+            void ctxDecoder.release();
+            ctxDecoder = null;
+          }
           // A new session frame means a fresh attach: drop any suppressed-replay
           // window left open by a prior (possibly failed) attach — its replay
           // is moot now, and an unbalanced window would leave onData suppressed
@@ -1679,6 +1788,19 @@ export const Terminal = () => {
             replayChunks = [];
           }
           send({ type: "ready", replay: wantsReplay, compress: COMPRESS_MODE });
+        } else if (message.type === "compress") {
+          // The server's chosen compress mode, sent on promote BEFORE the
+          // scrollback replay so the client knows how to parse the compressed
+          // replay frames. Drives the binary handler (NOT COMPRESS_MODE — that's
+          // the client's advertisement). An old server that doesn't know "br-ctx"
+          // never sends this frame, so negotiatedCompressMode stays null and the
+          // binary handler reads frames as raw (no header) — graceful degrade.
+          negotiatedCompressMode = message.mode;
+          if (ctxDecoder !== null) {
+            void ctxDecoder.release();
+            ctxDecoder = null;
+          }
+          if (message.mode === "br-ctx") ctxDecoder = makeCtxDecoder();
         } else if (message.type === "replay-end") {
           // The server has finished sending the scrollback replay. Write the
           // buffered frames as one block with onData suppressed so xterm's
@@ -1714,7 +1836,7 @@ export const Terminal = () => {
           // block. Raw mode (no compression) flushes inline — the frames
           // arrived synchronously and the flush must land before the next
           // (inline) live frame reads `inReplay`.
-          if (COMPRESS_MODE === null) flushReplay();
+          if (negotiatedCompressMode === null) flushReplay();
           else enqueueDecompress(flushReplay);
         } else if (message.type === "automations") {
           setAutomations(message.automations);

@@ -26,8 +26,10 @@ import {
   WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
   WS_READY_STATE_OPEN,
   WS_OUTPUT_BROTLI,
+  WS_OUTPUT_BROTLI_CTX,
   WS_OUTPUT_BROTLI_QUALITY,
   WS_OUTPUT_COMPRESS_THRESHOLD_BYTES,
+  WS_OUTPUT_CTX_HEADER_BYTES,
   WS_OUTPUT_GZIP,
   WS_OUTPUT_GZIP_LEVEL,
   WS_OUTPUT_RAW,
@@ -43,6 +45,54 @@ import type { SessionEventName } from "./session-event-manager.js";
 import type { GitBranchPr, ServerToClientMessage, SpawnPtyInput } from "./types.js";
 import type { CompressMode } from "./schemas.js";
 import type { SessionOwner } from "./identity/types.js";
+
+// Persistent Brotli compressor for the context-takeover mode ("br-ctx"). Each
+// output frame is flushed as a chunk of ONE continuous Brotli stream, so frame N
+// compresses against frames 0..N-1 (the prior screen primes the LZ77 window —
+// the delta). Per-client, created on promote, released on detach. The flushes
+// are chained (a per-encoder FIFO) so frames compress + ship in PTY order even
+// though each flush is async (the BROTLI_OPERATION_FLUSH callback fires on the
+// next tick). The accumulator is trimmed after each flush so a long session
+// doesn't grow without bound.
+interface BrotliEncoder {
+  flush: (bytes: Uint8Array<ArrayBuffer>) => Promise<Buffer<ArrayBuffer>>;
+  release: () => void;
+}
+const makeBrotliEncoder = (level: number): BrotliEncoder => {
+  const enc = zlib.createBrotliCompress({
+    params: { [zlib.constants.BROTLI_PARAM_QUALITY]: level },
+  });
+  let buf = Buffer.alloc(0);
+  enc.on("data", (d: Buffer) => {
+    buf = Buffer.concat([buf, d]);
+  });
+  let chain: Promise<Buffer<ArrayBuffer>> = Promise.resolve(Buffer.alloc(0));
+  const flush = (bytes: Uint8Array<ArrayBuffer>): Promise<Buffer<ArrayBuffer>> => {
+    chain = chain.then(
+      () =>
+        new Promise<Buffer<ArrayBuffer>>((resolve) => {
+          const before = buf.length;
+          enc.write(bytes);
+          enc.flush(zlib.constants.BROTLI_OPERATION_FLUSH, () => {
+            setImmediate(() => {
+              const out = buf.subarray(before, buf.length);
+              buf = buf.subarray(buf.length);
+              resolve(out);
+            });
+          });
+        }),
+    );
+    return chain;
+  };
+  const release = () => {
+    try {
+      enc.destroy();
+    } catch {
+      /* already closed */
+    }
+  };
+  return { flush, release };
+};
 import { resolveNamedKeys } from "./utils/named-keys.js";
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 
@@ -112,6 +162,7 @@ interface ManagedClient {
   pixelHeight?: number;
   coordinator: GitMetadataCoordinator | null;
   compressMode: CompressMode;
+  brotliEncoder: BrotliEncoder | null;
 }
 
 export interface ManagedSession {
@@ -427,6 +478,7 @@ export class SessionManager {
       rows: 0,
       coordinator,
       compressMode: null,
+      brotliEncoder: null,
     };
     coordinator.add(ws);
     managed.clients.add(client);
@@ -453,7 +505,10 @@ export class SessionManager {
     // its scrollback replay still lands before live fan-out. `promote` always
     // sends `replay-end`, so even a slow link that auto-promotes with
     // `replay: false` can't deadlock the client in its replay window.
-    client.pendingTimer = setTimeout(() => this.promote(ws, false), this.pendingPromoteTimeoutMs);
+    client.pendingTimer = setTimeout(
+      () => void this.promote(ws, false),
+      this.pendingPromoteTimeoutMs,
+    );
     client.pendingTimer.unref?.();
     this.hooks.onSessionActivity();
     return managed;
@@ -476,7 +531,7 @@ export class SessionManager {
   // lets the client flush whatever it buffered (the pending bytes that raced
   // ahead of the marker) and rejoin live fan-out. A client that didn't open the
   // window (a silent reattach, or a back-compat reader) treats it as a no-op.
-  promote(ws: ClientSocket, replay: boolean, compress: CompressMode = null): void {
+  async promote(ws: ClientSocket, replay: boolean, compress: CompressMode = null): Promise<void> {
     const entry = this.wsToClient.get(ws);
     if (!entry) return;
     const client = entry.client;
@@ -486,8 +541,22 @@ export class SessionManager {
       client.pendingTimer = null;
     }
     client.compressMode = compress;
+    // Reset the persistent Brotli encoder: a new promote is a fresh attach (a
+    // PTY switch or reconnect), so the prior screen's LZ77 context is stale.
+    // The first frame of the new stream has no prior context (the per-frame
+    // equivalent); subsequent frames compress against it.
+    if (client.brotliEncoder !== null) {
+      client.brotliEncoder.release();
+      client.brotliEncoder = null;
+    }
+    if (compress === "br-ctx") client.brotliEncoder = makeBrotliEncoder(WS_OUTPUT_BROTLI_QUALITY);
+    // Tell the client the chosen compress mode BEFORE the scrollback replay so
+    // it knows how to parse the compressed replay frames. A back-compat server
+    // that doesn't know "br-ctx" never sends this frame, so an old-server +
+    // new-client pair degrades to raw (no header) instead of mis-parsing.
+    this.sendControl(ws, { type: "compress", mode: compress });
     if (replay) {
-      this.sendScrollback(ws, entry.session, client.compressMode);
+      await this.sendScrollback(ws, entry.session, client);
     }
     // Tell the client the replay bytes have all landed so it can write them as
     // one suppressed block (dropping xterm's responses to the stale query
@@ -496,7 +565,7 @@ export class SessionManager {
     // exits its suppressed-replay window and never deadlocks on a slow link.
     this.sendControl(ws, { type: "replay-end" });
     for (const payload of client.pendingControl) this.sendControl(ws, payload);
-    for (const bytes of client.pendingBytes) this.sendOutputFrame(ws, bytes, client.compressMode);
+    for (const bytes of client.pendingBytes) await this.sendOutputFrame(ws, bytes, client);
     client.pendingControl = [];
     client.pendingBytes = [];
     client.pending = false;
@@ -510,7 +579,7 @@ export class SessionManager {
     // that never sends {type:"ready"} still unblocks on its first keystroke.
     // The localterm client sends {type:"ready"} before any input, so this is a
     // no-op for it. Promote flushes any buffered output before the input echoes.
-    if (entry.client.pending) this.promote(ws, false);
+    if (entry.client.pending) void this.promote(ws, false);
     entry.session.session.write(data);
   }
 
@@ -542,6 +611,10 @@ export class SessionManager {
     if (client.pendingTimer !== null) {
       clearTimeout(client.pendingTimer);
       client.pendingTimer = null;
+    }
+    if (client.brotliEncoder !== null) {
+      client.brotliEncoder.release();
+      client.brotliEncoder = null;
     }
     client.pendingControl = [];
     client.pendingBytes = [];
@@ -947,12 +1020,16 @@ export class SessionManager {
     return Math.min(Math.max(Math.trunc(value), min), max);
   }
 
-  private sendScrollback(ws: ClientSocket, managed: ManagedSession, mode: CompressMode): void {
+  private async sendScrollback(
+    ws: ClientSocket,
+    managed: ManagedSession,
+    client: ManagedClient,
+  ): Promise<void> {
     const snapshot = managed.session.snapshotScrollback();
     if (!snapshot) return;
     const bytes = Buffer.from(snapshot, "utf8");
     for (let offset = 0; offset < bytes.byteLength; offset += MAX_OUTPUT_BYTES) {
-      this.sendOutputFrame(ws, bytes.subarray(offset, offset + MAX_OUTPUT_BYTES), mode);
+      await this.sendOutputFrame(ws, bytes.subarray(offset, offset + MAX_OUTPUT_BYTES), client);
     }
   }
 
@@ -987,17 +1064,37 @@ export class SessionManager {
     return out;
   }
 
-  private sendOutputFrame(
+  // 5-byte header for the context-takeover mode: 0x03 + 4-byte LE raw size, so
+  // the client can size-delimit a frame out of the persistent DecompressionStream
+  // (which doesn't end per frame and emits in arbitrary 16KB chunks).
+  private frameWithCtxHeader(
+    compressed: Uint8Array<ArrayBuffer>,
+    rawSize: number,
+  ): Buffer<ArrayBuffer> {
+    const out = Buffer.allocUnsafe(WS_OUTPUT_CTX_HEADER_BYTES + compressed.length);
+    out[0] = WS_OUTPUT_BROTLI_CTX;
+    out.writeUInt32LE(rawSize, 1);
+    out.set(compressed, WS_OUTPUT_CTX_HEADER_BYTES);
+    return out;
+  }
+
+  private async sendOutputFrame(
     ws: ClientSocket,
     bytes: Uint8Array<ArrayBuffer>,
-    mode: CompressMode,
-  ): void {
+    client: ManagedClient,
+  ): Promise<void> {
+    const mode = client.compressMode;
     if (mode === null) {
       this.sendOutputBytes(ws, bytes);
       return;
     }
     if (bytes.length < WS_OUTPUT_COMPRESS_THRESHOLD_BYTES) {
       this.sendOutputBytes(ws, this.frameWithHeader(WS_OUTPUT_RAW, bytes));
+      return;
+    }
+    if (mode === "br-ctx") {
+      const compressed = await client.brotliEncoder!.flush(bytes);
+      this.sendOutputBytes(ws, this.frameWithCtxHeader(compressed, bytes.length));
       return;
     }
     const compressed = this.compressPayload(bytes, mode);
@@ -1024,6 +1121,18 @@ export class SessionManager {
       }
       if (!compressible) {
         this.sendOutputBytes(client.ws, this.frameWithHeader(WS_OUTPUT_RAW, bytes));
+        continue;
+      }
+      if (mode === "br-ctx") {
+        // Per-client persistent stream: the flush is async (chained per encoder
+        // in PTY order), so fire-and-forget here — the chain preserves order
+        // across this client's frames and sendOutputBytes checks
+        // readyState/backpressure at send time.
+        void client
+          .brotliEncoder!.flush(bytes)
+          .then((compressed) =>
+            this.sendOutputBytes(client.ws, this.frameWithCtxHeader(compressed, bytes.length)),
+          );
         continue;
       }
       if (mode === "br") {

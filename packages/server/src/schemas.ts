@@ -464,16 +464,19 @@ const identifyMessageSchema = z
 // "pending" and receives no live fan-out, so no output is lost across the gap —
 // it all lives in the ring buffer and arrives via the replay.
 // `compress` is the decompressor the client advertised (feature-detected via
-// `new DecompressionStream(mode)`): "br" if Brotli is supported (the best
-// ratio), "gzip" as a widely-supported fallback (Chrome 80+), or null if the
-// browser has no DecompressionStream (raw passthrough). null is also the
+// `new DecompressionStream(mode)`): "br-ctx" if Brotli is supported (the best
+// ratio — a persistent context-takeover stream compresses each frame against
+// the prior screen, the delta), "br" as a per-frame Brotli fallback (a back-
+// compat client), "gzip" as a widely-supported fallback (Chrome 80+), or null if
+// the browser has no DecompressionStream (raw passthrough). null is also the
 // default for a back-compat client that omits the field — it gets raw frames.
-export type CompressMode = "br" | "gzip" | null;
+export type CompressMode = "br-ctx" | "br" | "gzip" | null;
+const compressModeSchema = z.enum(["br-ctx", "br", "gzip"]).nullable();
 const readyMessageSchema = z
   .object({
     type: z.literal("ready"),
     replay: z.boolean(),
-    compress: z.enum(["br", "gzip"]).nullable().default(null),
+    compress: compressModeSchema.default(null),
   })
   .strict();
 
@@ -1261,6 +1264,15 @@ const automationsMessageSchema = z
 // reattach, or a back-compat reader) treats it as a no-op.
 const replayEndMessageSchema = z.object({ type: z.literal("replay-end") }).strict();
 
+// The server's chosen compress mode, sent on promote BEFORE the scrollback
+// replay so the client knows how to parse the compressed replay frames. A
+// back-compat server that doesn't know "br-ctx" never sends this frame, so the
+// client falls back to raw (no header) — the new client + old server degrade to
+// uncompressed rather than mis-parsing framed bytes as a header.
+const compressMessageSchema = z
+  .object({ type: z.literal("compress"), mode: compressModeSchema })
+  .strict();
+
 // A second client just attached to this PTY (a mobile ingested a desktop's
 // share QR, or another tab joined via the session picker). Broadcast to the
 // existing subscribers at attach time — before the joiner is added — so a
@@ -1543,6 +1555,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   caffeinateStateMessageSchema,
   cdpControlledMessageSchema,
   replayEndMessageSchema,
+  compressMessageSchema,
   peerAttachedMessageSchema,
   ptySizeMessageSchema,
 ]);

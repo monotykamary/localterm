@@ -135,6 +135,7 @@ export {
   processSetInputSchema,
   processesListResponseSchema,
 } from "./schemas.js";
+export type { CompressMode } from "./schemas.js";
 export type {
   Automation,
   AutomationLastRun,
