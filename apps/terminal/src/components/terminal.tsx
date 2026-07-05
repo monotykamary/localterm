@@ -167,6 +167,7 @@ import {
 } from "@/utils/sync-session-id-query-param";
 import { LocalEcho } from "@/lib/local-echo";
 import { isCoarsePointer } from "@/utils/is-coarse-pointer";
+import { detectIsAppleWebKit } from "@/utils/detect-is-apple-webkit";
 import { loadStoredDefaultCwd } from "@/utils/stored-default-cwd";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
@@ -525,25 +526,40 @@ export const Terminal = () => {
   const rootRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const isTouchDevice = useMemo(() => isCoarsePointer(), []);
+  const isAppleWebKit = useMemo(detectIsAppleWebKit, []);
+  // Apple WebKit ignores `interactive-widget=resizes-content` (set in
+  // index.html) — its keyboard overlays the layout viewport, where Chromium
+  // shrinks it above the keyboard in one browser-driven pass. Only WebKit
+  // needs this hand-rolled shrink+translate, rAF-coalesced so the keyboard
+  // animation's per-frame visualViewport events fold into one aligned style
+  // write; the transform drops at zero offset to avoid a needless layer.
   useEffect(() => {
-    if (!isTouchDevice) return;
+    if (!isTouchDevice || !isAppleWebKit) return;
     const root = rootRef.current;
     const visualViewport = typeof window !== "undefined" ? window.visualViewport : undefined;
     if (!root || !visualViewport) return;
+    let pendingFrame: number | null = null;
     const apply = () => {
+      pendingFrame = null;
       root.style.height = `${visualViewport.height}px`;
-      root.style.transform = `translateY(${visualViewport.offsetTop}px)`;
+      const offsetTop = visualViewport.offsetTop;
+      root.style.transform = offsetTop ? `translateY(${offsetTop}px)` : "";
     };
-    apply();
-    visualViewport.addEventListener("resize", apply);
-    visualViewport.addEventListener("scroll", apply);
+    const schedule = () => {
+      if (pendingFrame !== null) return;
+      pendingFrame = window.requestAnimationFrame(apply);
+    };
+    schedule();
+    visualViewport.addEventListener("resize", schedule);
+    visualViewport.addEventListener("scroll", schedule);
     return () => {
-      visualViewport.removeEventListener("resize", apply);
-      visualViewport.removeEventListener("scroll", apply);
+      if (pendingFrame !== null) window.cancelAnimationFrame(pendingFrame);
+      visualViewport.removeEventListener("resize", schedule);
+      visualViewport.removeEventListener("scroll", schedule);
       root.style.height = "";
       root.style.transform = "";
     };
-  }, [isTouchDevice]);
+  }, [isTouchDevice, isAppleWebKit]);
   // On touch the expanded action toolbar dismisses on a tap landing outside
   // itself, replacing the dedicated overlay layer. The settings and keep-awake
   // popovers portal to <body> and own their own outside-tap dismissal, so while
