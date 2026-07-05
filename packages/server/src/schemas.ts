@@ -32,7 +32,6 @@ import {
   MAX_INPUT_BYTES,
   MAX_LAUNCH_COMMAND_LENGTH,
   MAX_NOTIFICATION_LENGTH,
-  MAX_OUTPUT_BYTES,
   MAX_ROWS,
   MAX_TAB_TOKEN_LENGTH,
   MAX_TITLE_LENGTH,
@@ -1279,21 +1278,6 @@ const ptySizeMessageSchema = z
   })
   .strict();
 
-// Render-skip payload: when the uplink can't keep up with a megabyte TUI
-// redraw, the server sends this compact serialized state instead of the raw
-// burst, so the viewer paints the latest screen in one write instead of a
-// top-to-bottom crawl. `data` is the ANSI stream from the official
-// @xterm/addon-serialize (both buffers + modes — a faithful full-state restore,
-// verified to reproduce the viewport even when written to a viewer already in
-// the alt-screen). The client writes it to xterm the same way it writes a raw
-// output frame. Capped at the same ceiling as a raw output message.
-const viewportSnapshotMessageSchema = z
-  .object({
-    type: z.literal("viewport-snapshot"),
-    data: z.string().max(MAX_OUTPUT_BYTES),
-  })
-  .strict();
-
 const cdpControlledMessageSchema = z
   .object({
     type: z.literal("cdp-controlled"),
@@ -1554,7 +1538,6 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   replayEndMessageSchema,
   peerAttachedMessageSchema,
   ptySizeMessageSchema,
-  viewportSnapshotMessageSchema,
 ]);
 
 export const gitDiffFileSchema = gitDiffFileMetaSchema

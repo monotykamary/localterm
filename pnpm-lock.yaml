@@ -240,9 +240,6 @@ importers:
       '@simplewebauthn/server':
         specifier: ^13.3.2
         version: 13.3.2
-      '@xterm/addon-serialize':
-        specifier: 0.15.0-beta.287
-        version: 0.15.0-beta.287(@xterm/xterm@6.1.0-beta.287)
       '@xterm/headless':
         specifier: 6.1.0-beta.287
         version: 6.1.0-beta.287
@@ -2433,11 +2430,6 @@ packages:
 
   '@xterm/addon-search@0.17.0-beta.287':
     resolution: {integrity: sha512-nFyUwT/i7i4i1BgqYhQsHIuUGhE18g0KiuoxU6e78n63zGN6RVw5jExvZ8PPa3zVuu/vf8pJ9G9gQs2OmekX4g==}
-    peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.287
-
-  '@xterm/addon-serialize@0.15.0-beta.287':
-    resolution: {integrity: sha512-UPN1vUaDabYmRr3LU4uQdGzsIJ8/+zJH8OQ+kTOPWtKG3ETkwu3z2tDtSZslDSSg/LtAUfUVtrQdbsxAl5KlLQ==}
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.287
 
@@ -6808,10 +6800,6 @@ snapshots:
       '@xterm/xterm': 6.1.0-beta.287
 
   '@xterm/addon-search@0.17.0-beta.287(@xterm/xterm@6.1.0-beta.287)':
-    dependencies:
-      '@xterm/xterm': 6.1.0-beta.287
-
-  '@xterm/addon-serialize@0.15.0-beta.287(@xterm/xterm@6.1.0-beta.287)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.287
 
