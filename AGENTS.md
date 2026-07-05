@@ -52,3 +52,4 @@ See root `package.json` scripts for the full list. Quick reference:
 - **Install**: `pnpm install`
 - **Build**: `pnpm build`
 - **Dev watch**: `pnpm dev`
+- **Lint dead code**: `pnpm lint:dead` (runs `knip` to find unused files, exports, and dependencies)
