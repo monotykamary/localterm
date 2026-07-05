@@ -1669,6 +1669,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     snapshotProcesses: options.caffeinateSnapshotProcesses,
     batteryProbe: options.caffeinateBatteryProbe,
     hasRecentOutput: (pids, withinMs) => registry.hasRecentOutput(pids, withinMs),
+    hasPeerClient: () => registry.hasPeerClient(),
   });
   // Open dev ports: the daemon reads the process tree (ps) and the listening
   // socket table (lsof) on demand while the ports modal is open. Both are
@@ -1850,6 +1851,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     active: caffeinateManager.active,
     mode: caffeinateManager.mode,
     activityGate: caffeinateManager.activityGate,
+    peerKeepAwake: caffeinateManager.peerKeepAwake,
+    peerActive: caffeinateManager.peerActive,
     batteryThreshold: caffeinateManager.batteryThreshold,
     defaultCommands: [...caffeinateManager.defaultCommands],
     commands: caffeinateManager.commands,
@@ -2319,6 +2322,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             caffeinateManager.setCommands(parsed.data.commands);
           } else if (parsed.data.type === "caffeinate-activity-gate") {
             caffeinateManager.setActivityGate(parsed.data.enabled);
+          } else if (parsed.data.type === "caffeinate-peer-keep-awake") {
+            caffeinateManager.setPeerKeepAwake(parsed.data.enabled);
           } else if (parsed.data.type === "caffeinate-battery-threshold") {
             caffeinateManager.setBatteryThreshold(parsed.data.percent);
           } else if (parsed.data.type === "identify") {

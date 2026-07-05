@@ -36,6 +36,7 @@ describe("CaffeinateManager", () => {
   let sessionPids: number[];
   let snapshot: ProcessSnapshotEntry[];
   let recentOutputPids: number[];
+  let peerClientPresent: boolean;
   let batteryStatus: {
     percent: number;
     isOnBattery: boolean;
@@ -50,6 +51,7 @@ describe("CaffeinateManager", () => {
       listSessionPids: () => sessionPids,
       snapshotProcesses: async () => snapshot,
       hasRecentOutput: (pids) => pids.some((pid) => recentOutputPids.includes(pid)),
+      hasPeerClient: () => peerClientPresent,
       batteryProbe: async () => batteryStatus,
     });
     return { manager, controller, spawned };
@@ -61,6 +63,7 @@ describe("CaffeinateManager", () => {
     sessionPids = [];
     snapshot = [];
     recentOutputPids = [];
+    peerClientPresent = false;
     // Default to a healthy plugged-out battery well above the 20% floor, so
     // the guard is armed but never suppresses unless a test sets a low value.
     batteryStatus = { percent: 80, isOnBattery: true, minutesToEmpty: 240 };
@@ -228,6 +231,131 @@ describe("CaffeinateManager", () => {
     // noteOutputActivity should be a no-op when autoActive is true but
     // the gate timer is armed — it resets the timer.
     manager.noteOutputActivity();
+    manager.dispose();
+  });
+
+  it("activates in automatic mode when a peer is attached, bypassing the activity gate", async () => {
+    const { manager, controller } = build();
+    // No recognized program, no recent output, activity gate on — a peer
+    // alone must hold caffeinate (an idle-but-attached phone is the point).
+    sessionPids = [100];
+    snapshot = [{ pid: 100, ppid: 1, command: "-zsh" }];
+    peerClientPresent = true;
+    expect(manager.peerKeepAwake).toBe(true);
+    await manager.pollNow();
+    expect(controller.active).toBe(true);
+    expect(manager.activeTrigger).toBeNull();
+    expect(manager.peerActive).toBe(true);
+    manager.dispose();
+  });
+
+  it("releases when the peer disconnects", async () => {
+    const { manager, controller } = build();
+    sessionPids = [100];
+    snapshot = [{ pid: 100, ppid: 1, command: "-zsh" }];
+    peerClientPresent = true;
+    await manager.pollNow();
+    expect(controller.active).toBe(true);
+
+    // Peer detaches (the disconnect event drives this re-check).
+    peerClientPresent = false;
+    await manager.pollNow();
+    expect(controller.active).toBe(false);
+    expect(manager.activeTrigger).toBeNull();
+    expect(manager.peerActive).toBe(false);
+    manager.dispose();
+  });
+
+  it("does not caffeinate for a peer when peer keep-awake is off", async () => {
+    const { manager, controller } = build();
+    sessionPids = [100];
+    snapshot = [{ pid: 100, ppid: 1, command: "-zsh" }];
+    peerClientPresent = true;
+    manager.setPeerKeepAwake(false);
+    expect(manager.peerKeepAwake).toBe(false);
+    await manager.pollNow();
+    expect(controller.active).toBe(false);
+    manager.dispose();
+  });
+
+  it("surfaces the program trigger and peer hold independently", async () => {
+    const { manager, controller } = build();
+    sessionPids = [100];
+    snapshot = claudeUnderSession(100);
+    recentOutputPids = [100];
+    peerClientPresent = true;
+    await manager.pollNow();
+    expect(controller.active).toBe(true);
+    // Both triggers hold: the program name is in `activeTrigger` (the more
+    // specific signal) and the peer hold is in `peerActive`, so the UI can
+    // highlight each setting row on its own.
+    expect(manager.activeTrigger).toBe("claude");
+    expect(manager.peerActive).toBe(true);
+
+    // Program goes idle; the peer still holds, so caffeinate stays active and
+    // the program trigger clears while the peer hold remains.
+    recentOutputPids = [];
+    snapshot = [{ pid: 100, ppid: 1, command: "-zsh" }];
+    await manager.pollNow();
+    expect(controller.active).toBe(true);
+    expect(manager.activeTrigger).toBeNull();
+    expect(manager.peerActive).toBe(true);
+    manager.dispose();
+  });
+
+  it("does not arm the activity-gate silence timer while a peer holds", async () => {
+    const { manager, controller } = build();
+    sessionPids = [100];
+    snapshot = [{ pid: 100, ppid: 1, command: "-zsh" }];
+    peerClientPresent = true;
+    await manager.pollNow();
+    expect(controller.active).toBe(true);
+
+    // Output arriving while a peer holds must not arm a trailing-edge timer
+    // (the peer releases on disconnect, not on silence).
+    manager.noteOutputActivity();
+    // No way to observe the timer directly without a clock; the contract is
+    // that a subsequent poll with the peer gone releases at once, which only
+    // holds if no stale timer re-armed. Drive that transition:
+    peerClientPresent = false;
+    await manager.pollNow();
+    expect(controller.active).toBe(false);
+    manager.dispose();
+  });
+
+  it("broadcasts when the trigger identity changes while caffeinate stays active", async () => {
+    const { manager } = build();
+    let changes = 0;
+    manager.on("change", () => (changes += 1));
+
+    // Peer attaches: caffeinate activates (autoActive false -> true).
+    sessionPids = [100];
+    snapshot = [{ pid: 100, ppid: 1, command: "-zsh" }];
+    peerClientPresent = true;
+    await manager.pollNow();
+    expect(manager.peerActive).toBe(true);
+    expect(manager.activeTrigger).toBeNull();
+    const changesAfterPeer = changes;
+
+    // A program starts while the peer holds: autoActive stays true, but
+    // activeTrigger flips null -> "claude". This must broadcast so the UI
+    // re-highlights the program chip and activity-gate row.
+    snapshot = claudeUnderSession(100);
+    recentOutputPids = [100];
+    await manager.pollNow();
+    expect(manager.activeTrigger).toBe("claude");
+    expect(manager.peerActive).toBe(true);
+    expect(changes).toBeGreaterThan(changesAfterPeer);
+
+    // The peer leaves while the program runs: autoActive stays true, but
+    // peerActive flips true -> false. This must broadcast so the peer row
+    // stops highlighting.
+    const changesAfterProgram = changes;
+    peerClientPresent = false;
+    await manager.pollNow();
+    expect(manager.peerActive).toBe(false);
+    expect(manager.activeTrigger).toBe("claude");
+    expect(changes).toBeGreaterThan(changesAfterProgram);
     manager.dispose();
   });
 });

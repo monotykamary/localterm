@@ -27,6 +27,7 @@ describe("CaffeinatePreferencesStore", () => {
     const store = new CaffeinatePreferencesStore(filePath);
     expect(store.getMode()).toBe("automatic");
     expect(store.getActivityGate()).toBe(true);
+    expect(store.getPeerKeepAwake()).toBe(true);
     expect(store.getCommands()).toEqual([]);
   });
 
@@ -35,15 +36,17 @@ describe("CaffeinatePreferencesStore", () => {
     expect(store.getBatteryThreshold()).toBe(20);
   });
 
-  it("persists mode, activity gate, and commands across reloads", () => {
+  it("persists mode, activity gate, peer keep-awake, and commands across reloads", () => {
     const store = new CaffeinatePreferencesStore(filePath);
     store.setMode("on");
     store.setActivityGate(false);
+    store.setPeerKeepAwake(false);
     store.setCommands(["ollama"]);
 
     const reloaded = new CaffeinatePreferencesStore(filePath);
     expect(reloaded.getMode()).toBe("on");
     expect(reloaded.getActivityGate()).toBe(false);
+    expect(reloaded.getPeerKeepAwake()).toBe(false);
     expect(reloaded.getCommands()).toEqual(["ollama"]);
   });
 
@@ -113,6 +116,23 @@ describe("CaffeinatePreferencesStore", () => {
     const store = new CaffeinatePreferencesStore(filePath);
     expect(store.getBatteryThreshold()).toBe(CAFFEINATE_BATTERY_LOW_WATER_PERCENT_DEFAULT);
     expect(store.getMode()).toBe("on");
+    expect(store.getCommands()).toEqual(["ollama"]);
+  });
+
+  it("migrates v3 files by defaulting peerKeepAwake to true", () => {
+    fs.mkdirSync(dir, { recursive: true });
+    const v3 = {
+      version: 3,
+      mode: "on",
+      activityGate: true,
+      batteryThreshold: 20,
+      commands: ["ollama"],
+    };
+    fs.writeFileSync(filePath, JSON.stringify(v3), "utf8");
+    const store = new CaffeinatePreferencesStore(filePath);
+    expect(store.getPeerKeepAwake()).toBe(true);
+    expect(store.getMode()).toBe("on");
+    expect(store.getBatteryThreshold()).toBe(20);
     expect(store.getCommands()).toEqual(["ollama"]);
   });
 });

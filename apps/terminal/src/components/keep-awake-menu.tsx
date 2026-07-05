@@ -1,5 +1,5 @@
 import { Coffee, Plus, X } from "lucide-react";
-import { useState, type KeyboardEvent, type RefObject } from "react";
+import { useState, type CSSProperties, type KeyboardEvent } from "react";
 import { SettingsSelect, type SettingsSelectItem } from "@/components/settings-select";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -18,13 +18,16 @@ interface KeepAwakeMenuProps {
   mode: CaffeinateMode;
   active: boolean;
   activityGate: boolean;
+  peerKeepAwake: boolean;
+  peerActive: boolean;
   batteryThreshold: number | null;
   defaultCommands: readonly string[];
   commands: readonly string[];
-  activeTriggerRef: RefObject<string | null>;
+  activeTrigger: string | null;
   onModeChange: (mode: CaffeinateMode) => void;
   onCommandsChange: (commands: string[]) => void;
   onActivityGateChange: (enabled: boolean) => void;
+  onPeerKeepAwakeChange: (enabled: boolean) => void;
   onBatteryThresholdChange: (percent: number | null) => void;
   onPopoverOpenChange?: (open: boolean) => void;
   onClose?: () => void;
@@ -71,18 +74,27 @@ const CHIP_BASE_CLASSES =
   "inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[11px] transition-colors duration-200";
 const CHIP_IDLE_CLASSES = "border-border/60 bg-foreground/5 text-foreground/80";
 const CHIP_ACTIVE_CLASSES = "border-foreground/25 text-background";
+// Tints a setting row's Switch to the caffeinate accent while checked. The
+// literal class is in source so Tailwind generates it; the `--keep-awake-accent`
+// var is set on the row (inline style, from the JS constant) so the color has a
+// single source of truth. Applied only while the row's trigger is active.
+const ACCENT_CHECKED_CLASS = "data-checked:bg-[var(--keep-awake-accent)]";
+const accentVarStyle = { "--keep-awake-accent": CAFFEINATE_ACCENT_COLOR } as CSSProperties;
 
 export const KeepAwakeMenu = ({
   mode,
   active,
   activityGate,
+  peerKeepAwake,
+  peerActive,
   batteryThreshold,
   defaultCommands,
   commands,
-  activeTriggerRef,
+  activeTrigger,
   onModeChange,
   onCommandsChange,
   onActivityGateChange,
+  onPeerKeepAwakeChange,
   onBatteryThresholdChange,
   onPopoverOpenChange,
   onClose,
@@ -140,6 +152,13 @@ export const KeepAwakeMenu = ({
   // Active = the keep-awake process is running right now (always in "on",
   // detection-driven in "automatic"). Tint the icon to match the old toggle.
   const triggerStyle = active ? { color: CAFFEINATE_ACCENT_COLOR } : undefined;
+  // A recognized program is the active trigger right now. The activity-gate row
+  // glows when its gate is on AND a program is holding; the peer row glows when
+  // a peer is holding (`peerActive`, independent of the program trigger so both
+  // rows can glow at once). Each setting's label + switch tint to the caffeinate
+  // accent to show which trigger is keeping the machine awake.
+  const programActive = active && activeTrigger !== null;
+  const activityGateRowActive = activityGate && programActive;
   const title =
     mode === "off"
       ? "Keep awake: off"
@@ -227,9 +246,17 @@ export const KeepAwakeMenu = ({
           {mode === "automatic" ? (
             <>
               <Separator className="bg-border/40" />
-              <div className="flex items-center justify-between gap-2">
+              <div
+                className="flex items-center justify-between gap-2"
+                style={activityGateRowActive ? accentVarStyle : undefined}
+              >
                 <div className="flex flex-col gap-0.5">
-                  <span className="text-[11px] font-medium text-foreground/90">Activity gate</span>
+                  <span
+                    className="text-[11px] font-medium text-foreground/90 transition-colors duration-200"
+                    style={activityGateRowActive ? { color: CAFFEINATE_ACCENT_COLOR } : undefined}
+                  >
+                    Activity gate
+                  </span>
                   <p className="text-[10px] leading-snug text-muted-foreground">
                     Only keep awake while a recognized program is producing output.
                   </p>
@@ -239,6 +266,32 @@ export const KeepAwakeMenu = ({
                   checked={activityGate}
                   onCheckedChange={onActivityGateChange}
                   aria-label="toggle activity gate"
+                  className={activityGateRowActive ? ACCENT_CHECKED_CLASS : undefined}
+                />
+              </div>
+
+              <Separator className="bg-border/40" />
+              <div
+                className="flex items-center justify-between gap-2"
+                style={peerActive ? accentVarStyle : undefined}
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span
+                    className="text-[11px] font-medium text-foreground/90 transition-colors duration-200"
+                    style={peerActive ? { color: CAFFEINATE_ACCENT_COLOR } : undefined}
+                  >
+                    Keep awake for peers
+                  </span>
+                  <p className="text-[10px] leading-snug text-muted-foreground">
+                    Stay awake while another client (e.g. a phone) is attached to a session.
+                  </p>
+                </div>
+                <Switch
+                  size="sm"
+                  checked={peerKeepAwake}
+                  onCheckedChange={onPeerKeepAwakeChange}
+                  aria-label="toggle peer keep-awake"
+                  className={peerActive ? ACCENT_CHECKED_CLASS : undefined}
                 />
               </div>
 
@@ -249,8 +302,8 @@ export const KeepAwakeMenu = ({
                   {defaultCommands.map((command) => {
                     const isActive =
                       active &&
-                      activeTriggerRef.current !== null &&
-                      activeTriggerRef.current.toLowerCase() === command.toLowerCase();
+                      activeTrigger !== null &&
+                      activeTrigger.toLowerCase() === command.toLowerCase();
                     return (
                       <span
                         key={command}
@@ -275,8 +328,8 @@ export const KeepAwakeMenu = ({
                     {commands.map((command) => {
                       const isActive =
                         active &&
-                        activeTriggerRef.current !== null &&
-                        activeTriggerRef.current.toLowerCase() === command.toLowerCase();
+                        activeTrigger !== null &&
+                        activeTrigger.toLowerCase() === command.toLowerCase();
                       return (
                         <div
                           key={command}

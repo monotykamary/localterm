@@ -417,6 +417,18 @@ const caffeinateCommandsInputMessageSchema = z
   })
   .strict();
 
+// Toggle the peer keep-awake trigger for automatic mode. When enabled (the
+// default), caffeinate also stays active while any session has a second client
+// attached (a phone joining via the share QR, or another tab via the session
+// picker) — held for the peer's lifetime and bypassing the activity gate, so
+// an idle-but-attached phone doesn't release the machine to sleep.
+const caffeinatePeerKeepAwakeInputMessageSchema = z
+  .object({
+    type: z.literal("caffeinate-peer-keep-awake"),
+    enabled: z.boolean(),
+  })
+  .strict();
+
 // Toggle the activity gate for automatic mode. When enabled (the default),
 // caffeinate only stays active while a recognized program is producing output;
 // after CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS of silence caffeinate releases.
@@ -486,6 +498,7 @@ export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   caffeinateModeInputMessageSchema,
   caffeinateCommandsInputMessageSchema,
   caffeinateActivityGateInputMessageSchema,
+  caffeinatePeerKeepAwakeInputMessageSchema,
   caffeinateBatteryThresholdInputMessageSchema,
   identifyMessageSchema,
   readyMessageSchema,
@@ -1311,6 +1324,8 @@ const caffeinateStateMessageSchema = z
     active: z.boolean(),
     mode: caffeinateModeSchema,
     activityGate: z.boolean(),
+    peerKeepAwake: z.boolean(),
+    peerActive: z.boolean(),
     batteryThreshold: z
       .number()
       .int()
@@ -1329,6 +1344,7 @@ export const caffeinatePreferencesFileSchema = z
     version: z.literal(CAFFEINATE_PREFERENCES_FILE_VERSION),
     mode: caffeinateModeSchema,
     activityGate: z.boolean(),
+    peerKeepAwake: z.boolean(),
     batteryThreshold: z
       .number()
       .int()

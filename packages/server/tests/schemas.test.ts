@@ -56,6 +56,23 @@ describe("clientToServerMessageSchema", () => {
     ).toBe(false);
   });
 
+  it("accepts a caffeinate-peer-keep-awake frame with an enabled flag", () => {
+    expect(
+      clientToServerMessageSchema.safeParse({ type: "caffeinate-peer-keep-awake", enabled: true })
+        .success,
+    ).toBe(true);
+    expect(
+      clientToServerMessageSchema.safeParse({ type: "caffeinate-peer-keep-awake", enabled: false })
+        .success,
+    ).toBe(true);
+  });
+
+  it("rejects a caffeinate-peer-keep-awake frame missing the enabled flag", () => {
+    expect(
+      clientToServerMessageSchema.safeParse({ type: "caffeinate-peer-keep-awake" }).success,
+    ).toBe(false);
+  });
+
   it("accepts a caffeinate-battery-threshold frame with a percent or null", () => {
     expect(
       clientToServerMessageSchema.safeParse({
@@ -286,6 +303,8 @@ describe("serverToClientMessageSchema", () => {
       active: true,
       mode: "automatic",
       activityGate: true,
+      peerKeepAwake: true,
+      peerActive: false,
       batteryThreshold: 20,
       defaultCommands: ["claude", "codex"],
       commands: ["ollama"],

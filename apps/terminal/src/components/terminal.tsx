@@ -520,6 +520,7 @@ export const Terminal = () => {
   const setCaffeinateModeRef = useRef<((mode: CaffeinateMode) => void) | null>(null);
   const setCaffeinateCommandsRef = useRef<((commands: string[]) => void) | null>(null);
   const setCaffeinateActivityGateRef = useRef<((enabled: boolean) => void) | null>(null);
+  const setCaffeinatePeerKeepAwakeRef = useRef<((enabled: boolean) => void) | null>(null);
   const setCaffeinateBatteryThresholdRef = useRef<((percent: number | null) => void) | null>(null);
   const toolbarHoverTimeoutRef = useRef<number | null>(null);
   const qrPeerAttachedRef = useRef<(() => void) | null>(null);
@@ -621,14 +622,18 @@ export const Terminal = () => {
   // overwrites this seed on the first `{type:"caffeinate"}` frame.
   const [caffeinateSupported, setCaffeinateSupported] = useState(detectLikelyKeepAwakeSupported);
   const [caffeinateActive, setCaffeinateActive] = useState(false);
+  const [caffeinatePeerActive, setCaffeinatePeerActive] = useState(false);
   const [caffeinateMode, setCaffeinateMode] = useState<CaffeinateMode>("automatic");
   const [caffeinateDefaultCommands, setCaffeinateDefaultCommands] = useState<string[]>([]);
   const [caffeinateCommands, setCaffeinateCommands] = useState<string[]>([]);
   const [caffeinateActivityGate, setCaffeinateActivityGate] = useState(true);
+  // Default on (the server's authoritative peer keep-awake default overwrites
+  // this on the first WS frame).
+  const [caffeinatePeerKeepAwake, setCaffeinatePeerKeepAwake] = useState(true);
   // Default null = guard off on the client seed; the server's authoritative
   // threshold (which defaults to 20% on) overwrites this on the first WS frame.
   const [caffeinateBatteryThreshold, setCaffeinateBatteryThreshold] = useState<number | null>(null);
-  const caffeinateActiveTriggerRef = useRef<string | null>(null);
+  const [caffeinateActiveTrigger, setCaffeinateActiveTrigger] = useState<string | null>(null);
   useScreenWakeLock(caffeinateActive);
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
   const { summary: diffSummary, setGitDiffSummary } = useGitDiffSummary();
@@ -1281,6 +1286,8 @@ export const Terminal = () => {
       send({ type: "caffeinate-commands", commands });
     setCaffeinateActivityGateRef.current = (enabled: boolean) =>
       send({ type: "caffeinate-activity-gate", enabled });
+    setCaffeinatePeerKeepAwakeRef.current = (enabled: boolean) =>
+      send({ type: "caffeinate-peer-keep-awake", enabled });
     setCaffeinateBatteryThresholdRef.current = (percent: number | null) =>
       send({ type: "caffeinate-battery-threshold", percent });
 
@@ -1859,12 +1866,14 @@ export const Terminal = () => {
         } else if (message.type === "caffeinate") {
           setCaffeinateSupported(message.supported);
           setCaffeinateActive(message.active);
+          setCaffeinatePeerActive(message.peerActive);
           setCaffeinateMode(message.mode);
           setCaffeinateDefaultCommands(message.defaultCommands);
           setCaffeinateCommands(message.commands);
           setCaffeinateActivityGate(message.activityGate);
+          setCaffeinatePeerKeepAwake(message.peerKeepAwake);
           setCaffeinateBatteryThreshold(message.batteryThreshold);
-          caffeinateActiveTriggerRef.current = message.activeTrigger;
+          setCaffeinateActiveTrigger(message.activeTrigger);
         } else if (message.type === "cwd") {
           setLiveCwd(message.cwd);
           setGitDiffSummary(null);
@@ -2075,6 +2084,10 @@ export const Terminal = () => {
 
   const handleCaffeinateActivityGateChange = useCallback((enabled: boolean) => {
     setCaffeinateActivityGateRef.current?.(enabled);
+  }, []);
+
+  const handleCaffeinatePeerKeepAwakeChange = useCallback((enabled: boolean) => {
+    setCaffeinatePeerKeepAwakeRef.current?.(enabled);
   }, []);
 
   const handleCaffeinateBatteryThresholdChange = useCallback((percent: number | null) => {
@@ -2940,13 +2953,16 @@ export const Terminal = () => {
                       mode={caffeinateMode}
                       active={caffeinateActive}
                       activityGate={caffeinateActivityGate}
+                      peerKeepAwake={caffeinatePeerKeepAwake}
+                      peerActive={caffeinatePeerActive}
                       batteryThreshold={caffeinateBatteryThreshold}
                       defaultCommands={caffeinateDefaultCommands}
                       commands={caffeinateCommands}
-                      activeTriggerRef={caffeinateActiveTriggerRef}
+                      activeTrigger={caffeinateActiveTrigger}
                       onModeChange={handleCaffeinateModeChange}
                       onCommandsChange={handleCaffeinateCommandsChange}
                       onActivityGateChange={handleCaffeinateActivityGateChange}
+                      onPeerKeepAwakeChange={handleCaffeinatePeerKeepAwakeChange}
                       onBatteryThresholdChange={handleCaffeinateBatteryThresholdChange}
                       onPopoverOpenChange={handleKeepAwakePopoverOpenChange}
                       onClose={refocusTerminalRef.current ?? undefined}

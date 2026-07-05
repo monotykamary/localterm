@@ -15,6 +15,10 @@ import { memoBy } from "./utils/memo-by.js";
 interface CaffeinatePreferences {
   mode: CaffeinateMode;
   activityGate: boolean;
+  // Whether automatic mode also caffeinates while a session has a second
+  // client attached (a phone via the share QR, or another tab via the session
+  // picker). Held for the peer's lifetime and bypasses the activity gate.
+  peerKeepAwake: boolean;
   commands: string[];
   // `null` disables the battery floor; otherwise 5–50. Defaults on so a
   // machine left unplugged stops keeping itself awake before it dies.
@@ -29,6 +33,7 @@ interface CaffeinatePreferences {
 const DEFAULT_PREFERENCES: CaffeinatePreferences = {
   mode: "automatic",
   activityGate: true,
+  peerKeepAwake: true,
   commands: [],
   batteryThreshold: CAFFEINATE_BATTERY_LOW_WATER_PERCENT_DEFAULT,
 };
@@ -65,6 +70,10 @@ export class CaffeinatePreferencesStore {
     return this.preferences.activityGate;
   }
 
+  getPeerKeepAwake(): boolean {
+    return this.preferences.peerKeepAwake;
+  }
+
   getBatteryThreshold(): number | null {
     return this.preferences.batteryThreshold;
   }
@@ -74,6 +83,13 @@ export class CaffeinatePreferencesStore {
     this.preferences = { ...this.preferences, activityGate: enabled };
     this.persist();
     return this.preferences.activityGate;
+  }
+
+  setPeerKeepAwake(enabled: boolean): boolean {
+    if (enabled === this.preferences.peerKeepAwake) return this.preferences.peerKeepAwake;
+    this.preferences = { ...this.preferences, peerKeepAwake: enabled };
+    this.persist();
+    return this.preferences.peerKeepAwake;
   }
 
   setBatteryThreshold(percent: number | null): number | null {
@@ -118,30 +134,30 @@ export class CaffeinatePreferencesStore {
       console.warn(`caffeinate preferences file invalid; using defaults (${this.filePath})`);
       return;
     }
-    // v1 files lack `activityGate`; migrate before validation.
-    if (
-      json &&
-      typeof json === "object" &&
-      "version" in json &&
-      (json as Record<string, unknown>).version === 1 &&
-      !("activityGate" in json)
-    ) {
-      (json as Record<string, unknown>).activityGate = true;
-      (json as Record<string, unknown>).version = CAFFEINATE_PREFERENCES_FILE_VERSION;
-    }
-    // v2 files lack `batteryThreshold`; migrate before validation. Default to
-    // the guard-on default rather than null so the floor lights up for existing
-    // users on first boot after upgrade.
-    if (
-      json &&
-      typeof json === "object" &&
-      "version" in json &&
-      (json as Record<string, unknown>).version === 2 &&
-      !("batteryThreshold" in json)
-    ) {
-      (json as Record<string, unknown>).batteryThreshold =
-        CAFFEINATE_BATTERY_LOW_WATER_PERCENT_DEFAULT;
-      (json as Record<string, unknown>).version = CAFFEINATE_PREFERENCES_FILE_VERSION;
+    // Migrate the file forward one version at a time so a v1 file chains
+    // v1→v2→v3→v4 rather than jumping straight to the latest and skipping the
+    // intermediate field-adds (which would fail the strict schema and fall back
+    // to defaults, losing the user's mode/commands). Each step advances the
+    // version unconditionally; the field is added only when missing so a user
+    // who already set it keeps their value. v1→v2 adds activityGate, v2→v3 the
+    // battery floor (defaulting to the guard-on default so the floor lights up
+    // for existing users), v3→v4 the peer keep-awake trigger (default on).
+    const record = json && typeof json === "object" ? (json as Record<string, unknown>) : null;
+    if (record && typeof record.version === "number") {
+      if (record.version === 1) {
+        if (record.activityGate === undefined) record.activityGate = true;
+        record.version = 2;
+      }
+      if (record.version === 2) {
+        if (record.batteryThreshold === undefined) {
+          record.batteryThreshold = CAFFEINATE_BATTERY_LOW_WATER_PERCENT_DEFAULT;
+        }
+        record.version = 3;
+      }
+      if (record.version === 3) {
+        if (record.peerKeepAwake === undefined) record.peerKeepAwake = true;
+        record.version = CAFFEINATE_PREFERENCES_FILE_VERSION;
+      }
     }
     const parsed = caffeinatePreferencesFileSchema.safeParse(json);
     if (!parsed.success) {
@@ -151,6 +167,7 @@ export class CaffeinatePreferencesStore {
     this.preferences = {
       mode: parsed.data.mode,
       activityGate: parsed.data.activityGate,
+      peerKeepAwake: parsed.data.peerKeepAwake,
       commands: sanitizeCommands(parsed.data.commands),
       batteryThreshold: parsed.data.batteryThreshold,
     };
@@ -162,6 +179,7 @@ export class CaffeinatePreferencesStore {
       version: CAFFEINATE_PREFERENCES_FILE_VERSION,
       mode: this.preferences.mode,
       activityGate: this.preferences.activityGate,
+      peerKeepAwake: this.preferences.peerKeepAwake,
       batteryThreshold: this.preferences.batteryThreshold,
       commands: this.preferences.commands,
     };

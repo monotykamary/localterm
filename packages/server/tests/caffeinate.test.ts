@@ -20,6 +20,8 @@ const caffeinateState = (overrides: Record<string, unknown> = {}) => ({
   active: false,
   mode: "automatic",
   activityGate: true,
+  peerKeepAwake: true,
+  peerActive: false,
   batteryThreshold: 20,
   defaultCommands: [...CAFFEINATE_AUTO_DEFAULT_COMMANDS],
   commands: [],
@@ -219,26 +221,20 @@ describe("createServer caffeinate broadcast", () => {
     }
   });
 
-  it("broadcasts and persists the battery threshold, including null", async () => {
+  it("broadcasts and persists the peer keep-awake toggle", async () => {
     const tab = await connect(server.port);
     try {
       await tab.waitFor((message) => hasType(message, "caffeinate"));
-      tab.socket.send(JSON.stringify({ type: "caffeinate-battery-threshold", percent: 30 }));
+      tab.socket.send(JSON.stringify({ type: "caffeinate-peer-keep-awake", enabled: false }));
       const state = await tab.waitFor(
-        (message) => hasType(message, "caffeinate") && message.batteryThreshold === 30,
+        (message) => hasType(message, "caffeinate") && message.peerKeepAwake === false,
       );
-      expect(state).toEqual(caffeinateState({ batteryThreshold: 30 }));
+      expect(state).toEqual(caffeinateState({ peerKeepAwake: false }));
       const persisted = JSON.parse(
         fs.readFileSync(path.join(stateDirectory, "caffeinate.json"), "utf8"),
       );
-      expect(persisted.batteryThreshold).toBe(30);
-
-      // Disabling the guard broadcasts null.
-      tab.socket.send(JSON.stringify({ type: "caffeinate-battery-threshold", percent: null }));
-      const disabled = await tab.waitFor(
-        (message) => hasType(message, "caffeinate") && message.batteryThreshold === null,
-      );
-      expect(disabled).toEqual(caffeinateState({ batteryThreshold: null }));
+      expect(persisted.peerKeepAwake).toBe(false);
+      expect(persisted.version).toBe(4);
     } finally {
       await closeWs(tab.socket);
     }

@@ -36,6 +36,12 @@ export interface CaffeinateManagerOptions {
   // is enabled, caffeinate only stays active while a recognized program is
   // producing output within the debounce window.
   hasRecentOutput?: (pids: readonly number[], withinMs: number) => boolean;
+  // Whether any session currently has a second client attached (a peer: a
+  // phone via the share QR, or another tab via the session picker). When peer
+  // keep-awake is on, automatic mode also caffeinates while a peer is present,
+  // held for the peer's lifetime and bypassing the activity gate so an
+  // idle-but-attached phone must not release the machine to sleep.
+  hasPeerClient?: () => boolean;
   // Injectable battery probe for tests; defaults to a real `pmset` read on
   // macOS and a sysfs read on Linux. The battery floor is enforced on an
   // adaptive schedule that mirrors the activity gate's design: status-driven (a
@@ -55,8 +61,13 @@ interface CaffeinateManagerEvents {
 // process tree under each session's shell. When the activity gate is enabled
 // (the default), caffeinate further requires that a recognized program is
 // producing output; after CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS of silence,
-// caffeinate releases. Emits `change` whenever any broadcastable field
-// (mode/active/commands/batteryThreshold) moves.
+// caffeinate releases. When peer keep-awake is enabled (also the default),
+// caffeinate ALSO stays active while any session has a second client attached
+// (a phone joining via the share QR, or another tab via the session picker) —
+// held for the peer's lifetime and bypassing the activity gate, since an
+// idle-but-attached phone is exactly the state you want to hold the machine
+// awake for. Emits `change` whenever any broadcastable field
+// (mode/active/commands/batteryThreshold/peerKeepAwake) moves.
 //
 // Automatic detection is event-driven: it never polls on a timer. A `ps`
 // snapshot is taken only in response to an event — a session's foreground
@@ -85,11 +96,17 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
   private readonly listSessionPids: () => number[];
   private readonly snapshotProcesses: SnapshotProcesses;
   private readonly checkRecentOutput?: (pids: readonly number[], withinMs: number) => boolean;
+  private readonly hasPeerClient: () => boolean;
   private readonly batteryProbe: BatteryProbe;
   readonly defaultCommands: readonly string[];
 
   private autoActive = false;
   private autoTrigger: string | null = null;
+  // Whether the most recent poll held caffeinate because a peer was attached
+  // (vs. a recognized program). Drives the activity-gate timer arming: a peer
+  // holds until it disconnects (an event that pokes its own re-check), so the
+  // silence-release timer must not arm while one is present.
+  private autoPeerActive = false;
   private pokeTimer: NodeJS.Timeout | null = null;
   private activityGateTimer: NodeJS.Timeout | null = null;
   // The cached battery-suppression flag: true means the machine is on battery
@@ -125,6 +142,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.snapshotProcesses = options.snapshotProcesses ?? defaultSnapshotProcesses;
     this.defaultCommands = options.defaultCommands ?? CAFFEINATE_AUTO_DEFAULT_COMMANDS;
     this.checkRecentOutput = options.hasRecentOutput;
+    this.hasPeerClient = options.hasPeerClient ?? (() => false);
     this.batteryProbe = options.batteryProbe ?? defaultBatteryProbe;
 
     // An unexpected death of the caffeinate process flips controller state; pass
@@ -157,12 +175,24 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     return this.store.getActivityGate();
   }
 
+  get peerKeepAwake(): boolean {
+    return this.store.getPeerKeepAwake();
+  }
+
   get batteryThreshold(): number | null {
     return this.store.getBatteryThreshold();
   }
 
   get activeTrigger(): string | null {
     return this.autoActive ? this.autoTrigger : null;
+  }
+
+  // Whether automatic mode is currently holding caffeinate because a peer (a
+  // second client on a session) is attached — independent of the program
+  // trigger, so the UI can highlight the peer setting row even when a program
+  // is also active (in which case `activeTrigger` carries the program name).
+  get peerActive(): boolean {
+    return this.autoPeerActive;
   }
 
   setMode(mode: CaffeinateMode): void {
@@ -173,6 +203,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     if (mode !== "automatic") {
       this.autoActive = false;
       this.autoTrigger = null;
+      this.autoPeerActive = false;
       this.clearActivityGateTimer();
     }
     this.recompute();
@@ -204,6 +235,15 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.emit("change");
   }
 
+  setPeerKeepAwake(enabled: boolean): void {
+    if (this.disposed) return;
+    this.store.setPeerKeepAwake(enabled);
+    // The trigger set changed; re-derive automatic detection immediately so a
+    // peer that was already attached engages (or releases) at once.
+    if (this.mode === "automatic" && this.supported) void this.pollAuto();
+    this.emit("change");
+  }
+
   // Cheap, debounced nudge to re-check automatic detection in response to an
   // event (a session's foreground process changing, or a session
   // connecting/disconnecting). The debounce coalesces a burst of simultaneous
@@ -232,6 +272,11 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
       this.pokeAuto();
       return;
     }
+    // A peer is holding caffeinate; output is irrelevant to it. The peer
+    // releases on disconnect (an event that pokes its own re-check), so the
+    // silence timer must not arm while one is present — otherwise the trailing
+    // edge would poll on a timer and defeat the event-driven design.
+    if (this.autoPeerActive) return;
     this.clearActivityGateTimer();
     // Schedule a re-check after the debounce window. If more output arrives
     // before this fires, the timer resets (trailing-edge).
@@ -441,31 +486,64 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.polling = true;
     try {
       const pids = this.listSessionPids();
-      let next = false;
-      let matchedTrigger: string | null = null;
+      let programActive = false;
+      let programTrigger: string | null = null;
       if (pids.length > 0) {
         const snapshot = await this.snapshotProcesses();
-        matchedTrigger = anySessionRunsTrigger(pids, snapshot, this.triggerSet());
-        if (matchedTrigger) {
+        programTrigger = anySessionRunsTrigger(pids, snapshot, this.triggerSet());
+        if (programTrigger) {
           if (!this.activityGate) {
-            next = true;
+            programActive = true;
           } else if (this.checkRecentOutput) {
-            next = this.checkRecentOutput(pids, CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS);
+            programActive = this.checkRecentOutput(pids, CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS);
           }
         }
       }
       if (this.disposed || this.mode !== "automatic") return;
+      // A peer (a second client on a session) holds caffeinate independently of
+      // the program detection and bypasses the activity gate: an idle-but-
+      // attached phone must not release the machine to sleep. The peer's hold is
+      // surfaced via `peerActive` (independent of `activeTrigger`, which carries
+      // the program name) so the UI can highlight each setting row on its own
+      // when both are active.
+      const peerActive = this.peerKeepAwake && this.hasPeerClient();
+      const next = programActive || peerActive;
       const prevAutoActive = this.autoActive;
+      const prevAutoTrigger = this.autoTrigger;
+      const prevAutoPeerActive = this.autoPeerActive;
       this.autoActive = next;
-      this.autoTrigger = next ? matchedTrigger : null;
-      if (next !== prevAutoActive) {
+      // `autoTrigger` carries only the program trigger (a command name or null);
+      // the peer trigger is surfaced separately via `peerActive` so the UI can
+      // highlight each setting row independently when both are active.
+      this.autoTrigger = next ? programTrigger : null;
+      this.autoPeerActive = peerActive;
+      // Broadcast on any change to the broadcastable derived state, not just
+      // when caffeinate turns on/off: the trigger identity (which program, or
+      // whether a peer is holding) can flip while caffeinate stays continuously
+      // active (a program starting while a peer is attached, a peer leaving
+      // while a program runs). Without these the UI keeps a stale `activeTrigger`
+      // / `peerActive` and the wrong row (or none) highlights.
+      if (
+        next !== prevAutoActive ||
+        this.autoTrigger !== prevAutoTrigger ||
+        this.autoPeerActive !== prevAutoPeerActive
+      ) {
         this.emit("change");
       }
       this.recompute();
-      // If the activity gate is on and caffeinate is active, ensure the
-      // trailing-edge idle timer is armed. (It may have been cleared by
-      // noteOutputActivity or by a mode/command change.)
-      if (this.activityGate && this.autoActive) {
+      if (peerActive) {
+        // A peer now holds caffeinate; any program-silence timer armed before
+        // the peer joined is obsolete (the peer releases on disconnect, not
+        // on silence). Clear it so a stale trailing edge can't fire a spurious
+        // poll and re-arm into a timer-driven loop.
+        this.clearActivityGateTimer();
+      }
+      // Arm the silence-release timer only when a gated program is the SOLE
+      // reason caffeinate is active. A peer holds until it disconnects (which
+      // pokes its own re-check via onSessionActivity), so silence must not
+      // release while one is present — and a program active alongside a peer is
+      // also covered by the peer's hold.
+      if (this.activityGate && programActive && !peerActive) {
         this.armActivityGateTimerIfNeeded();
       }
     } finally {

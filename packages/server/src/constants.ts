@@ -49,7 +49,7 @@ export const CAFFEINATE_AUTO_DEFAULT_COMMANDS: readonly string[] = [
   "opencode",
   "pi",
 ];
-export const CAFFEINATE_PREFERENCES_FILE_VERSION = 3;
+export const CAFFEINATE_PREFERENCES_FILE_VERSION = 4;
 export const DAEMON_CONFIG_FILE_VERSION = 1;
 // Automatic detection is event-driven (no timer): a `ps` snapshot is taken only
 // in response to a foreground change or a session connect/disconnect. This

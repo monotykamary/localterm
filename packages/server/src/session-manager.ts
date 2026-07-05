@@ -303,6 +303,17 @@ export class SessionManager {
     return [...this.sessions.values()].map((managed) => managed.session.pid);
   }
 
+  // Whether any live session currently has a second client attached — a peer
+  // (a phone that ingested a share QR, or another tab via the session picker).
+  // Drives keep-awake's peer trigger: automatic mode holds caffeinate while a
+  // peer is present, since the machine is actively being used by someone else.
+  hasPeerClient(): boolean {
+    for (const managed of this.sessions.values()) {
+      if (managed.clients.size >= 2) return true;
+    }
+    return false;
+  }
+
   noteOutput(pid: number): void {
     this.lastOutputAtByPid.set(pid, Date.now());
   }
