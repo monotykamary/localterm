@@ -1,5 +1,13 @@
 # localterm-server
 
+## 2.38.2
+
+### Patch Changes
+
+- Stop the network top-to-bottom crawl on big TUI redraws over a bandwidth-limited link.
+
+  The 2ms coalescing window was a one-shot timer set from the FIRST chunk of a burst, so a full-screen redraw of a large session (emitted as many 1024-byte node-pty data events across more than the window) flushed mid-redraw and split one logical frame across multiple WebSocket messages. Over a bandwidth-limited link each split arrives as its own atomic message and xterm paints it separately — the visible top-to-bottom crawl. The window now resets on every chunk so the flush lands 2ms after the LAST chunk of a burst, and the size cap rises 32KB -> 64KB (under xterm's 12ms parse-yield budget), so a big single redraw stays one message the browser receives atomically and renders in a single paint regardless of link bandwidth. Sustained streams never idle, so the size cap still gates their rate unchanged.
+
 ## 2.38.1
 
 ### Patch Changes

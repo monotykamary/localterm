@@ -1,5 +1,16 @@
 # localterm
 
+## 2.38.2
+
+### Patch Changes
+
+- Stop the smooth-fps-but-stutter render clash and the frame skips on 60fps TUI animations. (Ships the terminal UI built from apps/terminal, bundled into the CLI tarball at publish time.)
+
+  The OutputBatcher flushed inside a requestAnimationFrame, so xterm's parse ran in the vsync deadline and starved the render rAF of its frame budget — the "smooth fps but visual stutter" same-deadline clash. A 4ms idle-debounce added on top only shifted frames past the vsync boundary and skipped frames on a 60fps TUI animation (e.g. the opentui golden-star demo). The batcher now flushes every output write synchronously on arrival (raw in/out): each WebSocket message is one terminal.write in the WS message task (a macrotask, not a rAF), so xterm's parse never runs inside a vsync and can't starve the render rAF, and each frame gets the earliest possible render rAF — no latency window to skip it. With the server now coalescing one frame per message and capping it under xterm's 12ms yield budget, the client has nothing to coalesce: flushing on arrival is both lowest-latency and partial-free. xterm's own RenderDebouncer stays the single vsync gate (it already samples the latest frame at 60fps and drops intermediates — the frame-skip model).
+
+- Updated dependencies
+  - @monotykamary/localterm-server@2.38.2
+
 ## 2.38.1
 
 ### Patch Changes
