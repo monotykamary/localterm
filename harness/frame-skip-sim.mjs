@@ -47,10 +47,6 @@ const PARSE_RATE = 50_000; // bytes/ms (50 MB/s); realistic xterm parse rate.
 // A ~100KB redraw parses inside one budget (instant on LAN); a 2MB dump yields.
 const RENDER_DURATION_MS = 0.4; // a render occupies the main thread briefly
 const FLUSH_DURATION_MS = 0.05; // terminal.write() call plumbing
-const FRAME_SKIP_RATE_CAP_MS = 16; // frame-skip stream coalesce window
-const FRAME_SKIP_SIZE_CAP_BYTES = BUDGET_MS * PARSE_RATE; // cap a flush so its
-// parse never exceeds the budget -> no parse-yield on the stream path.
-const STREAM_FRAME_ID = -1; // synthetic frame id for rate-capped stream flushes
 
 const nextVsync = (t) => {
   // smallest vsync (k*RAF_MS, k>=1) that is at-or-after t, snapping when t is
@@ -331,37 +327,24 @@ export const runPipeline = (mode, arrivals, opts) => {
       });
     }
   } else {
-    // FRAME-SKIP: staging buffer, one vsync slot (render, gated to idle).
+    // FRAME-END MARKER (shipped): staging buffer, one vsync slot (render,
+    // gated to complete frames).
     //  - frame chunks (a.stream === false): stage per frameId until the
-    //    frame-end marker (isLast), then commit the whole frame in ONE write.
-    //  - stream chunks (a.stream === true): coalesce on a rate-cap + size-cap
-    //    timer; each flush is a complete render unit.
-    //  - echo (small, isLast, frame): flushes immediately (fast path).
+    //    frame-end marker (isLast), then commit the whole frame in ONE write
+    //    so a frame the server split across messages at the cap renders as one
+    //    paint (no crawl over a bandwidth-limited link).
+    //  - stream chunks (a.stream === true): the server marks each
+    //    sustained-stream size-cap chunk (continuous past the threshold) so
+    //    the client flushes it progressively — a `cat` scrolls instead of
+    //    staging forever.
+    //  - echo (small, isLast, frame): flushes on the marker like any frame.
     const frameStaging = new Map();
-    let streamStaging = 0;
-    let streamTimer = null;
     const flushFrame = (fid) => {
       const bytes = frameStaging.get(fid) ?? 0;
       if (bytes <= 0) return;
       frameStaging.delete(fid);
       sim.occupy(FLUSH_DURATION_MS);
       write(bytes, fid);
-    };
-    const flushStream = () => {
-      streamTimer = null;
-      if (streamStaging <= 0) return;
-      metrics.flushes += 1;
-      const bytes = streamStaging;
-      streamStaging = 0;
-      // model each rate-capped flush as its own complete stream frame
-      const sf = getFrame(STREAM_FRAME_ID, bytes, sim.clock);
-      sf.stream = true;
-      sf.totalBytes = bytes;
-      sf.parsed = 0;
-      sf.allParsed = false;
-      sf.allArrived = true;
-      sim.occupy(FLUSH_DURATION_MS);
-      write(bytes, STREAM_FRAME_ID);
     };
     for (const a of arrivals) {
       const f = getFrame(a.frameId, a.frameBytes, a.sendT);
@@ -371,13 +354,9 @@ export const runPipeline = (mode, arrivals, opts) => {
         f.arrived += a.bytes;
         if (a.isLast) f.allArrived = true;
         if (a.stream) {
-          streamStaging += a.bytes;
-          if (streamStaging >= FRAME_SKIP_SIZE_CAP_BYTES) {
-            flushStream();
-          } else if (streamTimer === null) {
-            streamTimer = "pending";
-            sim.timeout(t + FRAME_SKIP_RATE_CAP_MS, flushStream);
-          }
+          metrics.flushes += 1;
+          sim.occupy(FLUSH_DURATION_MS);
+          write(a.bytes, a.frameId);
         } else {
           frameStaging.set(a.frameId, (frameStaging.get(a.frameId) ?? 0) + a.bytes);
           if (a.isLast) flushFrame(a.frameId); // atomic frame commit
