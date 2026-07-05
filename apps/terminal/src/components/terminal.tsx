@@ -1604,16 +1604,6 @@ export const Terminal = () => {
               terminal.write(chunks[index], index === chunks.length - 1 ? finishReplay : undefined);
             }
           }
-        } else if (message.type === "output-flush") {
-          // The server marks the boundary of a coalesced output frame (its
-          // 2ms idle-flush after a TUI redraw burst) — or a sustained-stream
-          // chunk — with this marker right after the bytes. The batcher staged
-          // each binary frame on arrival; commit them now as one terminal.write
-          // so a frame the server split across messages at the 64KB cap paints
-          // in a single render instead of crawling top-to-bottom over a
-          // bandwidth-limited link. A mid-frame size-cap split carries no
-          // marker, so the batcher keeps staging until the frame's end lands.
-          outputBatcher.flushStaged();
         } else if (message.type === "automations") {
           setAutomations(message.automations);
         } else if (message.type === "caffeinate") {

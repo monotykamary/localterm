@@ -1254,24 +1254,6 @@ const automationsMessageSchema = z
 // reattach, or a back-compat reader) treats it as a no-op.
 const replayEndMessageSchema = z.object({ type: z.literal("replay-end") }).strict();
 
-// Marks the end of a coalesced output frame — the boundary at which the client
-// flushes its staged output as one terminal.write (one render). The server's
-// coalescing window (OUTPUT_BATCH_WINDOW_MS resetting) flushes a burst as one
-// logical frame; this marker is sent right after that flush so the client —
-// which otherwise stages every output message — commits the whole frame in a
-// single paint. Without it, a frame the server split across messages at the
-// 64KB cap would render each split as it landed over a bandwidth-limited link
-// (the visible top-to-bottom crawl). Also sent after a size-cap flush once the
-// burst has run continuously past OUTPUT_STREAM_THRESHOLD_MS (a sustained
-// stream, not a frame): the client flushes each such chunk progressively, so a
-// `cat` scrolls instead of staging forever (a frame marker never comes for a
-// continuous stream). A size-cap flush mid-frame (the burst is still going, under
-// the threshold) sends NO marker — the client keeps staging until the frame's
-// end marker lands. A back-compat client that doesn't stage (flushes each
-// message on arrival) treats the marker as a no-op: the output bytes already
-// arrived and rendered, the marker just confirms the boundary.
-const outputFlushMessageSchema = z.object({ type: z.literal("output-flush") }).strict();
-
 // A second client just attached to this PTY (a mobile ingested a desktop's
 // share QR, or another tab joined via the session picker). Broadcast to the
 // existing subscribers at attach time — before the joiner is added — so a
@@ -1554,7 +1536,6 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   caffeinateStateMessageSchema,
   cdpControlledMessageSchema,
   replayEndMessageSchema,
-  outputFlushMessageSchema,
   peerAttachedMessageSchema,
   ptySizeMessageSchema,
 ]);

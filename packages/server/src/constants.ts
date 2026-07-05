@@ -248,23 +248,6 @@ export const OUTPUT_BATCH_FLUSH_BYTES = 64 * 1024;
 // timer, keeping the data flowing.
 export const OUTPUT_BATCH_WINDOW_MS = 2;
 
-// Stream-detection threshold for the output frame-end marker. The server's
-// coalescing window flushes a burst either on the 2ms idle (a TUI redraw frame
-// that ended) or on the 64KB size cap (a big frame split mid-burst, or a
-// sustained stream). A size-cap flush mid-frame (the burst is still going) must
-// NOT carry a frame-end marker — the client keeps staging until the burst's
-// idle-flush lands, so a split frame renders as one paint. But a sustained
-// stream never idles, so its size-cap flushes would stage forever; once the
-// burst has run continuously past this threshold the server marks the flush as
-// a stream chunk instead, and the client flushes it progressively. Sized above
-// the longest realistic TUI redraw burst (a full-screen repaint of a large
-// session delivers through node-pty at ~2.5 MB/s, so a 200KB redraw bursts in
-// ~80ms) so a frame is never misread as a stream, and below the point a slow
-// `cat`'s start-up staging delay would be felt (~100ms). Link-independent: the
-// threshold is server-side (before the network), so it doesn't change between
-// LAN and 5G.
-export const OUTPUT_STREAM_THRESHOLD_MS = 100;
-
 // Heartbeat: send a WS ping every N ms; if no pong arrives within the timeout
 // we tear down the socket. Without this, half-open connections (laptop sleep,
 // VPN dropout, kernel‑side TCP keepalives at 2h+) wedge the session — the
