@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import path from "node:path";
+import zlib from "node:zlib";
 import { CaptureRenderer } from "./capture-renderer.js";
 import {
   CAPTURE_PANE_MAX_LINES,
@@ -24,6 +25,12 @@ import {
   WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES,
   WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
   WS_READY_STATE_OPEN,
+  WS_OUTPUT_BROTLI,
+  WS_OUTPUT_BROTLI_QUALITY,
+  WS_OUTPUT_COMPRESS_THRESHOLD_BYTES,
+  WS_OUTPUT_GZIP,
+  WS_OUTPUT_GZIP_LEVEL,
+  WS_OUTPUT_RAW,
 } from "./constants.js";
 import {
   GitDiffWatcher,
@@ -34,6 +41,7 @@ import { GitMetadataCoordinator } from "./git-metadata-coordinator.js";
 import { Session } from "./session.js";
 import type { SessionEventName } from "./session-event-manager.js";
 import type { GitBranchPr, ServerToClientMessage, SpawnPtyInput } from "./types.js";
+import type { CompressMode } from "./schemas.js";
 import type { SessionOwner } from "./identity/types.js";
 import { resolveNamedKeys } from "./utils/named-keys.js";
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
@@ -103,6 +111,7 @@ interface ManagedClient {
   pixelWidth?: number;
   pixelHeight?: number;
   coordinator: GitMetadataCoordinator | null;
+  compressMode: CompressMode;
 }
 
 export interface ManagedSession {
@@ -417,6 +426,7 @@ export class SessionManager {
       cols: 0,
       rows: 0,
       coordinator,
+      compressMode: null,
     };
     coordinator.add(ws);
     managed.clients.add(client);
@@ -466,7 +476,7 @@ export class SessionManager {
   // lets the client flush whatever it buffered (the pending bytes that raced
   // ahead of the marker) and rejoin live fan-out. A client that didn't open the
   // window (a silent reattach, or a back-compat reader) treats it as a no-op.
-  promote(ws: ClientSocket, replay: boolean): void {
+  promote(ws: ClientSocket, replay: boolean, compress: CompressMode = null): void {
     const entry = this.wsToClient.get(ws);
     if (!entry) return;
     const client = entry.client;
@@ -475,8 +485,9 @@ export class SessionManager {
       clearTimeout(client.pendingTimer);
       client.pendingTimer = null;
     }
+    client.compressMode = compress;
     if (replay) {
-      this.sendScrollback(ws, entry.session);
+      this.sendScrollback(ws, entry.session, client.compressMode);
     }
     // Tell the client the replay bytes have all landed so it can write them as
     // one suppressed block (dropping xterm's responses to the stale query
@@ -485,7 +496,7 @@ export class SessionManager {
     // exits its suppressed-replay window and never deadlocks on a slow link.
     this.sendControl(ws, { type: "replay-end" });
     for (const payload of client.pendingControl) this.sendControl(ws, payload);
-    for (const bytes of client.pendingBytes) this.sendOutputBytes(ws, bytes);
+    for (const bytes of client.pendingBytes) this.sendOutputFrame(ws, bytes, client.compressMode);
     client.pendingControl = [];
     client.pendingBytes = [];
     client.pending = false;
@@ -936,16 +947,12 @@ export class SessionManager {
     return Math.min(Math.max(Math.trunc(value), min), max);
   }
 
-  private sendScrollback(ws: ClientSocket, managed: ManagedSession): void {
+  private sendScrollback(ws: ClientSocket, managed: ManagedSession, mode: CompressMode): void {
     const snapshot = managed.session.snapshotScrollback();
     if (!snapshot) return;
     const bytes = Buffer.from(snapshot, "utf8");
-    if (bytes.byteLength <= MAX_OUTPUT_BYTES) {
-      this.sendOutputBytes(ws, bytes);
-      return;
-    }
     for (let offset = 0; offset < bytes.byteLength; offset += MAX_OUTPUT_BYTES) {
-      this.sendOutputBytes(ws, bytes.subarray(offset, offset + MAX_OUTPUT_BYTES));
+      this.sendOutputFrame(ws, bytes.subarray(offset, offset + MAX_OUTPUT_BYTES), mode);
     }
   }
 
@@ -962,13 +969,63 @@ export class SessionManager {
     }
   }
 
+  private compressPayload(bytes: Uint8Array<ArrayBuffer>, mode: "br" | "gzip"): Buffer<ArrayBuffer> {
+    return mode === "br"
+      ? zlib.brotliCompressSync(bytes, {
+          params: { [zlib.constants.BROTLI_PARAM_QUALITY]: WS_OUTPUT_BROTLI_QUALITY },
+        })
+      : zlib.gzipSync(bytes, { level: WS_OUTPUT_GZIP_LEVEL });
+  }
+
+  private frameWithHeader(header: number, payload: Uint8Array<ArrayBuffer>): Buffer<ArrayBuffer> {
+    const out = Buffer.allocUnsafe(1 + payload.length);
+    out[0] = header;
+    out.set(payload, 1);
+    return out;
+  }
+
+  private sendOutputFrame(ws: ClientSocket, bytes: Uint8Array<ArrayBuffer>, mode: CompressMode): void {
+    if (mode === null) {
+      this.sendOutputBytes(ws, bytes);
+      return;
+    }
+    if (bytes.length < WS_OUTPUT_COMPRESS_THRESHOLD_BYTES) {
+      this.sendOutputBytes(ws, this.frameWithHeader(WS_OUTPUT_RAW, bytes));
+      return;
+    }
+    const compressed = this.compressPayload(bytes, mode);
+    this.sendOutputBytes(
+      ws,
+      this.frameWithHeader(mode === "br" ? WS_OUTPUT_BROTLI : WS_OUTPUT_GZIP, compressed),
+    );
+  }
+
   private broadcastBytes(managed: ManagedSession, bytes: Uint8Array<ArrayBuffer>): void {
+    if (bytes.length === 0) return;
+    const compressible = bytes.length >= WS_OUTPUT_COMPRESS_THRESHOLD_BYTES;
+    let brotli: Buffer<ArrayBuffer> | null = null;
+    let gzip: Buffer<ArrayBuffer> | null = null;
     for (const client of managed.clients) {
       if (client.pending) {
         client.pendingBytes.push(bytes);
         continue;
       }
-      this.sendOutputBytes(client.ws, bytes);
+      const mode = client.compressMode;
+      if (mode === null) {
+        this.sendOutputBytes(client.ws, bytes);
+        continue;
+      }
+      if (!compressible) {
+        this.sendOutputBytes(client.ws, this.frameWithHeader(WS_OUTPUT_RAW, bytes));
+        continue;
+      }
+      if (mode === "br") {
+        if (brotli === null) brotli = this.compressPayload(bytes, "br");
+        this.sendOutputBytes(client.ws, this.frameWithHeader(WS_OUTPUT_BROTLI, brotli));
+      } else {
+        if (gzip === null) gzip = this.compressPayload(bytes, "gzip");
+        this.sendOutputBytes(client.ws, this.frameWithHeader(WS_OUTPUT_GZIP, gzip));
+      }
     }
   }
 

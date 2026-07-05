@@ -247,6 +247,27 @@ export const OUTPUT_BATCH_FLUSH_BYTES = 64 * 1024;
 // OUTPUT_BATCH_FLUSH_BYTES triggers an immediate flush regardless of the
 // timer, keeping the data flowing.
 export const OUTPUT_BATCH_WINDOW_MS = 2;
+// Output compression. The server compresses each binary output frame for
+// viewers that advertised a decompressor in the {ready} handshake; viewers
+// that didn't get the raw bytes (backward-compatible). A 1-byte header tags the
+// frame so the client knows how to handle the payload:
+//   0x00 = raw (below threshold OR a raw-mode viewer)
+//   0x01 = gzip (widest-supported fallback: Chrome 80+)
+//   0x02 = brotli (best ratio: Chrome 105+ / Safari 16.4+)
+// Brotli q6 on a 64KB frame (the batcher cap) hits ~10x — a 200KB redraw crosses
+// a 10Mbps 5G link in ~16ms instead of ~160ms (one paint, not a crawl).
+// Per-frame independent (NOT context-takeover): at 64KB the within-frame
+// dictionary is already built, so a persistent stream buys nothing (measured
+// 10.18x per-frame vs 10.15x context-takeover) and avoids per-client streaming
+// state + reconnect resets. gzip L3 is the fallback for browsers without
+// DecompressionStream("br"). Frames below the threshold skip compression (the
+// deflate header would cost more than it saves) and ship as 0x00 raw.
+export const WS_OUTPUT_RAW = 0x00;
+export const WS_OUTPUT_GZIP = 0x01;
+export const WS_OUTPUT_BROTLI = 0x02;
+export const WS_OUTPUT_COMPRESS_THRESHOLD_BYTES = 256;
+export const WS_OUTPUT_BROTLI_QUALITY = 6;
+export const WS_OUTPUT_GZIP_LEVEL = 3;
 
 // Heartbeat: send a WS ping every N ms; if no pong arrives within the timeout
 // we tear down the socket. Without this, half-open connections (laptop sleep,

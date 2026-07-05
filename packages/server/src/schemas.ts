@@ -463,10 +463,17 @@ const identifyMessageSchema = z
 // replay and goes straight to live output. Until this lands the socket stays
 // "pending" and receives no live fan-out, so no output is lost across the gap —
 // it all lives in the ring buffer and arrives via the replay.
+// `compress` is the decompressor the client advertised (feature-detected via
+// `new DecompressionStream(mode)`): "br" if Brotli is supported (the best
+// ratio), "gzip" as a widely-supported fallback (Chrome 80+), or null if the
+// browser has no DecompressionStream (raw passthrough). null is also the
+// default for a back-compat client that omits the field — it gets raw frames.
+export type CompressMode = "br" | "gzip" | null;
 const readyMessageSchema = z
   .object({
     type: z.literal("ready"),
     replay: z.boolean(),
+    compress: z.enum(["br", "gzip"]).nullable().default(null),
   })
   .strict();
 

@@ -1557,28 +1557,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   );
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
   wss.options.maxPayload = 256 * 1024;
-  // Enable WebSocket per-message compression (permessage-deflate). A TUI redraw
-  // bigger than the 64KB server cap arrives split across messages; over a
-  // bandwidth-limited link (5G, mobile hotspot) those splits land spread and
-  // xterm paints them in order — the visible top-to-bottom crawl. The client
-  // can't render the frame before it arrives, so the only lever is how much
-  // arrives per unit time: ANSI redraws are highly redundant (repeated SGR
-  // codes, runs of spaces, cursor moves) and compress ~3–4x at level 3, so a
-  // 200KB redraw crosses the link in ~50ms on 10Mbps 5G instead of ~160ms —
-  // close to the instant one-paint feel LAN has, without holding the frame
-  // (the frame-end-marker approach, which traded the crawl for a longer
-  // blank wait) and without splitting it finer (a smaller cap, which just
-  // makes the crawl smoother, not gone). The browser negotiates this
-  // transparently; xterm sees the decompressed bytes. Level 3 (not the zlib
-  // default 6, which is too slow for high-throughput streams) keeps the
-  // compression CPU modest — ~30% of one core only for a sustained 15MB/s
-  // `cat`, ~12% on a 5G-bound 6MB/s stream, and negligible for typical
-  // build-log output. The 1KB threshold skips tiny control/echo messages
-  // where the deflate header would cost more than it saves.
-  wss.options.perMessageDeflate = {
-    threshold: 1024,
-    zlibDeflateOptions: { level: 3 },
-  };
+  // Output compression is application-level (per-frame brotli/gzip with a 1-byte
+  // header on the binary output frames), NOT permessage-deflate: browsers never
+  // advertise Sec-WebSocket-Extensions: permessage-deflate on a WebSocket, so a
+  // server-side offer goes unanswered and the connection stays uncompressed
+  // (verified: a no-extension-header client negotiates ""). See
+  // session-manager.ts broadcastBytes and the client's DecompressionStream path.
 
   const automationStore = new AutomationStore(path.join(stateDirectory, "automations.json"));
   const automationRunTracker = new AutomationRunTracker();
@@ -2324,7 +2308,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             // Attach handshake: the client has the {type:"session"} frame and
             // says whether it wants the scrollback replay (a switch to a PTY
             // it didn't already have on screen) before live fan-out begins.
-            registry.promote(ws, parsed.data.replay);
+            // `compress` is the decompressor the client advertised (feature-
+            // detected via DecompressionStream); the server compresses output
+            // frames for it (or sends raw if null — a back-compat/no-support
+            // client).
+            registry.promote(ws, parsed.data.replay, parsed.data.compress);
           } else if (parsed.data.type === "caffeinate-mode") {
             caffeinateManager.setMode(parsed.data.mode);
           } else if (parsed.data.type === "caffeinate-commands") {

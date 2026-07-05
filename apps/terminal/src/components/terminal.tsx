@@ -106,6 +106,9 @@ import {
   SEARCH_MATCH_BACKGROUND_HEX,
   TOOLBAR_HIDE_DELAY_MS,
   TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS,
+  WS_OUTPUT_BROTLI,
+  WS_OUTPUT_GZIP,
+  WS_OUTPUT_RAW,
 } from "@/lib/constants";
 import {
   AMBIENT_TAB_CLOSE_DEADLINE_MS,
@@ -189,6 +192,58 @@ const SEARCH_DECORATION_OPTIONS = {
   activeMatchBorder: SEARCH_ACTIVE_MATCH_BORDER_HEX,
   matchOverviewRuler: SEARCH_ACTIVE_MATCH_BACKGROUND_HEX,
   activeMatchColorOverviewRuler: SEARCH_ACTIVE_MATCH_BORDER_HEX,
+};
+
+// Server-side output compression: the server compresses each binary output
+// frame (brotli if the browser can decode it, else gzip) with a 1-byte header
+// (0x00 raw / 0x01 gzip / 0x02 brotli). Feature-detect the decompressor at
+// module load; null means no DecompressionStream (raw passthrough, also the
+// back-compat path for an old server). Browsers never negotiate
+// permessage-deflate, so this is application-level. The TS DOM lib's
+// CompressionFormat omits "br" (runtime-supported in Chrome 105+/Safari 16.4+),
+// so the format string is cast.
+const detectCompressMode = (): "br" | "gzip" | null => {
+  const tryFormat = (format: string): boolean => {
+    try {
+      new DecompressionStream(format as CompressionFormat);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (tryFormat("br")) return "br";
+  if (tryFormat("gzip")) return "gzip";
+  return null;
+};
+const COMPRESS_MODE = detectCompressMode();
+
+const decompressFrame = async (format: string, compressed: Uint8Array<ArrayBuffer>): Promise<Uint8Array> => {
+  const stream = new DecompressionStream(format as CompressionFormat);
+  const writer = stream.writable.getWriter();
+  const reader = stream.readable.getReader();
+  const chunks: Uint8Array[] = [];
+  // Read concurrently with the write+close: writer.close() waits for the
+  // readable to drain, so the reader must already be pulling or a large frame
+  // backpressures the transform and deadlocks the close.
+  const drained = (async () => {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value);
+    }
+  })();
+  await writer.write(compressed);
+  await writer.close();
+  await drained;
+  let length = 0;
+  for (const chunk of chunks) length += chunk.length;
+  const out = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
 };
 
 const CWD_QUERY_PARAM = "cwd";
@@ -1440,6 +1495,20 @@ export const Terminal = () => {
         );
       });
 
+      // Decompression is async (DecompressionStream), so serialize per socket:
+      // frames must reach xterm in PTY order, and the replay-end flush must wait
+      // for the replay frames' decompresses. A promise chain (FIFO). ptyGeneration
+      // invalidates pending decompresses when a {session} frame switches PTYs —
+      // a prior PTY's frame still in the queue would otherwise land in the new
+      // PTY (after terminal.reset()).
+      let decompressQueue: Promise<void> = Promise.resolve();
+      let ptyGeneration = 0;
+      const enqueueDecompress = (task: () => Promise<void> | void): void => {
+        decompressQueue = decompressQueue.then(task).catch((error: unknown) => {
+          console.warn("[localterm] output decompress error", error);
+        });
+      };
+
       nextSocket.addEventListener("message", (event) => {
         if (disposed || socket !== nextSocket) return;
         // Output frames are raw UTF-8 bytes (binary WebSocket frames) — bypass
@@ -1447,16 +1516,43 @@ export const Terminal = () => {
         // emits every other message type as JSON text, so anything that isn't
         // an ArrayBuffer goes through the schema parser.
         if (isBinaryMessageData(event.data)) {
-          if (inReplay) {
-            // Buffer replay frames; they are written as one suppressed block
-            // when `replay-end` lands, so xterm's responses to the stale query
-            // requests never reach the live PTY.
-            replayChunks.push(new Uint8Array(event.data));
+          const data = new Uint8Array(event.data);
+          if (COMPRESS_MODE === null) {
+            // Raw passthrough (no compression negotiated — a back-compat or
+            // no-DecompressionStream browser): the frame has no header byte.
+            if (inReplay) {
+              replayChunks.push(data);
+              return;
+            }
+            outputBatcher.pushBytes(localEcho.hasPending() ? localEcho.reconcile(data) : data);
+            noteOutputActivity();
             return;
           }
-          const bytes = new Uint8Array(event.data);
-          outputBatcher.pushBytes(localEcho.hasPending() ? localEcho.reconcile(bytes) : bytes);
-          noteOutputActivity();
+          // Compressed frame: 1-byte header (0x00 raw / 0x01 gzip / 0x02 brotli)
+          // then the payload. Decompress is async (DecompressionStream), so
+          // enqueue per socket — frames reach xterm in PTY order and the
+          // replay-end flush waits for the replay frames' decompresses. Capture
+          // the PTY generation so a {session} switch drops a prior PTY's frame
+          // still mid-decompress (it would otherwise land after terminal.reset()).
+          const generationAtEnqueue = ptyGeneration;
+          enqueueDecompress(async () => {
+            const header = data[0];
+            const payload = data.subarray(1);
+            let bytes: Uint8Array;
+            if (header === WS_OUTPUT_BROTLI) bytes = await decompressFrame("br", payload);
+            else if (header === WS_OUTPUT_GZIP) bytes = await decompressFrame("gzip", payload);
+            else if (header === WS_OUTPUT_RAW) bytes = payload;
+            else return; // unknown header — a version mismatch; drop the frame
+            if (ptyGeneration !== generationAtEnqueue) return;
+            if (inReplay) {
+              // Buffer the DECOMPRESSED bytes; replay-end writes them as one
+              // suppressed block (dropping xterm's stale query responses).
+              replayChunks.push(bytes);
+              return;
+            }
+            outputBatcher.pushBytes(localEcho.hasPending() ? localEcho.reconcile(bytes) : bytes);
+            noteOutputActivity();
+          });
           return;
         }
         let raw: unknown;
@@ -1471,6 +1567,7 @@ export const Terminal = () => {
         if (message.type === "title") {
           applyIncomingTitle(message.title);
         } else if (message.type === "session") {
+          ptyGeneration += 1;
           const priorSessionId = liveSessionId;
           // A new session frame means a fresh attach: drop any suppressed-replay
           // window left open by a prior (possibly failed) attach — its replay
@@ -1578,7 +1675,7 @@ export const Terminal = () => {
             suppressOutput = true;
             replayChunks = [];
           }
-          send({ type: "ready", replay: wantsReplay });
+          send({ type: "ready", replay: wantsReplay, compress: COMPRESS_MODE });
         } else if (message.type === "replay-end") {
           // The server has finished sending the scrollback replay. Write the
           // buffered frames as one block with onData suppressed so xterm's
@@ -1590,20 +1687,29 @@ export const Terminal = () => {
           // queued behind it in xterm's FIFO buffer and parses after the
           // callback clears suppression. An empty replay (blank PTY) writes
           // nothing and just clears the window.
-          const chunks = replayChunks;
-          inReplay = false;
-          replayChunks = [];
-          if (chunks.length === 0) {
-            suppressOutput = false;
-          } else {
-            const finishReplay = () => {
+          const flushReplay = () => {
+            const chunks = replayChunks;
+            inReplay = false;
+            replayChunks = [];
+            if (chunks.length === 0) {
               suppressOutput = false;
-              updateScrollbar();
-            };
-            for (let index = 0; index < chunks.length; index += 1) {
-              terminal.write(chunks[index], index === chunks.length - 1 ? finishReplay : undefined);
+            } else {
+              const finishReplay = () => {
+                suppressOutput = false;
+                updateScrollbar();
+              };
+              for (let index = 0; index < chunks.length; index += 1) {
+                terminal.write(chunks[index], index === chunks.length - 1 ? finishReplay : undefined);
+              }
             }
-          }
+          };
+          // Compressed replay frames are decompressed async (the per-socket
+          // queue); the flush must wait for them or it'd write an incomplete
+          // block. Raw mode (no compression) flushes inline — the frames
+          // arrived synchronously and the flush must land before the next
+          // (inline) live frame reads `inReplay`.
+          if (COMPRESS_MODE === null) flushReplay();
+          else enqueueDecompress(flushReplay);
         } else if (message.type === "automations") {
           setAutomations(message.automations);
         } else if (message.type === "caffeinate") {

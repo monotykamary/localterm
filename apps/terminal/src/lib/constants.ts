@@ -266,3 +266,10 @@ export const OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES = 8 * 1024;
 // inter-frame gap of common animators (cmatrix ~100ms, sl ~50ms) so streaming
 // output keeps continuous cadence while a genuinely idle terminal rests.
 export const OUTPUT_KEEP_WARM_MS = 150;
+
+// Server->client output compression frame-header bytes (see the server's
+// WS_OUTPUT_* constants). The server prepends one byte to each compressed
+// binary output frame: 0x00 = raw, 0x01 = gzip, 0x02 = brotli.
+export const WS_OUTPUT_RAW = 0x00;
+export const WS_OUTPUT_GZIP = 0x01;
+export const WS_OUTPUT_BROTLI = 0x02;
