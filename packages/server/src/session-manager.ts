@@ -1093,57 +1093,33 @@ export class SessionManager {
     }
     if (count === 0) return;
     if (!Number.isFinite(cols) || !Number.isFinite(rows)) return;
-    // A rows-only change (cols unchanged) doesn't reflow text, so a phone
-    // keyboard open/close must not re-render the whole conversation. The PTY
-    // rows are a high-water mark: only grow, never shrink. Skip the resize
-    // unless the cols changed OR the min rows grew past the high-water. A
-    // shorter viewer then sees the bottom of the taller PTY screen (the latest,
-    // where a TUI's cursor lives; the rest stays in xterm's scrollback) instead
-    // of the PTY shrinking and re-rendering. The high-water also covers a
-    // rotate-with-keyboard-open then keyboard-close: the cols change resizes to
-    // max(min rows now, high-water) so the PTY never strands itself shorter than
-    // the viewport, and the close-keyboard's rows-only grow back to the prior
-    // height is a no-op because the high-water already reached it — no blank
-    // rows, no re-render. The cols stay the min across clients (tmux-style
-    // reflow). Cost: a pager (less/man) pages at the PTY's (taller) rows, so a
-    // shorter viewer sees fewer rows than a full page — acceptable for "I
-    // opened the keyboard to type".
-    const colsChanged = managed.ptySizeCols !== cols;
-    const targetRows = Math.max(rows, managed.ptySizeRows ?? 0);
-    const rowsGrow = managed.ptySizeRows !== null && targetRows > managed.ptySizeRows;
-    if (colsChanged || rowsGrow) {
-      if (count === 1 && single?.pixelWidth !== undefined && single?.pixelHeight !== undefined) {
-        session.resize(cols, targetRows, single.pixelWidth, single.pixelHeight);
-      } else {
-        session.resize(cols, targetRows);
-      }
-      // Keep the capture renderer's grid at the PTY's effective size so a
-      // capture-pane reflects the same line wrapping a viewer would see.
-      managed.captureRenderer?.resize(cols, targetRows);
-      managed.ptySizeRows = targetRows;
+    if (count === 1 && single?.pixelWidth !== undefined && single?.pixelHeight !== undefined) {
+      session.resize(cols, rows, single.pixelWidth, single.pixelHeight);
+    } else {
+      session.resize(cols, rows);
     }
-    // Broadcast the PTY's effective size on a real change (cols change or a
-    // rows-only grow past the high-water). A rows-only shrink or no-op skips
-    // both the resize and the broadcast, so a phone keyboard open/close
-    // re-renders nothing and re-broadcasts nothing. A lone viewer is never
-    // constrained (its effective size equals its own), so it stays quiet except
-    // for one clear frame when a peer detaches and drops it back to solo — that
-    // erases the mask the leaving peer had imposed. A joiner entering an
-    // already-constrained session without changing the cols is seeded in attach.
-    const sizeChanged = colsChanged || rowsGrow;
+    // Keep the capture renderer's grid at the PTY's effective size so a
+    // capture-pane reflects the same line wrapping a viewer would see.
+    managed.captureRenderer?.resize(cols, rows);
+    // The PTY's effective size is the min across attached clients (tmux-style):
+    // a narrower peer constrains everyone. Broadcast it on change so each
+    // viewer can mask the dead area beyond its own (possibly wider) grid as
+    // inactive chrome. A lone viewer is never constrained (its effective size
+    // always equals its own), so it's left quiet except for one clear frame when
+    // a peer detaches and drops it back to solo — that erases the mask the
+    // leaving peer had imposed. A joiner entering an already-constrained
+    // session without changing the min is seeded in attach.
+    const sizeChanged = managed.ptySizeCols !== cols || managed.ptySizeRows !== rows;
     managed.ptySizeCols = cols;
+    managed.ptySizeRows = rows;
     if (count > 1) {
       managed.ptySizeWasMultiViewer = true;
       if (sizeChanged) {
-        this.broadcast(managed, {
-          type: "pty-size",
-          cols,
-          rows: managed.ptySizeRows ?? targetRows,
-        });
+        this.broadcast(managed, { type: "pty-size", cols, rows });
       }
     } else if (managed.ptySizeWasMultiViewer) {
       managed.ptySizeWasMultiViewer = false;
-      this.broadcast(managed, { type: "pty-size", cols, rows: managed.ptySizeRows ?? targetRows });
+      this.broadcast(managed, { type: "pty-size", cols, rows });
     }
   }
 
