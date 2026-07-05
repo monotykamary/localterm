@@ -1670,24 +1670,6 @@ const AutomationForm = ({
                 onChange={(prompt) => onChange({ ...form, runner: { ...form.runner, prompt } })}
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Session
-              <SettingsSelect
-                value={form.runner.agentSessionMode}
-                items={[
-                  { id: "fresh", label: "Fresh (ephemeral)" },
-                  { id: "thread", label: "Thread (resume + compact)" },
-                ]}
-                ariaLabel="agent session mode"
-                placeholder="Session"
-                onValueChange={(next) =>
-                  onChange({
-                    ...form,
-                    runner: { ...form.runner, agentSessionMode: next as "fresh" | "thread" },
-                  })
-                }
-              />
-            </label>
             <div className="flex gap-2">
               <label className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
                 Model (optional)
@@ -1725,6 +1707,24 @@ const AutomationForm = ({
                 />
               </label>
             </div>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              Session
+              <SettingsSelect
+                value={form.runner.agentSessionMode}
+                items={[
+                  { id: "fresh", label: "Fresh (ephemeral)" },
+                  { id: "thread", label: "Thread (resume + compact)" },
+                ]}
+                ariaLabel="agent session mode"
+                placeholder="Session"
+                onValueChange={(next) =>
+                  onChange({
+                    ...form,
+                    runner: { ...form.runner, agentSessionMode: next as "fresh" | "thread" },
+                  })
+                }
+              />
+            </label>
             <p className="text-[10px] text-muted-foreground/70">
               Runs the agent headlessly. Fresh = ephemeral; Thread = resumes one session per fire.
               Findings + a transcript log land in Triage.

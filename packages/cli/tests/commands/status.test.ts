@@ -1,6 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import * as state from "../../src/state.js";
-import { runStatus } from "../../src/commands/status.js";
+
+vi.mock("../../src/utils/portless.js", async () => {
+  const actual = await import("../../src/utils/portless.js");
+  return {
+    ...actual,
+    resolveDaemonUrl: vi.fn(async () => ({
+      url: "http://127.0.0.1:3417",
+      localUrl: "http://127.0.0.1:3417",
+      surface: "loopback" as const,
+      warnings: [],
+    })),
+  };
+});
+
+const { runStatus } = await import("../../src/commands/status.js");
 
 let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 
