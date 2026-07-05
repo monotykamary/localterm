@@ -419,10 +419,14 @@ describe("SessionManager pty-size", () => {
     manager.resize(mobile, 40, 24);
     const constrained = sent.filter(
       (entry) =>
-        entry.payload.type === "pty-size" && entry.payload.cols === 40 && entry.payload.rows === 24,
+        entry.payload.type === "pty-size" && entry.payload.cols === 40 && entry.payload.rows === 40,
     );
-    // Both viewers learn the effective size — the mobile is the limiter so its
-    // own grid matches (no mask); the desktop masks the dead area.
+    // Both viewers learn the effective size — the PTY rows are a high-water
+    // mark (only grow), so the mobile's narrow cols constrain the cols (40)
+    // but the rows stay at the desktop's taller 40 (the high-water). The
+    // mobile's cols match the PTY (no mask) and it sees the bottom rows of the
+    // taller PTY; the desktop masks the dead columns beyond the PTY's narrower
+    // cols.
     expect(constrained.some((entry) => entry.ws === desktop)).toBe(true);
     expect(constrained.some((entry) => entry.ws === mobile)).toBe(true);
 
@@ -453,9 +457,11 @@ describe("SessionManager pty-size", () => {
     manager.promote(mobile, false);
     manager.resize(mobile, 40, 24);
     sent.length = 0;
-    // A second desktop joins — wider than the mobile's limit, so the min stays
-    // 40 and recomputeResize doesn't broadcast. The joiner must still learn it's
-    // constrained via the seed, or it would render no mask over its wide grid.
+    // A second desktop joins — wider than the mobile's limit, so the cols min
+    // stays 40 and recomputeResize doesn't broadcast. The joiner must still
+    // learn it's constrained via the seed, or it would render no mask over its
+    // wide grid. The seed carries the PTY's high-water rows (40), not the
+    // mobile's 24 — the PTY rows never shrink below the high-water.
     const secondDesktop = createFakeSocket();
     manager.attach(secondDesktop, spawned.id);
     manager.promote(secondDesktop, false);
@@ -465,7 +471,7 @@ describe("SessionManager pty-size", () => {
         entry.ws === secondDesktop &&
         entry.payload.type === "pty-size" &&
         entry.payload.cols === 40 &&
-        entry.payload.rows === 24,
+        entry.payload.rows === 40,
     );
     expect(seeded.length).toBeGreaterThan(0);
   });
