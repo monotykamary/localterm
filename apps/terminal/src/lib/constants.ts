@@ -235,54 +235,23 @@ export const FONT_LOAD_PROBE_PX = 16;
 // double-capacity on demand until they fit into the reused backing store.
 export const OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES = 8 * 1024;
 
-// Visible-output flush threshold. An INCOMING write at or below this size is
-// flushed synchronously in the WebSocket message handler (calling
-// terminal.write immediately with the staged buffer plus the incoming bytes)
-// instead of being deferred to the idle-debounce timer. A terminal query a
-// probing program emits (DA1/DSR/OSC/DECRQM from a shell prompt plugin or a
-// TUI resuming after a foreground program exits) must be parsed by xterm.js and
-// answered in the SAME task — otherwise the deferral (~16ms when visible, the
-// dominant latency after the server's coalescing window) pushes xterm's
-// response past the probe's short read timeout, and the response then sits in
-// the PTY stdin and is read as typed garbage (e.g. `62;4;9;22c` after closing
-// a TUI switched to via the session picker). Gating on the incoming size (not
-// the staged total) also keeps a keystroke echo / query that lands atop a
-// staged high-throughput batch from waiting on the batch's idle-debounce —
-// the staged bytes flush with it in the same task. xterm parses a write under
-// this threshold within its 12ms synchronous budget, so a sync flush answers
-// the query with sub-frame latency. Large incoming writes (sustained renders,
-// `cat` of large files, big redraws) exceed the threshold and keep the
-// idle-debounce coalescing for throughput. The threshold covers interactive
-// output (queries <1KB, TUI redraws 3–6KB on a 120×40 terminal) while staying
-// well under xterm's 12ms parse budget, so sync flushing never spills to
-// xterm's own async drain.
-export const OUTPUT_SYNC_FLUSH_MAX_BYTES = 8 * 1024;
-
-// Idle-debounce window for large visible output (above OUTPUT_SYNC_FLUSH_MAX).
-// Output is staged and flushed OUTPUT_FLUSH_IDLE_MS after the LAST arriving
-// byte — a resetting timer, so a burst spread across many WebSocket messages
-// (the server coalesces one TUI frame per message, but a high-throughput
-// stream is many messages) coalesces into a single terminal.write. The flush
-// runs in a macrotask (setTimeout), NOT a requestAnimationFrame, so xterm's
-// parse never runs inside a vsync deadline and can't starve the render rAF of
-// its frame budget — the "smooth fps but visual stutter" same-deadline clash
-// between the batcher's rAF and xterm's render rAF. xterm's own render rAF
-// remains the single vsync gate; the flush just feeds it from a macrotask.
-// Small interactive output bypasses this entirely (sync fast-path above).
-export const OUTPUT_FLUSH_IDLE_MS = 4;
-
-// Upper bound on a single staged flush. A continuous high-throughput stream
-// never goes idle, so the idle-debounce timer keeps resetting and would hold
-// output indefinitely; this cap forces a flush once the staged batch reaches
-// it. Sized to a no-yield parse: xterm's WriteBuffer yields at a 12ms budget,// and a 64KB write parses in ~4–6ms (measured on xterm 6.1), so a flush at or
-// below this size never spills to xterm's async drain — no partial paint, no
-// mid-parse render. A single message at or above this size flushes whole in one
-// write (the cap is checked after appending, so it never splits one); smaller
-// messages coalesce via the idle-debounce up to this cap. The server's
-// OUTPUT_BATCH_FLUSH_BYTES matches, so a single TUI frame ≤ 64KB arrives as one
-// message and the client renders it in a single paint regardless of link
-// bandwidth.
-export const OUTPUT_FLUSH_SIZE_CAP_BYTES = 64 * 1024;
+// Raw in/out: the client flushes every output write synchronously on arrival
+// (one terminal.write per WebSocket message, in the WS message task — a
+// macrotask, not a requestAnimationFrame) and does not coalesce. The server
+// coalesces one logical TUI frame per message and caps a message at
+// OUTPUT_BATCH_FLUSH_BYTES (under xterm's 12ms parse-yield budget, so a single
+// write never spills to xterm's async drain — no partial paint), so the client
+// has nothing to coalesce: flushing on arrival gives each frame the earliest
+// possible render rAF (no latency window to shift a frame past a vsync
+// boundary and skip it — the visible jank on a 60fps TUI animation), keeps
+// xterm's parse out of a vsync so it can't starve the render rAF (the
+// "smooth fps but visual stutter" same-deadline clash the old rAF coalescer had),
+// and lets xterm answer a terminal query in the same task before the probing
+// program's read times out (the response otherwise leaks into the shell as
+// typed garbage, e.g. `62;4;9;22c` after closing a TUI switched to via the
+// session picker). A no-op keep-warm rAF (see write-terminal-output.ts) keeps
+// the compositor's frame loop warm across animation-frame gaps without
+// carrying any parse work.
 
 // Grace window after the last output chunk during which OutputBatcher holds a
 // self-requeuing requestAnimationFrame. Without an outstanding rAF, Chrome's
