@@ -390,13 +390,17 @@ export const runPipeline = (mode, arrivals, opts) => {
   return { frames, metrics, sim };
 };
 
-// --- arrival planner (link: latency + bandwidth, single serial queue) -----
+// --- arrival planner (link: latency + bandwidth + ratio, single serial queue) ---
+// `ratio` is the WebSocket permessage-deflate compression ratio (ANSI TUI output
+// compresses ~4x at level 3): the wire bytes are bytes/ratio, so the effective
+// bandwidth is bandwidth * ratio.
 export const planArrivals = (sends, link) => {
   const sorted = [...sends].sort((a, b) => a.sendT - b.sendT);
   let prevArrival = 0;
   const out = [];
+  const effectiveBandwidth = link.bandwidth * (link.ratio ?? 1);
   for (const s of sorted) {
-    const arrivalT = Math.max(prevArrival, s.sendT + link.latency) + s.bytes / link.bandwidth;
+    const arrivalT = Math.max(prevArrival, s.sendT + link.latency) + s.bytes / effectiveBandwidth;
     out.push({ ...s, arrivalT });
     prevArrival = arrivalT;
   }
@@ -424,8 +428,8 @@ export const frameSends = (frameId, totalBytes, sendT, chunkSize, chunkGap) => {
 };
 
 // --- scenarios -------------------------------------------------------------
-export const LAN = { latency: 0.5, bandwidth: 1_000_000 }; // 1 GB/s
-export const SLOW = { latency: 30, bandwidth: 1_000 }; // 1 MB/s uplink, 30ms RTT
+export const LAN = { latency: 0.5, bandwidth: 1_000_000, ratio: 4 }; // 1 GB/s
+export const SLOW = { latency: 30, bandwidth: 1_000, ratio: 4 }; // 1 MB/s uplink, 30ms RTT, ~4x permessage-deflate
 
 const fmt = (n) => (n == null ? "  - " : n.toFixed(1).padStart(7));
 
