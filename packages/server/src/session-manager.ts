@@ -25,7 +25,6 @@ import {
   WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
   WS_RENDER_SKIP_HIGH_WATER_BYTES,
   WS_RENDER_SKIP_LOW_WATER_BYTES,
-  WS_RENDER_SKIP_PERIODIC_MS,
   WS_READY_STATE_OPEN,
 } from "./constants.js";
 import {
@@ -165,15 +164,6 @@ export interface ManagedSession {
   // (the buffer never reaches the high water) so the raw in/out contract is
   // unchanged there.
   renderSkipMode: boolean;
-  // Periodic snapshot timer while render-skip is engaged (a continuous stream
-  // never hits the 2ms idle, so this tick is what keeps the viewer from
-  // stalling). One-in-flight paced via renderSkipLastSnapshotBuffer.
-  renderSkipPeriodicTimer: NodeJS.Timeout | null;
-  // The WS buffered amount at the last snapshot send. The raw is dropped in
-  // render-skip mode, so the buffer only grows from snapshots — a new snapshot
-  // is skipped until the buffer drains below this level (the previous snapshot
-  // finished sending). Reset to +Infinity on engagement so the first tick sends.
-  renderSkipLastSnapshotBuffer: number;
 }
 
 export interface SessionManagerHooks {
@@ -378,8 +368,6 @@ export class SessionManager {
       ptySizeRows: null,
       ptySizeWasMultiViewer: false,
       renderSkipMode: false,
-      renderSkipPeriodicTimer: null,
-      renderSkipLastSnapshotBuffer: 0,
     };
     this.sessions.set(managed.id, managed);
     this.installSessionListeners(managed);
@@ -962,7 +950,6 @@ export class SessionManager {
     const snapshot = managed.session.snapshotScrollback();
     if (!snapshot) return;
     const bytes = Buffer.from(snapshot, "utf8");
-    console.error(`[replay] size=${bytes.byteLength} alt=${managed.captureRenderer?.isAlternateBuffer ?? "?"}`);
     if (bytes.byteLength <= MAX_OUTPUT_BYTES) {
       this.sendOutputBytes(ws, bytes);
       return;
@@ -1020,23 +1007,16 @@ export class SessionManager {
     if (managed.renderSkipMode) {
       // The uplink can't keep up: sending the raw burst would crawl. Drop the
       // raw bytes (the capture renderer already has them) and re-arm the idle
-      // timer to send a forced (final) serialized snapshot at the burst's end.
-      // The raw 64KB cap and the raw flush are bypassed entirely — a mid-burst
-      // raw flush would be the very crawl we're avoiding. Also keep a periodic
-      // tick armed so a continuous stream (e.g. `cat`) that never idles still
-      // gets paced snapshots instead of stalling.
+      // timer to send a serialized snapshot at the burst's end. The raw 64KB
+      // cap and the raw flush are bypassed entirely — a mid-burst raw flush
+      // would be the very crawl we're avoiding.
       if (managed.outputBatchTimer !== null) clearTimeout(managed.outputBatchTimer);
       managed.outputBatchTimer = setTimeout(() => {
         managed.outputBatchTimer = null;
-        if (managed.renderSkipMode) {
-          this.stopRenderSkipPeriodic(managed);
-          void this.flushViewportSnapshot(managed, true);
-        } else {
-          this.flushOutput(managed);
-        }
+        if (managed.renderSkipMode) void this.flushViewportSnapshot(managed);
+        else this.flushOutput(managed);
       }, OUTPUT_BATCH_WINDOW_MS);
       managed.outputBatchTimer.unref?.();
-      this.ensureRenderSkipPeriodic(managed);
       return;
     }
     managed.outputBatch += data;
@@ -1099,75 +1079,47 @@ export class SessionManager {
 
   // Enter render-skip when a viewer's WS buffer backs up past the high water —
   // the uplink can't keep up with a raw TUI redraw. Once in render-skip mode,
-  // onSessionOutput drops the raw bytes and sends serialized snapshots instead
-  // (a forced final snapshot on the burst's 2ms idle, plus one-in-flight-paced
-  // periodic snapshots while the burst is ongoing). NOT gated on the alt-screen:
-  // pi itself runs in the normal buffer (the gate would block the very TUI we're
-  // fixing). The cost — a continuous shell stream (e.g. `cat`) in render-skip
-  // loses its scrollback history (the raw bytes are dropped) — is the known
-  // limitation the background-scrollback follow-up closes; the periodic tick at
-  // least keeps the viewport live instead of blank. The headless renderer is
-  // created fire-and-forget (reuses the capture-pane machinery); until it
-  // resolves captureRenderer is undefined and onSessionOutput's feed is a no-op,
-  // so the few ms of output during creation reaches it via the live feed once it
-  // exists. On a fast link the buffer never reaches the high water, so this
-  // never engages.
+  // onSessionOutput drops the raw bytes and the 2ms idle sends a serialized
+  // snapshot instead. Gate on the alt-screen: a TUI redraw lives in the alt
+  // buffer, where a viewport snapshot is the right payload (no scrollback
+  // history to lose); a shell stream (e.g. `cat`) lives in the normal buffer,
+  // where the raw bytes ARE the history the user scrolls and a snapshot would
+  // blank a continuous stream. If the renderer already exists (a prior
+  // backpressure created it), gate before engaging; the first backpressure
+  // creates it (fire-and-forget) and re-gates in the .then() once the buffer
+  // type is known — until then captureRenderer is undefined and onSessionOutput's
+  // feed is a no-op, so the few ms of output during creation reaches the
+  // renderer only via the live feed once it exists. On a fast link the buffer
+  // never reaches the high water, so this never engages.
   private maybeEnterRenderSkip(managed: ManagedSession): void {
     if (managed.renderSkipMode) return;
+    if (managed.captureRenderer && !managed.captureRenderer.isAlternateBuffer) return;
     for (const client of managed.clients) {
       if (client.pending) continue;
-      const buf = getBufferedAmount(client.ws);
-      if (buf >= WS_RENDER_SKIP_HIGH_WATER_BYTES) {
-        console.error(`[rs] ENGAGE buf=${buf}`);
+      if (getBufferedAmount(client.ws) >= WS_RENDER_SKIP_HIGH_WATER_BYTES) {
         managed.renderSkipMode = true;
-        managed.renderSkipLastSnapshotBuffer = Number.POSITIVE_INFINITY;
-        void this.ensureCaptureRenderer(managed);
+        void this.ensureCaptureRenderer(managed).then(() => {
+          if (managed.captureRenderer && !managed.captureRenderer.isAlternateBuffer) {
+            managed.renderSkipMode = false;
+          }
+        });
         return;
       }
     }
-  }
-
-  private ensureRenderSkipPeriodic(managed: ManagedSession): void {
-    if (managed.renderSkipPeriodicTimer !== null) return;
-    managed.renderSkipPeriodicTimer = setInterval(() => {
-      if (!managed.renderSkipMode) {
-        this.stopRenderSkipPeriodic(managed);
-        return;
-      }
-      void this.flushViewportSnapshot(managed, false);
-    }, WS_RENDER_SKIP_PERIODIC_MS);
-    managed.renderSkipPeriodicTimer.unref?.();
-  }
-
-  private stopRenderSkipPeriodic(managed: ManagedSession): void {
-    if (managed.renderSkipPeriodicTimer === null) return;
-    clearInterval(managed.renderSkipPeriodicTimer);
-    managed.renderSkipPeriodicTimer = null;
   }
 
   // Send a serialized state snapshot to every live viewer, then exit
   // render-skip once all buffers have drained below the low water (the uplink
   // caught up — resume raw passthrough). xterm parses asynchronously, so await
-  // the renderer's flush first to serialize a fully-parsed grid. `force` is the
-  // burst's 2ms idle (always send the final state); the periodic tick paces one
-  // snapshot in flight — the raw is dropped in render-skip mode so the buffer
-  // only grows from snapshots, and a new snapshot is skipped until the previous
-  // one has drained below its level. The snapshot (from the official
-  // @xterm/addon-serialize) is a faithful full-state restore.
-  private async flushViewportSnapshot(managed: ManagedSession, force: boolean): Promise<void> {
+  // the renderer's flush first to serialize a fully-parsed grid. The snapshot
+  // (from the official @xterm/addon-serialize) is a faithful full-state restore,
+  // so a viewer already in the alt-screen reproduces the viewport cleanly.
+  private async flushViewportSnapshot(managed: ManagedSession): Promise<void> {
     if (!managed.renderSkipMode) return;
     const renderer = managed.captureRenderer;
     if (!renderer) return;
-    let maxBuf = 0;
-    for (const client of managed.clients) {
-      if (client.pending) continue;
-      maxBuf = Math.max(maxBuf, getBufferedAmount(client.ws));
-    }
-    if (!force && maxBuf >= managed.renderSkipLastSnapshotBuffer) return;
     await renderer.flush();
     const snapshot = renderer.serializeViewport();
-    managed.renderSkipLastSnapshotBuffer = maxBuf;
-    console.error(`[rs] snapshot size=${snapshot.length} force=${force} maxBuf=${maxBuf}`);
     if (snapshot) {
       const payload: ServerToClientMessage = { type: "viewport-snapshot", data: snapshot };
       for (const client of managed.clients) {
@@ -1183,10 +1135,12 @@ export class SessionManager {
         break;
       }
     }
-    if (allLow) {
-      managed.renderSkipMode = false;
-      this.stopRenderSkipPeriodic(managed);
-    }
+    // Exit when the uplink caught up (raw passthrough resumes) OR the PTY left
+    // the alt-screen (a shell stream shouldn't be snapshot — the raw is the
+    // history). Checked here, on the burst's 2ms idle; a continuous stream that
+    // never idles stays in render-skip (the known limitation — the background
+    // scrollback follow-up closes it).
+    if (allLow || !renderer.isAlternateBuffer) managed.renderSkipMode = false;
   }
 
   private ensureDrainPoll(managed: ManagedSession): void {
@@ -1358,7 +1312,6 @@ export class SessionManager {
       managed.outputBatchTimer = null;
     }
     this.stopDrainPoll(managed);
-    this.stopRenderSkipPeriodic(managed);
     managed.gitWatcher.dispose();
     for (const client of managed.clients) {
       if (client.pendingTimer !== null) {

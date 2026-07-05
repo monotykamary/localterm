@@ -209,16 +209,6 @@ export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 // never engages and the raw in/out contract is unchanged.
 export const WS_RENDER_SKIP_HIGH_WATER_BYTES = 128 * 1024;
 export const WS_RENDER_SKIP_LOW_WATER_BYTES = 32 * 1024;
-// How often render-skip mode re-sends a serialized snapshot while a burst is
-// ongoing. The 2ms output-batch idle is the authoritative "burst ended" signal
-// (one final snapshot), but a continuous stream (e.g. `cat`) never idles, so
-// without a periodic tick the viewer would stall until the burst ends. The tick
-// is one-in-flight paced (see flushViewportSnapshot) — the raw is dropped in
-// render-skip mode, so the WS buffer grows only from snapshots, and a new
-// snapshot is skipped until the previous one has drained below its level. So
-// this period only sets how often the pacing is checked; the actual snapshot
-// rate is bounded by the uplink.
-export const WS_RENDER_SKIP_PERIODIC_MS = 200;
 
 // Output batch early-flush threshold. The OUTPUT_BATCH_WINDOW_MS timer is
 // authoritative for low-throughput streams (keystroke echo, TUI redraws of
