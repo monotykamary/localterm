@@ -90,8 +90,9 @@ const installFakeWebSocket = () => {
           this.dispatch("open", {});
         },
         fireMessage: (payload) => {
-          // Output frames travel as binary ArrayBuffers (raw UTF-8 bytes) to
-          // match the production wire format after the binary-frame change.
+          // Output frames travel as binary ArrayBuffers to match the production
+          // wire format: a 1-byte header (0x00 raw / 0x01 gzip / 0x02 brotli)
+          // then the UTF-8 payload. Tests send uncompressed frames (0x00 raw).
           // Everything else goes out as JSON text.
           if (
             typeof payload === "object" &&
@@ -99,9 +100,11 @@ const installFakeWebSocket = () => {
             (payload as Record<string, unknown>).type === "output"
           ) {
             const data = (payload as { data: string }).data;
-            this.dispatch("message", {
-              data: new TextEncoder().encode(data).buffer,
-            });
+            const bytes = new TextEncoder().encode(data);
+            const framed = new Uint8Array(bytes.length + 1);
+            framed[0] = 0x00;
+            framed.set(bytes, 1);
+            this.dispatch("message", { data: framed.buffer });
             return;
           }
           this.dispatch("message", { data: JSON.stringify(payload) });
@@ -890,7 +893,7 @@ const installFakeLocalStorage = (initial: Record<string, string> = {}) => {
 };
 
 describe("Terminal scrollback replay suppression", () => {
-  it("drops xterm's responses to replayed query requests so they never reach the PTY", () => {
+  it("drops xterm's responses to replayed query requests so they never reach the PTY", async () => {
     render(<Terminal />);
     act(() => {
       fakeWebSockets[0]?.fireOpen();
@@ -908,7 +911,7 @@ describe("Terminal scrollback replay suppression", () => {
     // A fresh attach (no prior session) asks for the scrollback replay, which
     // opens the suppressed-replay window.
     expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
-      JSON.stringify({ type: "ready", replay: true }),
+      expect.stringMatching(/"type":"ready","replay":true/),
     );
 
     // The replay arrives as a binary frame carrying a stale DA1 request
@@ -927,7 +930,9 @@ describe("Terminal scrollback replay suppression", () => {
     expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
 
     // replay-end writes the buffered replay as one block and closes the window.
-    act(() => {
+    // The flush is async (the per-socket decompress queue), so await the act to
+    // let the microtask run and close the suppressed-replay window.
+    await act(async () => {
       fakeWebSockets[0]?.fireMessage({ type: "replay-end" });
     });
 
@@ -1456,7 +1461,7 @@ describe("Terminal refresh reattach", () => {
     });
 
     expect(new URL(window.location.href).searchParams.get("sid")).toBe(TEST_SID);
-    expect(firstWs?.send).toHaveBeenCalledWith(JSON.stringify({ type: "ready", replay: true }));
+    expect(firstWs?.send).toHaveBeenCalledWith(expect.stringMatching(/"type":"ready","replay":true/));
 
     unmount();
     render(<Terminal />);
@@ -1468,7 +1473,7 @@ describe("Terminal refresh reattach", () => {
       fireSessionFrame(secondWs, TEST_SID);
     });
 
-    expect(secondWs?.send).toHaveBeenCalledWith(JSON.stringify({ type: "ready", replay: true }));
+    expect(secondWs?.send).toHaveBeenCalledWith(expect.stringMatching(/"type":"ready","replay":true/));
   });
 
   it("does not replay scrollback on a silent reattach of the same PTY", () => {
@@ -1495,7 +1500,7 @@ describe("Terminal refresh reattach", () => {
       fireSessionFrame(secondWs, TEST_SID);
     });
 
-    expect(secondWs?.send).toHaveBeenCalledWith(JSON.stringify({ type: "ready", replay: false }));
+    expect(secondWs?.send).toHaveBeenCalledWith(expect.stringMatching(/"type":"ready","replay":false/));
   });
 });
 

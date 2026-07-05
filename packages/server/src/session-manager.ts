@@ -969,7 +969,10 @@ export class SessionManager {
     }
   }
 
-  private compressPayload(bytes: Uint8Array<ArrayBuffer>, mode: "br" | "gzip"): Buffer<ArrayBuffer> {
+  private compressPayload(
+    bytes: Uint8Array<ArrayBuffer>,
+    mode: "br" | "gzip",
+  ): Buffer<ArrayBuffer> {
     return mode === "br"
       ? zlib.brotliCompressSync(bytes, {
           params: { [zlib.constants.BROTLI_PARAM_QUALITY]: WS_OUTPUT_BROTLI_QUALITY },
@@ -984,7 +987,11 @@ export class SessionManager {
     return out;
   }
 
-  private sendOutputFrame(ws: ClientSocket, bytes: Uint8Array<ArrayBuffer>, mode: CompressMode): void {
+  private sendOutputFrame(
+    ws: ClientSocket,
+    bytes: Uint8Array<ArrayBuffer>,
+    mode: CompressMode,
+  ): void {
     if (mode === null) {
       this.sendOutputBytes(ws, bytes);
       return;

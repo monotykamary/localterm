@@ -217,7 +217,10 @@ const detectCompressMode = (): "br" | "gzip" | null => {
 };
 const COMPRESS_MODE = detectCompressMode();
 
-const decompressFrame = async (format: string, compressed: Uint8Array<ArrayBuffer>): Promise<Uint8Array> => {
+const decompressFrame = async (
+  format: string,
+  compressed: Uint8Array<ArrayBuffer>,
+): Promise<Uint8Array> => {
   const stream = new DecompressionStream(format as CompressionFormat);
   const writer = stream.writable.getWriter();
   const reader = stream.readable.getReader();
@@ -1699,7 +1702,10 @@ export const Terminal = () => {
                 updateScrollbar();
               };
               for (let index = 0; index < chunks.length; index += 1) {
-                terminal.write(chunks[index], index === chunks.length - 1 ? finishReplay : undefined);
+                terminal.write(
+                  chunks[index],
+                  index === chunks.length - 1 ? finishReplay : undefined,
+                );
               }
             }
           };
