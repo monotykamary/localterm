@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { CAPTURE_RENDERER_SCROLLBACK } from "./constants.js";
+import { serializeViewport } from "./utils/serialize-viewport.js";
 
 // @xterm/headless ships a CJS `main` with no `exports` field and a broken
 // `module` field (points at a non-existent file), so Node's ESM loader can't
@@ -148,6 +149,15 @@ export class CaptureRenderer {
 
   get rows(): number {
     return this.terminal.rows;
+  }
+
+  // Serialize the visible viewport (the bottom `rows` lines of the active
+  // buffer) as an ANSI byte stream that reproduces the cells and cursor when
+  // written to a viewer's xterm — the render-skip payload. See
+  // serialize-viewport.ts for the format. The caller MUST `flush()` first so
+  // every write so far has parsed into the grid (xterm parses asynchronously).
+  serializeViewport(): string {
+    return serializeViewport(this.terminal);
   }
 
   dispose(): void {

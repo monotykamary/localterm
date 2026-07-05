@@ -195,6 +195,21 @@ export const WS_OUTBOUND_RESUME_LOW_WATER_BYTES = 1 * 1024 * 1024;
 export const WS_OUTBOUND_DRAIN_POLL_MS = 50;
 export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 
+// Render-skip gate. When a viewer's WS send buffer backs up past the high water
+// the uplink can't keep up with a raw TUI redraw (the megabyte top-to-bottom
+// crawl), so the server switches that session to render-skip mode: it stops
+// flushing raw output bytes and instead, on each burst's 2ms idle, serializes
+// the headless terminal's viewport and sends one `viewport-snapshot` (~50KB)
+// the viewer paints in a single write. Once every viewer's buffer drains below
+// the low water the session returns to raw passthrough. The high water sits
+// well under the PTY-pause high water so render-skip is the first line of
+// defense (send less); the PTY pause only triggers if the buffer nonetheless
+// climbs toward the runaway threshold. On a fast link (LAN) the buffer never
+// reaches the high water, so render-skip never engages and the raw in/out
+// contract is unchanged.
+export const WS_RENDER_SKIP_HIGH_WATER_BYTES = 256 * 1024;
+export const WS_RENDER_SKIP_LOW_WATER_BYTES = 64 * 1024;
+
 // Output batch early-flush threshold. The OUTPUT_BATCH_WINDOW_MS timer is
 // authoritative for low-throughput streams (keystroke echo, TUI redraws of
 // 3–6KB on a 120×40 terminal): it coalesces the per-chunk data events of one
