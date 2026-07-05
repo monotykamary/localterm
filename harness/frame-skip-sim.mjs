@@ -1,19 +1,31 @@
 #!/usr/bin/env node
 // Discrete-event simulation of the localterm client render pipeline.
 //
-// Reproduces three concerns and compares the CURRENT pipeline against a
-// FRAME-SKIPPING pipeline:
+// Compares three pipelines against each scenario:
 //
-//   Face 1 — a single large TUI redraw, split into ~32KB WebSocket messages by
-//            the server, arrives spread over a bandwidth-limited link. The
-//            current pipeline renders each chunk as it lands -> visible
-//            top-to-bottom crawl. Frame-skip renders the whole frame once.
+//   raw        — SHIPPED. Flush every WebSocket message on arrival (raw in/out).
+//                The server coalesces one burst per message and caps a message
+//                at 64KB, so a frame <= 64KB arrives as one atomic message
+//                (one render, no crawl). A frame > 64KB is split by the cap;
+//                over a bandwidth-limited link the splits land across vsyncs
+//                and each renders -> a top-to-bottom crawl.
+//   debounce   — PRE-RAW-IN-OUT backstop. Stage and flush 4ms after the LAST
+//                arrival (a resetting timer). On a fast link a split frame's
+//                messages land within the window -> one render; on a slow link
+//                they spread past it -> one flush per split -> crawl (== raw).
+//   frameskip   — DEFERRED ideal. The server marks the frame end; the client
+//                stages by frame until the marker, then commits the whole
+//                frame in ONE write -> one complete render regardless of split
+//                size or link bandwidth (the complete Face 1 fix).
 //
+//   Face 1 — a single large TUI redraw, split into ~64KB WebSocket messages by
+//            the server's cap, arrives spread over a bandwidth-limited link.
+//            raw/debounce render each split as it lands -> visible crawl.
+//            frameskip renders the whole frame once.
 //   Face 2 — a single write whose parse exceeds xterm's 12ms WriteBuffer budget
 //            yields via setTimeout(0); renders fire between parse chunks
-//            painting partial state -> smooth-fps visual stutter. Frame-skip
+//            painting partial state -> smooth-fps visual stutter. frameskip
 //            gates the render to complete writes -> one complete paint.
-//
 //   Throughput + keyboard — a sustained stream must not make keystroke echo
 //            unresponsive. Measures echo render latency and render FPS.
 //
@@ -29,8 +41,8 @@
 const RAF_MS = 1000 / 60; // 16.667
 const BUDGET_MS = 12; // xterm WriteBuffer parse-chunk budget
 const TIMEOUT_ZERO_MS = 4; // setTimeout(0) clamp between parse chunks
-const SYNC_FLUSH_MAX_BYTES = 8 * 1024; // client sync-flush threshold
-export const SERVER_BATCH_FLUSH_BYTES = 32 * 1024; // server 32KB split
+export const SERVER_BATCH_FLUSH_BYTES = 64 * 1024; // server 64KB cap (our shipped value)
+const IDLE_DEBOUNCE_MS = 4; // pre-raw-in-out client idle-debounce backstop
 const PARSE_RATE = 50_000; // bytes/ms (50 MB/s); realistic xterm parse rate.
 // A ~100KB redraw parses inside one budget (instant on LAN); a 2MB dump yields.
 const RENDER_DURATION_MS = 0.4; // a render occupies the main thread briefly
@@ -247,9 +259,9 @@ export const runPipeline = (mode, arrivals, opts) => {
   };
 
   // render slot callback.
-  //  CURRENT: paint cumulative-parsed of the active write every vsync while
-  //    output is active -> a partial until the write completes (Face 2 stutter,
-  //    Face 1 crawl).
+  //  raw/debounce: paint cumulative-parsed of the active write every vsync
+  //    while output is active -> a partial until the write completes (Face 2
+  //    stutter, Face 1 crawl step per split).
   //  FRAME-SKIP: paint the latest COMPLETED write at vsync, skipping in-progress
   //    parses (no partials) and never starving under sustained throughput
   //    (renders once per vsync in which a new write committed).
@@ -260,7 +272,7 @@ export const runPipeline = (mode, arrivals, opts) => {
       lastRenderedSeq = lastCompleted.seq;
       return;
     }
-    // current: paint the active write's cumulative parsed (partial until done)
+    // raw/debounce: paint the active write's cumulative parsed (partial until done)
     const f = activeFrameId !== null ? frames.get(activeFrameId) : null;
     if (!f) return;
     const complete = f.allParsed && f.allArrived;
@@ -271,10 +283,33 @@ export const runPipeline = (mode, arrivals, opts) => {
   // --- per-mode arrival handling -----------------------------------------
   // CURRENT: OutputBatcher. Accumulate chunks; sync-flush if <= threshold,
   // else rAF-coalesce then flush. (Two vsync slots: flush + render.)
-  if (mode === "current") {
+  if (mode === "raw") {
+    // raw in/out (shipped): flush every arrival immediately as its own write.
+    // No coalescing — the server is expected to send one atomic frame per
+    // message (it coalesces a burst and caps at SERVER_BATCH_FLUSH_BYTES). A
+    // frame split across messages therefore renders each split -> a
+    // progressive crawl on a link that spreads the splits (Face 1).
+    for (const a of arrivals) {
+      const f = getFrame(a.frameId, a.frameBytes, a.sendT);
+      if (a.echo) f.echo = true;
+      sim.arrival(a.arrivalT, (t) => {
+        f.arrived += a.bytes;
+        if (a.isLast) f.allArrived = true;
+        sim.occupy(FLUSH_DURATION_MS);
+        write(a.bytes, a.frameId);
+      });
+    }
+  } else if (mode === "debounce") {
+    // pre-raw-in-out client: stage and flush IDLE_DEBOUNCE_MS after the LAST
+    // arrival (a resetting timer) — coalesces a burst that arrives within the
+    // window into one write. On a fast link a split frame's messages land
+    // within the window -> one render (no crawl); on a slow link they spread
+    // past it -> one flush per split -> crawl (same as raw).
     let pendingAccum = 0;
     let bufferedFrame = null;
-    const realFlush = () => {
+    let debounceGen = 0;
+    const realFlush = (gen) => {
+      if (gen !== debounceGen) return; // a newer arrival re-armed this timer
       if (pendingAccum <= 0) return;
       const fid = bufferedFrame;
       const bytes = pendingAccum;
@@ -291,11 +326,8 @@ export const runPipeline = (mode, arrivals, opts) => {
         if (a.isLast) f.allArrived = true;
         pendingAccum += a.bytes;
         bufferedFrame = a.frameId;
-        if (pendingAccum <= SYNC_FLUSH_MAX_BYTES) {
-          realFlush();
-        } else {
-          sim.requestRaf("flush", realFlush);
-        }
+        const gen = ++debounceGen;
+        sim.timeout(t + IDLE_DEBOUNCE_MS, () => realFlush(gen));
       });
     }
   } else {
@@ -426,10 +458,11 @@ const runScenario = (label, sends, link, mode, watchFrameId, echoKeystrokeT) => 
 };
 
 // Face 1: one 100KB redraw split into 32KB chunks. LAN vs SLOW.
-const face1 = (link, mode) => {
+const face1 = (link, mode, totalBytes = 100 * 1024) => {
   const id = 1;
-  const sends = frameSends(id, 100 * 1024, 0, SERVER_BATCH_FLUSH_BYTES, 2);
-  const { out } = runScenario(`Face1 ${link === LAN ? "LAN" : "SLOW"}`, sends, link, mode, id);
+  const sends = frameSends(id, totalBytes, 0, SERVER_BATCH_FLUSH_BYTES, 2);
+  const label = `Face1 ${link === LAN ? "LAN" : "SLOW/5G"} ${Math.round(totalBytes / 1024)}KB`;
+  const { out } = runScenario(label, sends, link, mode, id);
   return out;
 };
 
@@ -456,7 +489,7 @@ const face2 = (mode) => {
 const stream = (link, mode) => {
   const sends = [];
   const duration = 300;
-  const gap = 1; // 32 KB/ms = 32 MB/s, under the 50 MB/s parse rate
+  const gap = 2; // 64 KB / 2ms = 32 MB/s, under the 50 MB/s parse rate
   const chunkBytes = SERVER_BATCH_FLUSH_BYTES;
   let fid = 100;
   for (let t = 0; t <= duration; t += gap) {
@@ -518,24 +551,51 @@ const printTable = (title, rows, headers) => {
 };
 
 const main = () => {
+  // Each scenario runs the shipped raw in/out, the pre-raw-in-out idle-debounce
+  // backstop, and the deferred frame-marker (frameskip) ideal. Face 1 is run
+  // for a big frame (> the 64KB cap, so the server splits it) and a small frame
+  // (<= the cap, so the server sends one atomic message), over LAN and 5G.
   const scenarios = [
-    ["Face 1 (LAN)", () => face1(LAN, "current"), () => face1(LAN, "frameskip")],
-    ["Face 1 (SLOW)", () => face1(SLOW, "current"), () => face1(SLOW, "frameskip")],
-    ["Face 2 (local big write)", () => face2("current"), () => face2("frameskip")],
+    [
+      "Face 1 (LAN, 100KB > 64KB cap -> 2 split messages)",
+      () => face1(LAN, "raw", 100 * 1024),
+      () => face1(LAN, "debounce", 100 * 1024),
+      () => face1(LAN, "frameskip", 100 * 1024),
+    ],
+    [
+      "Face 1 (SLOW/5G, 100KB > 64KB cap -> 2 split messages)",
+      () => face1(SLOW, "raw", 100 * 1024),
+      () => face1(SLOW, "debounce", 100 * 1024),
+      () => face1(SLOW, "frameskip", 100 * 1024),
+    ],
+    [
+      "Face 1 (SLOW/5G, 40KB <= 64KB cap -> 1 atomic message)",
+      () => face1(SLOW, "raw", 40 * 1024),
+      () => face1(SLOW, "debounce", 40 * 1024),
+      () => face1(SLOW, "frameskip", 40 * 1024),
+    ],
+    [
+      "Face 2 (local 2MB write -> parse yields)",
+      () => face2("raw"),
+      () => face2("debounce"),
+      () => face2("frameskip"),
+    ],
     [
       "Stream + keyboard (LAN, saturated)",
-      () => stream(LAN, "current"),
+      () => stream(LAN, "raw"),
+      () => stream(LAN, "debounce"),
       () => stream(LAN, "frameskip"),
     ],
   ];
 
-  for (const [label, curFn, skipFn] of scenarios) {
-    const cur = { ...curFn(), mode: "current" };
+  for (const [label, rawFn, debFn, skipFn] of scenarios) {
+    const raw = { ...rawFn(), mode: "raw" };
+    const deb = { ...debFn(), mode: "debounce" };
     const skip = { ...skipFn(), mode: "frameskip" };
     console.log(`\n### ${label}`);
     printTable(
       label,
-      [cur, skip],
+      [raw, deb, skip],
       [
         "mode",
         "renders",
