@@ -23,8 +23,6 @@ import {
   WS_OUTBOUND_DRAIN_POLL_MS,
   WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES,
   WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
-  WS_RENDER_SKIP_HIGH_WATER_BYTES,
-  WS_RENDER_SKIP_LOW_WATER_BYTES,
   WS_READY_STATE_OPEN,
 } from "./constants.js";
 import {
@@ -157,12 +155,6 @@ export interface ManagedSession {
   // the remaining viewer erases any mask the leaving peer imposed. Stays false
   // for a lone viewer across its own resizes, so those stay quiet on the wire.
   ptySizeWasMultiViewer: boolean;
-  // Render-skip mode: when a viewer's WS buffer backs up past
-  // WS_RENDER_SKIP_HIGH_WATER_BYTES the server stops flushing raw output and
-  // instead sends serialized viewport snapshots on each burst's 2ms idle. See
-  // maybeEnterRenderSkip / flushViewportSnapshot. False on LAN (the buffer never
-  // reaches the high water) so the raw in/out contract is unchanged there.
-  renderSkipMode: boolean;
 }
 
 export interface SessionManagerHooks {
@@ -366,7 +358,6 @@ export class SessionManager {
       ptySizeCols: null,
       ptySizeRows: null,
       ptySizeWasMultiViewer: false,
-      renderSkipMode: false,
     };
     this.sessions.set(managed.id, managed);
     this.installSessionListeners(managed);
@@ -994,31 +985,14 @@ export class SessionManager {
   }
 
   private onSessionOutput(managed: ManagedSession, data: string): void {
+    managed.outputBatch += data;
     managed.lastOutputAt = Date.now();
     this.noteOutput(managed.session.pid);
     this.hooks.onOutputActivity();
     // Keep the capture renderer (if one exists) in lockstep with the PTY so a
     // later capture-pane reads current rendered text. Lazily created, so this
-    // is a no-op for sessions nobody has captured (the common browser case). In
-    // render-skip mode the renderer is the source of truth for the viewport
-    // snapshot, so it MUST be fed even though the raw bytes are dropped below.
+    // is a no-op for sessions nobody has captured (the common browser case).
     managed.captureRenderer?.write(data);
-    if (managed.renderSkipMode) {
-      // The uplink can't keep up: sending the raw burst would crawl. Drop the
-      // raw bytes (the capture renderer already has them) and re-arm the idle
-      // timer to send a viewport snapshot at the burst's end. The raw 64KB cap
-      // and the raw flush are bypassed entirely — a mid-burst raw flush would
-      // be the very crawl we're avoiding.
-      if (managed.outputBatchTimer !== null) clearTimeout(managed.outputBatchTimer);
-      managed.outputBatchTimer = setTimeout(() => {
-        managed.outputBatchTimer = null;
-        if (managed.renderSkipMode) void this.flushViewportSnapshot(managed);
-        else this.flushOutput(managed);
-      }, OUTPUT_BATCH_WINDOW_MS);
-      managed.outputBatchTimer.unref?.();
-      return;
-    }
-    managed.outputBatch += data;
     if (managed.outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
       if (managed.outputBatchTimer !== null) {
         clearTimeout(managed.outputBatchTimer);
@@ -1061,7 +1035,6 @@ export class SessionManager {
       }
     }
     this.maybePauseAfterFlush(managed);
-    this.maybeEnterRenderSkip(managed);
   }
 
   private maybePauseAfterFlush(managed: ManagedSession): void {
@@ -1074,55 +1047,6 @@ export class SessionManager {
         return;
       }
     }
-  }
-
-  // Enter render-skip when a viewer's WS buffer backs up past the high water —
-  // the uplink can't keep up with a raw TUI redraw. Once in render-skip mode,
-  // onSessionOutput drops the raw bytes and the 2ms idle sends a viewport
-  // snapshot instead. Fire-and-forget the headless renderer creation: until it
-  // resolves captureRenderer is undefined and onSessionOutput's feed is a
-  // no-op, so the few ms of output during creation reaches the renderer only
-  // via the live feed once it exists — the first snapshot is at most that much
-  // stale and the next one catches up. On a fast link the buffer never reaches
-  // the high water, so this never engages.
-  private maybeEnterRenderSkip(managed: ManagedSession): void {
-    if (managed.renderSkipMode) return;
-    for (const client of managed.clients) {
-      if (client.pending) continue;
-      if (getBufferedAmount(client.ws) >= WS_RENDER_SKIP_HIGH_WATER_BYTES) {
-        managed.renderSkipMode = true;
-        void this.ensureCaptureRenderer(managed);
-        return;
-      }
-    }
-  }
-
-  // Send a serialized viewport snapshot to every live viewer, then exit
-  // render-skip mode once all buffers have drained below the low water (the
-  // uplink caught up — resume raw passthrough). xterm parses asynchronously, so
-  // await the renderer's flush first to serialize a fully-parsed grid.
-  private async flushViewportSnapshot(managed: ManagedSession): Promise<void> {
-    if (!managed.renderSkipMode) return;
-    const renderer = managed.captureRenderer;
-    if (!renderer) return;
-    await renderer.flush();
-    const snapshot = renderer.serializeViewport();
-    if (snapshot) {
-      const payload: ServerToClientMessage = { type: "viewport-snapshot", data: snapshot };
-      for (const client of managed.clients) {
-        if (client.pending) continue;
-        this.sendToClient(client, payload);
-      }
-    }
-    let allLow = true;
-    for (const client of managed.clients) {
-      if (client.pending) continue;
-      if (getBufferedAmount(client.ws) > WS_RENDER_SKIP_LOW_WATER_BYTES) {
-        allLow = false;
-        break;
-      }
-    }
-    if (allLow) managed.renderSkipMode = false;
   }
 
   private ensureDrainPoll(managed: ManagedSession): void {
