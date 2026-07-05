@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import {
   OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES,
+  OUTPUT_FLUSH_IDLE_MS,
   OUTPUT_KEEP_WARM_MS,
   OUTPUT_SYNC_FLUSH_MAX_BYTES,
 } from "../../src/lib/constants";
@@ -116,7 +117,7 @@ describe("OutputBatcher visible sync flush", () => {
     batcher.detach();
   });
 
-  it("coalesces large output via rAF for throughput", () => {
+  it("coalesces large output via the idle-debounce timer for throughput", async () => {
     const writes: Uint8Array[] = [];
     const batcher = new OutputBatcher();
     batcher.attach(createFakeTerminal(writes));
@@ -124,13 +125,37 @@ describe("OutputBatcher visible sync flush", () => {
     const large = OUTPUT_SYNC_FLUSH_MAX_BYTES + 1;
     batcher.pushBytes(new Uint8Array(large).fill(1));
     batcher.pushBytes(new Uint8Array(large).fill(2));
-    // Large frames defer to a single armed rAF, coalescing in the buffer.
+    // Large frames stage; the flush is deferred to the idle-debounce timer (a
+    // macrotask, not a rAF), coalescing in the buffer. Only the no-op keep-warm
+    // rAF is armed, so rafCount is 1 and nothing has written yet.
     expect(rafCount).toBe(1);
     expect(writes).toHaveLength(0);
 
-    pendingCb!(performance.now());
+    await new Promise((resolve) => setTimeout(resolve, OUTPUT_FLUSH_IDLE_MS + 30));
     expect(writes).toHaveLength(1);
     expect(writes[0].byteLength).toBe(large * 2);
+    batcher.detach();
+  });
+
+  it("flushes a small interactive write immediately even atop a staged batch", () => {
+    const writes: Uint8Array[] = [];
+    const batcher = new OutputBatcher();
+    batcher.attach(createFakeTerminal(writes));
+
+    // A high-throughput stream stages in the buffer (above the sync threshold,
+    // below the size cap) and waits on the idle-debounce. A keystroke echo or
+    // terminal query that lands on top of it is a small INCOMING write, so it
+    // must flush synchronously in the same task — xterm answers the query before
+    // the probing program's read times out, and the echo paints without waiting
+    // on the stream's coalescing window. The staged bytes flush with it.
+    const staged = OUTPUT_SYNC_FLUSH_MAX_BYTES + 1;
+    batcher.pushBytes(new Uint8Array(staged).fill(1));
+    expect(writes).toHaveLength(0);
+
+    batcher.pushBytes(new Uint8Array([65, 66, 67]));
+    expect(writes).toHaveLength(1);
+    expect(writes[0].byteLength).toBe(staged + 3);
+    expect(Array.from(writes[0].slice(staged))).toEqual([65, 66, 67]);
     batcher.detach();
   });
 });
