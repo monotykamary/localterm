@@ -1,5 +1,5 @@
 import type { AgentSkillInfo } from "@monotykamary/localterm-server/protocol";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentSkills } from "@/utils/fetch-agent-skills";
 import { SKILL_INVOCATION_PREFIX, computeSkillToken, type SkillToken } from "@/utils/skill-token";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,9 @@ interface PromptSkillsAutocompleteProps {
   ariaLabel?: string;
   rows?: number;
   className?: string;
+  // When true, the textarea grows to fit its content (up to its CSS max-height)
+  // instead of staying a fixed row count — the ChatGPT-style composer behavior.
+  autoGrow?: boolean;
 }
 
 const SKILL_MENU_LIMIT = 8;
@@ -29,6 +32,7 @@ export const PromptSkillsAutocomplete = ({
   ariaLabel,
   rows,
   className,
+  autoGrow,
 }: PromptSkillsAutocompleteProps) => {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [activeToken, setActiveToken] = useState<SkillToken | null>(null);
@@ -56,6 +60,16 @@ export const PromptSkillsAutocomplete = ({
   useEffect(() => {
     setHighlightedIndex(0);
   }, [filtered]);
+
+  // Auto-size to content: reset to `auto` first so scrollHeight measures the
+  // intrinsic height (otherwise it never shrinks), then clamp growth to the
+  // element's CSS max-height — the browser scrolls once it hits it.
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || !autoGrow) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [value, autoGrow]);
 
   const insertSkill = (skill: AgentSkillInfo) => {
     const textarea = textareaRef.current;

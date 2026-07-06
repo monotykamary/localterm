@@ -1,6 +1,6 @@
 import type { AgentModelInfo } from "@monotykamary/localterm-server/protocol";
 import { Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useAgentModels } from "@/utils/fetch-agent-models";
 import { cn } from "@/lib/utils";
@@ -9,6 +9,12 @@ interface ModelSelectorProps {
   value: string;
   onChange: (model: string) => void;
   placeholder?: string;
+  // Optional custom trigger. When omitted, the default full-width combobox is
+  // rendered; when provided (e.g. a composer pill), it receives the open state,
+  // the current value, and a friendly display label (the model's name when the
+  // value matches a known model, else the raw value) so the trigger can show
+  // something prettier than `provider/id`.
+  trigger?: (open: boolean, value: string, label: string) => ReactElement;
 }
 
 const modelId = (model: AgentModelInfo): string =>
@@ -19,7 +25,12 @@ const modelId = (model: AgentModelInfo): string =>
 // comes from GET /api/agent-models (pi's available models). A leading "Default"
 // option clears the selection; Enter on a non-matching query accepts it as a
 // custom model string (pi's --model accepts patterns/aliases not in the list).
-export const ModelSelector = ({ value, onChange, placeholder = "default" }: ModelSelectorProps) => {
+export const ModelSelector = ({
+  value,
+  onChange,
+  placeholder = "default",
+  trigger,
+}: ModelSelectorProps) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -34,6 +45,14 @@ export const ModelSelector = ({ value, onChange, placeholder = "default" }: Mode
       return id.includes(trimmed) || model.name.toLowerCase().includes(trimmed);
     });
   }, [models, query]);
+
+  // A human-readable label for the current value: the matched model's name, or
+  // the raw value when it's a custom string not in the list (pi accepts those).
+  const displayLabel = useMemo(() => {
+    if (value.length === 0) return "";
+    const matched = models.find((model) => modelId(model) === value);
+    return matched ? matched.name : value;
+  }, [models, value]);
 
   // The option list is [Default, ...filtered]. The Default option is index 0.
   const optionCount = filtered.length + 1;
@@ -85,32 +104,25 @@ export const ModelSelector = ({ value, onChange, placeholder = "default" }: Mode
     }
   };
 
+  const defaultTrigger = (
+    <div
+      role="combobox"
+      aria-expanded={open}
+      aria-haspopup="listbox"
+      tabIndex={0}
+      className={cn(
+        "flex h-7 w-full items-center rounded-sm border border-border/50 bg-background px-1.5 text-left text-xs outline-none transition-colors hover:border-border focus-visible:border-ring",
+        open && "border-ring",
+      )}
+    >
+      <span className={cn("truncate", value.length === 0 ? "text-muted-foreground/70" : "text-foreground")}>
+        {value.length === 0 ? placeholder : value}
+      </span>
+    </div>
+  );
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        nativeButton={false}
-        render={
-          <div
-            role="combobox"
-            aria-expanded={open}
-            aria-haspopup="listbox"
-            tabIndex={0}
-            className={cn(
-              "flex h-7 w-full items-center rounded-sm border border-border/50 bg-background px-1.5 text-left text-xs outline-none transition-colors hover:border-border focus-visible:border-ring",
-              open && "border-ring",
-            )}
-          />
-        }
-      >
-        <span
-          className={cn(
-            "truncate",
-            value.length === 0 ? "text-muted-foreground/70" : "text-foreground",
-          )}
-        >
-          {value.length === 0 ? placeholder : value}
-        </span>
-      </PopoverTrigger>
+      <PopoverTrigger nativeButton={false} render={trigger ? trigger(open, value, displayLabel) : defaultTrigger} />
       <PopoverContent className="w-80 p-0" align="start" initialFocus={inputRef}>
         <div className="flex items-center gap-1.5 border-b border-border/40 px-2 py-1.5">
           <Search className="size-3 text-muted-foreground" aria-hidden="true" />

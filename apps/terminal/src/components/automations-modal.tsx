@@ -44,8 +44,7 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { EventTriggerSelector } from "@/components/event-trigger-selector";
-import { ModelSelector } from "@/components/model-selector";
-import { PromptSkillsAutocomplete } from "@/components/prompt-skills-autocomplete";
+import { AgentComposer } from "@/components/agent-composer";
 import { SecretSelector } from "@/components/secret-selector";
 import { fetchAgentSession } from "@/utils/fetch-agent-session";
 import { fetchAgentSessionUrl } from "@/utils/fetch-agent-session-url";
@@ -88,7 +87,6 @@ import {
   recognizeRunnerForm,
   runnerSummary,
   runnerTypeLabel,
-  type AgentThinkingLevel,
   type HarnessKind,
   type RunnerFormState,
 } from "@/utils/runner-form";
@@ -1656,78 +1654,25 @@ const AutomationForm = ({
           </label>
         ) : (
           <div className="flex flex-col gap-2">
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Prompt
-              <PromptSkillsAutocomplete
-                value={form.runner.prompt}
-                placeholder="Review the latest commits on origin/main and post an exec briefing."
-                ariaLabel="agent prompt"
-                rows={4}
-                cwd={form.cwd}
-                className={cn(
-                  "w-full min-w-0 resize-y rounded-md border border-border/50 bg-transparent px-2 py-1 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-ring",
-                )}
-                onChange={(prompt) => onChange({ ...form, runner: { ...form.runner, prompt } })}
-              />
-            </label>
-            <div className="flex gap-2">
-              <label className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
-                Model (optional)
-                <ModelSelector
-                  value={form.runner.agentModel}
-                  onChange={(agentModel) =>
-                    onChange({ ...form, runner: { ...form.runner, agentModel } })
-                  }
-                />
-              </label>
-              <label className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
-                Thinking (optional)
-                <SettingsSelect
-                  value={form.runner.agentThinking || "default"}
-                  items={[
-                    { id: "default", label: "default" },
-                    { id: "off", label: "off" },
-                    { id: "minimal", label: "minimal" },
-                    { id: "low", label: "low" },
-                    { id: "medium", label: "medium" },
-                    { id: "high", label: "high" },
-                    { id: "xhigh", label: "xhigh" },
-                  ]}
-                  ariaLabel="agent thinking"
-                  placeholder="Thinking"
-                  onValueChange={(next) =>
-                    onChange({
-                      ...form,
-                      runner: {
-                        ...form.runner,
-                        agentThinking: next === "default" ? "" : (next as AgentThinkingLevel),
-                      },
-                    })
-                  }
-                />
-              </label>
-            </div>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Session
-              <SettingsSelect
-                value={form.runner.agentSessionMode}
-                items={[
-                  { id: "fresh", label: "Fresh (ephemeral)" },
-                  { id: "thread", label: "Thread (resume + compact)" },
-                ]}
-                ariaLabel="agent session mode"
-                placeholder="Session"
-                onValueChange={(next) =>
-                  onChange({
-                    ...form,
-                    runner: { ...form.runner, agentSessionMode: next as "fresh" | "thread" },
-                  })
-                }
-              />
-            </label>
+            <AgentComposer
+              prompt={form.runner.prompt}
+              onPromptChange={(prompt) => onChange({ ...form, runner: { ...form.runner, prompt } })}
+              cwd={form.cwd}
+              agentModel={form.runner.agentModel}
+              onAgentModelChange={(agentModel) =>
+                onChange({ ...form, runner: { ...form.runner, agentModel } })
+              }
+              agentThinking={form.runner.agentThinking}
+              onAgentThinkingChange={(agentThinking) =>
+                onChange({ ...form, runner: { ...form.runner, agentThinking } })
+              }
+              agentSessionMode={form.runner.agentSessionMode}
+              onAgentSessionModeChange={(agentSessionMode) =>
+                onChange({ ...form, runner: { ...form.runner, agentSessionMode } })
+              }
+            />
             <p className="text-[10px] text-muted-foreground/70">
-              Runs the agent headlessly. Fresh = ephemeral; Thread = resumes one session per fire.
-              Findings + a transcript log land in Triage.
+              Runs the agent headlessly. Findings + a transcript log land in Triage.
             </p>
             <div className="flex flex-col gap-1.5">
               <span className={SECTION_LABEL_CLASSES}>Harness</span>
