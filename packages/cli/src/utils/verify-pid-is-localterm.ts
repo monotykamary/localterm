@@ -29,9 +29,11 @@ const readProcessComm = async (pid: number): Promise<string | null> => {
 
 export type PidVerification = "ours" | "not-ours" | "unknown";
 
-export const verifyPidIsLocalterm = async (pid: number): Promise<PidVerification> => {
+export const classifyPid = (pid: number, comm: string | null): PidVerification => {
   if (!Number.isInteger(pid) || pid <= 0) return "not-ours";
-  const comm = await readProcessComm(pid);
   if (comm === null) return "unknown";
   return comm === DAEMON_PROCESS_TITLE ? "ours" : "not-ours";
 };
+
+export const verifyPidIsLocalterm = async (pid: number): Promise<PidVerification> =>
+  classifyPid(pid, await readProcessComm(pid));
