@@ -470,6 +470,12 @@ export class Session extends EventEmitter<SessionEvents> {
           `source '${escapedZdotdir}/.zshenv' 2>/dev/null`,
           '__localterm_saved_zdotdir="${ZDOTDIR}"',
           `ZDOTDIR='${escapedZdotdir}'`,
+          // Source the zsh login file before .zshrc (matching `zsh -l`'s
+          // .zshenv → .zprofile → .zshrc order) so PATH/env a user set in
+          // .zprofile is visible in the interactive session. zsh users keep
+          // interactive setup in .zshrc, so cross-sourcing is rare here and a
+          // double-source risk is low (unlike bash's .profile→.bashrc).
+          `source '${escapedZdotdir}/.zprofile' 2>/dev/null`,
           `source '${escapedZdotdir}/.zshrc' 2>/dev/null`,
           'ZDOTDIR="${__localterm_saved_zdotdir}"',
           // Prepend the secrets shims dir AFTER the user's .zshrc ran, so the
@@ -523,10 +529,22 @@ export class Session extends EventEmitter<SessionEvents> {
           this.shimsDir ?? path.join(os.homedir(), LOCALTERM_STATE_DIRNAME, SECRETS_SHIMS_DIRNAME),
         );
         const lines = [
+          // Login-shell env (mimic `bash -l`): /etc/profile then the first
+          // existing login file. ~/.bashrc is sourced only when NO login file
+          // exists, so a login file that already sources .bashrc (the common
+          // Ubuntu .profile pattern: `if [ -n "$BASH_VERSION" ]; then . ~/.bashrc; fi`)
+          // doesn't get .bashrc twice — which would duplicate PATH prepends
+          // (Ubuntu's .profile adds $HOME/.local/bin and .bashrc adds $HOME/bin).
+          // The system interactive files /etc/bashrc + /etc/bash.bashrc stay
+          // (the original behavior) so macOS's /etc/bashrc prompt setup and
+          // Debian's /etc/bash.bashrc are preserved even with a login file.
+          "source /etc/profile 2>/dev/null",
+          "__localterm_login_loaded=0",
+          "for __localterm_f in ~/.bash_profile ~/.bash_login ~/.profile; do [ -f \"$__localterm_f\" ] && . \"$__localterm_f\" && __localterm_login_loaded=1 && break; done",
           "source /etc/bashrc 2>/dev/null",
           "source /etc/bash.bashrc 2>/dev/null",
-          "source ~/.bashrc 2>/dev/null",
-          // Prepend the secrets shims dir AFTER the user's .bashrc ran (see the
+          '[ "$__localterm_login_loaded" != 1 ] && source ~/.bashrc 2>/dev/null',
+          // Prepend the secrets shims dir AFTER the user's rc ran (see the
           // zsh case for why the ordering matters).
           shimsPrepend,
           hookScript,
