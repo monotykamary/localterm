@@ -24,14 +24,37 @@
 
 Do NOT run `pnpm test` / `pnpm lint` / `pnpm typecheck` / `pnpm format` as part of your normal turn flow or to "verify your work" before responding. These are slow, and running them mid-task just stalls iteration. Run the full suite exactly once — at the very end, when the user signals the whole task is complete and no more iteration is expected (the dust has fully settled). Not per-turn, not per-commit, not before sending a response.
 
+### Test tiers
+
+The suite is split by flake risk so the agent never burns a turn chasing a fail-then-pass:
+
+- `pnpm test` — **deterministic unit tests only** (the default; fast, no real timers/waits). This is the green gate.
+- `pnpm test:integration` — **integration tests** (real PTY / WebSocket / child process), tagged `@integration`. Run on demand, not every turn.
+- `pnpm test:e2e` — **e2e tests** (real browser / HTTPS / OIDC), tagged `@e2e`. On demand; `e2e-sso-browser` also needs a Chrome binary present.
+
+### Running the suite (one run, one file)
+
+Never invoke `pnpm test` twice (once to tail, once to grep) — that doubles the wait. Redirect the single run to a temp file (pi overflows large output to disk, so your context stays clean), then read the failure list and the tail from that one file:
+
 ```bash
-pnpm test
+pnpm test > /tmp/localterm-test.log 2>&1
+grep -E "FAIL |Test Files|Tests " /tmp/localterm-test.log | head -40   # the failed tests
+tail -25 /tmp/localterm-test.log                                       # the run summary
+```
+
+The other end-of-task checks:
+
+```bash
 pnpm lint
 pnpm typecheck
 pnpm format
 ```
 
 `pnpm format` mutates files — always `git diff` afterward and include any formatting changes in the commit.
+
+### Flaky-test stance
+
+`pnpm test` (the main suite) MUST stay deterministic: no `await wait(N)`, no `pollFor`, no bumped `testTimeout` / `hookTimeout` to paper over load. A test that fails-then-passes is a bug — fix it by first principles (extract pure logic, `vi.useFakeTimers()`, inject fakes) or move it to the `@integration` / `@e2e` tier via a vitest `tags` option. Genuine end-to-end coverage (real shell / WebSocket / browser) belongs in `pnpm test:integration` / `pnpm test:e2e`, never in the main suite. Make-deterministic-first where feasible; gate the rest.
 
 ## Development instructions
 
