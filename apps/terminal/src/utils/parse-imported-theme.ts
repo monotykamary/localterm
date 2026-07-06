@@ -131,7 +131,14 @@ const parseItermPlist = (text: string, filename: string | undefined): ImportedTh
     if (red && green && blue) colors[mapped] = `#${red}${green}${blue}`;
   }
   if (Object.keys(colors).length === 0) return { error: "No iTerm color entries found" };
-  return { theme: { id: generateThemeId(), name: baseNameFrom(filename), source: "imported", colors: colors as unknown as ITheme } };
+  return {
+    theme: {
+      id: generateThemeId(),
+      name: baseNameFrom(filename),
+      source: "imported",
+      colors: colors as unknown as ITheme,
+    },
+  };
 };
 
 export const parseImportedTheme = (

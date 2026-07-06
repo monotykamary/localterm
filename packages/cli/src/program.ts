@@ -210,10 +210,7 @@ export const createProgram = (): Command => {
     .description("run a one-shot command in a transient PTY and print its output")
     .argument("<command>", "shell command to run")
     .option("--cwd <path>", "working directory")
-    .option(
-      "--shell <path>",
-      "shell binary to spawn (default: the daemon's detected login shell)",
-    )
+    .option("--shell <path>", "shell binary to spawn (default: the daemon's detected login shell)")
     .option("--cols <n>", "terminal columns", parseInteger)
     .option("--rows <n>", "terminal rows", parseInteger)
     .option("--timeout <seconds>", "timeout in seconds", parseInteger)

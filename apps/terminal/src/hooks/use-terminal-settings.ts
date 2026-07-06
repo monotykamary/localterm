@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
-import { familyForFont, findTerminalFontById, CUSTOM_FONT_ID, buildCustomTerminalFont } from "@/lib/terminal-fonts";
+import {
+  familyForFont,
+  findTerminalFontById,
+  CUSTOM_FONT_ID,
+  buildCustomTerminalFont,
+} from "@/lib/terminal-fonts";
 import {
   AUTO_THEME_ID,
   DEFAULT_TERMINAL_THEME_ID,
@@ -19,7 +24,11 @@ import { findLigatureRanges } from "@/utils/ligature-joiner";
 import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
 import { generateExtendedPalette } from "@/utils/generate-extended-palette";
 import { parseImportedTheme } from "@/utils/parse-imported-theme";
-import { loadStoredCustomThemes, storeCustomThemes, subscribeStoredCustomThemes } from "@/utils/stored-custom-themes";
+import {
+  loadStoredCustomThemes,
+  storeCustomThemes,
+  subscribeStoredCustomThemes,
+} from "@/utils/stored-custom-themes";
 import {
   loadStoredDefaultCwd,
   storeDefaultCwd,
@@ -143,9 +152,8 @@ export const useTerminalSettings = ({
   const effectiveThemeId = previewThemeId ?? activeThemeId;
   // User-imported themes (JSON + iTerm .itermcolors), kept in localStorage so the
   // Theme picker lists them alongside the built-ins and they survive reloads.
-  const [activeCustomThemes, setActiveCustomThemes] = useState<TerminalTheme[]>(
-    loadStoredCustomThemes,
-  );
+  const [activeCustomThemes, setActiveCustomThemes] =
+    useState<TerminalTheme[]>(loadStoredCustomThemes);
   // The host's color-scheme drives the "Auto (system)" theme: VESPER when dark,
   // the light default when light. Updated live via matchMedia so a desktop
   // switch re-resolves without a reload (a Linux GTK color-scheme change).
@@ -450,7 +458,7 @@ export const useTerminalSettings = ({
   }, []);
 
   // Stored untrimmed so a family name with internal spaces (the common case —
-// "JetBrainsMono Nerd Font Mono") is preserved; only leading/trailing
+  // "JetBrainsMono Nerd Font Mono") is preserved; only leading/trailing
   // whitespace would be trimmed, and a browser font family never has those.
   // The custom font falls back to the bundled default when this is empty.
   const handleCustomFontFamilyChange = useCallback((nextCustomFontFamily: string) => {

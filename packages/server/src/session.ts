@@ -540,7 +540,7 @@ export class Session extends EventEmitter<SessionEvents> {
           // Debian's /etc/bash.bashrc are preserved even with a login file.
           "source /etc/profile 2>/dev/null",
           "__localterm_login_loaded=0",
-          "for __localterm_f in ~/.bash_profile ~/.bash_login ~/.profile; do [ -f \"$__localterm_f\" ] && . \"$__localterm_f\" && __localterm_login_loaded=1 && break; done",
+          'for __localterm_f in ~/.bash_profile ~/.bash_login ~/.profile; do [ -f "$__localterm_f" ] && . "$__localterm_f" && __localterm_login_loaded=1 && break; done',
           "source /etc/bashrc 2>/dev/null",
           "source /etc/bash.bashrc 2>/dev/null",
           '[ "$__localterm_login_loaded" != 1 ] && source ~/.bashrc 2>/dev/null',
@@ -585,14 +585,16 @@ export class Session extends EventEmitter<SessionEvents> {
           "end",
           "__localterm_osc7",
           shimsPrepend,
-          ...(this.reportInitialCommandExit ? ["set -g __localterm_automation_prompt_count 0"] : []),
+          ...(this.reportInitialCommandExit
+            ? ["set -g __localterm_automation_prompt_count 0"]
+            : []),
           "function __localterm_prompt_hook --on-event fish_prompt",
           "    set -l __localterm_exit $status",
           "    printf '\\e]7777;git-dirty\\a'",
           ...(this.reportInitialCommandExit
             ? [
                 "    set -g __localterm_automation_prompt_count (math $__localterm_automation_prompt_count + 1)",
-                "    if test \"$__localterm_automation_prompt_count\" -eq 2",
+                '    if test "$__localterm_automation_prompt_count" -eq 2',
                 "        printf '\\e]7777;automation-exit;%d\\a' $__localterm_exit",
                 "    end",
               ]

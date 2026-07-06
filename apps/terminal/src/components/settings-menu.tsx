@@ -1,5 +1,12 @@
 import { ChevronDown, ExternalLink, Settings, Trash2, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type CSSProperties,
+} from "react";
 import { createPortal } from "react-dom";
 import { NumberStepper } from "@/components/number-stepper";
 import { SettingsSelect, type SettingsSelectItem } from "@/components/settings-select";
@@ -654,8 +661,9 @@ export const SettingsMenu = ({
                             className="max-w-xs"
                           >
                             A font family installed on the host — most useful for a system-installed
-                            Nerd Font (e.g. “JetBrainsMono Nerd Font Mono”, “MesloLGS NF”) the browser
-                            resolves via fontconfig. Leave empty to fall back to the bundled default.
+                            Nerd Font (e.g. “JetBrainsMono Nerd Font Mono”, “MesloLGS NF”) the
+                            browser resolves via fontconfig. Leave empty to fall back to the bundled
+                            default.
                           </TooltipContent>
                         </Tooltip>
                       ) : null}
@@ -813,8 +821,9 @@ export const SettingsMenu = ({
                         >
                           Absolute path to the shell binary new tabs spawn. Leave empty to use the
                           daemon's detected login shell (LOCALTERM_SHELL, then your passwd entry,
-                          then $SHELL). The `localterm session new --shell` flag and the `?shell=` query
-                          param override this per session; an address-bar `?shell=` wins for one tab.
+                          then $SHELL). The `localterm session new --shell` flag and the `?shell=`
+                          query param override this per session; an address-bar `?shell=` wins for
+                          one tab.
                         </TooltipContent>
                       </Tooltip>
                       <Input

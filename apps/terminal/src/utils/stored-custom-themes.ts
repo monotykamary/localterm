@@ -39,7 +39,9 @@ export const loadStoredCustomThemes = (): TerminalTheme[] => loadRaw();
 
 export const storeCustomThemes = (themes: readonly TerminalTheme[]): void => storeRaw(themes);
 
-export const subscribeStoredCustomThemes = (onChange: (themes: TerminalTheme[]) => void): (() => void) => {
+export const subscribeStoredCustomThemes = (
+  onChange: (themes: TerminalTheme[]) => void,
+): (() => void) => {
   if (typeof window === "undefined") return () => {};
   const handleStorageEvent = (event: StorageEvent) => {
     if (event.key !== null && event.key !== CUSTOM_THEMES_STORAGE_KEY) return;
