@@ -1784,7 +1784,31 @@ export const processesListResponseSchema = z
 // CLI/UI imports (or a user-supplied origin string).
 const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{3,8}$/);
 
-const themeColorsSchema = z.record(z.string(), hexColorSchema);
+const themeColorsSchema = z.object({
+  background: hexColorSchema.optional(),
+  foreground: hexColorSchema.optional(),
+  cursor: hexColorSchema.optional(),
+  cursorAccent: hexColorSchema.optional(),
+  selectionBackground: hexColorSchema.optional(),
+  selectionForeground: hexColorSchema.optional(),
+  selectionInactiveBackground: hexColorSchema.optional(),
+  black: hexColorSchema.optional(),
+  red: hexColorSchema.optional(),
+  green: hexColorSchema.optional(),
+  yellow: hexColorSchema.optional(),
+  blue: hexColorSchema.optional(),
+  magenta: hexColorSchema.optional(),
+  cyan: hexColorSchema.optional(),
+  white: hexColorSchema.optional(),
+  brightBlack: hexColorSchema.optional(),
+  brightRed: hexColorSchema.optional(),
+  brightGreen: hexColorSchema.optional(),
+  brightYellow: hexColorSchema.optional(),
+  brightBlue: hexColorSchema.optional(),
+  brightMagenta: hexColorSchema.optional(),
+  brightCyan: hexColorSchema.optional(),
+  brightWhite: hexColorSchema.optional(),
+});
 
 export const storedThemeSchema = z
   .object({
@@ -1841,6 +1865,20 @@ export const migrateThemesInputSchema = z
   })
   .strict();
 
+// The full theme state (active id + custom library + the `initialized` flag),
+// pushed to every tab on any theme mutation (import/set/delete/migrate) so open
+// terminals reflect a CLI or other-tab change instantly — no polling. Mirrors
+// the automations/caffeinate broadcasts; the browser's WS dispatcher applies it
+// directly.
+const themesMessageSchema = z
+  .object({
+    type: z.literal("themes"),
+    activeThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    customThemes: z.array(storedThemeSchema).max(MAX_CUSTOM_THEMES),
+    initialized: z.boolean(),
+  })
+  .strict();
+
 export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   // NOTE: PTY output is NOT a JSON member of this union. The server emits output
   // as a binary WebSocket frame (raw UTF-8 bytes via sendOutputBytes in index.ts).
@@ -1860,6 +1898,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   gitBranchPrMessageSchema,
   automationsMessageSchema,
   caffeinateStateMessageSchema,
+  themesMessageSchema,
   cdpControlledMessageSchema,
   replayEndMessageSchema,
   compressMessageSchema,

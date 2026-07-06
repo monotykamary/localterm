@@ -131,10 +131,6 @@ export const SESSIONS_MESSAGE_BLOCK_MIN_HEIGHT_PX = 112;
 // on an idle open while still surfacing a dev server starting/stopping live.
 export const PORTS_MODAL_CLOSE_TRANSITION_MS = 150;
 export const PORTS_POLL_INTERVAL_MS = 2000;
-// Reconcile the terminal theme (active id + custom library) against the daemon
-// so a `localterm theme set`/`import`/`delete` from the CLI reaches open tabs.// Light: one GET /api/themes returning a tiny payload, gated to once per tab
-// (the localStorage `storage` event handles instant same-browser cross-tab).
-export const THEMES_RECONCILE_INTERVAL_MS = 15_000;
 // Each port row matches the sessions/command-palette single-line option
 // (py-2 text-sm = 36px), so the modal reuses the same per-row height to size
 // its height-reserved list container (no per-row measurement needed — a row's

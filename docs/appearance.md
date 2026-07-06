@@ -25,7 +25,9 @@ Imported themes are stored on the daemon in `~/.localterm/themes.json` and share
 with the `localterm theme` CLI (see [CLI reference](cli.md#theme--terminal-themes)),
 listed after the built-ins in the picker, and deletable (a delete on the active
 theme falls back to the default). A malformed file shows an error message instead
-of silently doing nothing.
+of silently doing nothing. A theme set or imported from the CLI (or another
+browser tab) updates every open terminal instantly — the daemon pushes the
+change over each tab's WebSocket, so no reload or polling is needed.
 
 If you imported themes in an earlier version (when they were kept per-browser in
 `localStorage`), they're moved to the daemon's store on your next launch — your

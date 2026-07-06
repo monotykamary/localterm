@@ -3,9 +3,13 @@
 Terminal themes (the built-in catalog + user-imported custom themes + the active
 selection) are server-managed state in `~/.localterm/themes.json`, so the
 `localterm theme` CLI and every browser tab share one source of truth. The
-browser keeps a `localStorage` cache for instant initial render (no flash of the
-default) and reconciles against the server on mount + a slow poll, so a CLI
-change reaches open tabs.
+daemon pushes the full theme state over each open tab's WebSocket as
+`{type:"themes", activeThemeId, customThemes, initialized}` on every mutation
+(import/set/delete/migrate), so open terminals reflect a CLI or other-tab
+change instantly — the browser applies the pushed state directly, no polling.
+The browser keeps a `localStorage` cache for instant initial render and
+reconciles once on mount (plus a one-time migrate of legacy `localStorage`
+themes on first contact with an uninitialized store).
 
 ## CLI
 

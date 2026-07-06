@@ -380,6 +380,7 @@ interface DaemonContext {
   syncSecretShims: () => void;
   automationStore: AutomationStore;
   broadcastAutomations: () => void;
+  broadcastThemes: () => void;
   syncFolderWatchers: () => void;
   syncSessionEventListeners: () => void;
   webhookTriggerManager: WebhookTriggerManager;
@@ -510,6 +511,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     buildTabUrl,
     mintViewerCookie,
     stateDirectory,
+    broadcastThemes,
   } = ctx;
 
   // Headless SGR-1006 fallback for `mouse` when no CDP tab is reachable:
@@ -1012,6 +1014,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     const parsed = migrateThemesInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
     themeStore.migrate(parsed.data.activeThemeId, parsed.data.customThemes);
+    broadcastThemes();
     return context.json({
       activeThemeId: themeStore.getActive(),
       customThemes: themeStore.list(),
@@ -1036,6 +1039,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     }
     const stored = themeStore.add(result.theme);
     if (!stored) return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
+    broadcastThemes();
     return context.json({ theme: stored }, HTTP_STATUS_CREATED);
   });
 
@@ -1045,6 +1049,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   api.delete("/themes/:id", (context) => {
     const removed = themeStore.delete(context.req.param("id"));
     if (!removed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    broadcastThemes();
     return context.json({
       activeThemeId: themeStore.getActive(),
     });
@@ -1060,7 +1065,9 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     const id = parsed.data.id;
     const valid = isBuiltinThemeId(id) || Boolean(themeStore.get(id));
     if (!valid) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
-    return context.json({ activeThemeId: themeStore.setActive(id) });
+    const activeThemeId = themeStore.setActive(id);
+    broadcastThemes();
+    return context.json({ activeThemeId });
   });
 
   // Open dev ports: TCP listening sockets owned by processes descended from a
@@ -2107,6 +2114,21 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
   };
 
+  // Push the full theme state to every tab on any mutation (import/set/delete/
+  // migrate) so open terminals reflect a CLI or other-tab change instantly — the
+  // browser applies the {type:"themes"} WS message directly, no polling.
+  const broadcastThemes = () => {
+    const payload: ServerToClientMessage = {
+      type: "themes",
+      activeThemeId: themeStore.getActive(),
+      customThemes: themeStore.list(),
+      initialized: themeStore.isInitialized(),
+    };
+    for (const clientSocket of clientSockets) {
+      safeSend(clientSocket, payload);
+    }
+  };
+
   const caffeinateStatePayload = (): ServerToClientMessage => ({
     type: "caffeinate",
     supported: caffeinateManager.supported,
@@ -2417,6 +2439,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     applyCdpPort,
     getGraceSeconds,
     applyGraceSeconds,
+    broadcastThemes,
     connectCdpNow,
     buildTabUrl: (sessionId: string) => {
       const url = new URL(

@@ -14,7 +14,6 @@ import {
   resolveAutoTheme,
   type TerminalTheme,
 } from "@/lib/terminal-themes";
-import { THEMES_RECONCILE_INTERVAL_MS } from "@/lib/constants";
 import type { TerminalCursorStyle } from "@/lib/terminal-cursor";
 import { LocalEcho } from "@/lib/local-echo";
 import { awaitFontReady } from "@/utils/await-font-ready";
@@ -157,10 +156,16 @@ export const useTerminalSettings = ({
   const [activeThemeId, setActiveThemeId] = useState<string>(initialThemeIdRef.current);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const effectiveThemeId = previewThemeId ?? activeThemeId;
-  // User-imported themes (JSON + iTerm .itermcolors), kept in localStorage so the
-  // Theme picker lists them alongside the built-ins and they survive reloads.
   const [activeCustomThemes, setActiveCustomThemes] =
     useState<TerminalTheme[]>(loadStoredCustomThemes);
+  // The daemon is the source of truth for the active theme + the custom library
+  // (~/.localterm/themes.json); localStorage is a cache for instant initial
+  // render. These refs mirror the state so the stable `applyThemesState` (called
+  // from the WS dispatcher) reads the latest without re-creating per change.
+  const activeThemeIdRef = useRef(activeThemeId);
+  activeThemeIdRef.current = activeThemeId;
+  const activeCustomThemesRef = useRef(activeCustomThemes);
+  activeCustomThemesRef.current = activeCustomThemes;
   // The host's color-scheme drives the "Auto (system)" theme: VESPER when dark,
   // the light default when light. Updated live via matchMedia so a desktop
   // switch re-resolves without a reload (a Linux GTK color-scheme change).
@@ -304,6 +309,34 @@ export const useTerminalSettings = ({
   // uninitialized store (a fresh upgrade from the localStorage-only era) it
   // pushes the browser's cached themes to the server once — preserving their
   // ids — so the upgrade never loses the user's imported themes / selection.
+  // Apply a theme state the daemon pushed ({type:"themes"} WS message) or that
+  // the mount reconcile read — the daemon is the source of truth, localStorage a
+  // cache. Stable (reads current state via refs) so the mount-once WS dispatcher
+  // captures it for the tab's lifetime. No-op when the state already matches
+  // (the browser's own write-through change, confirmed by the broadcast).
+  const applyThemesState = useCallback(
+    (state: { activeThemeId: string; customThemes: readonly TerminalTheme[] }) => {
+      if (state.activeThemeId !== activeThemeIdRef.current) {
+        setActiveThemeId(state.activeThemeId);
+        storeTerminalThemeId(state.activeThemeId);
+      }
+      const local = activeCustomThemesRef.current;
+      const serverIds = new Set(state.customThemes.map((theme) => theme.id));
+      const customsDiffer =
+        state.customThemes.length !== local.length ||
+        local.some((theme) => !serverIds.has(theme.id));
+      if (customsDiffer) {
+        setActiveCustomThemes([...state.customThemes]);
+        storeCustomThemes(state.customThemes);
+      }
+    },
+    [],
+  );
+
+  // One-shot on mount: fetch the server state so the cache reconciles, and push
+  // the legacy localStorage themes once on first contact with an uninitialized
+  // store (an upgrade from the localStorage era). No poll — the daemon pushes
+  // {type:"themes"} on every change.
   const reconcileThemes = useCallback(async (): Promise<void> => {
     const data = await fetchThemes();
     if (data === null) return; // daemon down / non-2xx → keep the cache
@@ -311,25 +344,11 @@ export const useTerminalSettings = ({
       await migrateThemes(loadStoredTerminalThemeId(), loadStoredCustomThemes());
       return;
     }
-    if (data.activeThemeId !== activeThemeId) {
-      setActiveThemeId(data.activeThemeId);
-      storeTerminalThemeId(data.activeThemeId);
-    }
-    const serverIds = new Set(data.customThemes.map((theme) => theme.id));
-    const localIds = activeCustomThemes.map((theme) => theme.id);
-    const customsDiffer =
-      data.customThemes.length !== activeCustomThemes.length ||
-      localIds.some((id) => !serverIds.has(id));
-    if (customsDiffer) {
-      setActiveCustomThemes(data.customThemes);
-      storeCustomThemes(data.customThemes);
-    }
-  }, [activeThemeId, activeCustomThemes]);
+    applyThemesState(data);
+  }, [applyThemesState]);
 
   useEffect(() => {
     void reconcileThemes();
-    const interval = window.setInterval(() => void reconcileThemes(), THEMES_RECONCILE_INTERVAL_MS);
-    return () => window.clearInterval(interval);
   }, [reconcileThemes]);
 
   // Re-resolve the "Auto (system)" theme when the desktop color-scheme changes.
@@ -593,5 +612,6 @@ export const useTerminalSettings = ({
     handleCustomFontFamilyChange,
     handleImportTheme,
     handleDeleteCustomTheme,
+    applyThemesState,
   };
 };

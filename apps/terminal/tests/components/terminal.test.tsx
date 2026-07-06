@@ -964,6 +964,24 @@ describe("Terminal theme picker", () => {
     expect(seededTheme?.background).toBe("#101010");
   });
 
+  it('applies a daemon-pushed {type:"themes"} message live (realtime push, no poll)', () => {
+    // Seeded Vesper (no stored preference); a CLI or other-tab change is pushed
+    // over the existing PTY WebSocket as {type:"themes"} and applied directly.
+    installFakeLocalStorage();
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({
+        type: "themes",
+        activeThemeId: "dracula",
+        customThemes: [],
+        initialized: true,
+      });
+    });
+    const pushedTheme = fakeXterms[0]?.getOptions().theme as { background?: string } | undefined;
+    expect(pushedTheme?.background).toBe("#282a36");
+  });
+
   it("exposes a single labelled settings trigger in the toolbar", () => {
     installFakeLocalStorage();
     render(<Terminal />);

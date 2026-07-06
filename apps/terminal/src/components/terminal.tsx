@@ -495,6 +495,7 @@ export const Terminal = () => {
     handleCustomFontFamilyChange,
     handleImportTheme,
     handleDeleteCustomTheme,
+    applyThemesState,
   } = useTerminalSettings({ terminalRef, fitAddonRef, terminalReady, localEchoRef });
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
   const openDiffViewerRef = useRef<(() => void) | null>(null);
@@ -1888,6 +1889,11 @@ export const Terminal = () => {
           else enqueueDecompress(flushReplay);
         } else if (message.type === "automations") {
           setAutomations(message.automations);
+        } else if (message.type === "themes") {
+          applyThemesState({
+            activeThemeId: message.activeThemeId,
+            customThemes: message.customThemes,
+          });
         } else if (message.type === "caffeinate") {
           setCaffeinateSupported(message.supported);
           setCaffeinateActive(message.active);
