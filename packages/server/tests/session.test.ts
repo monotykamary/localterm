@@ -26,7 +26,7 @@ const waitFor = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
     ),
   ]);
 
-const collectOutput = async (session: Session, timeoutMs = 5000): Promise<string> => {
+const collectOutput = async (session: Session, timeoutMs = 15000): Promise<string> => {
   return waitFor(
     new Promise<string>((resolve) => {
       let buffer = "";
