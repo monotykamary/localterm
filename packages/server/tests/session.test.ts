@@ -6,6 +6,18 @@ import { serverToClientMessageSchema } from "../src/schemas.js";
 import { Session } from "../src/session.js";
 import { terminalQueryResponder } from "../src/utils/terminal-query-responder.js";
 
+const findFish = (): string | null => {
+  for (const candidate of [
+    "/usr/bin/fish",
+    "/usr/local/bin/fish",
+    "/bin/fish",
+    "/opt/homebrew/bin/fish",
+  ]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+};
+
 const waitFor = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
   Promise.race([
     promise,
@@ -349,6 +361,46 @@ describe("Session", () => {
           session.on("output", onData);
         });
         session.write('echo "XPATHX${PATH}XENDX"\r');
+        const pathValue = await waitMarker;
+        expect(pathValue.startsWith(`${shimsDir}:`)).toBe(true);
+      } finally {
+        session.dispose();
+      }
+    } finally {
+      rmSync(shimsDir, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("fish prepends the secrets shims dir to PATH after the user's config", async () => {
+    // fish-only; skip where fish is absent. The fish hook uses `fish -C`
+    // (init-command, runs AFTER ~/.config/fish/config.fish) to prepend the
+    // shims dir, so a user config that reorders PATH can't shadow the shims.
+    // The comprehensive OSC 7 / git-dirty / automation-exit behavior is
+    // verified in the Docker fish test (tests/run with a real fish shell).
+    const fishPath = findFish();
+    if (!fishPath) return;
+    const shimsDir = mkdtempSync(path.join(os.tmpdir(), "localterm-shim-path-fish-"));
+    try {
+      const session = new Session({ shell: fishPath, shimsDir });
+      try {
+        const waitMarker = new Promise<string>((resolve, reject) => {
+          let buffer = "";
+          const timer = setTimeout(() => {
+            session.off("output", onData);
+            reject(new Error("PATH marker timeout"));
+          }, 15_000);
+          const onData = (chunk: string) => {
+            buffer += chunk;
+            const match = /XPATHX([^$]*?)XENDX/.exec(buffer);
+            if (match) {
+              clearTimeout(timer);
+              session.off("output", onData);
+              resolve(match[1]);
+            }
+          };
+          session.on("output", onData);
+        });
+        session.write("printf 'XPATHX%sXENDX' (string join : $PATH)\r");
         const pathValue = await waitMarker;
         expect(pathValue.startsWith(`${shimsDir}:`)).toBe(true);
       } finally {

@@ -543,6 +543,46 @@ export class Session extends EventEmitter<SessionEvents> {
         writeFileSync(hookPath, lines.join("\n") + "\n", { mode: 0o600 });
         return [["--rcfile", hookPath], null];
       }
+      case "fish": {
+        // fish's `-C` / `--init-command` runs AFTER ~/.config/fish/config.fish
+        // and the conf.d snippets load, so the user's config (including
+        // conf.d PATH manipulation) runs first and the shims prepend below
+        // shadows it — see the zsh case for why the ordering matters. Unlike
+        // zsh/bash this needs no temp rcfile: -C injects the setup directly
+        // and the event-bound functions persist for the session.
+        const shimsDir =
+          this.shimsDir ?? path.join(os.homedir(), LOCALTERM_STATE_DIRNAME, SECRETS_SHIMS_DIRNAME);
+        // fish escapes a single quote inside single quotes as `\'` (not the
+        // `\''` POSIX idiom).
+        const escapedShimsDir = shimsDir.replace(/'/g, "\\'");
+        const shimsPrepend = `test -d '${escapedShimsDir}' && set -gx PATH '${escapedShimsDir}' $PATH`;
+        // A single fish_prompt handler captures $status FIRST (before any
+        // printf mutates it) so the automation-exit emit on prompt #2 reports
+        // the real command exit code, then emits the git-dirty signal.
+        // Splitting these into two --on-event handlers would let the git-dirty
+        // printf reset $status to 0 before the exit handler read it.
+        const lines = [
+          "function __localterm_osc7 --on-variable PWD",
+          "    printf '\\e]7;file://%s%s\\a' (hostname 2>/dev/null || echo localhost) $PWD",
+          "end",
+          "__localterm_osc7",
+          shimsPrepend,
+          ...(this.reportInitialCommandExit ? ["set -g __localterm_automation_prompt_count 0"] : []),
+          "function __localterm_prompt_hook --on-event fish_prompt",
+          "    set -l __localterm_exit $status",
+          "    printf '\\e]7777;git-dirty\\a'",
+          ...(this.reportInitialCommandExit
+            ? [
+                "    set -g __localterm_automation_prompt_count (math $__localterm_automation_prompt_count + 1)",
+                "    if test \"$__localterm_automation_prompt_count\" -eq 2",
+                "        printf '\\e]7777;automation-exit;%d\\a' $__localterm_exit",
+                "    end",
+              ]
+            : []),
+          "end",
+        ];
+        return [["-C", lines.join("\n")], null];
+      }
       default:
         return [[], null];
     }
