@@ -169,6 +169,7 @@ import { LocalEcho } from "@/lib/local-echo";
 import { isCoarsePointer } from "@/utils/is-coarse-pointer";
 import { detectIsAppleWebKit } from "@/utils/detect-is-apple-webkit";
 import { loadStoredDefaultCwd } from "@/utils/stored-default-cwd";
+import { loadStoredDefaultShell } from "@/utils/stored-default-shell";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
 import { fetchDaemonConfig } from "@/utils/fetch-daemon-config";
@@ -331,6 +332,7 @@ const makeCtxDecoder = () => {
 };
 
 const CWD_QUERY_PARAM = "cwd";
+const SHELL_QUERY_PARAM = "shell";
 
 const buildWebSocketUrl = (cwdOverride?: string | null, sid?: string | null): string => {
   const url = new URL("/ws", window.location.href);
@@ -342,6 +344,12 @@ const buildWebSocketUrl = (cwdOverride?: string | null, sid?: string | null): st
   // meaningful instead of always the home directory.
   const cwd = cwdOverride ?? params.get(CWD_QUERY_PARAM) ?? loadStoredDefaultCwd();
   if (cwd) url.searchParams.set(CWD_QUERY_PARAM, cwd);
+  // The saved default shell override (Settings → Launch) seeds every fresh
+  // spawn with the user's chosen shell; an address-bar ?shell= wins (a
+  // programmatic launch can target a specific shell). Empty = the daemon's
+  // detected login shell (no param sent).
+  const shell = params.get(SHELL_QUERY_PARAM) ?? loadStoredDefaultShell();
+  if (shell) url.searchParams.set(SHELL_QUERY_PARAM, shell);
   const runId = params.get(RUN_QUERY_PARAM);
   if (runId) url.searchParams.set(RUN_QUERY_PARAM, runId);
   // Fall back to the address bar's ?sid= (written by syncSessionIdQueryParam)
@@ -364,6 +372,11 @@ const buildNewTabUrl = (cwd: string | null, command?: string): string => {
   // user's chosen directory rather than the home directory.
   const resolvedCwd = cwd ?? loadStoredDefaultCwd();
   if (resolvedCwd) url.searchParams.set(CWD_QUERY_PARAM, resolvedCwd);
+  // Seed the saved default shell so a new tab spawns the user's chosen shell
+  // (the address-bar ?shell= from a programmatic launch is inherited via the
+  // search params below).
+  const savedShell = loadStoredDefaultShell();
+  if (savedShell) url.searchParams.set(SHELL_QUERY_PARAM, savedShell);
   if (command) url.searchParams.set(INITIAL_COMMAND_QUERY_PARAM, command);
   return url.toString();
 };
@@ -457,6 +470,7 @@ export const Terminal = () => {
     activePaddingX,
     activePaddingY,
     activeDefaultCwd,
+    activeDefaultShell,
     effectiveTheme,
     setPreviewThemeId,
     setPreviewFontId,
@@ -475,6 +489,7 @@ export const Terminal = () => {
     handlePaddingXChange,
     handlePaddingYChange,
     handleDefaultCwdChange,
+    handleDefaultShellChange,
   } = useTerminalSettings({ terminalRef, fitAddonRef, terminalReady, localEchoRef });
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
   const openDiffViewerRef = useRef<(() => void) | null>(null);
@@ -497,6 +512,11 @@ export const Terminal = () => {
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [cdpPort, setCdpPort] = useState<number | null>(null);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
+  // The daemon's detected default shell (from `GET /api/config`), shown as the
+  // Settings → Launch shell field's placeholder so the user knows what an
+  // empty field falls back to. Lazily fetched when the Settings panel opens
+  // (alongside cdpPort/graceSeconds) since it's only needed for the hint.
+  const [detectedDefaultShell, setDetectedDefaultShell] = useState<string>("");
   const [cdpStatus, setCdpStatus] = useState<{
     connected: boolean;
     browser?: string;
@@ -2255,6 +2275,7 @@ export const Terminal = () => {
           if (config) {
             setCdpPort(config.cdpPort);
             setGraceSeconds(config.graceSeconds);
+            setDetectedDefaultShell(config.defaultShell);
           }
         });
         refreshCdpStatus();
@@ -2912,6 +2933,9 @@ export const Terminal = () => {
                     onPaddingYChange={handlePaddingYChange}
                     defaultCwd={activeDefaultCwd}
                     onDefaultCwdChange={handleDefaultCwdChange}
+                    defaultShell={activeDefaultShell}
+                    onDefaultShellChange={handleDefaultShellChange}
+                    detectedDefaultShell={detectedDefaultShell}
                     notificationsPermission={notificationsPermission}
                     onNotificationsPermissionRequest={handleNotificationsPermissionRequest}
                     sessionInfo={sessionInfo}

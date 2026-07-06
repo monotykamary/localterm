@@ -41,6 +41,7 @@ import {
   MAX_LAUNCH_COMMAND_LENGTH,
   MAX_NOTIFICATION_LENGTH,
   MAX_ROWS,
+  MAX_SHELL_PATH_LENGTH,
   MAX_TAB_TOKEN_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_WORKTREEINCLUDE_FILE_BYTES,
@@ -140,6 +141,7 @@ export const createSessionInputSchema = z
     rows: z.number().int().min(1).max(MAX_ROWS).optional(),
     command: z.string().max(MAX_INPUT_BYTES).optional(),
     name: z.string().max(MAX_TITLE_LENGTH).optional(),
+    shell: z.string().min(1).max(MAX_SHELL_PATH_LENGTH).optional(),
     pinned: z.boolean().optional(),
   })
   .strict();
@@ -185,6 +187,7 @@ export const execOneShotInputSchema = z
     cwd: z.string().min(1).optional(),
     cols: z.number().int().min(1).max(MAX_COLS).optional(),
     rows: z.number().int().min(1).max(MAX_ROWS).optional(),
+    shell: z.string().min(1).max(MAX_SHELL_PATH_LENGTH).optional(),
     timeoutMs: z.number().int().min(1).max(EXEC_MAX_TIMEOUT_MS).optional(),
     outputLimitBytes: z.number().int().min(1).max(EXEC_MAX_OUTPUT_LIMIT_BYTES).optional(),
     env: z.record(z.string(), z.string()).optional(),
@@ -1647,9 +1650,17 @@ export const daemonConfigFileSchema = z
   .strict();
 
 // API response shape for GET/PUT /api/config — always carries the resolved
-// values (a number or null, never undefined).
+// values (a number or null, never undefined). `defaultShell` is the daemon's
+// detected default shell (what a spawn with no override uses) and `shells` is
+// the host's `/etc/shells` list (the detected default first) so the client can
+// render an informed shell picker without a second round-trip.
 export const daemonConfigSchema = z
-  .object({ cdpPort: cdpPortSchema, graceSeconds: graceSecondsSchema })
+  .object({
+    cdpPort: cdpPortSchema,
+    graceSeconds: graceSecondsSchema,
+    defaultShell: z.string().min(1),
+    shells: z.array(z.string().min(1)),
+  })
   .strict();
 
 // PUT /api/config body — either knob may be omitted when only the other is

@@ -558,6 +558,68 @@ describe("createServer WS lifecycle", () => {
   });
 });
 
+describe("POST /api/sessions shell override", () => {
+  let server: RunningServer;
+
+  beforeEach(async () => {
+    server = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      tabController: { open: async () => null, close: async () => {} },
+    });
+  });
+
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  const sessionsUrl = () => `http://127.0.0.1:${server.port}/api/sessions`;
+
+  const kill = async (id: string): Promise<void> => {
+    await fetch(`http://127.0.0.1:${server.port}/api/sessions/${id}`, { method: "DELETE" });
+  };
+
+  it("spawns with an explicit executable shell path", async () => {
+    if (process.platform === "win32") return;
+    const response = await fetch(sessionsUrl(), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ shell: "/bin/sh" }),
+    });
+    expect(response.ok).toBe(true);
+    const body = (await response.json()) as { session: { id: string; shell: string } };
+    expect(body.session.shell).toBe("/bin/sh");
+    await kill(body.session.id);
+  }, 10_000);
+
+  it("rejects a non-executable shell path with 400 invalid_shell", async () => {
+    if (process.platform === "win32") return;
+    const before = server.registry.size();
+    const response = await fetch(sessionsUrl(), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ shell: "/definitely/does/not/exist" }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_shell" });
+    // No session was spawned.
+    expect(server.registry.size()).toBe(before);
+  });
+
+  it("falls back to the detected default when shell is omitted", async () => {
+    if (process.platform === "win32") return;
+    const response = await fetch(sessionsUrl(), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(response.ok).toBe(true);
+    const body = (await response.json()) as { session: { id: string; shell: string } };
+    expect(body.session.shell.length).toBeGreaterThan(0);
+    await kill(body.session.id);
+  }, 10_000);
+});
+
 describe("open dev ports API", () => {
   let server: RunningServer;
   let socket: WebSocket;

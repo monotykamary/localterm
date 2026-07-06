@@ -169,6 +169,7 @@ const runNew = async (options: {
   cwd?: string;
   cmd?: string;
   name?: string;
+  shell?: string;
   cols?: number;
   rows?: number;
   pin: boolean;
@@ -181,6 +182,7 @@ const runNew = async (options: {
       cwd: options.cwd,
       command: options.cmd,
       name: options.name,
+      shell: options.shell,
       cols: options.cols,
       rows: options.rows,
       pinned: options.pin,
@@ -387,7 +389,14 @@ const runSetPin = async (id: string, pinned: boolean): Promise<void> => {
 // no session bookkeeping. Same exit-code propagation as `session exec`.
 const runOneShotExecImpl = async (
   command: string,
-  options: { cwd?: string; cols?: number; rows?: number; timeout?: number; json: boolean },
+  options: {
+    cwd?: string;
+    shell?: string;
+    cols?: number;
+    rows?: number;
+    timeout?: number;
+    json: boolean;
+  },
 ): Promise<void> => {
   const response = await fetchOrReport("/exec", {
     method: "POST",
@@ -395,6 +404,7 @@ const runOneShotExecImpl = async (
     body: JSON.stringify({
       command,
       cwd: options.cwd,
+      shell: options.shell,
       cols: options.cols,
       rows: options.rows,
       ...(options.timeout ? { timeoutMs: secondsToMs(options.timeout) } : {}),

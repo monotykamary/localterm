@@ -29,13 +29,24 @@ describe("/api/config", () => {
 
   const configUrl = () => `http://127.0.0.1:${server.port}/api/config`;
 
+  // The response also carries the host's detected `defaultShell` and `shells`
+  // list, but those are environment-dependent (the test host's getDefaultShell
+  // + /etc/shells), so each assertion below only pins the config knobs via
+  // toMatchObject and separately checks the shell fields are present and
+  // internally consistent (shells always includes the detected default).
+  const expectShellFields = (body: Record<string, unknown>): void => {
+    expect(typeof body.defaultShell).toBe("string");
+    expect((body.defaultShell as string).length).toBeGreaterThan(0);
+    expect(Array.isArray(body.shells)).toBe(true);
+    expect(body.shells).toContain(body.defaultShell);
+  };
+
   it("GET returns a null cdpPort by default (auto-detect)", async () => {
     const response = await fetch(configUrl());
     expect(response.ok).toBe(true);
-    expect(await response.json()).toEqual({
-      cdpPort: null,
-      graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
-    });
+    const body = await response.json();
+    expect(body).toMatchObject({ cdpPort: null, graceSeconds: SESSION_GRACE_DEFAULT_SECONDS });
+    expectShellFields(body);
   });
 
   it("PUT persists a configured port and echoes it back", async () => {
@@ -45,18 +56,16 @@ describe("/api/config", () => {
       body: JSON.stringify({ cdpPort: 52860 }),
     });
     expect(response.ok).toBe(true);
-    expect(await response.json()).toEqual({
-      cdpPort: 52860,
-      graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
-    });
+    const body = await response.json();
+    expect(body).toMatchObject({ cdpPort: 52860, graceSeconds: SESSION_GRACE_DEFAULT_SECONDS });
+    expectShellFields(body);
 
     const reloaded = JSON.parse(fs.readFileSync(path.join(stateDirectory, "config.json"), "utf8"));
     expect(reloaded.cdpPort).toBe(52860);
 
-    expect(await (await fetch(configUrl())).json()).toEqual({
-      cdpPort: 52860,
-      graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
-    });
+    const reget = await (await fetch(configUrl())).json();
+    expect(reget).toMatchObject({ cdpPort: 52860, graceSeconds: SESSION_GRACE_DEFAULT_SECONDS });
+    expectShellFields(reget);
   });
 
   it("PUT with null clears the override back to auto-detect", async () => {
@@ -70,10 +79,9 @@ describe("/api/config", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ cdpPort: null }),
     });
-    expect(await response.json()).toEqual({
-      cdpPort: null,
-      graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
-    });
+    const body = await response.json();
+    expect(body).toMatchObject({ cdpPort: null, graceSeconds: SESSION_GRACE_DEFAULT_SECONDS });
+    expectShellFields(body);
   });
 
   it("PUT rejects an out-of-range port with 400", async () => {
@@ -84,7 +92,7 @@ describe("/api/config", () => {
     });
     expect(response.status).toBe(400);
     // The override is unchanged.
-    expect(await (await fetch(configUrl())).json()).toEqual({
+    expect(await (await fetch(configUrl())).json()).toMatchObject({
       cdpPort: null,
       graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
     });

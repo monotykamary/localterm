@@ -475,6 +475,11 @@ export const MAX_WORKTREE_PR_NUMBER = 1_000_000;
 // login shell so rc-sourced PATH entries (nvm, brew, editor CLIs) resolve; the
 // spawn is fire-and-forget (output discarded) since these are GUI launches.
 export const MAX_LAUNCH_COMMAND_LENGTH = 4096;
+// Absolute path to a shell binary, accepted on the WS `?shell=` query param and
+// the REST `POST /api/sessions` / `POST /api/exec` `shell` field. A shell path
+// is short, but the cap bounds a hostile/garbage value before it reaches the
+// filesystem/exec.
+export const MAX_SHELL_PATH_LENGTH = 4096;
 
 export const HTTP_STATUS_CREATED = 201;
 

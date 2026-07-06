@@ -210,6 +210,10 @@ export const createProgram = (): Command => {
     .description("run a one-shot command in a transient PTY and print its output")
     .argument("<command>", "shell command to run")
     .option("--cwd <path>", "working directory")
+    .option(
+      "--shell <path>",
+      "shell binary to spawn (default: the daemon's detected login shell)",
+    )
     .option("--cols <n>", "terminal columns", parseInteger)
     .option("--rows <n>", "terminal rows", parseInteger)
     .option("--timeout <seconds>", "timeout in seconds", parseInteger)
@@ -217,7 +221,14 @@ export const createProgram = (): Command => {
     .action(
       async (
         command: string,
-        options: { cwd?: string; cols?: number; rows?: number; timeout?: number; json: boolean },
+        options: {
+          cwd?: string;
+          shell?: string;
+          cols?: number;
+          rows?: number;
+          timeout?: number;
+          json: boolean;
+        },
       ) => {
         const { runOneShotExec } = await import("./commands/session.js");
         await runOneShotExec(command, options);
@@ -241,6 +252,10 @@ export const createProgram = (): Command => {
     .option("--cwd <path>", "working directory")
     .option("--cmd <command>", "command to run at spawn (shell stays alive after)")
     .option("--name <title>", "session title")
+    .option(
+      "--shell <path>",
+      "shell binary to spawn (default: the daemon's detected login shell; see `localterm config`)",
+    )
     .option("--cols <n>", "terminal columns", parseInteger)
     .option("--rows <n>", "terminal rows", parseInteger)
     .option("--no-pin", "subject to the idle reap (default: pinned)")
@@ -250,6 +265,7 @@ export const createProgram = (): Command => {
         cwd?: string;
         cmd?: string;
         name?: string;
+        shell?: string;
         cols?: number;
         rows?: number;
         pin: boolean;

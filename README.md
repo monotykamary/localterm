@@ -48,6 +48,16 @@ Transient connection drops silently reattach to the same shell (auto-reconnect i
 
 The session switcher (top-right, or <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>I</kbd>) lists every live shell — the one this tab is viewing, others attached in different tabs, and dormant ones waiting out their grace window. Each row's terminal icon is colored by activity, matching the tab favicon: green while output is streaming, blue while a foreground program runs quietly, grey when idle at the prompt. Click a row to switch this tab onto that shell; hover a row to kill it. Search by title, path, or shell. It's also in the command palette (<kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd> → Sessions).
 
+### Shell selection
+
+Every new shell is spawned from the daemon's detected default, resolved in order: the `LOCALTERM_SHELL` env var, your login shell from passwd (`os.userInfo().shell`), `$SHELL`, then `/bin/sh`. Override it three ways:
+
+- **Per tab** — Settings → Launch → **Shell** saves an absolute path (e.g. `/usr/bin/fish`) to `localStorage` and sends it as `?shell=` on every new WebSocket; the placeholder shows the detected default an empty field falls back to. The address-bar `?shell=/path` wins for one tab (a programmatic launch).
+- **Per REST/CLI session** — `localterm session new --shell /usr/bin/fish` (and `localterm exec --shell …`) pass the `shell` field to `POST /api/sessions` / `POST /api/exec`; a path that isn't an executable is rejected with `400 invalid_shell` so an agent gets feedback instead of a silently-different shell.
+- **Globally** — set `LOCALTERM_SHELL` in the daemon's environment (the systemd unit / launchd plist) before `localterm start`. This is the only knob a headless Linux VPS reachable purely over ssh/tailnet can use without a browser tab open.
+
+zsh and bash get OSC 7 cwd tracking + git-dirty + automation-exit hooks; fish gets OSC 7 + git-dirty; other shells run unhooked (no cwd tracking) until support is added.
+
 ## CLI
 
 ```bash
@@ -58,9 +68,9 @@ localterm restart
 localterm install [-p 3417] [-H 127.0.0.1]  # auto-start (launchd on macOS, systemd user unit on Linux)
 localterm uninstall                              # remove auto-start service
 localterm completions <bash|zsh|fish> [--install|--uninstall]  # print/install/uninstall shell completions
-localterm exec "<command>" [--cwd <path>] [--timeout 60] [--json]  # one-shot: run, capture, exit with its code
+localterm exec "<command>" [--cwd <path>] [--shell <path>] [--timeout 60] [--json]  # one-shot: run, capture, exit with its code
 localterm session ls [--json]                    # list live PTYs
-localterm session new [--cwd <path>] [--cmd <c>] [--name <t>] [--no-pin] [--json]  # spawn a detached shell
+localterm session new [--cwd <path>] [--shell <path>] [--cmd <c>] [--name <t>] [--no-pin] [--json]  # spawn a detached shell
 localterm session attach <id>                    # open a browser tab onto a shell
 localterm session exec <id> "<cmd>" [--timeout 60] [--json]  # run in a persistent session
 localterm session send-keys <id> '<keys>'        # raw input (\n=Enter, \x03=Ctrl-C)

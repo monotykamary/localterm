@@ -74,7 +74,7 @@ import {
   AUTH_SECRET_FILENAME,
   AUTH_COOKIE_NAME,
 } from "./constants.js";
-import { getDefaultShell } from "./default-shell.js";
+import { getDefaultShell, listKnownShells, resolveShellOverride } from "./default-shell.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
 import { openChromeInspect } from "./utils/open-chrome-inspect.js";
 import { ServerErrorException, serverError } from "./errors.js";
@@ -612,6 +612,9 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     if (cwd !== undefined && !resolveCwdQuery(cwd)) {
       return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
     }
+    if (parsed.data.shell !== undefined && resolveShellOverride(parsed.data.shell) === undefined) {
+      return context.json({ error: "invalid_shell" }, HTTP_STATUS_BAD_REQUEST);
+    }
     if (registry.atCapacity()) {
       return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
     }
@@ -620,6 +623,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
         cwd,
         cols: parsed.data.cols,
         rows: parsed.data.rows,
+        shell: resolveShellOverride(parsed.data.shell),
         initialCommand: parsed.data.command,
       },
       parsed.data.pinned ?? true,
@@ -801,12 +805,21 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     if (cwd !== undefined && !resolveCwdQuery(cwd)) {
       return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
     }
+    if (parsed.data.shell !== undefined && resolveShellOverride(parsed.data.shell) === undefined) {
+      return context.json({ error: "invalid_shell" }, HTTP_STATUS_BAD_REQUEST);
+    }
     if (registry.atCapacity()) {
       return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
     }
     const owner = ownerFor(context);
     const id = registry.spawnDetached(
-      { cwd, cols: parsed.data.cols, rows: parsed.data.rows, env: parsed.data.env },
+      {
+        cwd,
+        cols: parsed.data.cols,
+        rows: parsed.data.rows,
+        shell: resolveShellOverride(parsed.data.shell),
+        env: parsed.data.env,
+      },
       false,
       owner,
     );
@@ -1600,7 +1613,12 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   // reconnect so `/api/health` reflects the new browser promptly. A `null`
   // cdpPort clears the override back to auto-detect.
   api.get("/config", (context) =>
-    context.json({ cdpPort: getCdpPort(), graceSeconds: getGraceSeconds() }),
+    context.json({
+      cdpPort: getCdpPort(),
+      graceSeconds: getGraceSeconds(),
+      defaultShell: getDefaultShell(),
+      shells: listKnownShells(),
+    }),
   );
   api.put("/config", async (context) => {
     const parsed = updateDaemonConfigInputSchema.safeParse(await readJsonBody(context));
@@ -1611,6 +1629,8 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
         parsed.data.graceSeconds === undefined
           ? getGraceSeconds()
           : applyGraceSeconds(parsed.data.graceSeconds),
+      defaultShell: getDefaultShell(),
+      shells: listKnownShells(),
     });
   });
 
@@ -2391,6 +2411,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           /* invalid or inaccessible path; fall back to default cwd */
         }
       }
+      // `?shell=` overrides the daemon's detected default for this tab's PTY
+      // (the browser sends the user's saved default-shell pref; an address-bar
+      // override or a programmatic attach can pass a different one). A path
+      // that isn't an executable degrades to the detected default rather than
+      // spawning a non-existent shell — the WS can't surface a 400 mid-upgrade.
+      const requestedShell = resolveShellOverride(context.req.query("shell"));
       const requestedRunId = context.req.query(AUTOMATION_RUN_QUERY_PARAM);
       const requestedSid = context.req.query(SESSION_ID_QUERY_PARAM) ?? null;
       // A plain tab may carry an initial command (a worktree's setup script) —
@@ -2447,6 +2473,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               ws,
               {
                 cwd: sessionCwd,
+                shell: requestedShell,
                 initialCommand:
                   claimedRun && claimedRun.runner.kind === "shell"
                     ? claimedRun.runner.command

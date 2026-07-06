@@ -64,6 +64,9 @@ interface SettingsMenuProps {
   onPaddingYChange: (paddingY: number) => void;
   defaultCwd: string;
   onDefaultCwdChange: (defaultCwd: string) => void;
+  defaultShell: string;
+  onDefaultShellChange: (defaultShell: string) => void;
+  detectedDefaultShell: string;
   cursorStyle: TerminalCursorStyle;
   onCursorStyleChange: (style: TerminalCursorStyle) => void;
   onCursorStylePreview?: (style: TerminalCursorStyle | null) => void;
@@ -329,6 +332,9 @@ export const SettingsMenu = ({
   onPaddingYChange,
   defaultCwd,
   onDefaultCwdChange,
+  defaultShell,
+  onDefaultShellChange,
+  detectedDefaultShell,
   cursorStyle,
   onCursorStyleChange,
   onCursorStylePreview,
@@ -694,6 +700,32 @@ export const SettingsMenu = ({
                         aria-label="default launch directory"
                         className="h-7 px-2 font-mono text-xs"
                         onChange={(event) => onDefaultCwdChange(event.target.value)}
+                      />
+                      <Tooltip>
+                        <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                          Shell
+                        </TooltipTrigger>
+                        <TooltipContent
+                          side="bottom"
+                          sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                          className="max-w-xs"
+                        >
+                          Absolute path to the shell binary new tabs spawn. Leave empty to use the
+                          daemon's detected login shell (LOCALTERM_SHELL, then your passwd entry,
+                          then $SHELL). The `localterm session new --shell` flag and the `?shell=` query
+                          param override this per session; an address-bar `?shell=` wins for one tab.
+                        </TooltipContent>
+                      </Tooltip>
+                      <Input
+                        value={defaultShell}
+                        placeholder={
+                          detectedDefaultShell
+                            ? `Auto — detected ${detectedDefaultShell}`
+                            : "Auto — detected login shell"
+                        }
+                        aria-label="default shell"
+                        className="h-7 px-2 font-mono text-xs"
+                        onChange={(event) => onDefaultShellChange(event.target.value)}
                       />
                     </Field>
 

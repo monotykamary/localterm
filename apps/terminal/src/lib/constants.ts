@@ -231,6 +231,10 @@ export const TERMINAL_PADDING_Y_STORAGE_KEY = "localterm:terminal-padding-y";
 // (PWA app-icon launch, a fresh tab before any session connects, a reloaded
 // bare URL). Empty = unset, so the server falls back to the home directory.
 export const DEFAULT_CWD_STORAGE_KEY = "localterm:default-cwd";
+// Saved default shell override sent on the WS upgrade as `?shell=` (the
+// per-tab mirror of the CLI `--shell` flag). Empty = unset, so the server uses
+// its detected login shell (surfaced as the Settings field's placeholder).
+export const DEFAULT_SHELL_STORAGE_KEY = "localterm:default-shell";
 export const GOOGLE_FONTS_STYLESHEET_ID = "localterm-google-fonts";
 export const NERD_FONT_ENABLED_STORAGE_KEY = "localterm:nerd-font-enabled";
 export const LIGATURES_ENABLED_STORAGE_KEY = "localterm:ligatures-enabled";

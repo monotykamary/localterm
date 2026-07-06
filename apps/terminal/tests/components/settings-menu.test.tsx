@@ -55,6 +55,9 @@ interface SettingsMenuHarnessProps {
   onPaddingYChange?: (paddingY: number) => void;
   onLigaturesEnabledChange?: (enabled: boolean) => void;
   onDefaultCwdChange?: (cwd: string) => void;
+  onDefaultShellChange?: (shell: string) => void;
+  detectedDefaultShell?: string;
+  initialDefaultShell?: string;
   notificationsPermission?: NotificationPermission | "unsupported";
   onNotificationsPermissionRequest?: () => void;
   sessionInfo?: TerminalSessionInfo | null;
@@ -72,6 +75,7 @@ const renderSettingsMenu = ({
   initialFontId = "geist-mono",
   initialLigaturesEnabled = false,
   initialDefaultCwd = "",
+  initialDefaultShell = "",
   onThemeChange = () => {},
   onThemePreview,
   onFontChange = () => {},
@@ -96,6 +100,8 @@ const renderSettingsMenu = ({
   onPaddingYChange = () => {},
   onLigaturesEnabledChange = () => {},
   onDefaultCwdChange = () => {},
+  onDefaultShellChange = () => {},
+  detectedDefaultShell = "",
   notificationsPermission = "default",
   onNotificationsPermissionRequest = () => {},
   sessionInfo,
@@ -142,6 +148,9 @@ const renderSettingsMenu = ({
         onPaddingYChange={onPaddingYChange}
         defaultCwd={initialDefaultCwd}
         onDefaultCwdChange={onDefaultCwdChange}
+        defaultShell={initialDefaultShell}
+        onDefaultShellChange={onDefaultShellChange}
+        detectedDefaultShell={detectedDefaultShell}
         notificationsPermission={notificationsPermission}
         onNotificationsPermissionRequest={onNotificationsPermissionRequest}
         sessionInfo={sessionInfo}

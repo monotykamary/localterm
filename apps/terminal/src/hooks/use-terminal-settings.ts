@@ -18,6 +18,11 @@ import {
   subscribeStoredDefaultCwd,
 } from "@/utils/stored-default-cwd";
 import {
+  loadStoredDefaultShell,
+  storeDefaultShell,
+  subscribeStoredDefaultShell,
+} from "@/utils/stored-default-shell";
+import {
   loadStoredLigaturesEnabled,
   storeLigaturesEnabled,
   subscribeStoredLigaturesEnabled,
@@ -117,6 +122,7 @@ export const useTerminalSettings = ({
   const initialNerdFontEnabledRef = useRef<boolean>(loadStoredNerdFontEnabled());
   const initialLigaturesEnabledRef = useRef<boolean>(loadStoredLigaturesEnabled());
   const initialDefaultCwdRef = useRef<string>(loadStoredDefaultCwd());
+  const initialDefaultShellRef = useRef<string>(loadStoredDefaultShell());
 
   const [activeThemeId, setActiveThemeId] = useState<string>(initialThemeIdRef.current);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
@@ -158,6 +164,9 @@ export const useTerminalSettings = ({
   const [activePaddingX, setActivePaddingX] = useState<number>(initialPaddingXRef.current);
   const [activePaddingY, setActivePaddingY] = useState<number>(initialPaddingYRef.current);
   const [activeDefaultCwd, setActiveDefaultCwd] = useState<string>(initialDefaultCwdRef.current);
+  const [activeDefaultShell, setActiveDefaultShell] = useState<string>(
+    initialDefaultShellRef.current,
+  );
 
   useEffect(() => {
     if (!terminalReady) return;
@@ -344,6 +353,16 @@ export const useTerminalSettings = ({
     storeDefaultCwd(trimmed);
   }, []);
 
+  // Trimmed before storing so a path with accidental whitespace is never sent
+  // as `?shell=` (the server would reject a non-executable path on the REST
+  // surface and silently fall back on the WS surface). Empty clears the
+  // override back to the daemon's detected default shell.
+  const handleDefaultShellChange = useCallback((nextDefaultShell: string) => {
+    const trimmed = nextDefaultShell.trim();
+    setActiveDefaultShell(trimmed);
+    storeDefaultShell(trimmed);
+  }, []);
+
   // Settings persist to localStorage, so changing one in any tab fires a
   // `storage` event in every OTHER tab. Re-applying each setting there keeps
   // theme/font/cursor/padding/… in lockstep across all open tabs — the
@@ -365,6 +384,7 @@ export const useTerminalSettings = ({
       subscribeStoredTerminalPaddingX(setActivePaddingX),
       subscribeStoredTerminalPaddingY(setActivePaddingY),
       subscribeStoredDefaultCwd(setActiveDefaultCwd),
+      subscribeStoredDefaultShell(setActiveDefaultShell),
     ];
     return () => {
       for (const unsubscribe of unsubscribes) unsubscribe();
@@ -396,6 +416,7 @@ export const useTerminalSettings = ({
     activePaddingX,
     activePaddingY,
     activeDefaultCwd,
+    activeDefaultShell,
     effectiveTheme,
     setPreviewThemeId,
     setPreviewFontId,
@@ -414,5 +435,6 @@ export const useTerminalSettings = ({
     handlePaddingXChange,
     handlePaddingYChange,
     handleDefaultCwdChange,
+    handleDefaultShellChange,
   };
 };
