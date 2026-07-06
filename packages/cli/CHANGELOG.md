@@ -1,5 +1,20 @@
 # localterm
 
+## 2.47.0
+
+### Minor Changes
+
+- Open run logs at the top with a scroll-to-bottom affordance.
+
+  Thread-mode agent run logs force-scrolled to the bottom on load while fresh/shell logs stayed at the top. The thread auto-scroll on load is dropped so both log kinds open at the top, and a hovering bottom-right "scroll to bottom" button appears only when the reader isn't pinned to the bottom.
+
+  A scroll listener plus a `ResizeObserver` over the scroll container and its content keep the button's visibility in sync with manual scrolling, viewport resizes, and content growth (transcript load, the live poll, a tool entry expanding). The `active-run-id` dependency re-attaches the observer after the not-found branch. A `RUN_LOG_AT_BOTTOM_THRESHOLD_PX` tolerance keeps subpixel rounding from flickering the button.
+
+### Patch Changes
+
+- Updated dependencies
+  - @monotykamary/localterm-server@2.47.0
+
 ## 2.46.0
 
 ### Patch Changes
