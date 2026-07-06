@@ -68,8 +68,27 @@ localterm process delete <name>                   # delete a process and its shi
 See [the skills reference](../skills/localterm/references/secrets-sessions.md)
 for the security model and the PATH-shim injection mechanism.
 
+## theme — terminal themes
+
+```bash
+localterm theme list                       # built-ins + imports, active one marked
+localterm theme get                        # print the active theme id + name
+localterm theme import <file>              # JSON {name,colors}/bare colors, or iTerm .itermcolors → stored custom
+localterm theme set <id>                   # a built-in id, 'auto', or a custom id from `import`
+localterm theme delete <id>                # delete an imported custom (resets active to the default)
+```
+
+Themes (built-ins + imported customs + the active selection) are server-managed
+in `~/.localterm/themes.json` and shared with the browser UI — a theme imported or
+set from the CLI shows up in every browser tab, and one imported in a tab is
+deletable from the CLI. `import` accepts the same formats as the browser upload
+(see [Appearance](appearance.md)); the daemon parses the file. Tab-completion:
+`theme set` completes built-ins + `auto` + customs; `theme delete` completes
+customs.
+
 ## Related
 
+- [Appearance](appearance.md) — themes (built-ins, importing, creating) and fonts.
 - [Shells](shells.md) — the `--shell` flag on `exec` / `session new`.
 - [Automations](automations.md) — server-managed scheduled jobs.
 - [Auto-start & remote access](auto-start.md) — `install` / `uninstall`.

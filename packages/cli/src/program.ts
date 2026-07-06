@@ -205,6 +205,51 @@ export const createProgram = (): Command => {
       await runProcessDelete(name);
     });
 
+  const theme = program
+    .command("theme")
+    .description(
+      "manage terminal themes (built-ins + imported customs; shared with the browser UI)",
+    );
+  theme
+    .command("list")
+    .description("list every selectable theme (built-ins + imports) with the active one marked")
+    .action(async () => {
+      const { runThemeList } = await import("./commands/theme.js");
+      await runThemeList();
+    });
+  theme
+    .command("get")
+    .description("print the active theme id and its name")
+    .action(async () => {
+      const { runThemeGet } = await import("./commands/theme.js");
+      await runThemeGet();
+    });
+  theme
+    .command("import <file>")
+    .description(
+      "parse a theme file (JSON {name, colors} / bare colors, or an iTerm .itermcolors plist) and store it as a custom theme",
+    )
+    .action(async (file: string) => {
+      const { runThemeImport } = await import("./commands/theme.js");
+      await runThemeImport(file);
+    });
+  theme
+    .command("set <id>")
+    .description(
+      "set the active theme (a built-in id, 'auto', or a custom theme id from `theme import`)",
+    )
+    .action(async (id: string) => {
+      const { runThemeSet } = await import("./commands/theme.js");
+      await runThemeSet(id);
+    });
+  theme
+    .command("delete <id>")
+    .description("delete an imported custom theme")
+    .action(async (id: string) => {
+      const { runThemeDelete } = await import("./commands/theme.js");
+      await runThemeDelete(id);
+    });
+
   program
     .command("exec")
     .description("run a one-shot command in a transient PTY and print its output")

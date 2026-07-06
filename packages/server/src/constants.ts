@@ -114,6 +114,8 @@ export const SECRETS_FILE_VERSION = 2;
 export const SECRETS_FILENAME = "secrets.json";
 export const PROCESSES_FILE_VERSION = 1;
 export const PROCESSES_FILENAME = "processes.json";
+export const THEMES_FILENAME = "themes.json";
+export const THEMES_FILE_VERSION = 1;
 export const SECRETS_SHIMS_DIRNAME = "shims";
 export const LOCALTERM_STATE_DIRNAME = ".localterm";
 // Subdir of the state dir holding one activity-signal file per watched
@@ -137,9 +139,14 @@ export const ACTIVITY_REFRESH_DEBOUNCE_MS = 500;
 export const SECRET_KEYCHAIN_SERVICE_PREFIX = "localterm:";
 export const MAX_SECRETS = 64;
 export const MAX_PROCESSES = 64;
+export const MAX_CUSTOM_THEMES = 64;
 export const MAX_SECRET_NAME_LENGTH = 64;
 export const MAX_SECRET_ENV_VAR_LENGTH = 64;
 export const MAX_PROCESS_NAME_LENGTH = 128;
+export const MAX_THEME_NAME_LENGTH = 64;
+export const MAX_THEME_ID_LENGTH = 64;
+export const MAX_THEME_SOURCE_LENGTH = 128;
+export const MAX_THEME_IMPORT_TEXT_LENGTH = 256 * 1024;
 export const MAX_PROCESS_REQUESTED_SECRETS = 32;
 export const MAX_SECRET_VALUE_LENGTH = 8192;
 // `security` is always at /usr/bin/security on darwin; baking the absolute path

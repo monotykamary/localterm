@@ -34,6 +34,7 @@
         "src/protocol.ts",
         "src/constants.ts",
         "src/completion/index.ts",
+        "src/terminal-themes.ts",
         "vitest.config.ts"
       ]
     },

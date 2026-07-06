@@ -80,6 +80,12 @@ import type {
   processSchema,
   processSetInputSchema,
   processesListResponseSchema,
+  storedThemeSchema,
+  themesResponseSchema,
+  themeResponseSchema,
+  importThemeInputSchema,
+  setActiveThemeInputSchema,
+  migrateThemesInputSchema,
 } from "./schemas.js";
 
 export interface SpawnPtyInput {
@@ -128,6 +134,13 @@ export type SecretSetInput = z.infer<typeof secretSetInputSchema>;
 export type Process = z.infer<typeof processSchema>;
 export type ProcessSetInput = z.infer<typeof processSetInputSchema>;
 export type ProcessesListResponse = z.infer<typeof processesListResponseSchema>;
+
+export type StoredTheme = z.infer<typeof storedThemeSchema>;
+export type ThemesResponse = z.infer<typeof themesResponseSchema>;
+export type ThemeResponse = z.infer<typeof themeResponseSchema>;
+export type ImportThemeInput = z.infer<typeof importThemeInputSchema>;
+export type SetActiveThemeInput = z.infer<typeof setActiveThemeInputSchema>;
+export type MigrateThemesInput = z.infer<typeof migrateThemesInputSchema>;
 
 export type AutomationLastRunStatus = z.infer<typeof automationLastRunStatusSchema>;
 export type AutomationLastRun = z.infer<typeof automationLastRunSchema>;

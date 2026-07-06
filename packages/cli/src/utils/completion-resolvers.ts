@@ -1,5 +1,6 @@
 import { COMPLETION_DAEMON_FETCH_TIMEOUT_MS } from "../constants.js";
 import { daemonBaseUrl, daemonFetch } from "./daemon-api.js";
+import { BUILTIN_THEME_IDS } from "@monotykamary/localterm-server/themes";
 
 // Completion runs on every <Tab>, so these never throw or print: on a missing
 // port file (daemon down), timeout, non-2xx, or parse failure they resolve []
@@ -43,4 +44,23 @@ export const fetchProcessNames = async (): Promise<string[]> => {
     processes?: { name: string }[];
   } | null;
   return body?.processes?.map((process) => process.name) ?? [];
+};
+
+// Every selectable theme id (the built-ins + "auto" from the shared catalog, plus
+// the user's imported customs) — completes `theme set <id>`.
+export const fetchThemeIds = async (): Promise<string[]> => {
+  const body = (await fetchJsonWithTimeout("/themes")) as {
+    customThemes?: { id: string }[];
+  } | null;
+  const customIds = body?.customThemes?.map((theme) => theme.id) ?? [];
+  return [...BUILTIN_THEME_IDS, ...customIds];
+};
+
+// The user's imported custom theme ids only — completes `theme delete <id>`
+// (deleting a built-in isn't a thing).
+export const fetchCustomThemeIds = async (): Promise<string[]> => {
+  const body = (await fetchJsonWithTimeout("/themes")) as {
+    customThemes?: { id: string }[];
+  } | null;
+  return body?.customThemes?.map((theme) => theme.id) ?? [];
 };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { parseImportedTheme } from "../../src/utils/parse-imported-theme";
+import { parseImportedTheme } from "../src/theme-parser.js";
 
 describe("parseImportedTheme", () => {
   it("parses a JSON theme with a colors object and uses the provided name", () => {

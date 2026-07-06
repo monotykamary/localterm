@@ -29,8 +29,14 @@ import {
   MAX_PROCESS_NAME_LENGTH,
   MAX_PROCESS_REQUESTED_SECRETS,
   MAX_PROCESSES,
+  MAX_CUSTOM_THEMES,
+  MAX_THEME_NAME_LENGTH,
+  MAX_THEME_ID_LENGTH,
+  MAX_THEME_SOURCE_LENGTH,
+  MAX_THEME_IMPORT_TEXT_LENGTH,
   PROCESSES_FILE_VERSION,
   SECRETS_FILE_VERSION,
+  THEMES_FILE_VERSION,
   MAX_WEBHOOK_ID_LENGTH,
   MAX_CAFFEINATE_COMMAND_LENGTH,
   MAX_CAFFEINATE_COMMANDS,
@@ -1768,6 +1774,71 @@ export const processSetInputSchema = z
   .strict();
 export const processesListResponseSchema = z
   .object({ processes: z.array(processSchema).max(MAX_PROCESSES) })
+  .strict();
+
+// A user-imported terminal theme (JSON `{name, colors}` / bare colors, or an
+// iTerm `.itermcolors` plist), normalized to `#rrggbb` by the parser. `colors` is
+// a record of xterm ITheme keys to hex strings; the parser keeps only valid
+// hex fields so xterm falls back to its per-field defaults for the rest. `id` is
+// a stable `custom-<time>-<rand>` the daemon mints; `source` is "imported" for
+// CLI/UI imports (or a user-supplied origin string).
+const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{3,8}$/);
+
+const themeColorsSchema = z.record(z.string(), hexColorSchema);
+
+export const storedThemeSchema = z
+  .object({
+    id: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    name: z.string().min(1).max(MAX_THEME_NAME_LENGTH),
+    source: z.string().min(1).max(MAX_THEME_SOURCE_LENGTH),
+    colors: themeColorsSchema,
+  })
+  .strict();
+
+export const themesFileSchema = z
+  .object({
+    version: z.literal(THEMES_FILE_VERSION),
+    activeThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    customThemes: z.array(storedThemeSchema).max(MAX_CUSTOM_THEMES),
+  })
+  .strict();
+
+// POST /api/themes/import body: the raw file text plus the filename (so the
+// parser can derive a theme name and detect `.itermcolors`). The daemon parses
+// — one parser, shared by the browser UI and the `localterm theme import` CLI.
+export const importThemeInputSchema = z
+  .object({
+    text: z.string().min(1).max(MAX_THEME_IMPORT_TEXT_LENGTH),
+    filename: z.string().min(1).max(256).optional(),
+  })
+  .strict();
+
+// PUT /api/themes/active body: the id to make active (a built-in id, the
+// "auto" pseudo-id, or a custom theme id). Validated against the built-ins +
+// the stored custom themes at the route layer.
+export const setActiveThemeInputSchema = z
+  .object({ id: z.string().min(1).max(MAX_THEME_ID_LENGTH) })
+  .strict();
+
+export const themesResponseSchema = z
+  .object({
+    activeThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    customThemes: z.array(storedThemeSchema).max(MAX_CUSTOM_THEMES),
+    initialized: z.boolean(),
+  })
+  .strict();
+
+export const themeResponseSchema = z.object({ theme: storedThemeSchema }).strict();
+
+// POST /api/themes/migrate body: the browser's legacy localStorage state, pushed
+// once on first contact with an uninitialized store so an upgrade preserves the
+// user's imported themes + active selection (ids preserved). No-op if the store
+// is already initialized (CLI or another tab wrote first).
+export const migrateThemesInputSchema = z
+  .object({
+    activeThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    customThemes: z.array(storedThemeSchema).max(MAX_CUSTOM_THEMES),
+  })
   .strict();
 
 export const serverToClientMessageSchema = z.discriminatedUnion("type", [

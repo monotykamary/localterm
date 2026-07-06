@@ -6,15 +6,15 @@ import { fuzzyMatch } from "@/utils/fuzzy-match";
 // interchangeable: "short flex" matches "short-flex", "claude haiku" matches
 // "Claude Haiku 4.5". Lowercasing first keeps the range ASCII-only.
 const normalizeForSearch = (value: string): string =>
-  value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 
 // Best fuzzy score for a model against the query, matching both its
 // provider/id and its display name. Higher scores rank better (contiguous,
 // word-boundary hits beat scattered subsequences); null means no match.
-const scoreAgentModel = (
-  model: AgentModelInfo,
-  normalizedQuery: string,
-): number | null => {
+const scoreAgentModel = (model: AgentModelInfo, normalizedQuery: string): number | null => {
   const idMatch = fuzzyMatch(normalizedQuery, normalizeForSearch(agentModelId(model)));
   const nameMatch = fuzzyMatch(normalizedQuery, normalizeForSearch(model.name));
   if (idMatch && nameMatch) return Math.max(idMatch.score, nameMatch.score);

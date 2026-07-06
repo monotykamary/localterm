@@ -140,6 +140,12 @@ export {
   processSchema,
   processSetInputSchema,
   processesListResponseSchema,
+  storedThemeSchema,
+  themesResponseSchema,
+  themeResponseSchema,
+  importThemeInputSchema,
+  setActiveThemeInputSchema,
+  migrateThemesInputSchema,
 } from "./schemas.js";
 export type { CompressMode } from "./schemas.js";
 export type {
@@ -175,6 +181,12 @@ export type {
   Process,
   ProcessSetInput,
   ProcessesListResponse,
+  StoredTheme,
+  ThemesResponse,
+  ThemeResponse,
+  ImportThemeInput,
+  SetActiveThemeInput,
+  MigrateThemesInput,
   GitBaseSource,
   GitBranchInfo,
   GitBranchPr,

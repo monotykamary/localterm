@@ -14,7 +14,7 @@ export interface OptionSpec {
 
 export type PositionalSpec =
   | { kind: "static"; values: readonly string[] }
-  | { kind: "dynamic"; source: "sessions" | "secrets" | "processes" };
+  | { kind: "dynamic"; source: "sessions" | "secrets" | "processes" | "themes" | "customThemes" };
 
 export interface CommandSpecNode {
   name: string;

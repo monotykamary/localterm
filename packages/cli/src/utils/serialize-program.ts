@@ -37,6 +37,8 @@ const positionalDeclarations: Record<string, PositionalSpec[]> = {
   "secret set": [{ kind: "dynamic", source: "secrets" }],
   "process set": [{ kind: "dynamic", source: "processes" }],
   "process delete": [{ kind: "dynamic", source: "processes" }],
+  "theme set": [{ kind: "dynamic", source: "themes" }],
+  "theme delete": [{ kind: "dynamic", source: "customThemes" }],
   "config identity": [{ kind: "static", values: IDENTITY_PROVIDERS }],
 };
 

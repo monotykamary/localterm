@@ -3,7 +3,13 @@ import { describe, expect, it } from "vite-plus/test";
 import { matchAgentModels } from "../../src/utils/match-agent-model";
 
 const models: AgentModelInfo[] = [
-  { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", provider: "anthropic", contextWindow: 200000, reasoning: true },
+  {
+    id: "claude-haiku-4-5",
+    name: "Claude Haiku 4.5",
+    provider: "anthropic",
+    contextWindow: 200000,
+    reasoning: true,
+  },
   { id: "glm-5.2", name: "GLM 5.2", provider: "makora" },
   { id: "gen-short-flex", name: "Auto Short Flex", provider: "earendil" },
 ];
@@ -43,9 +49,7 @@ describe("matchAgentModels", () => {
   });
 
   it("matches across the provider/id slash and a space", () => {
-    expect(matchAgentModels(models, "makora glm").map((model) => model.id)).toEqual([
-      "glm-5.2",
-    ]);
+    expect(matchAgentModels(models, "makora glm").map((model) => model.id)).toEqual(["glm-5.2"]);
   });
 
   it("ranks a boundary/contiguous match above a contained interior match", () => {

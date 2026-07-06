@@ -8,9 +8,11 @@ import {
   type ValueSource,
 } from "@monotykamary/localterm-server/completion";
 import {
+  fetchCustomThemeIds,
   fetchProcessNames,
   fetchSecretNames,
   fetchSessionIds,
+  fetchThemeIds,
 } from "../utils/completion-resolvers.js";
 import { serializeProgram } from "../utils/serialize-program.js";
 import { writeCommandSpec } from "../utils/command-spec.js";
@@ -25,6 +27,8 @@ const cliValueSource: ValueSource = {
   sessions: fetchSessionIds,
   secrets: fetchSecretNames,
   processes: fetchProcessNames,
+  themes: fetchThemeIds,
+  customThemes: fetchCustomThemeIds,
 };
 
 const isSupportedShell = (shell: string): boolean =>

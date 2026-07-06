@@ -208,6 +208,44 @@ describe("runCompletion (dynamic candidates from the daemon)", () => {
     await runCompletion(createProgram(), ["localterm", "process", "set", ""]);
     expect(capturedStdout().split("\n").filter(Boolean).sort()).toEqual(["gh", "pi"]);
   });
+
+  it("lists every selectable theme id (built-ins + customs) for `theme set`", async () => {
+    vi.spyOn(state, "readPort").mockReturnValue(3417);
+    vi.spyOn(state, "readHost").mockReturnValue("127.0.0.1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          activeThemeId: "vesper",
+          customThemes: [{ id: "custom-abc", name: "Mine", source: "imported", colors: {} }],
+          initialized: true,
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    await runCompletion(createProgram(), ["localterm", "theme", "set", ""]);
+    const candidates = capturedStdout().split("\n").filter(Boolean);
+    expect(candidates).toContain("auto");
+    expect(candidates).toContain("vesper");
+    expect(candidates).toContain("dracula");
+    expect(candidates).toContain("custom-abc");
+  });
+
+  it("lists only custom theme ids for `theme delete`", async () => {
+    vi.spyOn(state, "readPort").mockReturnValue(3417);
+    vi.spyOn(state, "readHost").mockReturnValue("127.0.0.1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          activeThemeId: "vesper",
+          customThemes: [{ id: "custom-abc", name: "Mine", source: "imported", colors: {} }],
+          initialized: true,
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    await runCompletion(createProgram(), ["localterm", "theme", "delete", ""]);
+    expect(capturedStdout().split("\n").filter(Boolean)).toEqual(["custom-abc"]);
+  });
 });
 
 describe("wireCompletions / unwireCompletions", () => {

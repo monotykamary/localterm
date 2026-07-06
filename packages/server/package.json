@@ -48,6 +48,10 @@
     "./completion": {
       "types": "./dist/completion/index.d.ts",
       "import": "./dist/completion/index.js"
+    },
+    "./themes": {
+      "types": "./dist/terminal-themes.d.ts",
+      "import": "./dist/terminal-themes.js"
     }
   },
   "publishConfig": {

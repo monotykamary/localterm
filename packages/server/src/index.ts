@@ -57,6 +57,7 @@ import {
   MS_PER_MINUTE,
   PROCESSES_FILENAME,
   SECRETS_FILENAME,
+  THEMES_FILENAME,
   SECRETS_SHIMS_DIRNAME,
   AUTOMATION_AGENT_SESSIONS_DIRNAME,
   SERVER_STOP_GRACE_MS,
@@ -94,6 +95,9 @@ import { HeartbeatStore } from "./heartbeat-store.js";
 import { createDefaultSecretBackend, type SecretBackend } from "./secret-backend.js";
 import { SecretStore } from "./secret-store.js";
 import { ProcessStore } from "./process-store.js";
+import { ThemeStore } from "./theme-store.js";
+import { parseImportedTheme } from "./theme-parser.js";
+import { isBuiltinThemeId, BUILTIN_THEME_IDS } from "./terminal-themes.js";
 import { regenerateShims } from "./secret-shims.js";
 import { ProcessActivityWatcher } from "./process-activity-watcher.js";
 import { parseCronExpression } from "./cron-expression.js";
@@ -119,6 +123,9 @@ import {
   sessionResizeSchema,
   processNameSchema,
   processSetInputSchema,
+  importThemeInputSchema,
+  setActiveThemeInputSchema,
+  migrateThemesInputSchema,
   updateAutomationInputSchema,
   updateDaemonConfigInputSchema,
   updateSessionInputSchema,
@@ -369,6 +376,7 @@ interface DaemonContext {
   shimsDir: string;
   stateDirectory: string;
   processStore: ProcessStore;
+  themeStore: ThemeStore;
   syncSecretShims: () => void;
   automationStore: AutomationStore;
   broadcastAutomations: () => void;
@@ -481,6 +489,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     secretStore,
     shimsDir,
     processStore,
+    themeStore,
     syncSecretShims,
     automationStore,
     broadcastAutomations,
@@ -568,6 +577,8 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
       sessions: async () => registry.list(ownerFor(context)).map((session) => session.id),
       secrets: async () => secretStore.list().map((entry) => entry.name),
       processes: async () => processStore.list().map((entry) => entry.name),
+      themes: async () => [...BUILTIN_THEME_IDS, ...themeStore.list().map((theme) => theme.id)],
+      customThemes: async () => themeStore.list().map((theme) => theme.id),
     };
     const candidates = await resolveCandidates(completionContext, source);
     return context.text(formatCandidates(candidates, completionContext.currentWord));
@@ -979,6 +990,77 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     if (!removed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
     syncSecretShims();
     return context.json({ ok: true });
+  });
+
+  // Terminal themes: the active theme id + the user's imported custom themes,
+  // stored in ~/.localterm/themes.json so the `localterm theme` CLI and every
+  // browser tab share one source of truth (replacing the per-browser
+  // localStorage the UI used to keep). GET returns the full state in one read so
+  // the client reconciles its localStorage cache in a single round-trip.
+  api.get("/themes", (context) =>
+    context.json({
+      activeThemeId: themeStore.getActive(),
+      customThemes: themeStore.list(),
+      initialized: themeStore.isInitialized(),
+    }),
+  );
+
+  // One-time migration of the browser's legacy localStorage themes. No-ops once
+  // the store is initialized (the CLI or another tab wrote first) and returns
+  // the current state so the caller can reconcile regardless of outcome.
+  api.post("/themes/migrate", async (context) => {
+    const parsed = migrateThemesInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    themeStore.migrate(parsed.data.activeThemeId, parsed.data.customThemes);
+    return context.json({
+      activeThemeId: themeStore.getActive(),
+      customThemes: themeStore.list(),
+      initialized: themeStore.isInitialized(),
+    });
+  });
+
+  // Import a theme from raw file text (JSON `{name, colors}` / bare colors, or
+  // an iTerm `.itermcolors` plist). The daemon parses — one parser shared by the
+  // browser UI's upload and the `localterm theme import` CLI — so a malformed
+  // file explains itself with a stable error string. Returns the stored theme
+  // (with its server-minted id) so the client can select it immediately.
+  api.post("/themes/import", async (context) => {
+    const parsed = importThemeInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const result = parseImportedTheme(parsed.data.text, parsed.data.filename);
+    if ("error" in result) {
+      return context.json(
+        { error: "invalid_theme", message: result.error },
+        HTTP_STATUS_BAD_REQUEST,
+      );
+    }
+    const stored = themeStore.add(result.theme);
+    if (!stored) return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
+    return context.json({ theme: stored }, HTTP_STATUS_CREATED);
+  });
+
+  // Delete an imported custom theme. Deleting the active custom theme resets
+  // the active id to the default (the store handles it), so the client just
+  // re-reads GET /themes afterwards.
+  api.delete("/themes/:id", (context) => {
+    const removed = themeStore.delete(context.req.param("id"));
+    if (!removed) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json({
+      activeThemeId: themeStore.getActive(),
+    });
+  });
+
+  // Set the active theme id (a built-in, "auto", or a custom theme id).
+  // Validated against the built-ins + the stored custom themes so a typo can't
+  // select a theme that doesn't resolve (the client would silently fall back to
+  // the default otherwise).
+  api.put("/themes/active", async (context) => {
+    const parsed = setActiveThemeInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const id = parsed.data.id;
+    const valid = isBuiltinThemeId(id) || Boolean(themeStore.get(id));
+    if (!valid) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    return context.json({ activeThemeId: themeStore.setActive(id) });
   });
 
   // Open dev ports: TCP listening sockets owned by processes descended from a
@@ -1803,6 +1885,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     shimsDir,
   });
   const processStore = new ProcessStore(path.join(stateDirectory, PROCESSES_FILENAME));
+  const themeStore = new ThemeStore({ filePath: path.join(stateDirectory, THEMES_FILENAME) });
   const activityDir = path.join(stateDirectory, ACTIVITY_DIRNAME);
   const syncSecretShims = () =>
     regenerateShims(
@@ -2317,6 +2400,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     secretStore,
     shimsDir,
     processStore,
+    themeStore,
     syncSecretShims,
     automationStore,
     broadcastAutomations,

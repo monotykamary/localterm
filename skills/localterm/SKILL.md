@@ -1,6 +1,6 @@
 ---
 name: localterm
-description: Drive the localterm daemon's HTTP API and CLI — schedule automations, set up event-driven triggers (git changes, shell notifications, directory changes), trigger runs, manage per-program secrets (Keychain-backed PATH shims), control PTYs like tmux (list, create, send-keys, capture-pane, resize, rename, kill), run synchronous exec commands with captured output + exit code, run headless agent sessions (the built-in pi harness or a custom command, fresh or thread), send named keys (press), wait for a pane state, screenshot a pane to PNG (capture --png via the browser), drive TUIs with the mouse (click/drag/move/scroll, by coords or label), inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage automations, secrets, sessions, run shell commands, or drive headless agent runs in localterm, or to script against the localterm server.
+description: Drive the localterm daemon's HTTP API and CLI — schedule automations, set up event-driven triggers (git changes, shell notifications, directory changes), trigger runs, manage per-program secrets (Keychain-backed PATH shims), control PTYs like tmux (list, create, send-keys, capture-pane, resize, rename, kill), run synchronous exec commands with captured output + exit code, run headless agent sessions (the built-in pi harness or a custom command, fresh or thread), send named keys (press), wait for a pane state, screenshot a pane to PNG (capture --png via the browser), drive TUIs with the mouse (click/drag/move/scroll, by coords or label), manage terminal themes (list/import/set/delete, shared with the browser UI), inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage automations, secrets, sessions, themes, run shell commands, or drive headless agent runs in localterm, or to script against the localterm server.
 ---
 
 # localterm API
@@ -384,3 +384,17 @@ curl -s "$BASE/git/diff?cwd=/path/to/repo"          # full per-file unified patc
 ```
 
 For the sessions (`GET`/`DELETE /sessions/:id`) and secrets (`GET`/`PUT`/`DELETE /secrets/:name`) surfaces — including the security model (values never return over the API; use `localterm secret get` for that) and the PATH-shim injection mechanism — see [references/secrets-sessions.md](references/secrets-sessions.md). Secrets are also managed from the terminal via the `localterm secret list|get|set|delete` CLI.
+
+## Themes
+
+Terminal themes (built-ins + imported customs + the active selection) are server-managed in `~/.localterm/themes.json`, shared by the `localterm theme` CLI and every browser tab. Manage them from the terminal:
+
+```bash
+localterm theme list                       # built-ins + imports, active one marked
+localterm theme get                       # → active theme id + name
+localterm theme import <file>              # JSON {name,colors}/bare colors, or iTerm .itermcolors → stored custom
+localterm theme set <id>                   # a built-in id, 'auto', or a custom id from `import`
+localterm theme delete <id>                # delete an imported custom (resets active to the default)
+```
+
+Import accepts a JSON theme (`{name, colors}` or a bare xterm `ITheme` colors object) or an iTerm `.itermcolors` plist; the daemon parses — one parser shared with the browser UI's upload — and returns the stored theme with a server-minted id. The active theme is also settable over REST (`GET`/`POST /themes/import`, `PUT /themes/active`, `DELETE /themes/:id`, plus a one-time `POST /themes/migrate` the browser uses on upgrade). For the full surface — endpoints, error responses, import formats, and the `auto`/light-dark resolution — see [references/themes.md](references/themes.md).

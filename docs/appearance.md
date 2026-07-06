@@ -21,10 +21,31 @@ Open **Settings → Theme** to pick from the built-ins:
 - a `.json` theme file (see [Creating a theme](#creating-a-theme) below), or
 - an iTerm **`.itermcolors`** file (the common share format — export one from iTerm2, or grab one from a theme repo).
 
-Imported themes are stored in your browser's `localStorage`, listed after the
-built-ins in the picker, and deletable (a delete on the active theme falls back
-to the default). A malformed file shows an error message instead of silently
-doing nothing.
+Imported themes are stored on the daemon in `~/.localterm/themes.json` and shared
+with the `localterm theme` CLI (see [CLI reference](cli.md#theme--terminal-themes)),
+listed after the built-ins in the picker, and deletable (a delete on the active
+theme falls back to the default). A malformed file shows an error message instead
+of silently doing nothing.
+
+If you imported themes in an earlier version (when they were kept per-browser in
+`localStorage`), they're moved to the daemon's store on your next launch — your
+imported themes and active selection carry over (ids preserved), so an upgrade
+never loses them.
+
+### From the CLI
+
+You can also import and switch themes from the terminal, which is handy for
+scripting or a headless host with no browser open:
+
+```bash
+localterm theme import ~/themes/dracula.json   # prints the new custom id
+localterm theme set custom-lq3a2p               # or a built-in like `dracula`, or `auto`
+localterm theme list                             # built-ins + imports, active one marked
+localterm theme delete custom-lq3a2p
+```
+
+`theme import` accepts the same JSON and `.itermcolors` formats as the browser
+upload (below).
 
 #### iTerm `.itermcolors`
 

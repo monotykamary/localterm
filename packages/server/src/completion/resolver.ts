@@ -8,6 +8,8 @@ export interface ValueSource {
   sessions: () => Promise<string[]>;
   secrets: () => Promise<string[]>;
   processes: () => Promise<string[]>;
+  themes: () => Promise<string[]>;
+  customThemes: () => Promise<string[]>;
 }
 
 const optionFlags = (node: CommandSpecNode): string[] => {
