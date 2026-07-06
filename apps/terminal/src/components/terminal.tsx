@@ -472,6 +472,7 @@ export const Terminal = () => {
     activeDefaultCwd,
     activeDefaultShell,
     activeCustomFontFamily,
+    activeCustomThemes,
     effectiveTheme,
     setPreviewThemeId,
     setPreviewFontId,
@@ -492,6 +493,8 @@ export const Terminal = () => {
     handleDefaultCwdChange,
     handleDefaultShellChange,
     handleCustomFontFamilyChange,
+    handleImportTheme,
+    handleDeleteCustomTheme,
   } = useTerminalSettings({ terminalRef, fitAddonRef, terminalReady, localEchoRef });
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
   const openDiffViewerRef = useRef<(() => void) | null>(null);
@@ -2899,6 +2902,9 @@ export const Terminal = () => {
                     themeId={activeThemeId}
                     onThemeChange={handleThemeChange}
                     onThemePreview={setPreviewThemeId}
+                    customThemes={activeCustomThemes}
+                    onImportTheme={handleImportTheme}
+                    onDeleteTheme={handleDeleteCustomTheme}
                     fontId={activeFontId}
                     onFontChange={handleFontChange}
                     onFontPreview={setPreviewFontId}

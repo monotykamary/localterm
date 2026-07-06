@@ -239,6 +239,10 @@ export const DEFAULT_SHELL_STORAGE_KEY = "localterm:default-shell";
 // "JetBrainsMono Nerd Font Mono") used only when the font id is "custom".
 // Empty = the custom font falls back to the bundled default family.
 export const CUSTOM_FONT_FAMILY_STORAGE_KEY = "localterm:custom-font-family";
+// User-imported terminal themes (JSON shape + iTerm .itermcolors), stored as
+// a JSON array of TerminalTheme so the Theme picker can list them alongside
+// the built-ins and a delete can splice by id.
+export const CUSTOM_THEMES_STORAGE_KEY = "localterm:custom-themes";
 export const NERD_FONT_ENABLED_STORAGE_KEY = "localterm:nerd-font-enabled";
 export const LIGATURES_ENABLED_STORAGE_KEY = "localterm:ligatures-enabled";
 export const FONT_LOAD_PROBE_PX = 16;

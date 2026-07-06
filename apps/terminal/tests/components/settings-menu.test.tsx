@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { SettingsMenu } from "../../src/components/settings-menu";
 import type { TerminalSessionInfo } from "../../src/lib/terminal-session-info";
+import type { TerminalTheme } from "../../src/lib/terminal-themes";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import {
   DEFAULT_TERMINAL_CURSOR_BLINK,
@@ -33,6 +34,9 @@ interface SettingsMenuHarnessProps {
   initialDefaultCwd?: string;
   onThemeChange?: (id: string) => void;
   onThemePreview?: (id: string | null) => void;
+  customThemes?: TerminalTheme[];
+  onImportTheme?: (file: File) => Promise<string | null>;
+  onDeleteTheme?: (id: string) => void;
   onFontChange?: (id: string) => void;
   onFontPreview?: (id: string | null) => void;
   customFontFamily?: string;
@@ -80,6 +84,9 @@ const renderSettingsMenu = ({
   initialDefaultShell = "",
   onThemeChange = () => {},
   onThemePreview,
+  customThemes = [],
+  onImportTheme = async () => null,
+  onDeleteTheme = () => {},
   onFontChange = () => {},
   onFontPreview,
   customFontFamily = "",
@@ -116,6 +123,9 @@ const renderSettingsMenu = ({
         themeId={initialThemeId}
         onThemeChange={onThemeChange}
         onThemePreview={onThemePreview}
+        customThemes={customThemes}
+        onImportTheme={onImportTheme}
+        onDeleteTheme={onDeleteTheme}
         fontId={initialFontId}
         onFontChange={onFontChange}
         onFontPreview={onFontPreview}

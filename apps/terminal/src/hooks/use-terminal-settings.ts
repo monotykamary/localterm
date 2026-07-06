@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import { familyForFont, findTerminalFontById, CUSTOM_FONT_ID, buildCustomTerminalFont } from "@/lib/terminal-fonts";
-import { findTerminalThemeById } from "@/lib/terminal-themes";
+import {
+  AUTO_THEME_ID,
+  DEFAULT_TERMINAL_THEME_ID,
+  findTerminalThemeById,
+  resolveAutoTheme,
+  type TerminalTheme,
+} from "@/lib/terminal-themes";
 import type { TerminalCursorStyle } from "@/lib/terminal-cursor";
 import { LocalEcho } from "@/lib/local-echo";
 import { awaitFontReady } from "@/utils/await-font-ready";
@@ -12,6 +18,8 @@ import { clampTerminalPaddingX, clampTerminalPaddingY } from "@/utils/clamp-term
 import { findLigatureRanges } from "@/utils/ligature-joiner";
 import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
 import { generateExtendedPalette } from "@/utils/generate-extended-palette";
+import { parseImportedTheme } from "@/utils/parse-imported-theme";
+import { loadStoredCustomThemes, storeCustomThemes, subscribeStoredCustomThemes } from "@/utils/stored-custom-themes";
 import {
   loadStoredDefaultCwd,
   storeDefaultCwd,
@@ -133,7 +141,26 @@ export const useTerminalSettings = ({
   const [activeThemeId, setActiveThemeId] = useState<string>(initialThemeIdRef.current);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const effectiveThemeId = previewThemeId ?? activeThemeId;
-  const effectiveTheme = useMemo(() => findTerminalThemeById(effectiveThemeId), [effectiveThemeId]);
+  // User-imported themes (JSON + iTerm .itermcolors), kept in localStorage so the
+  // Theme picker lists them alongside the built-ins and they survive reloads.
+  const [activeCustomThemes, setActiveCustomThemes] = useState<TerminalTheme[]>(
+    loadStoredCustomThemes,
+  );
+  // The host's color-scheme drives the "Auto (system)" theme: VESPER when dark,
+  // the light default when light. Updated live via matchMedia so a desktop
+  // switch re-resolves without a reload (a Linux GTK color-scheme change).
+  const [prefersDark, setPrefersDark] = useState<boolean>(
+    typeof window !== "undefined" && window.matchMedia
+      ? window.matchMedia("(prefers-color-scheme: dark)").matches
+      : true,
+  );
+  const effectiveTheme = useMemo(
+    () =>
+      effectiveThemeId === AUTO_THEME_ID
+        ? resolveAutoTheme(prefersDark)
+        : findTerminalThemeById(effectiveThemeId, activeCustomThemes),
+    [effectiveThemeId, prefersDark, activeCustomThemes],
+  );
   const effectiveThemeWithExtendedPalette = useMemo(
     () => ({
       ...effectiveTheme.colors,
@@ -213,6 +240,50 @@ export const useTerminalSettings = ({
     setActiveThemeId(nextThemeId);
     setPreviewThemeId(null);
     storeTerminalThemeId(nextThemeId);
+  }, []);
+
+  // Import a theme from a file: JSON (TerminalTheme/bare-colors) or iTerm
+  // .itermcolors. Returns null on success or an error string the caller surfaces
+  // so a malformed file explains itself instead of silently no-op'ing. The
+  // imported theme is appended to the custom list and selected immediately.
+  const handleImportTheme = useCallback(
+    async (file: File): Promise<string | null> => {
+      const text = await file.text();
+      const result = parseImportedTheme(text, file.name);
+      if ("error" in result) return result.error;
+      const next = [...activeCustomThemes, result.theme];
+      setActiveCustomThemes(next);
+      storeCustomThemes(next);
+      setActiveThemeId(result.theme.id);
+      setPreviewThemeId(null);
+      storeTerminalThemeId(result.theme.id);
+      return null;
+    },
+    [activeCustomThemes],
+  );
+
+  const handleDeleteCustomTheme = useCallback(
+    (id: string) => {
+      const next = activeCustomThemes.filter((theme) => theme.id !== id);
+      setActiveCustomThemes(next);
+      storeCustomThemes(next);
+      // If the deleted theme was active (or previewed), fall back to the default.
+      if (activeThemeId === id) {
+        setActiveThemeId(DEFAULT_TERMINAL_THEME_ID);
+        storeTerminalThemeId(DEFAULT_TERMINAL_THEME_ID);
+      }
+      if (previewThemeId === id) setPreviewThemeId(null);
+    },
+    [activeCustomThemes, activeThemeId, previewThemeId],
+  );
+
+  // Re-resolve the "Auto (system)" theme when the desktop color-scheme changes.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (event: MediaQueryListEvent) => setPrefersDark(event.matches);
+    query.addEventListener("change", handler);
+    return () => query.removeEventListener("change", handler);
   }, []);
 
   const handleFontChange = useCallback((nextFontId: string) => {
@@ -409,6 +480,7 @@ export const useTerminalSettings = ({
       subscribeStoredTerminalPaddingY(setActivePaddingY),
       subscribeStoredDefaultCwd(setActiveDefaultCwd),
       subscribeStoredDefaultShell(setActiveDefaultShell),
+      subscribeStoredCustomThemes(setActiveCustomThemes),
       subscribeStoredCustomFontFamily(setActiveCustomFontFamily),
     ];
     return () => {
@@ -443,6 +515,7 @@ export const useTerminalSettings = ({
     activeDefaultCwd,
     activeDefaultShell,
     activeCustomFontFamily,
+    activeCustomThemes,
     effectiveTheme,
     setPreviewThemeId,
     setPreviewFontId,
@@ -463,5 +536,7 @@ export const useTerminalSettings = ({
     handleDefaultCwdChange,
     handleDefaultShellChange,
     handleCustomFontFamilyChange,
+    handleImportTheme,
+    handleDeleteCustomTheme,
   };
 };

@@ -1,5 +1,5 @@
-import { ChevronDown, ExternalLink, Settings, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { ChevronDown, ExternalLink, Settings, Trash2, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { NumberStepper } from "@/components/number-stepper";
 import { SettingsSelect, type SettingsSelectItem } from "@/components/settings-select";
@@ -39,7 +39,7 @@ import {
 } from "@/lib/terminal-cursor";
 import { TERMINAL_FONTS, CUSTOM_FONT_ID, buildCustomTerminalFont } from "@/lib/terminal-fonts";
 import { TERMINAL_SCROLLBACK_PRESETS, isTerminalScrollbackValue } from "@/lib/terminal-scrollback";
-import { TERMINAL_THEMES } from "@/lib/terminal-themes";
+import { TERMINAL_THEMES, AUTO_THEME_ID, type TerminalTheme } from "@/lib/terminal-themes";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +47,9 @@ interface SettingsMenuProps {
   themeId: string;
   onThemeChange: (themeId: string) => void;
   onThemePreview?: (themeId: string | null) => void;
+  customThemes: TerminalTheme[];
+  onImportTheme: (file: File) => Promise<string | null>;
+  onDeleteTheme: (id: string) => void;
   fontId: string;
   onFontChange: (fontId: string) => void;
   onFontPreview?: (fontId: string | null) => void;
@@ -317,6 +320,9 @@ export const SettingsMenu = ({
   themeId,
   onThemeChange,
   onThemePreview,
+  customThemes,
+  onImportTheme,
+  onDeleteTheme,
   fontId,
   onFontChange,
   onFontPreview,
@@ -368,6 +374,8 @@ export const SettingsMenu = ({
   const [mounted, setMounted] = useState(false);
   const [settled, setSettled] = useState(false);
   const [isFontSelectOpen, setIsFontSelectOpen] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // The font picker appends a "Custom…" entry whose preview style uses the
@@ -379,6 +387,16 @@ export const SettingsMenu = ({
     ...BUILTIN_FONT_ITEMS,
     { id: CUSTOM_FONT_ID, label: "Custom…", itemStyle: { fontFamily: customFont.family } },
   ];
+
+  // Theme picker: the "Auto (system)" entry first (resolves to dark/light from
+  // prefers-color-scheme), then the built-ins, then any user-imported custom
+  // themes so they appear at the bottom with their original names.
+  const themeItems: readonly SettingsSelectItem[] = [
+    { id: AUTO_THEME_ID, label: "Auto (system)" },
+    ...THEME_ITEMS,
+    ...customThemes.map((theme) => ({ id: theme.id, label: theme.name })),
+  ];
+  const activeCustomTheme = customThemes.find((theme) => theme.id === themeId);
 
   // The overlay is portalled to document.body so the toolbar's transform
   // (translate-y on hide) can't trap the fixed-position overlay in its stacking
@@ -449,6 +467,15 @@ export const SettingsMenu = ({
 
   const handleThemeSelectOpenChange = (open: boolean) => {
     if (!open) onThemePreview?.(null);
+  };
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Reset the input so the same file can be re-selected after an error.
+    event.target.value = "";
+    if (!file) return;
+    const error = await onImportTheme(file);
+    setImportError(error);
   };
 
   const handleFontSelectOpenChange = (open: boolean) => {
@@ -558,13 +585,48 @@ export const SettingsMenu = ({
                       <FieldLabel className={SECTION_LABEL_CLASSES}>Theme</FieldLabel>
                       <SettingsSelect
                         value={themeId}
-                        items={THEME_ITEMS}
+                        items={themeItems}
                         ariaLabel="select theme"
                         placeholder="Theme"
                         onValueChange={handleThemeChange}
                         onOpenChange={handleThemeSelectOpenChange}
                         onItemHover={onThemePreview ? (id) => onThemePreview(id) : undefined}
                       />
+                      <input
+                        ref={importInputRef}
+                        type="file"
+                        accept=".json,.itermcolors,application/json,text/xml,application/xml"
+                        className="hidden"
+                        onChange={handleImportFile}
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          aria-label="import theme"
+                          onClick={() => importInputRef.current?.click()}
+                        >
+                          <Upload className="size-3" />
+                          Import theme…
+                        </Button>
+                        {activeCustomTheme ? (
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            aria-label="delete custom theme"
+                            className="text-muted-foreground hover:text-foreground"
+                            onClick={() => onDeleteTheme(activeCustomTheme.id)}
+                          >
+                            <Trash2 className="size-3" />
+                            Delete
+                          </Button>
+                        ) : null}
+                      </div>
+                      {importError ? (
+                        <span className="min-w-0 text-[10px] leading-tight text-amber-400">
+                          {importError}
+                        </span>
+                      ) : null}
                     </Field>
 
                     <Separator className="bg-border/40" />
