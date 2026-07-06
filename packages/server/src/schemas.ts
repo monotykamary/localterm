@@ -1253,13 +1253,12 @@ export const automationRunRecordSchema = z
     // Triage unread flag for agent runs with findings or a log; cleared when the
     // user opens the run. Always false for shell runs (no findings to triage).
     unread: z.boolean().default(false),
-    // Full per-run log: the agent transcript (pi harness) or stdout+stderr
-    // (custom harness), truncated. Shown in an expandable log view. null for
-    // shell runs and agent runs that produced no output.
-    // Full per-run log: a string (ANSI-stripped PTY output) for shell runs, or
-    // a structured user/assistant/tool transcript for agent runs (so the UI
-    // can hide thinking behind a toggle). Discriminated at runtime by
-    // Array.isArray. null for runs that produced no output.
+    // Full per-run log: a tail-bounded ANSI-stripped PTY-output string for
+    // shell runs and custom-harness agent runs (stdout+stderr), or a structured
+    // user/assistant/tool transcript for pi-harness agent runs (so the UI can
+    // hide thinking behind a toggle). Discriminated at runtime by
+    // Array.isArray (array = pi transcript). null for runs that produced no
+    // output.
     log: z
       .union([
         z.string().max(MAX_AUTOMATION_LOG_LENGTH),

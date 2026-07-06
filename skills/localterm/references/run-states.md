@@ -12,7 +12,7 @@ The run tab opens in the **background** (it does not steal focus). When a Chromi
 
 ## Reading run state
 
-Each automation carries `runs` (newest-first, capped at 20) of `{runId, scheduledFor, startedAt, finishedAt, status, exitCode, trigger, countsTowardLimit, findings, changedFiles, unread, log}`, plus `runCount`, `lifecycle` (`active`|`finished`), and a back-compat `lastRun: {runId, at, status, exitCode}` (= the newest run). The `findings`/`log`/`changedFiles`/`unread` fields are agent-run artifacts — `null`/`[]`/`false` for shell runs:
+Each automation carries `runs` (newest-first, capped at 20) of `{runId, scheduledFor, startedAt, finishedAt, status, exitCode, trigger, countsTowardLimit, findings, changedFiles, unread, log}`, plus `runCount`, `lifecycle` (`active`|`finished`), and a back-compat `lastRun: {runId, at, status, exitCode}` (= the newest run). Of the per-run fields beyond `status`/`exitCode`/`trigger`: `log` is captured for every runner — a tail-bounded, ANSI-stripped PTY-output **string** for shell runs (null when the command emitted nothing), or a structured transcript / stdout+stderr for agent runs (discerned with `Array.isArray`). `findings`, `changedFiles`, and `unread` are agent-run artifacts — `null`/`[]`/`false` for shell runs. Run `status` is one of:
 
 | status      | meaning                                                                                                                                                                                                       |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

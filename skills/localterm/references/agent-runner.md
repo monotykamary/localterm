@@ -141,14 +141,14 @@ is stored as-is — leave it `false` (the default).
 
 ## Run record fields (agent runs)
 
-Run records are shared with shell runs; the agent-specific fields are:
+Run records are shared with shell runs. `findings`/`changedFiles`/`unread` are agent-specific (`null`/`[]`/`false` for shell runs); `log` is captured for every runner (a tail-bounded ANSI-stripped PTY-output string for shell runs). The agent-run field shapes:
 
-| field          | shape                               | meaning                                                                                          |
-| -------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `findings`     | `string \| null`                    | truncated final assistant text (pi) or stdout (custom), max 8000. null when nothing was emitted. |
-| `log`          | `AgentLogEntry[] \| string \| null` | structured transcript (pi) or stdout+stderr (custom). Discern with `Array.isArray`.              |
-| `changedFiles` | `string[]`                          | working-tree paths whose git status changed across the run, capped at 64. Empty for non-repos.   |
-| `unread`       | `boolean`                           | `true` for agent runs with findings until opened; always `false` for shell runs.                 |
+| field          | shape                               | meaning                                                                                                                                                                                    |
+| -------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `findings`     | `string \| null`                    | truncated final assistant text (pi) or stdout (custom), max 8000. null for shell runs and when nothing was emitted.                                                                        |
+| `log`          | `AgentLogEntry[] \| string \| null` | shell runs: ANSI-stripped PTY output (string). agent runs: structured transcript (pi, array) or stdout+stderr (custom, string). Discern agent transcript from string with `Array.isArray`. |
+| `changedFiles` | `string[]`                          | working-tree paths whose git status changed across the run, capped at 64. Empty for shell runs and non-repos.                                                                              |
+| `unread`       | `boolean`                           | `true` for agent runs with findings until opened; always `false` for shell runs.                                                                                                           |
 
 A `log` entry is one of:
 
