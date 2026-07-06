@@ -422,6 +422,7 @@ const RunLogView = ({
   const entries = Array.isArray(run.log) ? run.log : null;
   const textLog = typeof run.log === "string" ? run.log : run.findings;
   const displayEntries: AgentSessionEntry[] | null = isThread ? sessionEntries : entries;
+  const showScrollButton = !isAtBottom;
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-3 py-2">
@@ -489,18 +490,22 @@ const RunLogView = ({
             </p>
           )}
         </div>
-        {isAtBottom ? null : (
-          <button
-            type="button"
-            aria-label="scroll to bottom"
-            title="Scroll to bottom"
-            onClick={scrollToBottom}
-            className="absolute bottom-3 right-3 z-10 flex size-8 animate-in fade-in-0 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground shadow-md backdrop-blur-sm duration-150 ease-snappy transition-colors hover:text-foreground"
-          >
-            <ChevronDown className="size-4" aria-hidden="true" />
-          </button>
-        )}
       </div>
+      {/* Sibling of the scroll container so it stays pinned while the log
+          scrolls; always-mounted + transition keeps enter/exit interruptible. */}
+      <button
+        type="button"
+        aria-label="scroll to bottom"
+        title="Scroll to bottom"
+        aria-hidden={!showScrollButton || undefined}
+        tabIndex={showScrollButton ? 0 : -1}
+        data-visible={showScrollButton || undefined}
+        data-hidden={!showScrollButton || undefined}
+        onClick={scrollToBottom}
+        className="absolute bottom-3 right-3 z-10 flex size-8 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground shadow-md backdrop-blur-sm transition-[opacity,translate,color] duration-150 ease-snappy hover:text-foreground data-[hidden]:pointer-events-none data-[hidden]:translate-y-1 data-[hidden]:opacity-0 data-[visible]:translate-y-0 data-[visible]:opacity-100"
+      >
+        <ChevronDown className="size-4" aria-hidden="true" />
+      </button>
     </div>
   );
 };

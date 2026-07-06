@@ -335,20 +335,20 @@ describe("AutomationsModal run log", () => {
     const scrollContainer = transcript.closest<HTMLElement>(".overflow-auto")!;
 
     // jsdom reports no overflow, so the log reads as already pinned to the
-    // bottom and the hover button stays hidden.
-    expect(screen.queryByLabelText("scroll to bottom")).toBeNull();
+    // bottom and the scroll-to-bottom button stays hidden (aria-hidden).
+    expect(screen.queryByRole("button", { name: "scroll to bottom" })).toBeNull();
 
     // Pretend the transcript is taller than the viewport and scrolled up.
     Object.defineProperty(scrollContainer, "scrollHeight", { value: 1000, configurable: true });
     Object.defineProperty(scrollContainer, "clientHeight", { value: 200, configurable: true });
     fireEvent.scroll(scrollContainer);
-    const scrollButton = await screen.findByLabelText("scroll to bottom");
+    const scrollButton = await screen.findByRole("button", { name: "scroll to bottom" });
     expect(scrollButton).toBeDefined();
 
     // Clicking pins to the bottom and hides the button once the scroll settles.
     fireEvent.click(scrollButton);
     expect(scrollContainer.scrollTop).toBe(1000);
     fireEvent.scroll(scrollContainer);
-    expect(screen.queryByLabelText("scroll to bottom")).toBeNull();
+    expect(screen.queryByRole("button", { name: "scroll to bottom" })).toBeNull();
   });
 });
