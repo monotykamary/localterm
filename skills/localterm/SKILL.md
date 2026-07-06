@@ -339,7 +339,8 @@ CLI equivalents:
 
 ```bash
 localterm exec "pnpm test 2>&1 | tail -20" --cwd /Users/me/project --timeout 60 --json
-localterm session new --cwd /Users/me/project --json   # prints the session id
+localterm exec "fish -c 'status'" --shell /usr/bin/fish --json   # --shell overrides the daemon default (create/new/exec only)
+localterm session new --cwd /Users/me/project --shell /usr/bin/fish --json   # prints the session id
 localterm session exec <id> "cd src && pwd" --json
 localterm session send-keys <id> 'ls\n'                # \n=Enter, \x03=Ctrl-C
 localterm session press <id> Escape : w q Enter      # named keys (F2, Ctrl-C, literal text)
@@ -356,6 +357,10 @@ Key points for agents:
 - **Default to one-shot `exec`** for stateless commands — no session to manage.
   With `--json` the CLI exits 0 and the exit code is in the payload; without it,
   the CLI prints output and exits with the command's code (124 on timeout).
+- **`--shell` / `shell` picks the shell** for `exec` and `session new` (one-shot
+  exec + create-session; in-session exec uses the session's already-spawned shell).
+  Omit it to use the daemon's detected default (`LOCALTERM_SHELL` → login shell →
+  `$SHELL` → `/bin/sh`); a non-executable path is rejected with `400 invalid_shell`.
 - **Use a pinned session** only when state must survive across calls (a `cd`,
   an rc-sourced alias, a REPL). Create, drive, then `DELETE` it — pinned
   sessions don't self-reap.

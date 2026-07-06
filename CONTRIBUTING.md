@@ -61,6 +61,53 @@ nr lint:fix    # Fix lint errors
 nr format      # Format code
 ```
 
+### Dev server
+
+`pnpm dev` runs the terminal's Vite dev server through portless at
+`https://dev.localterm.localhost` (the daemon's `https://localterm.localhost`
+hostname is reserved for the built daemon). The two `tsc --watch` packages keep
+running in parallel via turbo. Escape hatch: `pnpm dev:app` runs `vp dev`
+without portless.
+
+### `localterm` binary from the working copy
+
+Iterating via `pnpm cli` is fast but leaves no `localterm` binary on PATH, so
+anything that calls `localterm ...` (scripts, docs, muscle memory) won't work.
+Link the CLI globally from your checkout to get the binary without giving up
+live rebuilds:
+
+```bash
+pnpm setup                         # once, if PNPM_HOME isn't configured yet
+pnpm link --global ./packages/cli  # from the repo root, so the workspace dep resolves
+```
+
+The shim runs `packages/cli/dist/index.js` straight out of the checkout, so
+`pnpm build` / `pnpm dev` rebuilds land on the next `localterm` call — no
+reinstall. Unlink with `pnpm remove --global @monotykamary/localterm`.
+
+Two gotchas:
+
+- `pnpm link` also writes a `link:` dependency into `package.json`,
+  `packages/cli/package.json`, and `pnpm-workspace.yaml` (and rewrites the
+  latter's `allowBuilds`). Those are side effects, not intended edits — revert
+  them so they don't get committed; the global shim lives in
+  `~/Library/pnpm/bin` and is unaffected:
+
+  ```bash
+  git checkout -- package.json packages/cli/package.json pnpm-workspace.yaml pnpm-lock.yaml
+  rm -f packages/cli/pnpm-workspace.yaml
+  ```
+
+- `prepack` (the `apps/terminal/dist` → `packages/cli/terminal` copy that ships
+  the UI with the tarball) runs only on `pnpm pack` / `pnpm publish`, **not** on
+  `pnpm build`. After a terminal-UI change, sync it manually; pure cli/server TS
+  changes just need `pnpm build` since `localterm` reads `dist` live:
+
+  ```bash
+  pnpm build
+  pnpm --filter @monotykamary/localterm run prepack
+  ```
+
 ## Code Style
 
 See `AGENTS.md` for the full set of rules. The highlights:

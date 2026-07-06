@@ -46,10 +46,13 @@ Same loopback-only, same-machine contract as the rest of the API.
 curl -s "$BASE/sessions"
 
 # Spawn a detached PTY (no browser tab). Pinned by default.
+# `shell` overrides the daemon's detected default; a non-executable path is
+# rejected with 400 invalid_shell. Omit it to use the default (LOCALTERM_SHELL
+# → login shell → $SHELL → /bin/sh).
 curl -s -X POST "$BASE/sessions" \
   -H 'content-type: application/json' \
-  -d '{ "cwd": "/Users/me/project", "command": "git status", "name": "build", "pinned": true }'
-# → 201 { "session": { "id": "<uuid>", "pinned": true, "shellName": "zsh", … } }
+  -d '{ "cwd": "/Users/me/project", "command": "git status", "name": "build", "pinned": true, "shell": "/usr/bin/fish" }'
+# → 201 { "session": { "id": "<uuid>", "pinned": true, "shellName": "fish", … } }
 
 # One session by id
 curl -s "$BASE/sessions/<id>"
@@ -98,7 +101,7 @@ curl -s -X DELETE "$BASE/sessions/<id>"
 
 ```bash
 localterm session ls [--json]
-localterm session new [--cwd <path>] [--cmd <command>] [--name <t>] [--cols N] [--rows N] [--no-pin] [--json]
+localterm session new [--cwd <path>] [--cmd <command>] [--shell <path>] [--name <t>] [--cols N] [--rows N] [--no-pin] [--json]
 localterm session attach <id>          # open a browser tab at <surface>/?sid=<id>
 localterm session kill <id>
 localterm session send-keys <id> '<keys>'   # \n = Enter, \xHH = control byte
@@ -170,21 +173,25 @@ echo $?            # the command's exit code (124 on timeout)
 # One-shot JSON — CLI always exits 0; the exit code is in the payload:
 localterm exec "pnpm build" --json --cwd /Users/me/project
 
-# In-session:
+# One-shot in a specific shell (overrides the daemon default):
+localterm exec "fish -c 'echo \$fish_version'" --shell /usr/bin/fish --json
+
+# In-session (the session's shell is fixed at spawn — `--shell` is create/new only):
 localterm session exec <id> "cd src && pwd" --json
 localterm session exec <id> "make test" --timeout 120
 ```
 
 ### Request fields
 
-| field              | exec | one-shot | meaning                                              |
-| ------------------ | ---- | -------- | ---------------------------------------------------- |
-| `command`          | ✓    | ✓        | single shell command line (required)                 |
-| `cwd`              |      | ✓        | working directory for the transient shell            |
-| `cols`/`rows`      |      | ✓        | terminal size (default 120×32)                       |
-| `env`              |      | ✓        | extra env vars for the transient shell               |
-| `timeoutMs`        | ✓    | ✓        | default 120000, max 1800000 (30 min)                 |
-| `outputLimitBytes` | ✓    | ✓        | default 1MB, max 8MB — output past it is `truncated` |
+| field              | exec | one-shot | meaning                                                 |
+| ------------------ | ---- | -------- | ------------------------------------------------------- |
+| `command`          | ✓    | ✓        | single shell command line (required)                    |
+| `cwd`              |      | ✓        | working directory for the transient shell               |
+| `shell`            |      | ✓        | absolute shell path; non-executable → 400 invalid_shell |
+| `cols`/`rows`      |      | ✓        | terminal size (default 120×32)                          |
+| `env`              |      | ✓        | extra env vars for the transient shell                  |
+| `timeoutMs`        | ✓    | ✓        | default 120000, max 1800000 (30 min)                    |
+| `outputLimitBytes` | ✓    | ✓        | default 1MB, max 8MB — output past it is `truncated`    |
 
 ### Result
 
