@@ -1,5 +1,15 @@
 # localterm
 
+## 2.44.1
+
+### Patch Changes
+
+- Revert `@fontsource/geist-mono` to 5.2.7 (Geist 1.401): 5.2.8 packages Geist 1.7.0, which collapsed every coding ligature (`:=`, `=>`, `!=`, `==`, `->`, `-->`, `>=`, `<=`) to a single cell under the `liga` feature. xterm.js's fixed-cell ligature model then left-clips the ligature (the colon in `:=` vanishes) and shifts trailing glyphs one cell left. 5.2.7 emits each ligature as a multi-cell substitution (`:=` spans 2 cells) so xterm renders it correctly. Pinned exactly so it cannot drift back to 5.2.8. Upstream Geist 1.7.0 ligature regression: vercel/geist-font#201, #231.
+
+  Also raise `VERIFY_PID_TIMEOUT_MS` 1s → 5s so the daemon pid probe tolerates a slow `ps` under load instead of falsely reporting "unknown".
+
+  - @monotykamary/localterm-server@2.44.1
+
 ## 2.44.0
 
 ### Minor Changes
