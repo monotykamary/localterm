@@ -18,6 +18,13 @@ const findFish = (): string | null => {
   return null;
 };
 
+const findBash = (): string | null => {
+  for (const candidate of ["/bin/bash", "/usr/bin/bash", "/usr/local/bin/bash"]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+};
+
 const waitFor = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
   Promise.race([
     promise,
@@ -410,4 +417,55 @@ describe("Session", { tags: ["integration"] }, () => {
       rmSync(shimsDir, { recursive: true, force: true });
     }
   }, 20_000);
+
+  it("runs a non-fullscreen initial command via the prompt hook (no PTY typing)", async () => {
+    // A non-fullscreen initial command (an automation shell-runner command, a
+    // worktree's setup script) for a hooked shell (zsh/bash/fish) runs via the
+    // prompt hook — `eval "$LOCALTERM_INITIAL_COMMAND"` in precmd /
+    // PROMPT_COMMAND — instead of being typed into the PTY, so it can't race
+    // the line editor's ECHO or double-echo. The hook also emits the
+    // automation-exit OSC with the command's exit status, so the run completes
+    // with the real exit code. Prefers zsh; falls back to bash; skips if neither
+    // is present.
+    const shellPath = existsSync("/bin/zsh") ? "/bin/zsh" : findBash();
+    if (!shellPath) return;
+    const session = new Session({
+      shell: shellPath,
+      initialCommand: "echo INITIAL_COMMAND_RUNS_TOKEN",
+    });
+    try {
+      await waitFor(
+        new Promise<void>((resolve, reject) => {
+          let sawToken = false;
+          let sawAutomationExit = false;
+          const finish = () => {
+            if (sawToken && sawAutomationExit) {
+              clearTimeout(timer);
+              session.off("output", onOutput);
+              session.off("automation-exit", onAutomationExit);
+              resolve();
+            }
+          };
+          const timer = setTimeout(() => {
+            session.off("output", onOutput);
+            session.off("automation-exit", onAutomationExit);
+            reject(new Error("initial command never completed"));
+          }, 10_000);
+          const onOutput = (chunk: string) => {
+            if (chunk.includes("INITIAL_COMMAND_RUNS_TOKEN")) sawToken = true;
+            finish();
+          };
+          const onAutomationExit = (exitCode: number) => {
+            if (exitCode === 0) sawAutomationExit = true;
+            finish();
+          };
+          session.on("output", onOutput);
+          session.on("automation-exit", onAutomationExit);
+        }),
+        12_000,
+      );
+    } finally {
+      session.dispose();
+    }
+  }, 15_000);
 });

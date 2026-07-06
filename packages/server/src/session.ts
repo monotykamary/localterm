@@ -8,6 +8,7 @@ import {
   COLORTERM_VALUE,
   DEFAULT_COLS,
   DEFAULT_ROWS,
+  HOOKED_SHELL_NAMES,
   LOCALTERM_STATE_DIRNAME,
   LOCALTERM_VALUE,
   MAX_NOTIFICATION_LENGTH,
@@ -29,6 +30,7 @@ import { shimPathPrependLine } from "./secret-shims.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
 import type { SpawnPtyInput } from "./types.js";
 import { formatWorkingDirectoryTitle } from "./utils/format-working-directory-title.js";
+import { isFullscreenTuiCommand } from "./utils/is-fullscreen-tui-command.js";
 import { parseAltScreenFromChunk } from "./utils/parse-alt-screen.js";
 import { parseOsc7FromChunk } from "./utils/parse-osc7.js";
 import { parseOscAutomationExitFromChunk } from "./utils/parse-osc-automation-exit.js";
@@ -163,6 +165,26 @@ export class Session extends EventEmitter<SessionEvents> {
       }
     }
 
+    // An initial command (an "open in neovim" tab, a worktree's setup script,
+    // an automation shell-runner command) runs one of two ways:
+    //  - Hooked shells (zsh/bash/fish) run it via the prompt hook (eval), so it
+    //    never goes through the line editor's typed-input path and can't race
+    //    ECHO or double-echo. The command is passed through the
+    //    LOCALTERM_INITIAL_COMMAND env var; the hook evals it, emits the
+    //    automation-exit OSC, and unsets it.
+    //  - Fullscreen TUIs (nvim/vim/less/…) and unhooked shells get the at-spawn
+    //    PTY write. A fullscreen TUI clears the screen on alt-screen enter, so
+    //    the line discipline's echo of the typed command is invisible; running
+    //    a full-screen app inside a precmd hook is fragile, so it takes the PTY
+    //    path. Unhooked shells (sh/dash) have no hook to eval with.
+    const useHookEval =
+      !!input.initialCommand &&
+      HOOKED_SHELL_NAMES.has(this.shellName) &&
+      !isFullscreenTuiCommand(input.initialCommand);
+    if (input.initialCommand && useHookEval) {
+      env.LOCALTERM_INITIAL_COMMAND = input.initialCommand;
+    }
+
     this.pty = spawn(this.shell, shellArgs, {
       name: TERM_TYPE,
       cols: this.currentCols,
@@ -193,10 +215,9 @@ export class Session extends EventEmitter<SessionEvents> {
       this.emit("exit", exitCode);
     });
 
-    // The PTY line discipline buffers the bytes until the shell reads stdin,
-    // so writing before the first prompt is safe — the command echoes at the
-    // prompt and runs exactly as if the user had typed it.
-    if (input.initialCommand) this.pty.write(`${input.initialCommand}\r`);
+    if (input.initialCommand && !useHookEval) {
+      this.pty.write(`${input.initialCommand}\r`);
+    }
 
     this.emitInitialMetadata();
     this.foregroundWatcher = new ForegroundWatcher(
@@ -574,28 +595,29 @@ export class Session extends EventEmitter<SessionEvents> {
         // `\''` POSIX idiom).
         const escapedShimsDir = shimsDir.replace(/'/g, "\\'");
         const shimsPrepend = `test -d '${escapedShimsDir}' && set -gx PATH '${escapedShimsDir}' $PATH`;
-        // A single fish_prompt handler captures $status FIRST (before any
-        // printf mutates it) so the automation-exit emit on prompt #2 reports
-        // the real command exit code, then emits the git-dirty signal.
-        // Splitting these into two --on-event handlers would let the git-dirty
-        // printf reset $status to 0 before the exit handler read it.
+        // The fish_prompt handler emits the git-dirty signal, and (when an
+        // initial command is staged) copies LOCALTERM_INITIAL_COMMAND into a
+        // local, clears the env var, evals the local, and emits the
+        // automation-exit OSC with the eval's $status. See
+        // automationExitHookFunctionLines for the security rationale (copy +
+        // unset before eval, PTY_ENV_DENYLIST) and why this runs the command
+        // instead of typing it into the PTY.
         const lines = [
           "function __localterm_osc7 --on-variable PWD",
           "    printf '\\e]7;file://%s%s\\a' (hostname 2>/dev/null || echo localhost) $PWD",
           "end",
           "__localterm_osc7",
           shimsPrepend,
-          ...(this.reportInitialCommandExit
-            ? ["set -g __localterm_automation_prompt_count 0"]
-            : []),
           "function __localterm_prompt_hook --on-event fish_prompt",
-          "    set -l __localterm_exit $status",
           "    printf '\\e]7777;git-dirty\\a'",
           ...(this.reportInitialCommandExit
             ? [
-                "    set -g __localterm_automation_prompt_count (math $__localterm_automation_prompt_count + 1)",
-                '    if test "$__localterm_automation_prompt_count" -eq 2',
-                "        printf '\\e]7777;automation-exit;%d\\a' $__localterm_exit",
+                '    if test -n "$LOCALTERM_INITIAL_COMMAND"',
+                "        set -l __localterm_initial_command $LOCALTERM_INITIAL_COMMAND",
+                "        set -e LOCALTERM_INITIAL_COMMAND",
+                "        printf '+ %s\\n' $__localterm_initial_command",
+                "        eval $__localterm_initial_command",
+                "        printf '\\e]7777;automation-exit;%d\\a' $status",
                 "    end",
               ]
             : []),
@@ -608,18 +630,29 @@ export class Session extends EventEmitter<SessionEvents> {
     }
   }
 
-  // The initial command is buffered into the PTY at spawn, so prompt #1 is
-  // the one the command echoes at and prompt #2 is the first one after it
-  // finishes — that's the only cycle where $? is the command's exit status.
-  // The hook must run FIRST in the prompt chain (prepended), otherwise the
-  // osc7/git-dirty hooks' printf would have already reset $? to 0.
+  // The initial command for a hooked shell (zsh/bash/fish) is run by this hook
+  // via `eval`, instead of being typed into the PTY — so it never goes through
+  // the line editor's typed-input path and can't race ECHO or double-echo. The
+  // command arrives through the LOCALTERM_INITIAL_COMMAND env var (set in the
+  // constructor). The hook copies it into a local and unsets the env var
+  // BEFORE eval, so the command string isn't inherited by child processes the
+  // command spawns and the hook runs once; then prints it (prefixed `+`),
+  // evals the local, and emits the automation-exit OSC with the eval's exit
+  // status. Prepended first in the prompt chain; fullscreen TUIs and unhooked
+  // shells don't reach here (they take the at-spawn PTY write).
+  // LOCALTERM_INITIAL_COMMAND is on PTY_ENV_DENYLIST so a stale or inherited
+  // value from the daemon env can't reach the hook — the constructor's set is
+  // the only source.
   private automationExitHookFunctionLines(functionName: string): string[] {
     return [
-      "__localterm_automation_prompt_count=0",
       `${functionName}() {`,
-      "  local __localterm_command_exit=$?",
-      "  __localterm_automation_prompt_count=$((__localterm_automation_prompt_count + 1))",
-      '  if [ "$__localterm_automation_prompt_count" -eq 2 ]; then',
+      '  if [ -n "${LOCALTERM_INITIAL_COMMAND:-}" ]; then',
+      "    local __localterm_command_exit __localterm_initial_command",
+      '    __localterm_initial_command="$LOCALTERM_INITIAL_COMMAND"',
+      "    unset LOCALTERM_INITIAL_COMMAND",
+      "    printf '+ %s\\n' \"$__localterm_initial_command\"",
+      '    eval "$__localterm_initial_command"',
+      "    __localterm_command_exit=$?",
       "    printf '\\e]7777;automation-exit;%d\\a' \"$__localterm_command_exit\"",
       "  fi",
       "}",

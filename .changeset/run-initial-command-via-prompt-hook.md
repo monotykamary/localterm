@@ -1,0 +1,11 @@
+---
+"@monotykamary/localterm-server": patch
+---
+
+Run a non-fullscreen initial command via the shell's prompt hook instead of typing it into the PTY.
+
+An initial command (an "open in neovim" tab, a worktree's setup script, or an automation shell-runner command) was written to the PTY, so the line discipline's ECHO and the line editor's char-echo raced it: at spawn the command floated above the not-yet-rendered prompt, and at the first prompt's early signals (git-dirty, bracketed-paste-enable DECSET 2004) ECHO was still on, so the first character double-echoed (`ggit pull …`) and a bracketed paste was worse (the whole command line-discipline-echoed plus block-inserted).
+
+For a hooked shell (zsh/bash/fish) the command is now passed through a `LOCALTERM_INITIAL_COMMAND` env var and run by the existing prompt hook via `eval` (in precmd / PROMPT_COMMAND / fish_prompt), instead of being typed. It never goes through the line editor's typed-input path, so it can't race ECHO or double-echo — no floating, no doubled character, no delay. The hook copies the env var into a local and unsets the env var BEFORE eval (so the command string isn't inherited by child processes the command spawns, and the hook runs once), prints the command (prefixed `+`), evals the local, and emits the automation-exit OSC with the eval's exit status. `LOCALTERM_INITIAL_COMMAND` is on the PTY env denylist so a stale or inherited value from the daemon env can't reach the hook — the constructor's explicit set is the only source. The server side is unchanged: the hook emits the same `\e]7777;automation-exit;N\a` OSC the count-based hook already emitted, and `parseOscAutomationExitFromChunk` parses it the same way (it arrives at precmd #1 instead of prompt #2, which the server doesn't track).
+
+Fullscreen TUIs (nvim/vim/less/htop/… — detected by the command's first token) and unhooked shells (sh/dash/arbitrary) still take the at-spawn PTY write. A fullscreen TUI clears the screen on alt-screen enter, so the line discipline's echo of the typed command is invisible; running a full-screen app inside a precmd hook is fragile, so it keeps the PTY path. Unhooked shells have no prompt hook to eval with. The doubling for those is the same as before (and for fullscreen TUIs it's invisible).

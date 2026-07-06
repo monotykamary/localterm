@@ -166,6 +166,7 @@ export const TITLE_MAX_PATH_SEGMENTS = 1;
  */
 export const PTY_ENV_DENYLIST = [
   "LOCALTERM_DAEMON_CHILD",
+  "LOCALTERM_INITIAL_COMMAND",
   "TERM_PROGRAM",
   "TERM_PROGRAM_VERSION",
   "TERM_SESSION_ID",
@@ -191,6 +192,43 @@ export const MAX_PENDING_PARSE_BYTES = 4096;
 export const MAX_COLS = 1000;
 export const MAX_ROWS = 1000;
 export const MAX_CONCURRENT_SESSIONS = 64;
+// Shells localterm installs prompt hooks (osc7, git-dirty, automation-exit)
+// into via prepareOsc7Hook. An initial command for one of these runs via the
+// hook (eval) instead of a PTY write, so it never goes through the line
+// editor's typed-input path and can't race ECHO or double-echo. Other shells
+// (sh, dash, arbitrary) have no hook to eval with and get the at-spawn PTY
+// write.
+export const HOOKED_SHELL_NAMES = new Set(["zsh", "bash", "fish"]);
+
+// Commands that take over the screen (enter the alternate screen buffer), so
+// the line discipline's ECHO of the typed initial command is invisible — the
+// TUI clears the screen on alt-screen enter. These take the at-spawn PTY write
+// instead of the hook-eval path: running a full-screen app inside a precmd /
+// PROMPT_COMMAND / fish_prompt hook is fragile (zle/readline/fish's reader
+// aren't active during the hook, but the app still has to take the TTY from
+// inside a prompt function), and the doubling/floating never shows anyway.
+// Matched on the command's first token (basename), so `nvim file && exit`
+// routes here but a worktree setup script or `git pull` doesn't.
+export const FULLSCREEN_TUI_COMMANDS = new Set([
+  "nvim",
+  "vim",
+  "vi",
+  "view",
+  "ex",
+  "less",
+  "more",
+  "most",
+  "man",
+  "htop",
+  "top",
+  "btop",
+  "emacs",
+  "micro",
+  "helix",
+  "hx",
+  "tmux",
+  "screen",
+]);
 // High/low water marks gate the PTY -> WS pipe instead of killing the socket.
 // Crossing the high water mark pauses the PTY so the OS pipe absorbs further
 // child output until the WS drains below the low water mark, at which point
