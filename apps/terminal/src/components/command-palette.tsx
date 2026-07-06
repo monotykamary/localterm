@@ -7,6 +7,7 @@ import {
 } from "@/lib/animation-classes";
 import { COMMAND_PALETTE_CLOSE_TRANSITION_MS, PALETTE_MODAL_MAX_HEIGHT_PX } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+import { fuzzyMatch, fuzzyMaxScore, type QueryMatch } from "@/utils/fuzzy-match";
 
 export interface CommandItem {
   id: string;
@@ -34,11 +35,6 @@ interface CommandPaletteProps {
 const COMMAND_ITEM_CLASSES =
   "flex w-full items-center gap-2.5 rounded-sm px-2.5 py-2 text-sm text-muted-foreground outline-none transition-colors";
 
-interface QueryMatch {
-  score: number;
-  indices: readonly number[];
-}
-
 // Matches that hit the label directly always rank above matches that only
 // succeed against "category label", whatever their individual scores.
 const CATEGORY_MATCH_PENALTY = 10;
@@ -57,31 +53,6 @@ const matchQuery = (query: string, text: string): QueryMatch | null => {
   if (!fuzzy) return null;
   const normalized = fuzzy.score / fuzzyMaxScore(q.length);
   return { score: 4 + (1 - normalized), indices: fuzzy.indices };
-};
-
-const fuzzyMaxScore = (queryLength: number): number => {
-  let score = queryLength;
-  score += (queryLength - 1) * 0.5;
-  score += queryLength * 0.5;
-  return score;
-};
-
-const fuzzyMatch = (q: string, t: string): QueryMatch | null => {
-  let qi = 0;
-  let score = 0;
-  let lastMatchIndex = -1;
-  const indices: number[] = [];
-  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
-    if (t[ti] === q[qi]) {
-      score += 1;
-      if (lastMatchIndex === ti - 1) score += 0.5;
-      if (ti === 0 || t[ti - 1] === " " || t[ti - 1] === "-") score += 0.5;
-      lastMatchIndex = ti;
-      indices.push(ti);
-      qi++;
-    }
-  }
-  return qi === q.length ? { score, indices } : null;
 };
 
 interface FilteredEntry {

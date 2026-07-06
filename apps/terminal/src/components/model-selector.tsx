@@ -1,7 +1,8 @@
-import type { AgentModelInfo } from "@monotykamary/localterm-server/protocol";
 import { Search } from "lucide-react";
 import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { agentModelId } from "@/utils/agent-model-id";
+import { matchAgentModels } from "@/utils/match-agent-model";
 import { useAgentModels } from "@/utils/fetch-agent-models";
 import { cn } from "@/lib/utils";
 
@@ -16,9 +17,6 @@ interface ModelSelectorProps {
   // something prettier than `provider/id`.
   trigger?: (open: boolean, value: string, label: string) => ReactElement;
 }
-
-const modelId = (model: AgentModelInfo): string =>
-  model.provider.length > 0 ? `${model.provider}/${model.id}` : model.id;
 
 // A single-select model picker that mirrors the SecretSelector: a combobox
 // trigger + a searchable popover list with arrow-key navigation. The list
@@ -37,20 +35,13 @@ export const ModelSelector = ({
   const { models, loading } = useAgentModels();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const filtered = useMemo(() => {
-    const trimmed = query.trim().toLowerCase();
-    if (trimmed.length === 0) return models;
-    return models.filter((model) => {
-      const id = modelId(model).toLowerCase();
-      return id.includes(trimmed) || model.name.toLowerCase().includes(trimmed);
-    });
-  }, [models, query]);
+  const filtered = useMemo(() => matchAgentModels(models, query), [models, query]);
 
   // A human-readable label for the current value: the matched model's name, or
   // the raw value when it's a custom string not in the list (pi accepts those).
   const displayLabel = useMemo(() => {
     if (value.length === 0) return "";
-    const matched = models.find((model) => modelId(model) === value);
+    const matched = models.find((model) => agentModelId(model) === value);
     return matched ? matched.name : value;
   }, [models, value]);
 
@@ -91,7 +82,7 @@ export const ModelSelector = ({
         return;
       }
       const model = filtered[highlightedIndex - 1];
-      if (model !== undefined) choose(modelId(model));
+      if (model !== undefined) choose(agentModelId(model));
       else if (query.trim().length > 0) choose(query.trim());
       return;
     }
@@ -140,7 +131,7 @@ export const ModelSelector = ({
             value={query}
             onChange={(changeEvent) => setQuery(changeEvent.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search by model or provider…"
+            placeholder="Search models…"
             className="flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60"
           />
         </div>
@@ -192,11 +183,11 @@ export const ModelSelector = ({
               const optionIndex = index + 1;
               return (
                 <button
-                  key={modelId(model)}
+                  key={agentModelId(model)}
                   type="button"
                   role="option"
                   aria-selected={optionIndex === highlightedIndex}
-                  onClick={() => choose(modelId(model))}
+                  onClick={() => choose(agentModelId(model))}
                   onMouseEnter={() => setHighlightedIndex(optionIndex)}
                   className={cn(
                     "flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-1.5 text-left outline-none transition-colors",
@@ -205,7 +196,7 @@ export const ModelSelector = ({
                       : "text-muted-foreground hover:bg-foreground/5",
                   )}
                 >
-                  <span className="text-xs">{modelId(model)}</span>
+                  <span className="text-xs">{agentModelId(model)}</span>
                   <span className="font-mono text-[10px] text-muted-foreground/80">
                     {model.name}
                     {typeof model.contextWindow === "number"
