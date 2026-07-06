@@ -915,6 +915,39 @@ describe("automations REST API", { tags: ["integration"] }, () => {
     }
   });
 
+  it("clears a single automation's run history via /automations/:id/clear-history, leaving other automations intact", async () => {
+    const a = await request("POST", "", createInput());
+    const aId = (a.body.automation as { id: string }).id;
+    const b = await request("POST", "", { ...createInput(), name: "other" });
+    const bId = (b.body.automation as { id: string }).id;
+    await request("POST", `/${aId}/run`);
+    await request("POST", `/${bId}/run`);
+
+    const listBefore = (await request("GET", "")).body as {
+      automations: Array<{ id: string; runs: unknown[]; runCount: number }>;
+    };
+    const aBefore = listBefore.automations.find((item) => item.id === aId)!;
+    const bBefore = listBefore.automations.find((item) => item.id === bId)!;
+    expect(aBefore.runs.length).toBeGreaterThan(0);
+    expect(bBefore.runs.length).toBeGreaterThan(0);
+
+    const res = await request("POST", `/${aId}/clear-history`);
+    expect(res.status).toBe(200);
+
+    const listAfter = (await request("GET", "")).body as {
+      automations: Array<{ id: string; runs: unknown[]; runCount: number }>;
+    };
+    const aAfter = listAfter.automations.find((item) => item.id === aId)!;
+    const bAfter = listAfter.automations.find((item) => item.id === bId)!;
+    // Only the targeted automation's history is cleared.
+    expect(aAfter.runs).toEqual([]);
+    expect(bAfter.runs.length).toBe(bBefore.runs.length);
+    // The automation survives with its run-count (limit progress) preserved —
+    // unlike /reset, which zeroes the count and reactivates.
+    expect(aAfter.runCount).toBe(aBefore.runCount);
+    expect(listAfter.automations.length).toBe(listBefore.automations.length);
+  });
+
   it("returns the thread-mode session transcript for an agent automation", async () => {
     const created = await request("POST", "", {
       name: "reviewer",

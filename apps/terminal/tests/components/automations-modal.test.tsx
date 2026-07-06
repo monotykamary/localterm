@@ -110,6 +110,44 @@ describe("AutomationsModal", () => {
     expect(screen.getByText("Shell: pnpm build")).toBeDefined();
   });
 
+  it("clears a single automation's run history via the per-automation eraser button", async () => {
+    const run = {
+      runId: "run-1",
+      scheduledFor: 1000,
+      startedAt: 1000,
+      finishedAt: 2000,
+      status: "completed" as const,
+      exitCode: 0,
+      trigger: "schedule" as const,
+      countsTowardLimit: true,
+      findings: null,
+      changedFiles: [],
+      unread: false,
+      log: null,
+    };
+    renderModal([automation({ runs: [run] })]);
+    const clearButton = await screen.findByLabelText("clear nightly build run history");
+    // First click arms (two-click confirm, like delete); no request yet.
+    fireEvent.click(clearButton);
+    expect(screen.getByLabelText("confirm clear nightly build run history")).toBeDefined();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String(call[0]).includes("/api/automations/automation-1/clear-history"),
+      ),
+    ).toBe(false);
+    // Second click fires the per-automation clear (not the /triage all-clear).
+    fireEvent.click(screen.getByLabelText("confirm clear nightly build run history"));
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String(call[0]).includes("/api/automations/automation-1/clear-history"),
+      ),
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/triage/clear-history")),
+    ).toBe(false);
+  });
+
   it("renders a watch automation with its trigger label and on-change next run", async () => {
     renderModal([
       automation({

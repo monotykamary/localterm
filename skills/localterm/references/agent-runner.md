@@ -216,6 +216,11 @@ curl -s -X POST "$BASE/triage/mark-all-read"
 # drops pre-log runs that have no transcript to show)
 curl -s -X POST "$BASE/triage/clear-history"
 # → {"ok":true}
+
+# Clear a single automation's run history (keeps the automation + its run-count/
+# lifecycle; use /reset to also restart a finished automation)
+curl -s -X POST "$BASE/automations/<id>/clear-history"
+# → {"ok":true}
 ```
 
 ## Discovery endpoints
@@ -254,6 +259,7 @@ curl -s "$BASE/automations/<id>/session?runId=<runId>"
 | `POST /automations/:id/runs/:runId/read`         | mark one run's findings read                              |
 | `POST /triage/mark-all-read`                     | mark every run read across all automations                |
 | `POST /triage/clear-history`                     | clear every automation's run history                      |
+| `POST /automations/:id/clear-history`            | clear one automation's run history (keeps it + run-count) |
 | `GET /agent-models`                              | pi's available models (cached)                            |
 | `GET /agent-skills?cwd=`                         | discoverable pi skills for a cwd (cached)                 |
 | `GET /automations/:id/session?runId=`            | thread session transcript up to a run                     |

@@ -75,6 +75,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
 import { computeAutomationsHeaderLayout } from "@/utils/compute-automations-header-layout";
 import { clearAutomationHistory } from "@/utils/clear-automation-history";
+import { clearAutomationRuns } from "@/utils/clear-automation-runs";
 import { compactAutomation } from "@/utils/compact-automation";
 import { createAutomation } from "@/utils/create-automation";
 import { deleteAutomation } from "@/utils/delete-automation";
@@ -810,6 +811,7 @@ export const AutomationsModal = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
+  const [armedClearId, setArmedClearId] = useState<string | null>(null);
   const [runFilter, setRunFilter] = useState<"all" | "unread" | "failed" | "skipped">("all");
   const loadSortFromStorage = (): AutomationsSort => {
     try {
@@ -870,6 +872,7 @@ export const AutomationsModal = ({
       setMode("view");
       setSaveError(false);
       setArmedDeleteId(null);
+      setArmedClearId(null);
       setSearch("");
       return;
     }
@@ -1108,6 +1111,16 @@ export const AutomationsModal = ({
 
   const handleReset = async (automation: AutomationWithNextRun) => {
     await resetAutomation(automation.id);
+    await refreshAutomations();
+  };
+
+  const handleClearRuns = async (automation: AutomationWithNextRun) => {
+    if (armedClearId !== automation.id) {
+      setArmedClearId(automation.id);
+      return;
+    }
+    setArmedClearId(null);
+    await clearAutomationRuns(automation.id);
     await refreshAutomations();
   };
 
@@ -1385,6 +1398,8 @@ export const AutomationsModal = ({
                     onToggleEnabled={(enabled) => void handleToggleEnabled(selected, enabled)}
                     onReset={() => void handleReset(selected)}
                     onCompact={() => void handleCompact(selected)}
+                    onClearHistory={() => void handleClearRuns(selected)}
+                    armedClear={armedClearId === selected.id}
                     onOpenLog={(run) => void openRunLog(selected.id, run)}
                   />
                 ) : filteredAutomations !== null && filteredAutomations.length === 0 ? (
@@ -1415,6 +1430,8 @@ const AutomationDetail = ({
   onToggleEnabled,
   onReset,
   onCompact,
+  onClearHistory,
+  armedClear,
   onOpenLog,
 }: {
   automation: AutomationWithNextRun;
@@ -1426,6 +1443,8 @@ const AutomationDetail = ({
   onToggleEnabled: (enabled: boolean) => void;
   onReset: () => void;
   onCompact?: () => void;
+  onClearHistory: () => void;
+  armedClear: boolean;
   onOpenLog: (run: AutomationRunRecord) => void;
 }) => {
   const finished = lifecycleBadge(automation.lifecycle);
@@ -1606,20 +1625,42 @@ const AutomationDetail = ({
       <Separator className="bg-border/40" />
 
       <Collapsible defaultOpen>
-        <CollapsibleTrigger
-          render={
+        <div className="flex items-center gap-2">
+          <CollapsibleTrigger
+            render={
+              <button
+                type="button"
+                className="group flex flex-1 items-center justify-between gap-2 text-left"
+              />
+            }
+          >
+            <span className={SECTION_LABEL_CLASSES}>History · {automation.runs.length} runs</span>
+            <ChevronDown
+              className="size-3.5 text-muted-foreground transition-transform group-data-[panel-open]:rotate-180"
+              aria-hidden="true"
+            />
+          </CollapsibleTrigger>
+          {automation.runs.length > 0 ? (
             <button
               type="button"
-              className="group flex w-full items-center justify-between gap-2 text-left"
-            />
-          }
-        >
-          <span className={SECTION_LABEL_CLASSES}>History · {automation.runs.length} runs</span>
-          <ChevronDown
-            className="size-3.5 text-muted-foreground transition-transform group-data-[panel-open]:rotate-180"
-            aria-hidden="true"
-          />
-        </CollapsibleTrigger>
+              aria-label={
+                armedClear
+                  ? `confirm clear ${automation.name} run history`
+                  : `clear ${automation.name} run history`
+              }
+              title={armedClear ? "Click again to confirm" : "Clear this automation's run history"}
+              className={cn(
+                "shrink-0 rounded-md p-1 text-[11px] transition-colors",
+                armedClear
+                  ? "text-red-400 hover:bg-red-500/10"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+              )}
+              onClick={onClearHistory}
+            >
+              <Eraser className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
         <CollapsibleContent>
           {automation.runs.length === 0 ? (
             <p className="px-2 py-2 text-[11px] text-muted-foreground">No runs yet.</p>
@@ -2068,6 +2109,7 @@ const RecentRunsView = ({
   onClearHistory: () => void;
 }) => {
   const hasUnread = runs.some(({ run }) => run.unread);
+  const [armedClear, setArmedClear] = useState(false);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 py-2">
@@ -2098,12 +2140,27 @@ const RecentRunsView = ({
         {runs.length > 0 ? (
           <button
             type="button"
-            onClick={onClearHistory}
-            title="Clear all run history (keeps the automations)"
+            aria-label={armedClear ? "confirm clear all run history" : "clear all run history"}
+            title={
+              armedClear
+                ? "Click again to confirm"
+                : "Clear all run history (keeps the automations)"
+            }
             className={cn(
-              "rounded-sm px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground",
+              "rounded-sm px-2 py-0.5 text-[11px] transition-colors",
+              armedClear
+                ? "text-red-400 hover:bg-red-500/10"
+                : "text-muted-foreground hover:text-foreground",
               hasUnread ? "ml-1" : "ml-auto",
             )}
+            onClick={() => {
+              if (!armedClear) {
+                setArmedClear(true);
+                return;
+              }
+              setArmedClear(false);
+              onClearHistory();
+            }}
           >
             <Eraser className="size-3" aria-hidden="true" />
           </button>

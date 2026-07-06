@@ -243,6 +243,7 @@ curl -s -X POST "$BASE/automations/<id>/compact"           # manually compact a 
 curl -s -X POST "$BASE/automations/<id>/runs/<runId>/read"  # mark one run's findings read
 curl -s -X POST "$BASE/triage/mark-all-read"               # mark every run read
 curl -s -X POST "$BASE/triage/clear-history"              # clear every automation's run history
+curl -s -X POST "$BASE/automations/<id>/clear-history"     # clear one automation's run history
 ```
 
 ### Error responses

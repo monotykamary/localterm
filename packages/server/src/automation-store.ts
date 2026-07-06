@@ -335,6 +335,21 @@ export class AutomationStore {
     return changed;
   }
 
+  // Clear a single automation's run history (its runs array) while keeping the
+  // automation, its run-count, and lifecycle — the per-automation counterpart to
+  // clearAllRuns (use reset to restart a finished automation). No-op (returns
+  // the automation unchanged, no persist) if it has no runs.
+  clearRuns(id: string): Automation | null {
+    const index = this.automations.findIndex((automation) => automation.id === id);
+    if (index === -1) return null;
+    const current = this.automations[index];
+    if (current.runs.length === 0) return current;
+    const updated: Automation = { ...current, runs: [] };
+    this.automations[index] = updated;
+    this.persist();
+    return updated;
+  }
+
   // Clear every automation's run history (the runs array) while keeping the
   // automations themselves and their run-count/lifecycle (limit progress is
   // preserved — use resetAutomation to restart a finished automation). Used

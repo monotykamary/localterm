@@ -601,6 +601,31 @@ describe("AutomationStore", () => {
     expect(store.clearAllRuns()).toBe(false);
   });
 
+  it("clears a single automation's run history while keeping the automation, run count, and other automations", () => {
+    const store = new AutomationStore(filePath);
+    const automation = store.create(createInput);
+    store.appendRun(automation.id, runRecord({ runId: "r1", status: "completed", exitCode: 0 }));
+    store.incrementRunCount(automation.id);
+    store.appendRun(automation.id, runRecord({ runId: "r2", status: "completed", exitCode: 0 }));
+    store.incrementRunCount(automation.id);
+    const other = store.create({ ...createInput, name: "other" });
+    store.appendRun(other.id, runRecord({ runId: "r3", status: "completed", exitCode: 0 }));
+
+    const cleared = store.clearRuns(automation.id);
+    expect(cleared).not.toBeNull();
+    expect(store.get(automation.id)?.runs).toEqual([]);
+    // The other automation's runs are untouched (the per-automation clear is
+    // not the /triage/clear-history all-clear).
+    expect(store.get(other.id)?.runs.length).toBe(1);
+    // The automation survives with its run-count (limit progress) preserved —
+    // unlike reset, which zeroes the count and reactivates.
+    expect(store.get(automation.id)?.runCount).toBe(2);
+    // Idempotent: clearing an automation with no runs returns it unchanged.
+    expect(store.clearRuns(automation.id)?.runs).toEqual([]);
+    // Unknown automation -> null.
+    expect(store.clearRuns("missing")).toBeNull();
+  });
+
   it("returns null when marking an unknown run or automation", () => {
     const store = new AutomationStore(filePath);
     const automation = store.create(createInput);

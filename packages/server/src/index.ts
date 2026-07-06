@@ -1562,6 +1562,17 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     return context.json({ automation: toAutomationWithNextRun(automation, new Date()) });
   });
 
+  // Clear a single automation's run history (the runs array) while keeping the
+  // automation, its run-count, and lifecycle — the per-automation counterpart to
+  // /triage/clear-history (which clears every automation). Use reset to restart
+  // a finished automation.
+  api.post("/automations/:id/clear-history", (context) => {
+    const automation = automationStore.clearRuns(context.req.param("id"));
+    if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    broadcastAutomations();
+    return context.json({ ok: true });
+  });
+
   // Triage inbox: mark a single agent run's findings as read (the user opened
   // it). Idempotent — a missing/already-read run is a no-op success.
   api.post("/automations/:id/runs/:runId/read", (context) => {
