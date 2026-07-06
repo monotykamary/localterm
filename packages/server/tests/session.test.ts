@@ -468,4 +468,50 @@ describe("Session", { tags: ["integration"] }, () => {
       session.dispose();
     }
   }, 15_000);
+
+  it("emits a git-dirty signal before the initial command runs so the overlay updates mid-run", async () => {
+    // The pre-command git-dirty (emitted by the automation-exit hook before the
+    // eval) must precede the command's output in the raw stream — without it
+    // the first git-dirty only fires after the command finishes, leaving the
+    // ambient overlay without a signal while a git command runs. The output
+    // ("ABC") differs from the command string ("abc"), so its first occurrence
+    // is the echo output, not the `+ <cmd>` hook line.
+    const shellPath = existsSync("/bin/zsh") ? "/bin/zsh" : findBash();
+    if (!shellPath) return;
+    const session = new Session({
+      shell: shellPath,
+      initialCommand: "echo abc | tr a-z A-Z",
+    });
+    try {
+      let raw = "";
+      await waitFor(
+        new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            session.off("output", onOutput);
+            session.off("automation-exit", onAutomationExit);
+            reject(new Error("initial command never completed"));
+          }, 10_000);
+          const onOutput = (chunk: string) => {
+            raw += chunk;
+          };
+          const onAutomationExit = () => {
+            clearTimeout(timer);
+            session.off("output", onOutput);
+            session.off("automation-exit", onAutomationExit);
+            resolve();
+          };
+          session.on("output", onOutput);
+          session.on("automation-exit", onAutomationExit);
+        }),
+        12_000,
+      );
+      const gitDirtyIndex = raw.indexOf("\x1b]7777;git-dirty\x07");
+      const outputIndex = raw.indexOf("ABC");
+      expect(gitDirtyIndex).not.toBe(-1);
+      expect(outputIndex).not.toBe(-1);
+      expect(gitDirtyIndex).toBeLessThan(outputIndex);
+    } finally {
+      session.dispose();
+    }
+  }, 15_000);
 });

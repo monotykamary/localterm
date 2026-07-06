@@ -637,9 +637,13 @@ export class Session extends EventEmitter<SessionEvents> {
   // constructor). The hook copies it into a local and unsets the env var
   // BEFORE eval, so the command string isn't inherited by child processes the
   // command spawns and the hook runs once; then prints it (prefixed `+`),
-  // evals the local, and emits the automation-exit OSC with the eval's exit
-  // status. Prepended first in the prompt chain; fullscreen TUIs and unhooked
-  // shells don't reach here (they take the at-spawn PTY write).
+  // emits a git-dirty signal before the eval so the ambient overlay updates
+  // as the command begins (the regular __localterm_git_dirty runs after this
+  // hook in the prompt chain — without this the first git-dirty only fires
+  // once the command finishes), evals the local, and emits the
+  // automation-exit OSC with the eval's exit status. Prepended first in the
+  // prompt chain; fullscreen TUIs and unhooked shells don't reach here (they
+  // take the at-spawn PTY write).
   // LOCALTERM_INITIAL_COMMAND is on PTY_ENV_DENYLIST so a stale or inherited
   // value from the daemon env can't reach the hook — the constructor's set is
   // the only source.
@@ -651,6 +655,7 @@ export class Session extends EventEmitter<SessionEvents> {
       '    __localterm_initial_command="$LOCALTERM_INITIAL_COMMAND"',
       "    unset LOCALTERM_INITIAL_COMMAND",
       "    printf '+ %s\\n' \"$__localterm_initial_command\"",
+      "    printf '\\e]7777;git-dirty\\a'",
       '    eval "$__localterm_initial_command"',
       "    __localterm_command_exit=$?",
       "    printf '\\e]7777;automation-exit;%d\\a' \"$__localterm_command_exit\"",

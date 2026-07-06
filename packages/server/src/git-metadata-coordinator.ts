@@ -62,6 +62,18 @@ export class GitMetadataCoordinator {
     this.subscribers.delete(ws);
   }
 
+  // Re-send the cached summary to a subscriber once it promotes out of the
+  // pending hold, so the ambient overlay is guaranteed populated on the
+  // now-live client. A summary pushed while the client was pending can be
+  // wiped by a `cwd` frame (the client nulls its summary on a cwd change);
+  // replaying after the promote flush lands past that reset. No-op when no
+  // summary is cached yet — the in-flight compute broadcasts on completion
+  // and reaches the now-live subscriber.
+  replayLastSummary(ws: ClientSocket): void {
+    if (!this.lastSummary) return;
+    this.send(ws, { type: "git-diff-summary", summary: this.lastSummary });
+  }
+
   get isEmpty(): boolean {
     return this.subscribers.size === 0;
   }

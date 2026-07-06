@@ -77,3 +77,52 @@ describe("GitMetadataCoordinator broadcastPr", () => {
     }
   });
 });
+
+describe("GitMetadataCoordinator replayLastSummary", () => {
+  const mkDir = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "lt-coord-replay-"));
+
+  it("re-sends the cached summary so a cwd-driven null-reset can't strand the overlay", async () => {
+    const dir = mkDir();
+    try {
+      const sent: SentEntry[] = [];
+      // Resolve exactly when the first git-diff-summary ships (add()'s in-flight
+      // compute landing), so the test advances on the event — no fixed wait.
+      let resolveFirstSummary!: () => void;
+      const firstSummary = new Promise<void>((resolve) => {
+        resolveFirstSummary = resolve;
+      });
+      const coordinator = new GitMetadataCoordinator(dir, (ws, payload) => {
+        sent.push({ ws, payload });
+        if (payload.type === "git-diff-summary") resolveFirstSummary();
+      });
+      const tab = fakeSocket();
+      coordinator.add(tab);
+      await firstSummary;
+
+      const before = sent.filter(
+        (entry) => entry.ws === tab && entry.payload.type === "git-diff-summary",
+      ).length;
+      coordinator.replayLastSummary(tab);
+      const after = sent.filter(
+        (entry) => entry.ws === tab && entry.payload.type === "git-diff-summary",
+      ).length;
+      expect(after).toBe(before + 1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("is a no-op when no summary is cached yet (the in-flight compute will broadcast)", () => {
+    const dir = mkDir();
+    try {
+      const sent: SentEntry[] = [];
+      const coordinator = new GitMetadataCoordinator(dir, (ws, payload) =>
+        sent.push({ ws, payload }),
+      );
+      coordinator.replayLastSummary(fakeSocket());
+      expect(sent.filter((entry) => entry.payload.type === "git-diff-summary")).toHaveLength(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

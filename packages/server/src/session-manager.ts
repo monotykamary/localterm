@@ -587,6 +587,11 @@ export class SessionManager {
     client.pendingControl = [];
     client.pendingBytes = [];
     client.pending = false;
+    // Re-push the ambient git-diff summary to the now-live client so a summary
+    // pushed while pending (and wiped by the client's cwd-driven null-reset on
+    // a cwd change during the pending window) is restored. See
+    // GitMetadataCoordinator.replayLastSummary.
+    client.coordinator?.replayLastSummary(ws);
   }
 
   writeInput(ws: ClientSocket, data: string): void {
