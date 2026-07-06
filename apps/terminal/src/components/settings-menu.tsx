@@ -804,7 +804,7 @@ export const SettingsMenu = ({
                       />
                       <Tooltip>
                         <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
-                          Shell
+                          Default shell
                         </TooltipTrigger>
                         <TooltipContent
                           side="bottom"
