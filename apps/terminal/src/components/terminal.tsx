@@ -153,6 +153,7 @@ import { isDiffViewerShortcut } from "@/utils/is-diff-viewer-shortcut";
 import { isFindShortcut } from "@/utils/is-find-shortcut";
 import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
 import { isPortsShortcut } from "@/utils/is-ports-shortcut";
+import { isSecretsShortcut } from "@/utils/is-secrets-shortcut";
 import { isSessionsShortcut } from "@/utils/is-sessions-shortcut";
 import { isWorktreesCreateShortcut } from "@/utils/is-worktrees-create-shortcut";
 import { isWorktreesShortcut } from "@/utils/is-worktrees-shortcut";
@@ -540,6 +541,7 @@ export const Terminal = () => {
   const toggleWorktreesRef = useRef<(() => void) | null>(null);
   const togglePortsRef = useRef<(() => void) | null>(null);
   const toggleSessionsRef = useRef<(() => void) | null>(null);
+  const toggleSecretsRef = useRef<(() => void) | null>(null);
   const createWorktreeRef = useRef<
     ((options: CreateWorktreeOptions, openAfter: boolean) => Promise<boolean>) | null
   >(null);
@@ -1402,6 +1404,13 @@ export const Terminal = () => {
         if (event.type === "keydown") {
           event.preventDefault();
           togglePortsRef.current?.();
+        }
+        return false;
+      }
+      if (isSecretsShortcut(event, isMac)) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          toggleSecretsRef.current?.();
         }
         return false;
       }
@@ -2345,6 +2354,11 @@ export const Terminal = () => {
   }, [handlePortsOpenChange, isPortsOpen]);
   togglePortsRef.current = togglePorts;
 
+  const toggleSecrets = useCallback(() => {
+    handleSecretsOpenChange(!isSecretsOpen);
+  }, [handleSecretsOpenChange, isSecretsOpen]);
+  toggleSecretsRef.current = toggleSecrets;
+
   const openShellAt = useCallback((shellCwd: string, command?: string) => {
     window.open(buildNewTabUrl(shellCwd, command), "_blank", "noopener,noreferrer");
   }, []);
@@ -2626,6 +2640,7 @@ export const Terminal = () => {
         id: "secrets",
         label: "Secrets",
         category: "Actions",
+        shortcut: `${togglePrefix}Shift+S`,
         icon: <Key className="size-3.5" />,
         action: () => handleSecretsOpenChange(true),
       },

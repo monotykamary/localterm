@@ -1,6 +1,6 @@
-import { Boxes, Key, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Boxes, Key, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
@@ -220,8 +220,20 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   const [processSaving, setProcessSaving] = useState(false);
   const [processDeletingName, setProcessDeletingName] = useState<string | null>(null);
   const [processArmedDeleteName, setProcessArmedDeleteName] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const filteredProcesses = useMemo(() => {
+    if (!processes) return [];
+    const lower = search.trim().toLowerCase();
+    if (!lower) return processes;
+    return processes.filter(
+      (process) =>
+        process.name.toLowerCase().includes(lower) ||
+        process.requestedSecrets.some((secretName) => secretName.toLowerCase().includes(lower)),
+    );
+  }, [processes, search]);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const refresh = useCallback(async () => {
     const [fetchedSecrets, fetchedProcesses] = await Promise.all([
@@ -239,9 +251,9 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   }, []);
 
   // Mount/unmount + open/close animation mirrors the sessions/ports/worktrees
-  // modals. The panel is focused on open so the terminal's textarea releases
-  // focus before any field is interacted with — without this xterm retains
-  // focus and steals keystrokes from the modal's inputs.
+  // modals. The search field is focused on open so the terminal's textarea
+  // releases focus before any field is interacted with — without this xterm
+  // retains focus and steals keystrokes from the modal's inputs.
   useEffect(() => {
     if (open) {
       setMounted(true);
@@ -251,9 +263,12 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
       setProcessForm(null);
       setProcessFormError(null);
       setProcessArmedDeleteName(null);
+      setSearch("");
       const frame = requestAnimationFrame(() => {
         setSettled(true);
-        panelRef.current?.focus();
+        // Falls back to the panel when the search bar isn't rendered (error state).
+        if (searchInputRef.current) searchInputRef.current.focus();
+        else panelRef.current?.focus();
       });
       return () => cancelAnimationFrame(frame);
     }
@@ -272,12 +287,20 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   }, [open, refresh]);
 
   const secretsList = secrets ?? [];
+  const filteredSecrets = useMemo(() => {
+    const lower = search.trim().toLowerCase();
+    if (!lower) return secretsList;
+    return secretsList.filter(
+      (secret) =>
+        secret.name.toLowerCase().includes(lower) || secret.envVar.toLowerCase().includes(lower),
+    );
+  }, [secretsList, search]);
   const virtualizer = useVirtualizer({
-    count: secretsList.length,
+    count: filteredSecrets.length,
     getScrollElement: () => listScrollRef.current,
     estimateSize: () => SECRETS_LIST_ROW_HEIGHT_PX,
     overscan: 8,
-    getItemKey: (index) => secretsList[index].name,
+    getItemKey: (index) => filteredSecrets[index].name,
   });
   // The list div gets an explicit pixel height (the virtualizer's total) so the
   // absolute-positioned rows have a sizing container; the intro/form/empty
@@ -309,6 +332,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
 
   const switchTab = (next: ModalTab) => {
     setTab(next);
+    setSearch("");
     setSecretForm(null);
     setSecretFormError(null);
     setSecretArmedDeleteName(null);
@@ -443,7 +467,6 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   const isVisible = open && settled;
   const isEditingSecret = secretForm !== null && secretForm.originalName !== null;
   const isEditingProcess = processForm !== null && processForm.originalName !== null;
-  const processesList = processes ?? [];
   const secretEnvVars = new Map(secretsList.map((secret) => [secret.name, secret.envVar]));
   const activeCount = tab === "secrets" ? secrets?.length : processes?.length;
   const activeFormOpen = tab === "secrets" ? secretForm !== null : processForm !== null;
@@ -528,6 +551,27 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
           className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           <div className="animate-in fade-in-0 duration-150 ease-snappy">
+            {!hasError ? (
+              <div className="relative px-2.5 pt-1 pb-1.5">
+                <Search
+                  className="pointer-events-none absolute left-[14px] top-1/2 size-3 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={tab === "secrets" ? "Search secrets…" : "Search processes…"}
+                  aria-label={tab === "secrets" ? "search secrets" : "search processes"}
+                  className="w-full rounded-sm border border-border/50 bg-transparent py-1 pl-6 pr-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-border"
+                />
+              </div>
+            ) : null}
             {hasError ? (
               <div
                 className="flex flex-col items-center justify-center gap-3 px-2.5 py-6 text-center text-sm text-muted-foreground/70"
@@ -648,18 +692,24 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                   </div>
                 ) : null}
 
-                {secretsList.length === 0 && !secretForm ? (
+                {filteredSecrets.length === 0 && !secretForm ? (
                   <div className="flex flex-col items-center justify-center gap-2 px-2.5 py-6 text-center text-sm text-muted-foreground/70">
-                    No secrets yet.
-                    {supported ? (
-                      <Button variant="outline" size="xs" onClick={startAddSecret}>
-                        <Plus className="size-3.5" aria-hidden="true" />
-                        Add a secret
-                      </Button>
-                    ) : null}
+                    {search.trim() ? (
+                      <span>No secrets match your search.</span>
+                    ) : (
+                      <>
+                        No secrets yet.
+                        {supported ? (
+                          <Button variant="outline" size="xs" onClick={startAddSecret}>
+                            <Plus className="size-3.5" aria-hidden="true" />
+                            Add a secret
+                          </Button>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 ) : null}
-                {secretsList.length > 0 ? (
+                {filteredSecrets.length > 0 ? (
                   <div
                     style={{
                       height: `${secretListHeightPx}px`,
@@ -668,7 +718,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                     }}
                   >
                     {virtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
-                      const secret = secretsList[virtualRow.index];
+                      const secret = filteredSecrets[virtualRow.index];
                       return (
                         <div
                           key={secret.name}
@@ -784,18 +834,24 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                   </div>
                 ) : null}
 
-                {processesList.length === 0 && !processForm ? (
+                {filteredProcesses.length === 0 && !processForm ? (
                   <div className="flex flex-col items-center justify-center gap-2 px-2.5 py-6 text-center text-sm text-muted-foreground/70">
-                    No processes yet.
-                    <Button variant="outline" size="xs" onClick={startAddProcess}>
-                      <Plus className="size-3.5" aria-hidden="true" />
-                      Add a process
-                    </Button>
+                    {search.trim() ? (
+                      <span>No processes match your search.</span>
+                    ) : (
+                      <>
+                        No processes yet.
+                        <Button variant="outline" size="xs" onClick={startAddProcess}>
+                          <Plus className="size-3.5" aria-hidden="true" />
+                          Add a process
+                        </Button>
+                      </>
+                    )}
                   </div>
                 ) : null}
-                {processesList.length > 0 ? (
+                {filteredProcesses.length > 0 ? (
                   <div>
-                    {processesList.map((process) => (
+                    {filteredProcesses.map((process) => (
                       <ProcessRow
                         key={process.name}
                         process={process}
