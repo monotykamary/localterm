@@ -1,6 +1,6 @@
 # Automation triggers
 
-An automation's `trigger` is a tagged union on `kind`. This reference covers all four kinds in full: the schedule-shape table, the git/event taxonomy, watch debounce/filter semantics, and webhook capability-URL semantics. For the field-level summary, see [SKILL.md](../SKILL.md#automations).
+An automation's `trigger` is a tagged union on `kind`, **orthogonal to the `runner`** — any trigger (schedule/watch/event/webhook) fires either a shell command or a headless agent session. This reference covers all four trigger kinds in full: the schedule-shape table, the git/event taxonomy, watch debounce/filter semantics, and webhook capability-URL semantics. For the field-level summary, see [SKILL.md](../SKILL.md#automations); for the agent runner, see [agent-runner.md](agent-runner.md).
 
 ## `{kind:"schedule", schedule}` — time-based
 

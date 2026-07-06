@@ -10,9 +10,7 @@ Per-program secret injection. API keys live in the macOS Keychain (never plainte
 
 The `/api/*` surface is gated by a **network-origin** check (loopback/tailnet), not a capability check — any local process can reach it via `curl`. So the daemon **never** returns secret values over HTTP. The list response carries `hasValue` (probed from the Keychain without reading the value into memory) so a UI can show "set / no value" without ever exposing the secret. To read a value, use the CLI's `get` (which resolves from the Keychain directly, not the API) or the generated shim.
 
-The one place values _do_ reach a process other than the shimmed binary is **automations**: an automation may name secrets it needs, and the daemon resolves them into the run's PTY environment at spawn. This preserves the property above — the value goes Keychain → daemon → PTY env, never over HTTP. See [Automation secret exposure](#automation-secret-exposure) below.
-
-### Automation secret exposure
+The one place values _do_ reach a process other than the shimmed binary is **automations**: an automation may name secrets it needs, and the daemon resolves them into the run's PTY (shell) or subprocess (agent) environment at spawn. This preserves the property above — the value goes Keychain → daemon → run env, never over HTTP. See [Automation secret exposure](#automation-secret-exposure) below.
 
 ### Endpoints
 
@@ -99,14 +97,14 @@ localterm's zsh/bash shell hook prepends the shims dir to PATH **after** the use
 
 ### Automation secret exposure
 
-Automations type an arbitrary shell `command` into a tab, so a secret in that tab's env can be exfiltrated. Exposure is therefore **per-automation, opt-in, and least-privilege**: each automation names exactly the secrets it needs via `requestedSecrets` (a list of secret **names** — the stable identifier, not the env var), and only those resolve into the run's PTY environment. An automation with `requestedSecrets: []` (the default) gets no secrets; a command alone can never reach a key the automation didn't explicitly request.
+Automations run arbitrary code — a shell `command` typed into a tab (shell runner) or an agent `prompt` run headlessly as a subprocess (agent runner) — so a secret in that run's env can be exfiltrated. Exposure is therefore **per-automation, opt-in, and least-privilege**: each automation names exactly the secrets it needs via `requestedSecrets` (a list of secret **names** — the stable identifier, not the env var), and only those resolve into the run's environment (PTY for shell, subprocess for agent). An automation with `requestedSecrets: []` (the default) gets no secrets; the run alone can never reach a key the automation didn't explicitly request.
 
-Resolution happens at **launch time**, not claim time: when a run fires (schedule/watch/event/webhook/manual), the daemon resolves each named secret from the Keychain in parallel and stores the env on the pending run _before_ it opens the run tab. The WS that claims the run is therefore guaranteed to see the resolved env, and the synchronous spawn path just passes it through. Resolution is fail-closed on both ends:
+Resolution happens at **launch time**, not claim time: when a run fires (schedule/watch/event/webhook/manual), the daemon resolves each named secret from the Keychain in parallel and stores the env on the pending run before the run starts. For a **shell** run this is before the run tab is claimed (the WS that claims it is guaranteed to see the resolved env; the synchronous spawn path passes it through); for an **agent** run there is no tab — the env is resolved before the harness subprocess spawns. Resolution is fail-closed on both ends:
 
 - **At create/update** — unknown secret names (typos, or deleted-before-you-saved) are rejected with `400 {"error":"invalid_secret"}`.
 - **At run time** — a name deleted after the automation was authored, or a secret with no value (locked Keychain / never set), is silently skipped; it never clobbers a pre-existing env var with an empty string.
 
-Values flow Keychain → daemon → PTY env and never cross the HTTP surface, so the network-origin gate on `/api/*` is not widened. The env lives only in the run's shell process (and its children, e.g. `node scripts/update-models.js`), not the parent daemon or any other tab.
+Values flow Keychain → daemon → run env and never cross the HTTP surface, so the network-origin gate on `/api/*` is not widened. The env lives only in the run's process — the shell for a shell run, or the agent harness subprocess for an agent run (and its children, e.g. `node scripts/update-models.js`) — not the parent daemon or any other tab.
 
 ```bash
 # Grant an automation the keys it needs (names from `localterm secret list`)
@@ -116,7 +114,7 @@ curl -s -X POST "$BASE/automations" \
     "name": "update all provider models",
     "trigger": { "kind": "schedule", "schedule": { "kind": "daily", "hour": 2, "minute": 0 } },
     "cwd": "/Users/me/open-source",
-    "command": "bash update-all-models.sh",
+    "runner": { "kind": "shell", "command": "bash update-all-models.sh" },
     "requestedSecrets": ["neuralwatt_api_key","deepseek_api_key","moonshot_api_key"]
   }'
 
