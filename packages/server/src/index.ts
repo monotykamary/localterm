@@ -45,6 +45,7 @@ import {
   DEFAULT_HOST,
   DEFAULT_PORT,
   FRIENDLY_HOSTNAME,
+  GIT_DIRTY_THROTTLE_MS,
   GIT_MAX_REF_LENGTH,
   HTTP_STATUS_ACCEPTED,
   HTTP_STATUS_BAD_REQUEST,
@@ -79,6 +80,7 @@ import { getDefaultShell, listKnownShells, resolveShellOverride } from "./defaul
 import { shellPathForUserShell } from "./utils/shell-path.js";
 import { openChromeInspect } from "./utils/open-chrome-inspect.js";
 import { ServerErrorException, serverError } from "./errors.js";
+import { AutomationGitWatcher } from "./automation-git-watcher.js";
 import { FolderWatchManager } from "./folder-watch-manager.js";
 import { SessionEventManager } from "./session-event-manager.js";
 import { WebhookTriggerManager } from "./webhook-trigger-manager.js";
@@ -1868,7 +1870,20 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     },
     getAutomation: (automationId) => automationStore.get(automationId),
   });
-  const syncSessionEventListeners = () => sessionEventManager.sync(automationStore.list());
+  // Daemon-global git detection for event automations: arms a recursive
+  // fs.watch per event-automation cwd so ref changes reach SessionEventManager
+  // regardless of source (the per-session GitDiffWatcher only fires when a
+  // localterm PTY is live in the affected repo).
+  const automationGitWatcher = new AutomationGitWatcher({
+    throttleMs: GIT_DIRTY_THROTTLE_MS,
+  });
+  automationGitWatcher.on("refEvent", (eventName, repoRoot) =>
+    sessionEventManager.onSessionEvent(eventName, repoRoot),
+  );
+  const syncSessionEventListeners = () => {
+    sessionEventManager.sync(automationStore.list());
+    automationGitWatcher.sync(automationStore.list());
+  };
   // Webhook triggers: a POST to /api/webhooks/:id arms a trailing debounce per
   // automation (coalesces duplicate delivery) with an in-flight overlap guard.
   // Stateless vs the watch/event managers — nothing to arm, so no sync().
@@ -2877,6 +2892,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const stop = async () => {
     automationScheduler.dispose();
     folderWatchManager.dispose();
+    automationGitWatcher.dispose();
     webhookTriggerManager.dispose();
     caffeinateManager.dispose();
     processActivityWatcher?.dispose();

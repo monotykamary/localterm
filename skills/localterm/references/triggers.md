@@ -28,9 +28,9 @@ After a watch-triggered run finishes, a 1-second grace period suppresses new eve
 
 ## `{kind:"event", events: [...]}` — session events
 
-Fires when a localterm session emits any of the named events whose cwd matches the automation's `cwd` (or is inside it). This is **session-scoped** — the automation only triggers when you are _in_ localterm and the event occurs, not from background filesystem noise. A burst of events is debounced into a single run and no new run starts while a previous one is still in-flight. Event triggers have no `cron`/`nextRunAt` (both `null`).
+Fires when a named event occurs whose cwd matches the automation's `cwd` (or is inside it). Git ref events (`git-commit`, `git-branch-change`, `git-fetch`, …) are detected by watching each affected repository's `.git` directory — both from a live localterm session in that repo and from a daemon-global filesystem watch over the automation's `cwd` tree, so a ref change fires regardless of whether a localterm tab is open: a commit from a headless agent run, an editor, or an SSH session is detected the same as one typed into a localterm shell, and a brand-new repo created under the tree is picked up once its `.git` appears. The other events (`notification`, `cwd`, `foreground`, `exit`) are **session-scoped** — they only fire from a live localterm PTY whose cwd matches. A burst of events is debounced into a single run and no new run starts while a previous one is still in-flight. Event triggers have no `cron`/`nextRunAt` (both `null`).
 
-Git events are detected by watching the repository's `.git` directory. The operation-level events are best-effort guesses based on which ref namespace moved and which git internal files were present during the change.
+Git events are detected by watching the repository's `.git` directory (via the per-session watcher when a localterm tab is open in the repo, plus the daemon-global watcher over the automation's `cwd` tree). The operation-level events are best-effort guesses based on which ref namespace moved and which git internal files were present during the change.
 
 ### Git events
 

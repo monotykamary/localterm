@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import os from "node:os";
 import { DEFAULT_SHELL_FALLBACK } from "./constants.js";
 
-export const isExecutable = (binaryPath: string): boolean => {
+const isExecutable = (binaryPath: string): boolean => {
   try {
     accessSync(binaryPath, fsConstants.X_OK);
     return true;

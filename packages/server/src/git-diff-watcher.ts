@@ -4,12 +4,12 @@ import { EventEmitter } from "node:events";
 import { GIT_DIRTY_THROTTLE_MS } from "./constants.js";
 import { Throttle } from "./utils/throttle.js";
 
-interface GitDirResult {
+export interface GitDirResult {
   gitDir: string;
   repoRoot: string;
 }
 
-const resolveGitDir = (cwd: string): GitDirResult | null => {
+export const resolveGitDir = (cwd: string): GitDirResult | null => {
   let current = path.resolve(cwd);
   while (true) {
     const indicator = path.join(current, ".git");
