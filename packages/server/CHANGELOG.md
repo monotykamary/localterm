@@ -1,5 +1,21 @@
 # localterm-server
 
+## 2.44.0
+
+### Minor Changes
+
+- Per-session shell override, fish hooks, login-profile sourcing, offline fonts, custom themes/fonts, and a docs site.
+
+  **Shells.** Pick a shell per tab (Settings → Launch → Default shell, sent as `?shell=`), per CLI/REST call (`localterm session new --shell` / `localterm exec --shell`, the `shell` field on `POST /api/sessions` + `/api/exec`; a non-executable path is rejected with `400 invalid_shell`), or globally (`LOCALTERM_SHELL`). Detection order: `LOCALTERM_SHELL` → login shell from passwd → `$SHELL` → `/bin/sh`; `GET /api/config` returns the detected default and the host's `/etc/shells` list.
+
+  **Shell hooks.** fish now gets OSC 7 cwd tracking + git-dirty + the one-shot automation-exit hook (previously unhooked). bash mimics `bash -l` (`/etc/profile` + the first login file, `.bashrc` only when none exists → no double-source PATH duplication) and zsh sources `.zprofile`, so PATH/env set in login profiles isn't lost.
+
+  **Themes.** 19 built-in themes (16 dark + 3 light: GitHub Light, Solarized Light, Catppuccin Latte) plus **Auto (system)**, which resolves to the dark/light default from `prefers-color-scheme` live. Import your own theme from **Settings → Theme → Import theme…** — a JSON theme (`{ name, colors }` or a bare xterm `ITheme` colors object) or an iTerm **`.itermcolors`** plist. Imported themes are stored locally, listed after the built-ins, and deletable.
+
+  **Fonts.** All 11 fonts are now bundled (no runtime Google Fonts fetch), so the font picker works on an air-gapped or firewalled Linux VPS — only the latin woff2 subset of the selected font is fetched at runtime. A **Custom…** font entry lets you type a system-installed Nerd Font family (`JetBrainsMono Nerd Font Mono`, `MesloLGS NF`) resolved by the OS font stack.
+
+  **Docs.** The README is now an idiot-friendly quick-start; the deep dives live in a new `docs/` tree (usage, shells, appearance, automations, auto-start, identity, pi, security, cli) with a guide to creating and importing themes. The `shell` field is documented in the agent skill.
+
 ## 2.43.0
 
 ### Minor Changes
