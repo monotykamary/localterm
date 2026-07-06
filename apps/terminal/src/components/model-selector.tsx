@@ -115,15 +115,23 @@ export const ModelSelector = ({
         open && "border-ring",
       )}
     >
-      <span className={cn("truncate", value.length === 0 ? "text-muted-foreground/70" : "text-foreground")}>
+      <span
+        className={cn(
+          "truncate",
+          value.length === 0 ? "text-muted-foreground/70" : "text-foreground",
+        )}
+      >
         {value.length === 0 ? placeholder : value}
       </span>
     </div>
   );
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger nativeButton={false} render={trigger ? trigger(open, value, displayLabel) : defaultTrigger} />
-      <PopoverContent className="w-80 p-0" align="start" initialFocus={inputRef}>
+      <PopoverTrigger
+        nativeButton={false}
+        render={trigger ? trigger(open, value, displayLabel) : defaultTrigger}
+      />
+      <PopoverContent className="w-80 gap-0 p-0" align="start" initialFocus={inputRef}>
         <div className="flex items-center gap-1.5 border-b border-border/40 px-2 py-1.5">
           <Search className="size-3 text-muted-foreground" aria-hidden="true" />
           <input

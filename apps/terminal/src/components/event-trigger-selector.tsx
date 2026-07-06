@@ -134,7 +134,7 @@ export const EventTriggerSelector = ({
           ))
         )}
       </PopoverTrigger>
-      <PopoverContent className="w-80 p-0" align="start" initialFocus={inputRef}>
+      <PopoverContent className="w-80 gap-0 p-0" align="start" initialFocus={inputRef}>
         <div className="flex items-center gap-1.5 border-b border-border/40 px-2 py-1.5">
           <Search className="size-3 text-muted-foreground" aria-hidden="true" />
           <input

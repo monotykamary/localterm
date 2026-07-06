@@ -15,6 +15,7 @@ import {
   CalendarClock,
   ChevronDown,
   ChevronLeft,
+  Clock,
   Eraser,
   ExternalLink,
   Minimize2,
@@ -35,6 +36,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -148,6 +150,15 @@ const DEFAULT_LIMIT_MAX = 20;
 const SECTION_LABEL_CLASSES =
   "text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase";
 const FORM_INPUT_CLASSES = "h-7 px-2 text-xs";
+const FORM_SECTION_CARD_CLASSES =
+  "flex flex-col gap-2.5 rounded-lg border border-border/60 bg-foreground/[0.02] p-3";
+
+const FormSection = ({ label, children }: { label: string; children: ReactNode }) => (
+  <section className={FORM_SECTION_CARD_CLASSES}>
+    <span className={SECTION_LABEL_CLASSES}>{label}</span>
+    {children}
+  </section>
+);
 
 const runTimestamp = (run: AutomationRunRecord): number =>
   run.finishedAt ?? run.startedAt ?? run.scheduledFor;
@@ -468,7 +479,7 @@ const ToggleChip = ({
     aria-pressed={active}
     onClick={onToggle}
     className={cn(
-      "rounded-sm border px-1.5 py-0.5 text-[10px] tabular-nums transition-colors",
+      "flex items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] tabular-nums transition-colors",
       active
         ? "border-primary/50 bg-foreground/10 text-foreground"
         : "border-border/60 text-muted-foreground hover:text-foreground",
@@ -489,6 +500,7 @@ const TimePicker = ({
   onChange: (hour: number, minute: number) => void;
 }) => (
   <div className="flex items-center gap-1.5">
+    <Clock className="size-3 text-muted-foreground/70" aria-hidden="true" />
     <NumberStepper
       value={hour}
       min={0}
@@ -597,31 +609,34 @@ const ScheduleBuilder = ({
       )}
 
       {schedule.frequency === "monthly" && (
-        <div className="grid w-fit grid-cols-7 gap-1 justify-items-center">
-          {WEEKDAY_NAMES.map((name) => (
-            <div
-              key={name}
-              className="text-center text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60"
-            >
-              {name}
-            </div>
-          ))}
-          {Array.from({ length: 31 }, (_, index) => index + 1).map((day) => (
-            <ToggleChip
-              key={day}
-              label={String(day)}
-              ariaLabel={`toggle day ${day}`}
-              active={schedule.daysOfMonth.includes(day)}
-              onToggle={() =>
-                onChange({
-                  ...schedule,
-                  daysOfMonth: schedule.daysOfMonth.includes(day)
-                    ? schedule.daysOfMonth.filter((value) => value !== day)
-                    : [...schedule.daysOfMonth, day],
-                })
-              }
-            />
-          ))}
+        <div className="w-fit rounded-lg border border-border/40 bg-background/40 p-2">
+          <div className="grid grid-cols-7 gap-1 justify-items-center">
+            {WEEKDAY_NAMES.map((name) => (
+              <div
+                key={name}
+                className="flex h-7 items-center justify-center text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60"
+              >
+                {name}
+              </div>
+            ))}
+            {Array.from({ length: 31 }, (_, index) => index + 1).map((day) => (
+              <ToggleChip
+                key={day}
+                label={String(day)}
+                ariaLabel={`toggle day ${day}`}
+                active={schedule.daysOfMonth.includes(day)}
+                onToggle={() =>
+                  onChange({
+                    ...schedule,
+                    daysOfMonth: schedule.daysOfMonth.includes(day)
+                      ? schedule.daysOfMonth.filter((value) => value !== day)
+                      : [...schedule.daysOfMonth, day],
+                  })
+                }
+                className="size-7 px-0"
+              />
+            ))}
+          </div>
         </div>
       )}
 
@@ -1398,55 +1413,55 @@ const AutomationDetail = ({
             {runnerTypeLabel(automation.runner)}: {runnerSummary(automation.runner)}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-0.5">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`run ${automation.name} now`}
-            className="hover:text-foreground"
-            onClick={onRunNow}
-          >
-            <Play />
-          </Button>
-          {compactable && onCompact ? (
+        <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex items-center gap-0.5 rounded-full border border-border/60 bg-foreground/[0.02] p-0.5">
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={`compact ${automation.name} thread`}
-              title="Compact the thread session now"
-              className="hover:text-foreground"
-              onClick={onCompact}
+              aria-label={`run ${automation.name} now`}
+              className="rounded-full hover:bg-foreground/10 hover:text-foreground"
+              onClick={onRunNow}
             >
-              <Minimize2 />
+              <Play />
             </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`edit ${automation.name}`}
-            className="hover:text-foreground"
-            onClick={onEdit}
-          >
-            <Pencil />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={
-              armedDelete ? `confirm delete ${automation.name}` : `delete ${automation.name}`
-            }
-            className={cn(
-              armedDelete ? "text-red-400 hover:text-red-400" : "hover:text-foreground",
-            )}
-            onClick={onDelete}
-          >
-            <Trash2 />
-          </Button>
+            {compactable && onCompact ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`compact ${automation.name} thread`}
+                title="Compact the thread session now"
+                className="rounded-full hover:bg-foreground/10 hover:text-foreground"
+                onClick={onCompact}
+              >
+                <Minimize2 />
+              </Button>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`edit ${automation.name}`}
+              className="rounded-full hover:bg-foreground/10 hover:text-foreground"
+              onClick={onEdit}
+            >
+              <Pencil />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={
+                armedDelete ? `confirm delete ${automation.name}` : `delete ${automation.name}`
+              }
+              className={cn(
+                "rounded-full hover:bg-foreground/10",
+                armedDelete ? "text-red-400 hover:text-red-400" : "hover:text-foreground",
+              )}
+              onClick={onDelete}
+            >
+              <Trash2 />
+            </Button>
+          </div>
           <Switch
             size="sm"
-            // The icon buttons carry their own padding; the switch doesn't, so
-            // a small left margin keeps its spacing even with the buttons.
-            className="ml-1.5"
             aria-label={`toggle ${automation.name}`}
             checked={automation.enabled}
             onCheckedChange={onToggleEnabled}
@@ -1454,7 +1469,7 @@ const AutomationDetail = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 text-[11px]">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-border/60 bg-foreground/[0.02] p-3 text-[11px]">
         <div className="flex flex-col gap-0.5">
           <span className={SECTION_LABEL_CLASSES}>Trigger</span>
           <span className="text-foreground/90">{triggerLabel(automation.trigger)}</span>
@@ -1614,14 +1629,14 @@ const AutomationForm = ({
   const closeOnFinishDisabled = !closeOnFinishSupported && !form.closeOnFinish;
   return (
     <div className="flex flex-col gap-2.5 p-4">
-      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+      <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
         Name
         <Input
           value={form.name}
           autoFocus
           placeholder="nightly build"
           aria-label="automation name"
-          className={FORM_INPUT_CLASSES}
+          className="h-9 px-2.5 text-sm font-medium"
           onChange={(event) => onChange({ ...form, name: event.target.value })}
         />
       </label>
@@ -1674,7 +1689,7 @@ const AutomationForm = ({
             <p className="text-[10px] text-muted-foreground/70">
               Runs the agent headlessly. Findings + a transcript log land in Triage.
             </p>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-foreground/[0.02] p-3">
               <span className={SECTION_LABEL_CLASSES}>Harness</span>
               <SettingsSelect
                 value={form.runner.harnessKind}
@@ -1758,19 +1773,17 @@ const AutomationForm = ({
           </div>
         )}
       </div>
-      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-        Directory
-        <Input
-          value={form.cwd}
-          placeholder="/path/to/project"
-          aria-label="automation directory"
-          className={cn(FORM_INPUT_CLASSES, "font-mono")}
-          onChange={(event) => onChange({ ...form, cwd: event.target.value })}
-        />
-      </label>
-
-      <div className="flex flex-col gap-1.5">
-        <span className={SECTION_LABEL_CLASSES}>Trigger</span>
+      <FormSection label="Where & when">
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          Directory
+          <Input
+            value={form.cwd}
+            placeholder="/path/to/project"
+            aria-label="automation directory"
+            className={cn(FORM_INPUT_CLASSES, "font-mono")}
+            onChange={(event) => onChange({ ...form, cwd: event.target.value })}
+          />
+        </label>
         <SettingsSelect
           value={form.triggerType}
           items={[
@@ -1860,10 +1873,9 @@ const AutomationForm = ({
             </span>
           </div>
         )}
-      </div>
+      </FormSection>
 
-      <div className="flex flex-col gap-1.5">
-        <span className={SECTION_LABEL_CLASSES}>Run limit</span>
+      <FormSection label="Limits">
         <div className="flex items-center gap-2">
           <SettingsSelect
             value={form.limitMode}
@@ -1896,44 +1908,43 @@ const AutomationForm = ({
             />
           ) : null}
         </div>
-      </div>
 
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        Enabled
-        <Switch
-          aria-label="automation enabled"
-          checked={form.enabled}
-          onCheckedChange={(enabled) => onChange({ ...form, enabled })}
-        />
-      </div>
-
-      {form.runner.runnerType === "shell" ? (
         <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span className="flex flex-col">
-            Close tab when finished
-            <span
-              className={
-                closeOnFinishSupported
-                  ? "text-[10px] text-muted-foreground/60"
-                  : "text-[10px] text-amber-400"
-              }
-            >
-              {closeOnFinishSupported
-                ? "Closes the run's tab once the command exits."
-                : "Needs a Chromium browser with remote debugging enabled — run tabs won't close until it's on."}
-            </span>
-          </span>
+          Enabled
           <Switch
-            aria-label="close tab when finished"
-            checked={form.closeOnFinish}
-            disabled={closeOnFinishDisabled}
-            onCheckedChange={(closeOnFinish) => onChange({ ...form, closeOnFinish })}
+            aria-label="automation enabled"
+            checked={form.enabled}
+            onCheckedChange={(enabled) => onChange({ ...form, enabled })}
           />
         </div>
-      ) : null}
 
-      <div className="flex flex-col gap-1.5">
-        <span className={SECTION_LABEL_CLASSES}>Secrets to expose</span>
+        {form.runner.runnerType === "shell" ? (
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="flex flex-col">
+              Close tab when finished
+              <span
+                className={
+                  closeOnFinishSupported
+                    ? "text-[10px] text-muted-foreground/60"
+                    : "text-[10px] text-amber-400"
+                }
+              >
+                {closeOnFinishSupported
+                  ? "Closes the run's tab once the command exits."
+                  : "Needs a Chromium browser with remote debugging enabled — run tabs won't close until it's on."}
+              </span>
+            </span>
+            <Switch
+              aria-label="close tab when finished"
+              checked={form.closeOnFinish}
+              disabled={closeOnFinishDisabled}
+              onCheckedChange={(closeOnFinish) => onChange({ ...form, closeOnFinish })}
+            />
+          </div>
+        ) : null}
+      </FormSection>
+
+      <FormSection label="Secrets to expose">
         {secrets === null ? (
           <span className="text-[10px] text-muted-foreground/60">Loading secrets…</span>
         ) : secrets.length === 0 ? (
@@ -1952,7 +1963,7 @@ const AutomationForm = ({
           are resolved from the Keychain into the run’s environment and never travel over the
           network. A secret deleted after you select it is skipped at run time.
         </span>
-      </div>
+      </FormSection>
 
       {saveError ? (
         <p className="text-[10px] text-red-400">
@@ -1960,13 +1971,12 @@ const AutomationForm = ({
         </p>
       ) : null}
 
-      <Separator className="bg-border/40" />
-      <div className="flex items-center justify-end gap-1.5">
-        <Button variant="ghost" size="xs" onClick={onCancel}>
+      <div className="flex items-center justify-end gap-2 border-t border-border/40 pt-3">
+        <Button variant="ghost" size="sm" onClick={onCancel}>
           Cancel
         </Button>
-        <Button variant="secondary" size="xs" disabled={!isValid || isSaving} onClick={onSave}>
-          {isSaving ? <Spinner className="size-3" aria-label="saving" /> : null}
+        <Button variant="secondary" size="sm" disabled={!isValid || isSaving} onClick={onSave}>
+          {isSaving ? <Spinner className="size-3.5" aria-label="saving" /> : null}
           {form.id ? "Save" : "Create"}
         </Button>
       </div>
@@ -2186,7 +2196,7 @@ const AutomationListPopover = ({
                 aria-selected={isSelected}
                 onClick={() => onSelect(automation.id)}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left outline-none transition-colors",
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors",
                   isSelected
                     ? "bg-foreground/10 text-foreground"
                     : "text-muted-foreground hover:bg-foreground/5",
@@ -2333,7 +2343,7 @@ const AutomationSidebar = ({
                   onClick={() => onSelect(automation.id)}
                   data-index={virtualRow.index}
                   className={cn(
-                    "flex w-full flex-col gap-0.5 rounded-sm px-2 py-1.5 text-left outline-none transition-colors",
+                    "flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none transition-colors",
                     isSelected
                       ? "bg-foreground/10 text-foreground"
                       : "text-muted-foreground hover:bg-foreground/5",

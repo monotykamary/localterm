@@ -38,7 +38,11 @@ const THINKING_ITEMS: readonly OptionItem[] = [
 
 const SESSION_ITEMS: readonly OptionItem[] = [
   { id: "fresh", label: "Fresh", description: "Ephemeral — a new session each fire." },
-  { id: "thread", label: "Thread", description: "Resumes one session per fire, compacts in place." },
+  {
+    id: "thread",
+    label: "Thread",
+    description: "Resumes one session per fire, compacts in place.",
+  },
 ];
 
 const labelFor = (items: readonly OptionItem[], id: string): ReactNode =>
@@ -70,11 +74,22 @@ const OptionPopover = ({
   popoverClassName,
 }: OptionPopoverProps) => {
   const [open, setOpen] = useState(false);
-  const [highlighted, setHighlighted] = useState(() => Math.max(0, items.findIndex((item) => item.id === value)));
+  const [highlighted, setHighlighted] = useState(() =>
+    Math.max(
+      0,
+      items.findIndex((item) => item.id === value),
+    ),
+  );
   const listboxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (open) setHighlighted(Math.max(0, items.findIndex((item) => item.id === value)));
+    if (open)
+      setHighlighted(
+        Math.max(
+          0,
+          items.findIndex((item) => item.id === value),
+        ),
+      );
   }, [open, items, value]);
 
   const choose = (id: string) => {
@@ -114,7 +129,11 @@ const OptionPopover = ({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger nativeButton={false} render={trigger(open)} />
-      <PopoverContent align="start" className={cn("p-1", popoverClassName)} initialFocus={listboxRef}>
+      <PopoverContent
+        align="start"
+        className={cn("p-1", popoverClassName)}
+        initialFocus={listboxRef}
+      >
         <div
           ref={listboxRef}
           tabIndex={-1}
@@ -138,7 +157,9 @@ const OptionPopover = ({
                 onMouseEnter={() => setHighlighted(index)}
                 className={cn(
                   "flex cursor-pointer flex-col items-start gap-0.5 rounded-sm px-2 py-1.5 text-left outline-none transition-colors",
-                  active ? "bg-foreground/10 text-foreground" : "text-muted-foreground hover:bg-foreground/5",
+                  active
+                    ? "bg-foreground/10 text-foreground"
+                    : "text-muted-foreground hover:bg-foreground/5",
                 )}
               >
                 <span className="flex items-center gap-1.5 text-xs">
@@ -150,7 +171,9 @@ const OptionPopover = ({
                   {item.label}
                 </span>
                 {item.description ? (
-                  <span className="pl-[1.125rem] text-[10px] text-muted-foreground/70">{item.description}</span>
+                  <span className="pl-[1.125rem] text-[10px] text-muted-foreground/70">
+                    {item.description}
+                  </span>
                 ) : null}
               </div>
             );
@@ -197,7 +220,9 @@ export const AgentComposer = ({
               className={composerChipClasses(open)}
             >
               <Cpu className="size-3 shrink-0" aria-hidden="true" />
-              <span className="max-w-[10rem] truncate">{value.length === 0 ? "Default" : label}</span>
+              <span className="max-w-[10rem] truncate">
+                {value.length === 0 ? "Default" : label}
+              </span>
               <ChevronDown className="size-3 shrink-0 opacity-50" aria-hidden="true" />
             </button>
           )}
@@ -206,7 +231,9 @@ export const AgentComposer = ({
           ariaLabel="effort"
           items={THINKING_ITEMS}
           value={thinkingId}
-          onChange={(id) => onAgentThinkingChange(id === "default" ? "" : (id as AgentThinkingLevel))}
+          onChange={(id) =>
+            onAgentThinkingChange(id === "default" ? "" : (id as AgentThinkingLevel))
+          }
           popoverClassName="w-52"
           trigger={(open) => (
             <button
