@@ -94,6 +94,9 @@ export const AUTOMATIONS_RELATIVE_TIME_REFRESH_MS = 30_000;
 // dropped/reconnecting socket left a completed run showing "running…").
 export const AUTOMATIONS_LIVE_POLL_MS = 4_000;
 export const AUTOMATIONS_MODAL_CLOSE_TRANSITION_MS = 150;
+// Tolerance for treating the run-log scroll container as pinned to the bottom,
+// so subpixel rounding doesn't flicker the "scroll to bottom" button.
+export const RUN_LOG_AT_BOTTOM_THRESHOLD_PX = 4;
 // Most-recent runs shown in the cross-automation "Recent runs" feed.
 export const RECENT_RUNS_LIMIT = 50;
 

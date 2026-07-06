@@ -235,3 +235,82 @@ describe("AutomationsModal", () => {
     expect(await screen.findByText(/won't close until it's on/)).toBeDefined();
   });
 });
+
+const threadAutomation = (): AutomationWithNextRun =>
+  automation({
+    runner: {
+      kind: "agent",
+      sessionMode: "thread",
+      prompt: "review the latest commit",
+      harness: { kind: "pi", extensions: true, skills: true, contextFiles: true },
+    },
+    runs: [
+      {
+        runId: "run-1",
+        scheduledFor: Date.now(),
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+        status: "completed",
+        exitCode: 0,
+        trigger: "manual",
+        countsTowardLimit: false,
+        findings: "Summary of work.",
+        changedFiles: [],
+        unread: false,
+        log: [{ type: "assistant", text: "hello" }],
+      },
+    ],
+  });
+
+describe("AutomationsModal run log", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/health")) {
+          return new Response(
+            JSON.stringify({ ok: true, sessions: 0, cdp: { connected: true, browser: "Chrome" } }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (url.includes("/session")) {
+          return new Response(
+            JSON.stringify({ entries: [{ type: "assistant", text: "transcript body" }] }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({ automations: [] }), { status: 200 });
+      }),
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("opens at the top and surfaces a scroll-to-bottom button only when scrolled away from the bottom", async () => {
+    renderModal([threadAutomation()]);
+    fireEvent.click((await screen.findByText("Summary of work.")).closest("button")!);
+    const transcript = await screen.findByText("transcript body");
+    const scrollContainer = transcript.closest<HTMLElement>(".overflow-auto")!;
+
+    // jsdom reports no overflow, so the log reads as already pinned to the
+    // bottom and the hover button stays hidden.
+    expect(screen.queryByLabelText("scroll to bottom")).toBeNull();
+
+    // Pretend the transcript is taller than the viewport and scrolled up.
+    Object.defineProperty(scrollContainer, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(scrollContainer, "clientHeight", { value: 200, configurable: true });
+    fireEvent.scroll(scrollContainer);
+    const scrollButton = await screen.findByLabelText("scroll to bottom");
+    expect(scrollButton).toBeDefined();
+
+    // Clicking pins to the bottom and hides the button once the scroll settles.
+    fireEvent.click(scrollButton);
+    expect(scrollContainer.scrollTop).toBe(1000);
+    fireEvent.scroll(scrollContainer);
+    expect(screen.queryByLabelText("scroll to bottom")).toBeNull();
+  });
+});

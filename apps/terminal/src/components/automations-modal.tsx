@@ -69,6 +69,7 @@ import {
   AUTOMATIONS_SORT_STORAGE_KEY,
   COPY_FEEDBACK_MS,
   RECENT_RUNS_LIMIT,
+  RUN_LOG_AT_BOTTOM_THRESHOLD_PX,
 } from "@/lib/constants";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
@@ -81,6 +82,7 @@ import { fetchAutomations } from "@/utils/fetch-automations";
 import { fetchSecrets } from "@/utils/fetch-secrets";
 import { fetchServerHealth, type ServerHealth } from "@/utils/fetch-server-health";
 import { formatRelativeTime } from "@/utils/format-relative-time";
+import { isScrolledToBottom } from "@/utils/is-scrolled-to-bottom";
 import { resetAutomation } from "@/utils/reset-automation";
 import {
   buildRunnerFromForm,
@@ -341,11 +343,25 @@ const RunLogView = ({
   onOpenAutomation: (id: string) => void;
 }) => {
   const [sessionEntries, setSessionEntries] = useState<AgentSessionEntry[] | null>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollContentRef = useRef<HTMLDivElement | null>(null);
   const automation = automations.find((candidate) => candidate.id === automationId);
   const run = automation?.runs.find((candidate) => candidate.runId === runId) ?? null;
   const runner = automation?.runner;
   const isThread = runner?.kind === "agent" && runner.sessionMode === "thread";
+  const activeRunId = run?.runId ?? null;
+
+  const recomputeAtBottom = useCallback(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    setIsAtBottom(isScrolledToBottom(node, RUN_LOG_AT_BOTTOM_THRESHOLD_PX));
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    const node = scrollRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, []);
 
   // Thread-mode runs resume a pi session file; show its transcript (the whole
   // branch up to this run's point in time, including compactions) instead of
@@ -367,12 +383,27 @@ const RunLogView = ({
     };
   }, [automationId, runId, isThread]);
 
-  // Land on the latest message when the thread transcript loads.
+  // Logs open at the top; a hovering "scroll to bottom" button covers the
+  // rest. A scroll listener plus a ResizeObserver over the container and its
+  // content keep that button's visibility in sync with manual scrolling,
+  // viewport resizes, and content growth (transcript load, live poll, a tool
+  // entry expanding). The active-run-id dep re-attaches after the not-found
+  // branch.
   useEffect(() => {
-    if (!isThread || sessionEntries === null) return;
-    const node = scrollRef.current;
-    if (node) node.scrollTop = node.scrollHeight;
-  }, [isThread, sessionEntries]);
+    const container = scrollRef.current;
+    const content = scrollContentRef.current;
+    if (!container || !content) return;
+    recomputeAtBottom();
+    const handleScroll = () => recomputeAtBottom();
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    const observer = new ResizeObserver(() => recomputeAtBottom());
+    observer.observe(container);
+    observer.observe(content);
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      observer.disconnect();
+    };
+  }, [recomputeAtBottom, activeRunId]);
 
   if (!automation || !run) {
     return (
@@ -391,7 +422,7 @@ const RunLogView = ({
   const textLog = typeof run.log === "string" ? run.log : run.findings;
   const displayEntries: AgentSessionEntry[] | null = isThread ? sessionEntries : entries;
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-3 py-2">
         <Button variant="ghost" size="icon-sm" aria-label="back to automations" onClick={onBack}>
           <ChevronLeft />
@@ -433,27 +464,40 @@ const RunLogView = ({
           <ArrowUpRight className="size-3.5" aria-hidden="true" />
         </button>
       </div>
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto p-3">
-        {isThread && displayEntries === null ? (
-          <div className="flex h-full items-center justify-center">
-            <Spinner className="size-4" aria-label="loading session" />
-          </div>
-        ) : displayEntries !== null && displayEntries.length === 0 ? (
-          <p className="py-6 text-center text-xs text-muted-foreground">
-            {isThread ? "No session history yet." : "No log recorded for this run."}
-          </p>
-        ) : displayEntries ? (
-          <div className="flex flex-col gap-2 font-mono text-[11px] leading-relaxed">
-            {displayEntries.map((entry, index) => renderLogEntry(entry, index))}
-          </div>
-        ) : textLog ? (
-          <pre className="whitespace-pre-wrap break-words rounded-sm bg-foreground/5 p-3 font-mono text-[11px] leading-relaxed text-foreground/80">
-            {textLog}
-          </pre>
-        ) : (
-          <p className="py-6 text-center text-xs text-muted-foreground">
-            No log recorded for this run.
-          </p>
+      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto p-3">
+        <div ref={scrollContentRef} className="min-h-full">
+          {isThread && displayEntries === null ? (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Spinner className="size-4" aria-label="loading session" />
+            </div>
+          ) : displayEntries !== null && displayEntries.length === 0 ? (
+            <p className="py-6 text-center text-xs text-muted-foreground">
+              {isThread ? "No session history yet." : "No log recorded for this run."}
+            </p>
+          ) : displayEntries ? (
+            <div className="flex flex-col gap-2 font-mono text-[11px] leading-relaxed">
+              {displayEntries.map((entry, index) => renderLogEntry(entry, index))}
+            </div>
+          ) : textLog ? (
+            <pre className="whitespace-pre-wrap break-words rounded-sm bg-foreground/5 p-3 font-mono text-[11px] leading-relaxed text-foreground/80">
+              {textLog}
+            </pre>
+          ) : (
+            <p className="py-6 text-center text-xs text-muted-foreground">
+              No log recorded for this run.
+            </p>
+          )}
+        </div>
+        {isAtBottom ? null : (
+          <button
+            type="button"
+            aria-label="scroll to bottom"
+            title="Scroll to bottom"
+            onClick={scrollToBottom}
+            className="absolute bottom-3 right-3 z-10 flex size-8 animate-in fade-in-0 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground shadow-md backdrop-blur-sm duration-150 ease-snappy transition-colors hover:text-foreground"
+          >
+            <ChevronDown className="size-4" aria-hidden="true" />
+          </button>
         )}
       </div>
     </div>
