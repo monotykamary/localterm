@@ -87,7 +87,7 @@ describe("SGR-1006 mouse encoder (headless fallback)", () => {
   });
 });
 
-describe("SessionManager wait + press + mouse state", () => {
+describe("SessionManager wait + press + mouse state", { tags: ["integration"] }, () => {
   let manager: SessionManager;
 
   afterEach(() => {

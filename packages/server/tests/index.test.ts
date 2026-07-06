@@ -109,7 +109,7 @@ const closeWs = (socket: WebSocket): Promise<void> =>
     socket.close();
   });
 
-describe("createServer WS lifecycle", () => {
+describe("createServer WS lifecycle", { tags: ["integration"] }, () => {
   let server: RunningServer;
 
   beforeEach(async () => {
@@ -558,7 +558,7 @@ describe("createServer WS lifecycle", () => {
   });
 });
 
-describe("POST /api/sessions shell override", () => {
+describe("POST /api/sessions shell override", { tags: ["integration"] }, () => {
   let server: RunningServer;
 
   beforeEach(async () => {
@@ -620,7 +620,7 @@ describe("POST /api/sessions shell override", () => {
   }, 10_000);
 });
 
-describe("open dev ports API", () => {
+describe("open dev ports API", { tags: ["integration"] }, () => {
   let server: RunningServer;
   let socket: WebSocket;
   let sessionPid = 0;

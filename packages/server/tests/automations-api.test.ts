@@ -38,7 +38,7 @@ const createInput = () => ({
   runner: { kind: "shell", command: "pnpm build" },
 });
 
-describe("automations REST API", () => {
+describe("automations REST API", { tags: ["integration"] }, () => {
   let testContext: TestContext;
 
   const apiUrl = (suffix: string) =>
@@ -1072,7 +1072,7 @@ describe("automations REST API", () => {
   });
 });
 
-describe("automation run tab surface", () => {
+describe("automation run tab surface", { tags: ["integration"] }, () => {
   let server: RunningServer;
   let stateDirectory: string;
   let openedUrls: string[];

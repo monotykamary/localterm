@@ -252,7 +252,7 @@ afterAll(() => {
   else process.env.NODE_TLS_REJECT_UNAUTHORIZED = savedTlsReject;
 });
 
-describe("e2e: auth gate + operator token + gateway mux (passkey mode)", () => {
+describe("e2e: auth gate + operator token + gateway mux (passkey mode)", { tags: ["e2e"] }, () => {
   let server: RunningServer;
   let daemonOrigin: string;
   let cookieFor: (user: string) => string;
@@ -321,7 +321,7 @@ describe("e2e: auth gate + operator token + gateway mux (passkey mode)", () => {
   });
 });
 
-describe("e2e: OIDC round-trip over HTTPS", () => {
+describe("e2e: OIDC round-trip over HTTPS", { tags: ["e2e"] }, () => {
   let idp: MockIdp;
   let server: RunningServer;
   let daemonOrigin: string;

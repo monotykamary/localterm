@@ -56,7 +56,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
-    "test": "vp test --run",
+    "test": "vp test --run --tagsFilter '!integration && !e2e'",
+    "test:integration": "vp test --run --tagsFilter integration",
+    "test:e2e": "LOCALTERM_E2E_BROWSER=1 vp test --run --tagsFilter e2e",
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {

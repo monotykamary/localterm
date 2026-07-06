@@ -74,7 +74,7 @@ const closeWs = (socket: WebSocket): Promise<void> =>
     socket.close();
   });
 
-describe("worktree delete guard (active PTY)", () => {
+describe("worktree delete guard (active PTY)", { tags: ["integration"] }, () => {
   let server: RunningServer;
   let repoDir: string;
   let worktreeDir: string;

@@ -150,7 +150,7 @@ const pollFor = async (
 const evalIn = (cdp: CdpClient, sessionId: string, expression: string): Promise<unknown> =>
   cdp.evaluateInSession(sessionId, expression);
 
-d("e2e: passkey WebAuthn + CDP cookie mint (headless Chrome)", () => {
+d("e2e: passkey WebAuthn + CDP cookie mint (headless Chrome)", { tags: ["e2e"] }, () => {
   let chrome: HeadlessChrome;
   let server: RunningServer;
   let daemonOrigin: string;

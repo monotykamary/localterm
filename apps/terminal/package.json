@@ -8,7 +8,7 @@
     "dev:app": "vp dev",
     "build": "tsc -b && vp build && node scripts/generate-sw.mjs",
     "preview": "vp preview",
-    "test": "vp test --run",
+    "test": "vp test --run --tagsFilter '!integration && !e2e'",
     "generate:sw": "node scripts/generate-sw.mjs",
     "generate:icons": "node scripts/generate-icons.mjs",
     "typecheck": "tsc -b --noEmit"

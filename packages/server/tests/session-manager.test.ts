@@ -30,7 +30,7 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(
 
 const shellInput = { shell: "/bin/sh", cwd: os.tmpdir() };
 
-describe("SessionManager no-clients grace", () => {
+describe("SessionManager no-clients grace", { tags: ["integration"] }, () => {
   let manager: SessionManager;
 
   afterEach(() => {
@@ -274,7 +274,7 @@ describe("SessionManager no-clients grace", () => {
   }, 10_000);
 });
 
-describe("SessionManager pending promote", () => {
+describe("SessionManager pending promote", { tags: ["integration"] }, () => {
   const noopHooks = {
     onOutputActivity: () => {},
     onSessionActivity: () => {},
@@ -323,7 +323,7 @@ describe("SessionManager pending promote", () => {
   });
 });
 
-describe("SessionManager peer-attached", () => {
+describe("SessionManager peer-attached", { tags: ["integration"] }, () => {
   const noopHooks = {
     onOutputActivity: () => {},
     onSessionEvent: () => {},
@@ -365,7 +365,7 @@ describe("SessionManager peer-attached", () => {
   });
 });
 
-describe("SessionManager pty-size", () => {
+describe("SessionManager pty-size", { tags: ["integration"] }, () => {
   const noopHooks = {
     onOutputActivity: () => {},
     onSessionActivity: () => {},
@@ -467,7 +467,7 @@ describe("SessionManager pty-size", () => {
   });
 });
 
-describe("SessionManager sessionsInPath", () => {
+describe("SessionManager sessionsInPath", { tags: ["integration"] }, () => {
   let manager: SessionManager;
 
   afterEach(() => {

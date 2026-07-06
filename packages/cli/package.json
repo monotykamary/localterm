@@ -46,7 +46,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
-    "test": "vp test --run",
+    "test": "vp test --run --tagsFilter '!integration && !e2e'",
     "typecheck": "tsc --noEmit",
     "prepack": "node ../../scripts/prepare-cli-publish.mjs"
   },

@@ -19,7 +19,7 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(
 
 const shellInput = { shell: "/bin/sh", cwd: os.tmpdir() };
 
-describe("SessionManager exec + programmatic PTY control", () => {
+describe("SessionManager exec + programmatic PTY control", { tags: ["integration"] }, () => {
   let manager: SessionManager;
 
   afterEach(() => {

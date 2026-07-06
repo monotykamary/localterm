@@ -127,7 +127,7 @@ const createFakeSpawn = () => {
 
 const makeStateDir = (): string => path.join(os.tmpdir(), `localterm-caffeinate-${randomUUID()}`);
 
-describe("createServer caffeinate broadcast", () => {
+describe("createServer caffeinate broadcast", { tags: ["integration"] }, () => {
   let server: RunningServer;
   let spawned: { killed: boolean }[];
   let stateDirectory: string;
@@ -241,7 +241,7 @@ describe("createServer caffeinate broadcast", () => {
   });
 });
 
-describe("createServer caffeinate when unsupported", () => {
+describe("createServer caffeinate when unsupported", { tags: ["integration"] }, () => {
   it("reports unsupported and never spawns", async () => {
     const fakeSpawn = createFakeSpawn();
     const stateDirectory = makeStateDir();

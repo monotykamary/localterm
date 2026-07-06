@@ -183,7 +183,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => s.close()));
 });
 
-describe("CdpClient.openBackgroundTab", () => {
+describe("CdpClient.openBackgroundTab", { tags: ["integration"] }, () => {
   it("creates the tab with background:true and resolves the target id", async () => {
     const browser = await startMockBrowser("ok");
     const client = new CdpClient({ detect: async () => [detected(browser.wsUrl)] });
@@ -265,7 +265,7 @@ describe("CdpClient.openBackgroundTab", () => {
   });
 });
 
-describe("CdpClient.closeTab", () => {
+describe("CdpClient.closeTab", { tags: ["integration"] }, () => {
   it("drives window.close() then Target.closeTarget for the tab", async () => {
     const browser = await startMockBrowser("ok");
     const client = new CdpClient({ detect: async () => [detected(browser.wsUrl)] });
@@ -309,7 +309,7 @@ describe("CdpClient.closeTab", () => {
 
 const relaxForObserve = () => new Promise((resolve) => setTimeout(resolve, 50));
 
-describe("CdpClient ambient tab observation", () => {
+describe("CdpClient ambient tab observation", { tags: ["integration"] }, () => {
   it("sends Target.setDiscoverTargets once on connect", async () => {
     const browser = await startMockBrowser("ok");
     const client = new CdpClient({
@@ -393,7 +393,7 @@ describe("CdpClient ambient tab observation", () => {
   });
 });
 
-describe("CdpClient keepalive (wake-from-sleep)", () => {
+describe("CdpClient keepalive (wake-from-sleep)", { tags: ["integration"] }, () => {
   it("tears down a half-open socket when the liveness probe goes unanswered, then reconnects", async () => {
     // silenceProbe: the WebSocket stays OPEN but never replies to the keepalive's
     // Target.getTargets probe — the same shape as a loopback socket that went
@@ -451,7 +451,7 @@ describe("CdpClient keepalive (wake-from-sleep)", () => {
   });
 });
 
-describe("CdpClient.resetConnection", () => {
+describe("CdpClient.resetConnection", { tags: ["integration"] }, () => {
   it("drops the live socket so the next open reconnects on a fresh socket", async () => {
     const browser = await startMockBrowser("ok");
     const client = new CdpClient({ detect: async () => [detected(browser.wsUrl)] });

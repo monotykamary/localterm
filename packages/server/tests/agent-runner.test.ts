@@ -89,7 +89,7 @@ const piRequest = (overrides: Partial<Parameters<typeof runAgent>[0]> = {}) =>
     ...overrides,
   }) as Parameters<typeof runAgent>[0];
 
-describe("runAgent (pi harness)", () => {
+describe("runAgent (pi harness)", { tags: ["integration"] }, () => {
   let tmpDir: string;
   let pi: string;
 
@@ -237,7 +237,7 @@ describe("runAgent (pi harness)", () => {
   });
 });
 
-describe("runAgent (custom harness)", () => {
+describe("runAgent (custom harness)", { tags: ["integration"] }, () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -282,7 +282,7 @@ describe("runAgent (custom harness)", () => {
   });
 });
 
-describe("compactAgent", () => {
+describe("compactAgent", { tags: ["integration"] }, () => {
   let tmpDir: string;
   let pi: string;
 
@@ -337,7 +337,7 @@ describe("compactAgent", () => {
   });
 });
 
-describe("listAgentModels", () => {
+describe("listAgentModels", { tags: ["integration"] }, () => {
   let tmpDir: string;
   let pi: string;
 

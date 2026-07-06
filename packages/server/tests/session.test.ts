@@ -45,7 +45,7 @@ const collectOutput = async (session: Session, timeoutMs = 15000): Promise<strin
   );
 };
 
-describe("Session", () => {
+describe("Session", { tags: ["integration"] }, () => {
   it("sets LOCALTERM in the PTY environment", async () => {
     const session = new Session({ shell: "/bin/sh" });
     try {
