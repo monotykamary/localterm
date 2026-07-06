@@ -1,5 +1,13 @@
 # localterm
 
+## 2.48.0
+
+### Patch Changes
+
+- Updated dependencies [8e0e2d9]
+- Updated dependencies [6509046]
+  - @monotykamary/localterm-server@2.48.0
+
 ## 2.47.0
 
 ### Minor Changes
