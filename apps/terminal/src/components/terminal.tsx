@@ -471,6 +471,7 @@ export const Terminal = () => {
     activePaddingY,
     activeDefaultCwd,
     activeDefaultShell,
+    activeCustomFontFamily,
     effectiveTheme,
     setPreviewThemeId,
     setPreviewFontId,
@@ -490,6 +491,7 @@ export const Terminal = () => {
     handlePaddingYChange,
     handleDefaultCwdChange,
     handleDefaultShellChange,
+    handleCustomFontFamilyChange,
   } = useTerminalSettings({ terminalRef, fitAddonRef, terminalReady, localEchoRef });
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
   const openDiffViewerRef = useRef<(() => void) | null>(null);
@@ -2900,6 +2902,8 @@ export const Terminal = () => {
                     fontId={activeFontId}
                     onFontChange={handleFontChange}
                     onFontPreview={setPreviewFontId}
+                    customFontFamily={activeCustomFontFamily}
+                    onCustomFontFamilyChange={handleCustomFontFamilyChange}
                     nerdFontEnabled={activeNerdFontEnabled}
                     onNerdFontEnabledChange={handleNerdFontEnabledChange}
                     ligaturesEnabled={activeLigaturesEnabled}

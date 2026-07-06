@@ -35,6 +35,8 @@ interface SettingsMenuHarnessProps {
   onThemePreview?: (id: string | null) => void;
   onFontChange?: (id: string) => void;
   onFontPreview?: (id: string | null) => void;
+  customFontFamily?: string;
+  onCustomFontFamilyChange?: (family: string) => void;
   onFontSizeChange?: (size: number) => void;
   onLineHeightChange?: (lineHeight: number) => void;
   onCursorStyleChange?: (style: TerminalCursorStyle) => void;
@@ -80,6 +82,8 @@ const renderSettingsMenu = ({
   onThemePreview,
   onFontChange = () => {},
   onFontPreview,
+  customFontFamily = "",
+  onCustomFontFamilyChange = () => {},
   onFontSizeChange = () => {},
   onLineHeightChange = () => {},
   onCursorStyleChange = () => {},
@@ -115,6 +119,8 @@ const renderSettingsMenu = ({
         fontId={initialFontId}
         onFontChange={onFontChange}
         onFontPreview={onFontPreview}
+        customFontFamily={customFontFamily}
+        onCustomFontFamilyChange={onCustomFontFamilyChange}
         nerdFontEnabled={false}
         onNerdFontEnabledChange={() => {}}
         ligaturesEnabled={initialLigaturesEnabled}
@@ -190,6 +196,24 @@ describe("SettingsSelect trigger label", () => {
     const trigger = screen.getByLabelText("select font");
     expect(trigger.textContent).toContain("Geist Mono");
     expect(trigger.textContent).not.toContain("geist-mono");
+  });
+
+  it("Custom font shows the family-name field only when selected", () => {
+    const onCustomFontFamilyChange = vi.fn();
+    // With a built-in font the custom family input is absent.
+    renderSettingsMenu({ initialFontId: "geist-mono", onCustomFontFamilyChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    expect(screen.queryByLabelText("custom font family")).toBeNull();
+    cleanup();
+
+    // Selecting the custom font reveals the family input; typing updates it.
+    renderSettingsMenu({ initialFontId: "custom", onCustomFontFamilyChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    const trigger = screen.getByLabelText("select font");
+    expect(trigger.textContent).toContain("Custom");
+    const input = screen.getByLabelText("custom font family");
+    fireEvent.change(input, { target: { value: "JetBrainsMono Nerd Font Mono" } });
+    expect(onCustomFontFamilyChange).toHaveBeenCalledWith("JetBrainsMono Nerd Font Mono");
   });
 
   it("Cursor style trigger shows the formatted label, not the raw id", () => {

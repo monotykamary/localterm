@@ -37,7 +37,7 @@ import {
   isTerminalCursorStyle,
   type TerminalCursorStyle,
 } from "@/lib/terminal-cursor";
-import { TERMINAL_FONTS } from "@/lib/terminal-fonts";
+import { TERMINAL_FONTS, CUSTOM_FONT_ID, buildCustomTerminalFont } from "@/lib/terminal-fonts";
 import { TERMINAL_SCROLLBACK_PRESETS, isTerminalScrollbackValue } from "@/lib/terminal-scrollback";
 import { TERMINAL_THEMES } from "@/lib/terminal-themes";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
@@ -50,6 +50,8 @@ interface SettingsMenuProps {
   fontId: string;
   onFontChange: (fontId: string) => void;
   onFontPreview?: (fontId: string | null) => void;
+  customFontFamily: string;
+  onCustomFontFamilyChange: (family: string) => void;
   nerdFontEnabled: boolean;
   onNerdFontEnabledChange: (enabled: boolean) => void;
   ligaturesEnabled: boolean;
@@ -318,6 +320,8 @@ export const SettingsMenu = ({
   fontId,
   onFontChange,
   onFontPreview,
+  customFontFamily,
+  onCustomFontFamilyChange,
   nerdFontEnabled,
   onNerdFontEnabledChange,
   ligaturesEnabled,
@@ -365,6 +369,16 @@ export const SettingsMenu = ({
   const [settled, setSettled] = useState(false);
   const [isFontSelectOpen, setIsFontSelectOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // The font picker appends a "Custom…" entry whose preview style uses the
+  // user-entered family so the dropdown renders the item in that font (when
+  // the OS resolves it). A blank custom family previews in the bundled default
+  // (what an empty field falls back to) rather than a bare fallback chain.
+  const customFont = buildCustomTerminalFont(customFontFamily);
+  const fontItems: readonly SettingsSelectItem[] = [
+    ...BUILTIN_FONT_ITEMS,
+    { id: CUSTOM_FONT_ID, label: "Custom…", itemStyle: { fontFamily: customFont.family } },
+  ];
 
   // The overlay is portalled to document.body so the toolbar's transform
   // (translate-y on hide) can't trap the fixed-position overlay in its stacking
@@ -559,7 +573,7 @@ export const SettingsMenu = ({
                       <FieldLabel className={SECTION_LABEL_CLASSES}>Font</FieldLabel>
                       <SettingsSelect
                         value={fontId}
-                        items={BUILTIN_FONT_ITEMS}
+                        items={fontItems}
                         ariaLabel="select font"
                         placeholder="Font"
                         open={isFontSelectOpen}
@@ -567,6 +581,31 @@ export const SettingsMenu = ({
                         onOpenChange={handleFontSelectOpenChange}
                         onItemHover={onFontPreview ? (id) => onFontPreview(id) : undefined}
                       />
+                      {fontId === CUSTOM_FONT_ID ? (
+                        <Tooltip>
+                          <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                            Custom font family
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="bottom"
+                            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                            className="max-w-xs"
+                          >
+                            A font family installed on the host — most useful for a system-installed
+                            Nerd Font (e.g. “JetBrainsMono Nerd Font Mono”, “MesloLGS NF”) the browser
+                            resolves via fontconfig. Leave empty to fall back to the bundled default.
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : null}
+                      {fontId === CUSTOM_FONT_ID ? (
+                        <Input
+                          value={customFontFamily}
+                          placeholder="e.g. JetBrainsMono Nerd Font Mono"
+                          aria-label="custom font family"
+                          className="h-7 px-2 font-mono text-xs"
+                          onChange={(event) => onCustomFontFamilyChange(event.target.value)}
+                        />
+                      ) : null}
                       <div className="flex items-center justify-between gap-2">
                         <span className={ROW_LABEL_CLASSES}>Size</span>
                         <NumberStepper

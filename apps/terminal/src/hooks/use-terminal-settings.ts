@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
-import { familyForFont, findTerminalFontById } from "@/lib/terminal-fonts";
+import { familyForFont, findTerminalFontById, CUSTOM_FONT_ID, buildCustomTerminalFont } from "@/lib/terminal-fonts";
 import { findTerminalThemeById } from "@/lib/terminal-themes";
 import type { TerminalCursorStyle } from "@/lib/terminal-cursor";
 import { LocalEcho } from "@/lib/local-echo";
@@ -52,6 +52,11 @@ import {
   storeTerminalFontId,
   subscribeStoredTerminalFontId,
 } from "@/utils/stored-terminal-font-id";
+import {
+  loadStoredCustomFontFamily,
+  storeCustomFontFamily,
+  subscribeStoredCustomFontFamily,
+} from "@/utils/stored-custom-font-family";
 import {
   loadStoredTerminalFontSize,
   storeTerminalFontSize,
@@ -123,6 +128,7 @@ export const useTerminalSettings = ({
   const initialLigaturesEnabledRef = useRef<boolean>(loadStoredLigaturesEnabled());
   const initialDefaultCwdRef = useRef<string>(loadStoredDefaultCwd());
   const initialDefaultShellRef = useRef<string>(loadStoredDefaultShell());
+  const initialCustomFontFamilyRef = useRef<string>(loadStoredCustomFontFamily());
 
   const [activeThemeId, setActiveThemeId] = useState<string>(initialThemeIdRef.current);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
@@ -145,7 +151,6 @@ export const useTerminalSettings = ({
     initialLigaturesEnabledRef.current,
   );
   const ligatureJoinerIdRef = useRef<number | null>(null);
-  const effectiveFont = useMemo(() => findTerminalFontById(effectiveFontId), [effectiveFontId]);
   const [activeFontSize, setActiveFontSize] = useState<number>(initialFontSizeRef.current);
   const [activeLineHeight, setActiveLineHeight] = useState<number>(initialLineHeightRef.current);
   const [activeCursorStyle, setActiveCursorStyle] = useState<TerminalCursorStyle>(
@@ -166,6 +171,16 @@ export const useTerminalSettings = ({
   const [activeDefaultCwd, setActiveDefaultCwd] = useState<string>(initialDefaultCwdRef.current);
   const [activeDefaultShell, setActiveDefaultShell] = useState<string>(
     initialDefaultShellRef.current,
+  );
+  const [activeCustomFontFamily, setActiveCustomFontFamily] = useState<string>(
+    initialCustomFontFamilyRef.current,
+  );
+  const effectiveFont = useMemo(
+    () =>
+      effectiveFontId === CUSTOM_FONT_ID
+        ? buildCustomTerminalFont(activeCustomFontFamily)
+        : findTerminalFontById(effectiveFontId),
+    [effectiveFontId, activeCustomFontFamily],
   );
 
   useEffect(() => {
@@ -363,6 +378,15 @@ export const useTerminalSettings = ({
     storeDefaultShell(trimmed);
   }, []);
 
+  // Stored untrimmed so a family name with internal spaces (the common case —
+// "JetBrainsMono Nerd Font Mono") is preserved; only leading/trailing
+  // whitespace would be trimmed, and a browser font family never has those.
+  // The custom font falls back to the bundled default when this is empty.
+  const handleCustomFontFamilyChange = useCallback((nextCustomFontFamily: string) => {
+    setActiveCustomFontFamily(nextCustomFontFamily);
+    storeCustomFontFamily(nextCustomFontFamily);
+  }, []);
+
   // Settings persist to localStorage, so changing one in any tab fires a
   // `storage` event in every OTHER tab. Re-applying each setting there keeps
   // theme/font/cursor/padding/… in lockstep across all open tabs — the
@@ -385,6 +409,7 @@ export const useTerminalSettings = ({
       subscribeStoredTerminalPaddingY(setActivePaddingY),
       subscribeStoredDefaultCwd(setActiveDefaultCwd),
       subscribeStoredDefaultShell(setActiveDefaultShell),
+      subscribeStoredCustomFontFamily(setActiveCustomFontFamily),
     ];
     return () => {
       for (const unsubscribe of unsubscribes) unsubscribe();
@@ -417,6 +442,7 @@ export const useTerminalSettings = ({
     activePaddingY,
     activeDefaultCwd,
     activeDefaultShell,
+    activeCustomFontFamily,
     effectiveTheme,
     setPreviewThemeId,
     setPreviewFontId,
@@ -436,5 +462,6 @@ export const useTerminalSettings = ({
     handlePaddingYChange,
     handleDefaultCwdChange,
     handleDefaultShellChange,
+    handleCustomFontFamilyChange,
   };
 };

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  CUSTOM_FONT_ID,
   DEFAULT_TERMINAL_FONT_ID,
   TERMINAL_FONTS,
-  buildGoogleFontsStylesheetHref,
+  buildCustomTerminalFont,
   findTerminalFontById,
 } from "../../src/lib/terminal-fonts";
 
@@ -29,15 +30,35 @@ describe("terminal-fonts registry", () => {
     (_id, font) => {
       expect(font.family.length).toBeGreaterThan(0);
       expect(font.family).toContain("monospace");
+      // All shipped fonts are bundled via fontsource (no runtime network fetch),
+      // so they render on an air-gapped host.
+      expect(font.source).toBe("fontsource");
     },
   );
 
-  it("builds a single Google Fonts stylesheet URL containing every google-sourced family", () => {
-    const href = buildGoogleFontsStylesheetHref();
-    expect(href.startsWith("https://fonts.googleapis.com/css2?")).toBe(true);
-    const googleFonts = TERMINAL_FONTS.filter((font) => font.source === "google");
-    for (const font of googleFonts) {
-      expect(href).toContain(font.name.replace(/ /g, "+"));
-    }
+  it("builds a custom font from a user-entered family name resolved by the OS", () => {
+    const font = buildCustomTerminalFont("JetBrainsMono Nerd Font Mono");
+    expect(font.id).toBe(CUSTOM_FONT_ID);
+    expect(font.source).toBe("custom");
+    expect(font.name).toBe("JetBrainsMono Nerd Font Mono");
+    // The primary family is quoted, the Nerd Font symbols face is appended, and
+    // the generic monospace fallback anchors the stack.
+    expect(font.family).toContain('"JetBrainsMono Nerd Font Mono"');
+    expect(font.family).toContain("Symbols Nerd Font");
+    expect(font.family).toContain("monospace");
+  });
+
+  it("escapes a custom family name containing a CSS-significant quote", () => {
+    const font = buildCustomTerminalFont('Bad"Name');
+    // The quote is escaped so it can't break out of the quoted family string.
+    expect(font.family).not.toContain('"Bad"Name"');
+  });
+
+  it("falls back to the default family when the custom name is blank", () => {
+    const font = buildCustomTerminalFont("   ");
+    expect(font.id).toBe(CUSTOM_FONT_ID);
+    // A blank field resolves to the default's primary family, never a bare
+    // fallback chain — so the terminal still renders the bundled default.
+    expect(font.family).toContain("Geist Mono");
   });
 });

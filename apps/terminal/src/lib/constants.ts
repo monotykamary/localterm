@@ -235,7 +235,10 @@ export const DEFAULT_CWD_STORAGE_KEY = "localterm:default-cwd";
 // per-tab mirror of the CLI `--shell` flag). Empty = unset, so the server uses
 // its detected login shell (surfaced as the Settings field's placeholder).
 export const DEFAULT_SHELL_STORAGE_KEY = "localterm:default-shell";
-export const GOOGLE_FONTS_STYLESHEET_ID = "localterm-google-fonts";
+// User-entered custom font family (a system-installed Nerd Font such as
+// "JetBrainsMono Nerd Font Mono") used only when the font id is "custom".
+// Empty = the custom font falls back to the bundled default family.
+export const CUSTOM_FONT_FAMILY_STORAGE_KEY = "localterm:custom-font-family";
 export const NERD_FONT_ENABLED_STORAGE_KEY = "localterm:nerd-font-enabled";
 export const LIGATURES_ENABLED_STORAGE_KEY = "localterm:ligatures-enabled";
 export const FONT_LOAD_PROBE_PX = 16;

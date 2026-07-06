@@ -56,9 +56,39 @@ importers:
       '@chenglou/pretext':
         specifier: ^0.0.8
         version: 0.0.8
-      '@fontsource/geist-mono':
+      '@fontsource/anonymous-pro':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource/dm-mono':
         specifier: ^5.2.7
         version: 5.2.7
+      '@fontsource/fira-code':
+        specifier: ^5.2.7
+        version: 5.2.7
+      '@fontsource/geist-mono':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource/ibm-plex-mono':
+        specifier: ^5.2.7
+        version: 5.2.7
+      '@fontsource/inconsolata':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource/jetbrains-mono':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource/roboto-mono':
+        specifier: ^5.2.9
+        version: 5.2.9
+      '@fontsource/source-code-pro':
+        specifier: ^5.2.7
+        version: 5.2.7
+      '@fontsource/space-mono':
+        specifier: ^5.2.9
+        version: 5.2.9
+      '@fontsource/ubuntu-mono':
+        specifier: ^5.2.8
+        version: 5.2.8
       '@monotykamary/localterm-server':
         specifier: workspace:*
         version: link:../../packages/server
@@ -788,8 +818,38 @@ packages:
   '@floating-ui/utils@0.2.11':
     resolution: {integrity: sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg==}
 
-  '@fontsource/geist-mono@5.2.7':
-    resolution: {integrity: sha512-xVPVFISJg/K0VVd+aQN0Y7X/sw9hUcJPyDWFJ5GpyU3bHELhoRsJkPSRSHXW32mOi0xZCUQDOaPj1sqIFJ1FGg==}
+  '@fontsource/anonymous-pro@5.2.8':
+    resolution: {integrity: sha512-nCK3XLqSyTjWw94vtgaI5n8j+jsxz7Eds5S38il0DSZ+lBqs/O08m41iXqmm+i/pXqQb/KBxA6hck3hbozZQiA==}
+
+  '@fontsource/dm-mono@5.2.7':
+    resolution: {integrity: sha512-Ma1az2atTVgQWuOWwjuxx26p/6A6CU9HBNKq1CFV6YKpKhpswnf9ry9Ql4+T6bTZzkdtSfS6tjJvqZOljVzIFQ==}
+
+  '@fontsource/fira-code@5.2.7':
+    resolution: {integrity: sha512-tnB9NNund9TwIym8/7DMJe573nlPEQb+fKUV5GL8TBYXjIhDvL0D7mgmNVNQUPhXp+R7RylQeiBdkA4EbOHPGQ==}
+
+  '@fontsource/geist-mono@5.2.8':
+    resolution: {integrity: sha512-YqZUb3X42GjRaHkibUNyE8K4Rk9A6I9Ez81YpJYiuJN4ggmTW2ixoQpa9EWCPfXZtIsCQJTyrDoV9OJOZO/UcA==}
+
+  '@fontsource/ibm-plex-mono@5.2.7':
+    resolution: {integrity: sha512-MKAb8qV+CaiMQn2B0dIi1OV3565NYzp3WN5b4oT6LTkk+F0jR6j0ZN+5BKJiIhffDC3rtBULsYZE65+0018z9w==}
+
+  '@fontsource/inconsolata@5.2.8':
+    resolution: {integrity: sha512-lIZW+WOZYpUH91g9r6rYYhfTmptF3YPPM54ZOs8IYVeeL4SeiAu4tfj7mdr8llYEq31DLYgi6JtGIJa192gB0Q==}
+
+  '@fontsource/jetbrains-mono@5.2.8':
+    resolution: {integrity: sha512-6w8/SG4kqvIMu7xd7wt6x3idn1Qux3p9N62s6G3rfldOUYHpWcc2FKrqf+Vo44jRvqWj2oAtTHrZXEP23oSKwQ==}
+
+  '@fontsource/roboto-mono@5.2.9':
+    resolution: {integrity: sha512-iIeSyrRGoM15uIWqXslW1K9UFnUYfnCFNrNoWjXE0huO1L+hM0Jst0KNLuRc7P21xPpGL0bZouzYSX0Em9eyWg==}
+
+  '@fontsource/source-code-pro@5.2.7':
+    resolution: {integrity: sha512-7papq9TH94KT+S5VSY8cU7tFmwuGkIe3qxXRMscuAXH6AjMU+KJI75f28FzgBVDrlMfA0jjlTV4/x5+H5o/5EQ==}
+
+  '@fontsource/space-mono@5.2.9':
+    resolution: {integrity: sha512-b61faFOHEISQ/pD25G+cfGY9o/WW6lRv6hBQQfpWvEJ4y1V+S4gmth95EVyBE2VL3qDYHeVQ8nBzrplzdXTDDg==}
+
+  '@fontsource/ubuntu-mono@5.2.8':
+    resolution: {integrity: sha512-N4nT8+GYWWcDODVSBLU4f3PycZQH9YIF6SypDI0rti3HrLqcXFS9u6wMvAd9vx1FmjAQkYv7Ld9CZ8XYTEOD0A==}
 
   '@google/genai@1.52.0':
     resolution: {integrity: sha512-gwSvbpiN/17O9TbsqSsE/OzZcpv5Fo4RQjdngGgogtuB9RsyJ8ZHhX5KjHj1bp5N9snN2eK8LDGXSaWW2hof8Q==}
@@ -5650,7 +5710,27 @@ snapshots:
 
   '@floating-ui/utils@0.2.11': {}
 
-  '@fontsource/geist-mono@5.2.7': {}
+  '@fontsource/anonymous-pro@5.2.8': {}
+
+  '@fontsource/dm-mono@5.2.7': {}
+
+  '@fontsource/fira-code@5.2.7': {}
+
+  '@fontsource/geist-mono@5.2.8': {}
+
+  '@fontsource/ibm-plex-mono@5.2.7': {}
+
+  '@fontsource/inconsolata@5.2.8': {}
+
+  '@fontsource/jetbrains-mono@5.2.8': {}
+
+  '@fontsource/roboto-mono@5.2.9': {}
+
+  '@fontsource/source-code-pro@5.2.7': {}
+
+  '@fontsource/space-mono@5.2.9': {}
+
+  '@fontsource/ubuntu-mono@5.2.8': {}
 
   '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))':
     dependencies:
@@ -6884,12 +6964,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@vitest/browser-preview@4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9)(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vite@8.0.10(@types/node@26.1.0)(jiti@2.7.0)(yaml@2.9.0)))':
+  '@vitest/browser-preview@4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vitest@4.1.9)':
     dependencies:
       '@testing-library/dom': 10.4.1
       '@testing-library/user-event': 14.6.1(@testing-library/dom@10.4.1)
-      '@vitest/browser': 4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9)(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vite@8.0.10(@types/node@26.1.0)(jiti@2.7.0)(yaml@2.9.0)))
-      vitest: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9)(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vite@8.0.10(@types/node@26.1.0)(jiti@2.7.0)(yaml@2.9.0))
+      '@vitest/browser': 4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vitest@4.1.9)
+      vitest: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9)(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))
     transitivePeerDependencies:
       - bufferutil
       - msw
@@ -6908,7 +6988,7 @@ snapshots:
       - utf-8-validate
       - vite
 
-  '@vitest/browser@4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9)(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vite@8.0.10(@types/node@26.1.0)(jiti@2.7.0)(yaml@2.9.0)))':
+  '@vitest/browser@4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vitest@4.1.9)':
     dependencies:
       '@blazediff/core': 1.9.1
       '@vitest/mocker': 4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))
@@ -6917,7 +6997,7 @@ snapshots:
       pngjs: 7.0.0
       sirv: 3.0.2
       tinyrainbow: 3.1.0
-      vitest: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9)(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vite@8.0.10(@types/node@26.1.0)(jiti@2.7.0)(yaml@2.9.0))
+      vitest: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9)(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))
       ws: 8.21.0
     transitivePeerDependencies:
       - bufferutil
@@ -9551,8 +9631,8 @@ snapshots:
     dependencies:
       '@oxc-project/types': 0.138.0
       '@oxlint/plugins': 1.68.0
-      '@vitest/browser': 4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9)(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vite@8.0.10(@types/node@26.1.0)(jiti@2.7.0)(yaml@2.9.0)))
-      '@vitest/browser-preview': 4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9)(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vite@8.0.10(@types/node@26.1.0)(jiti@2.7.0)(yaml@2.9.0)))
+      '@vitest/browser': 4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vitest@4.1.9)
+      '@vitest/browser-preview': 4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vitest@4.1.9)
       '@vitest/expect': 4.1.9
       '@vitest/mocker': 4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))
       '@vitest/pretty-format': 4.1.9
@@ -9564,7 +9644,7 @@ snapshots:
       oxfmt: 0.57.0(vite-plus@0.2.2(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(jiti@2.7.0)(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(typescript@6.0.3)(yaml@2.9.0))
       oxlint: 1.72.0(oxlint-tsgolint@0.24.0)(vite-plus@0.2.2(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(jiti@2.7.0)(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(typescript@6.0.3)(yaml@2.9.0))
       oxlint-tsgolint: 0.24.0
-      vitest: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vite@8.0.10(@types/node@26.1.0)(jiti@2.7.0)(yaml@2.9.0))(vitest@4.1.9))(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))
+      vitest: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9)(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))
     optionalDependencies:
       '@voidzero-dev/vite-plus-darwin-arm64': 0.2.2
       '@voidzero-dev/vite-plus-darwin-x64': 0.2.2
@@ -9676,7 +9756,7 @@ snapshots:
       jiti: 2.7.0
       yaml: 2.9.0
 
-  vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vite@8.0.10(@types/node@26.1.0)(jiti@2.7.0)(yaml@2.9.0))(vitest@4.1.9))(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3)):
+  vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@26.1.0)(@vitest/browser-preview@4.1.9)(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3)):
     dependencies:
       '@vitest/expect': 4.1.9
       '@vitest/mocker': 4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))
@@ -9701,7 +9781,7 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       '@types/node': 26.1.0
-      '@vitest/browser-preview': 4.1.9(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vite@8.0.10(@types/node@26.1.0)(jiti@2.7.0)(yaml@2.9.0))(vitest@4.1.9)
+      '@vitest/browser-preview': 4.1.9(@voidzero-dev/vite-plus-core@0.2.2(@types/node@26.1.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(msw@2.14.2(@types/node@26.1.0)(typescript@6.0.3))(vitest@4.1.9)
       jsdom: 29.0.2(@noble/hashes@1.8.0)
     transitivePeerDependencies:
       - msw
