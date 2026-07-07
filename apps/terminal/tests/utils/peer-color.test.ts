@@ -7,9 +7,7 @@ const hueOf = (color: string): number => {
   return match ? Number(match[1]) : Number.NaN;
 };
 
-const session = (
-  clientProfiles: { windowId: string; count: number }[],
-): SessionListItem => ({
+const session = (clientProfiles: { windowId: string; count: number }[]): SessionListItem => ({
   id: "00000000-0000-0000-0000-000000000001",
   pid: 1,
   shell: "/bin/sh",
