@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import {
 import {
   PALETTE_MODAL_MAX_HEIGHT_PX,
   SESSIONS_LIST_ROW_HEIGHT_PX,
+  SESSIONS_MAX_PEER_DOTS,
   SESSIONS_MESSAGE_BLOCK_MIN_HEIGHT_PX,
   SESSIONS_MODAL_CLOSE_TRANSITION_MS,
   SESSIONS_POLL_INTERVAL_MS,
@@ -32,6 +34,8 @@ import { fetchSessions, killSession } from "@/utils/fetch-sessions";
 import { formatRelativeTime } from "@/utils/format-relative-time";
 import { resolveInitialSessionIndex } from "@/utils/resolve-initial-session-index";
 import { sortSessions } from "@/utils/sort-sessions";
+import { hueForWindowId } from "@/utils/hue-for-window-id";
+import { loadWindowId } from "@/utils/window-id";
 
 interface SessionsModalProps {
   open: boolean;
@@ -74,6 +78,7 @@ interface SessionOptionProps {
   isCurrent: boolean;
   isActive: boolean;
   nowMs: number;
+  windowId: string;
   isKilling: boolean;
   onSetActive: () => void;
   onSwitch: () => void;
@@ -98,31 +103,91 @@ const SessionIcon = ({ state }: { state: SessionActivityState }) => (
   />
 );
 
-// Attachment pill: "current" when this tab is the one viewing it, "active"
-// when a client is attached (in another tab), "orphaned" when the shell is
-// dormant (no viewers, waiting out its grace window). Distinct from the
-// icon's activity color (running/quiet/idle) — the pill says who's looking,
-// the icon says what the shell is doing.
-// Rendered in a fixed 4rem column between the title and the meta, right-
-// aligned within the column (justify-end) so the pill's right edge stays
-// pinned and the content-width shell name hugging it doesn't shift when the
-// pill label changes between current/active/orphaned.
-const StatusPill = ({ session, isCurrent }: { session: SessionListItem; isCurrent: boolean }) => {
-  const isOrphaned = session.clients === 0;
+// Peer cluster: one solid dot per attached client, grouped by browser
+// profile. The picker's own profile leads and renders in the foreground color
+// ("me"), each other profile gets a stable hue derived from its id, and a
+// back-compat client with no profile id groups under a muted neutral. Dots
+// within a profile touch; a wider gap separates profiles — so the cluster
+// reads at a glance as "two of mine, one of another profile." A dormant shell
+// (no viewers) shows a single hollow dot, distinct from a 1-peer solid dot;
+// the activity icon already says what the shell is doing, this says who's
+// watching it. Beyond SESSIONS_MAX_PEER_DOTS the tail collapses into "+N" so a
+// busy row can't overflow. Distinct from the trailing Check, which marks the
+// row this tab is currently viewing (orthogonal — a session can be current
+// and have peers, or be a peer-only row another of this profile's tabs views).
+const PeerDot = ({ windowId, ownWindowId }: { windowId: string; ownWindowId: string }) => {
+  const isSelf = ownWindowId !== "" && windowId === ownWindowId;
+  const isUnknown = windowId === "";
   return (
-    <span className="flex min-w-[4rem] shrink-0 items-center justify-end">
+    <span
+      aria-hidden="true"
+      style={
+        isSelf || isUnknown
+          ? undefined
+          : { backgroundColor: `hsl(${hueForWindowId(windowId)} 55% 55%)` }
+      }
+      className={cn(
+        "size-1.5 rounded-full",
+        isSelf && "bg-foreground",
+        isUnknown && "bg-foreground/30",
+      )}
+    />
+  );
+};
+
+const PeerDots = ({ session, windowId }: { session: SessionListItem; windowId: string }) => {
+  const total = session.clients;
+  if (total === 0) {
+    return (
       <span
-        className={cn(
-          "rounded-full px-1.5 py-px text-[9px] font-medium uppercase tracking-wide",
-          isCurrent
-            ? "bg-foreground/15 text-foreground"
-            : isOrphaned
-              ? "bg-transparent text-muted-foreground/70 ring-1 ring-foreground/10"
-              : "bg-foreground/10 text-foreground/70",
-        )}
+        className="flex shrink-0 items-center"
+        aria-label="no peers attached (dormant)"
+        title="No one is viewing this shell"
       >
-        {isCurrent ? "current" : isOrphaned ? "orphaned" : "active"}
+        <span className="size-1.5 rounded-full ring-1 ring-foreground/25" aria-hidden="true" />
       </span>
+    );
+  }
+  const groups = (session.clientProfiles ?? [{ windowId: "", count: total }]).slice();
+  groups.sort((a, b) => {
+    const aSelf = a.windowId !== "" && a.windowId === windowId;
+    const bSelf = b.windowId !== "" && b.windowId === windowId;
+    if (aSelf !== bSelf) return aSelf ? -1 : 1;
+    return b.count - a.count;
+  });
+  const renderedGroups: ReactNode[] = [];
+  let rendered = 0;
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+    if (rendered >= SESSIONS_MAX_PEER_DOTS) break;
+    const group = groups[groupIndex];
+    const dots: ReactNode[] = [];
+    for (
+      let dotIndex = 0;
+      dotIndex < group.count && rendered < SESSIONS_MAX_PEER_DOTS;
+      dotIndex += 1
+    ) {
+      dots.push(<PeerDot key={dotIndex} windowId={group.windowId} ownWindowId={windowId} />);
+      rendered += 1;
+    }
+    renderedGroups.push(
+      <span key={group.windowId || groupIndex} className="flex items-center gap-px">
+        {dots}
+      </span>,
+    );
+  }
+  const overflow = total - rendered;
+  return (
+    <span
+      className="flex shrink-0 items-center gap-1.5"
+      aria-label={`${total} ${total === 1 ? "peer" : "peers"} attached`}
+      title={`${total} ${total === 1 ? "peer" : "peers"} attached`}
+    >
+      {renderedGroups}
+      {overflow > 0 && (
+        <span className="font-mono text-[9px] tabular-nums text-muted-foreground/60">
+          +{overflow}
+        </span>
+      )}
     </span>
   );
 };
@@ -138,6 +203,7 @@ const SessionOption = ({
   isCurrent,
   isActive,
   nowMs,
+  windowId,
   isKilling,
   onSetActive,
   onSwitch,
@@ -157,10 +223,8 @@ const SessionOption = ({
   >
     <SessionIcon state={session.state} />
     <span className="min-w-0 flex-1 truncate text-left">{session.title || session.cwd}</span>
-    <StatusPill session={session} isCurrent={isCurrent} />
-    <span className="hidden shrink-0 items-center gap-2 font-mono text-[10px] tabular-nums text-muted-foreground/60 sm:flex">
-      <span>{session.shellName}</span>
-      <span className="min-w-[3.5rem] text-right">pid {session.pid}</span>
+    <PeerDots session={session} windowId={windowId} />
+    <span className="hidden shrink-0 items-center font-mono text-[10px] tabular-nums text-muted-foreground/60 sm:flex">
       <span className="min-w-[3rem] text-right">
         {formatRelativeTime(session.createdAt, nowMs)}
       </span>
@@ -211,6 +275,11 @@ export const SessionsModal = ({
   const [activeIndex, setActiveIndex] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [killingId, setKillingId] = useState<string | null>(null);
+  // This tab's per-browser-profile handle (minted into localStorage, shared by
+  // every tab of this profile). Stable for the tab's life, so the picker can
+  // color its own peer dots and cluster its profile's sessions without a
+  // server round-trip — it already knows its own id.
+  const [windowId] = useState(() => loadWindowId());
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   // Latched on open so the picker applies its initial highlight (the last
@@ -277,8 +346,8 @@ export const SessionsModal = ({
   const currentId = liveSessionIdRef.current;
   const normalizedQuery = query.trim().toLowerCase();
   const ordered = useMemo(
-    () => (sessions ? sortSessions(sessions, currentId, normalizedQuery) : []),
-    [sessions, currentId, normalizedQuery],
+    () => (sessions ? sortSessions(sessions, currentId, normalizedQuery, windowId) : []),
+    [sessions, currentId, normalizedQuery, windowId],
   );
 
   useEffect(() => {
@@ -493,6 +562,7 @@ export const SessionsModal = ({
                         isCurrent={isCurrent}
                         isActive={virtualRow.index === activeIndex}
                         nowMs={nowMs}
+                        windowId={windowId}
                         isKilling={killingId === session.id}
                         onSetActive={() => {
                           if (virtualRow.index !== activeIndex) setActiveIndex(virtualRow.index);

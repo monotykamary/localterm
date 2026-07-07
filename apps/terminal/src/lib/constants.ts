@@ -132,6 +132,10 @@ export const SESSIONS_POLL_INTERVAL_MS = 1500;
 // ports modals' message-block reservation, and gives the height transition a
 // stable floor to grow from on the way to a populated list.
 export const SESSIONS_MESSAGE_BLOCK_MIN_HEIGHT_PX = 112;
+// Max peer dots rendered in a session picker row before the rest collapse into
+// a "+N" overflow. Most sessions have a handful of attached clients, so this
+// caps the cluster's width; the count is still exact via the overflow suffix.
+export const SESSIONS_MAX_PEER_DOTS = 5;
 
 // Open dev ports modal: mirrors the sessions modal's palette-style overlay and
 // close timing. Each poll runs `ps` + `lsof` on the daemon (heavier than the
@@ -243,6 +247,13 @@ export const DEFAULT_CWD_STORAGE_KEY = "localterm:default-cwd";
 // per-tab mirror of the CLI `--shell` flag). Empty = unset, so the server uses
 // its detected login shell (surfaced as the Settings field's placeholder).
 export const DEFAULT_SHELL_STORAGE_KEY = "localterm:default-shell";
+// The per-browser-profile handle minted on first load and sent on the WS
+// upgrade as `?wid=`. `localStorage` is partitioned per browser profile, so
+// every tab/window of one profile shares this id and a different profile gets
+// a different one — letting the session picker group a row's attached clients
+// by profile. A uuid minted on first miss; never cleared (stable across
+// restarts). Incognito's ephemeral storage mints a fresh id each session.
+export const WINDOW_ID_STORAGE_KEY = "localterm:window-id";
 // User-entered custom font family (a system-installed Nerd Font such as
 // "JetBrainsMono Nerd Font Mono") used only when the font id is "custom".
 // Empty = the custom font falls back to the bundled default family.

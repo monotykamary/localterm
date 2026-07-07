@@ -39,6 +39,25 @@ describe("sortSessions", () => {
     expect(ordered.map((session) => session.id)).toEqual(["newer", "older"]);
   });
 
+  it("floats this profile's sessions above other profiles' within an activity group", () => {
+    const own = buildSession({
+      id: "own",
+      state: "ready",
+      lastOutputAt: 100,
+      clients: 1,
+      clientProfiles: [{ windowId: "me", count: 1 }],
+    });
+    const other = buildSession({
+      id: "other",
+      state: "ready",
+      lastOutputAt: 900,
+      clients: 1,
+      clientProfiles: [{ windowId: "them", count: 1 }],
+    });
+    const ordered = sortSessions([other, own], null, "", "me");
+    expect(ordered.map((session) => session.id)).toEqual(["own", "other"]);
+  });
+
   it("filters by title, cwd, or shell before sorting", () => {
     const alpha = buildSession({ id: "alpha", title: "alpha", state: "running", lastOutputAt: 1 });
     const beta = buildSession({ id: "beta", cwd: "/beta", state: "ready", lastOutputAt: 2 });

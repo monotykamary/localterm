@@ -171,6 +171,7 @@ import { isCoarsePointer } from "@/utils/is-coarse-pointer";
 import { detectIsAppleWebKit } from "@/utils/detect-is-apple-webkit";
 import { loadStoredDefaultCwd } from "@/utils/stored-default-cwd";
 import { loadStoredDefaultShell } from "@/utils/stored-default-shell";
+import { WINDOW_ID_QUERY_PARAM, loadWindowId } from "@/utils/window-id";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
 import { fetchDaemonConfig } from "@/utils/fetch-daemon-config";
@@ -358,6 +359,12 @@ const buildWebSocketUrl = (cwdOverride?: string | null, sid?: string | null): st
   // same live PTY instead of spawning a fresh shell.
   const resolvedSid = sid ?? params.get(SESSION_ID_QUERY_PARAM);
   if (resolvedSid) url.searchParams.set(SESSION_ID_QUERY_PARAM, resolvedSid);
+  // The per-browser-profile handle so the daemon can group this tab with the
+  // others of the same profile in the session picker's peer display. Minted
+  // once into localStorage (partitioned per profile), so every tab of one
+  // profile carries the same id.
+  const windowId = loadWindowId();
+  if (windowId) url.searchParams.set(WINDOW_ID_QUERY_PARAM, windowId);
   // Forward a transient initial command (a worktree's setup script) so the
   // server writes it to the PTY as if the user typed it — the install/env-copy
   // output is visible and the prompt returns when it finishes.
