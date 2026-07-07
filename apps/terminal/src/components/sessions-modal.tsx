@@ -34,7 +34,7 @@ import { fetchSessions, killSession } from "@/utils/fetch-sessions";
 import { formatRelativeTime } from "@/utils/format-relative-time";
 import { resolveInitialSessionIndex } from "@/utils/resolve-initial-session-index";
 import { sortSessions } from "@/utils/sort-sessions";
-import { hueForWindowId } from "@/utils/hue-for-window-id";
+import { buildPeerColorMap } from "@/utils/peer-color";
 import { loadWindowId } from "@/utils/window-id";
 
 interface SessionsModalProps {
@@ -79,6 +79,7 @@ interface SessionOptionProps {
   isActive: boolean;
   nowMs: number;
   windowId: string;
+  peerColors: Map<string, string>;
   isKilling: boolean;
   onSetActive: () => void;
   onSwitch: () => void;
@@ -105,37 +106,43 @@ const SessionIcon = ({ state }: { state: SessionActivityState }) => (
 
 // Peer cluster: one solid dot per attached client, grouped by browser
 // profile. The picker's own profile leads and renders in the foreground color
-// ("me"), each other profile gets a stable hue derived from its id, and a
-// back-compat client with no profile id groups under a muted neutral. Dots
-// within a profile touch; a wider gap separates profiles — so the cluster
-// reads at a glance as "two of mine, one of another profile." A dormant shell
-// (no viewers) shows a single hollow dot, distinct from a 1-peer solid dot;
-// the activity icon already says what the shell is doing, this says who's
-// watching it. Beyond SESSIONS_MAX_PEER_DOTS the tail collapses into "+N" so a
-// busy row can't overflow. Distinct from the trailing Check, which marks the
-// row this tab is currently viewing (orthogonal — a session can be current
-// and have peers, or be a peer-only row another of this profile's tabs views).
-const PeerDot = ({ windowId, ownWindowId }: { windowId: string; ownWindowId: string }) => {
-  const isSelf = ownWindowId !== "" && windowId === ownWindowId;
-  const isUnknown = windowId === "";
-  return (
-    <span
-      aria-hidden="true"
-      style={
-        isSelf || isUnknown
-          ? undefined
-          : { backgroundColor: `hsl(${hueForWindowId(windowId)} 55% 55%)` }
-      }
-      className={cn(
-        "size-1.5 rounded-full",
-        isSelf && "bg-foreground",
-        isUnknown && "bg-foreground/30",
-      )}
-    />
-  );
-};
+// ("me"); each other profile gets a hue from a golden-angle sequence ranked
+// across every profile visible in the picker (see buildPeerColorMap), so any N
+// profiles land near-optimally spaced on the wheel — two can never collapse to
+// the same hue the way a per-id hash can (two uuids once hashed to ~12° apart:
+// indistinguishable purples, hiding a third client). A back-compat client with
+// no profile id groups under a muted neutral. Dots within a profile touch; a
+// wider gap separates profiles — so the cluster reads at a glance as "two of
+// mine, one of another profile." A dormant shell (no viewers) shows a single
+// hollow dot, distinct from a 1-peer solid dot; the activity icon already says
+// what the shell is doing, this says who's watching it. Beyond
+// SESSIONS_MAX_PEER_DOTS the tail collapses into "+N" so a busy row can't
+// overflow. Distinct from the trailing Check, which marks the row this tab is
+// currently viewing (orthogonal — a session can be current and have peers, or
+// be a peer-only row another of this profile's tabs views).
+type PeerDotColor = { kind: "self" } | { kind: "unknown" } | { kind: "other"; color: string };
 
-const PeerDots = ({ session, windowId }: { session: SessionListItem; windowId: string }) => {
+const PeerDot = ({ color }: { color: PeerDotColor }) => (
+  <span
+    aria-hidden="true"
+    style={color.kind === "other" ? { backgroundColor: color.color } : undefined}
+    className={cn(
+      "size-1.5 rounded-full",
+      color.kind === "self" && "bg-foreground",
+      color.kind === "unknown" && "bg-foreground/30",
+    )}
+  />
+);
+
+const PeerDots = ({
+  session,
+  windowId,
+  peerColors,
+}: {
+  session: SessionListItem;
+  windowId: string;
+  peerColors: Map<string, string>;
+}) => {
   const total = session.clients;
   if (total === 0) {
     return (
@@ -148,6 +155,12 @@ const PeerDots = ({ session, windowId }: { session: SessionListItem; windowId: s
       </span>
     );
   }
+  const resolveColor = (groupWindowId: string): PeerDotColor => {
+    if (windowId !== "" && groupWindowId === windowId) return { kind: "self" };
+    if (groupWindowId === "") return { kind: "unknown" };
+    const resolved = peerColors.get(groupWindowId);
+    return resolved !== undefined ? { kind: "other", color: resolved } : { kind: "unknown" };
+  };
   const groups = (session.clientProfiles ?? [{ windowId: "", count: total }]).slice();
   groups.sort((a, b) => {
     const aSelf = a.windowId !== "" && a.windowId === windowId;
@@ -160,13 +173,14 @@ const PeerDots = ({ session, windowId }: { session: SessionListItem; windowId: s
   for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
     if (rendered >= SESSIONS_MAX_PEER_DOTS) break;
     const group = groups[groupIndex];
+    const color = resolveColor(group.windowId);
     const dots: ReactNode[] = [];
     for (
       let dotIndex = 0;
       dotIndex < group.count && rendered < SESSIONS_MAX_PEER_DOTS;
       dotIndex += 1
     ) {
-      dots.push(<PeerDot key={dotIndex} windowId={group.windowId} ownWindowId={windowId} />);
+      dots.push(<PeerDot key={dotIndex} color={color} />);
       rendered += 1;
     }
     renderedGroups.push(
@@ -204,6 +218,7 @@ const SessionOption = ({
   isActive,
   nowMs,
   windowId,
+  peerColors,
   isKilling,
   onSetActive,
   onSwitch,
@@ -223,7 +238,7 @@ const SessionOption = ({
   >
     <SessionIcon state={session.state} />
     <span className="min-w-0 flex-1 truncate text-left">{session.title || session.cwd}</span>
-    <PeerDots session={session} windowId={windowId} />
+    <PeerDots session={session} windowId={windowId} peerColors={peerColors} />
     <span className="hidden shrink-0 items-center font-mono text-[10px] tabular-nums text-muted-foreground/60 sm:flex">
       <span className="min-w-[3rem] text-right">
         {formatRelativeTime(session.createdAt, nowMs)}
@@ -348,6 +363,14 @@ export const SessionsModal = ({
   const ordered = useMemo(
     () => (sessions ? sortSessions(sessions, currentId, normalizedQuery, windowId) : []),
     [sessions, currentId, normalizedQuery, windowId],
+  );
+  // One well-separated hue per other profile visible anywhere in the picker
+  // (golden-angle rank, see buildPeerColorMap), so two profiles never render as
+  // the same color. Built from the full unfiltered list so a profile keeps its
+  // color while a search query filters the rows.
+  const peerColors = useMemo(
+    () => buildPeerColorMap(sessions ?? [], windowId),
+    [sessions, windowId],
   );
 
   useEffect(() => {
@@ -563,6 +586,7 @@ export const SessionsModal = ({
                         isActive={virtualRow.index === activeIndex}
                         nowMs={nowMs}
                         windowId={windowId}
+                        peerColors={peerColors}
                         isKilling={killingId === session.id}
                         onSetActive={() => {
                           if (virtualRow.index !== activeIndex) setActiveIndex(virtualRow.index);
