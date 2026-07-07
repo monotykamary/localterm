@@ -99,6 +99,11 @@ export const AUTOMATIONS_MODAL_CLOSE_TRANSITION_MS = 150;
 export const RUN_LOG_AT_BOTTOM_THRESHOLD_PX = 4;
 // Most-recent runs shown in the cross-automation "Recent runs" feed.
 export const RECENT_RUNS_LIMIT = 50;
+// Triage inbox threading: same-automation runs collapse into one thread once the
+// visible set reaches this many runs; below it they stay as plain inline rows.
+export const TRIAGE_THREAD_MIN_RUNS = 2;
+// Rolling window (in days) backing the "This week" date band in the triage log.
+export const TRIAGE_WEEK_BAND_DAYS = 7;
 
 export const WORKTREES_MODAL_CLOSE_TRANSITION_MS = 150;
 export const WORKTREES_LIST_ROW_HEIGHT_PX = 56;
