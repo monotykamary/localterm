@@ -388,6 +388,14 @@ export const SESSION_PENDING_PROMOTE_TIMEOUT_MS = 2_000;
 // Query param a reconnecting or switching client carries to attach to a live
 // PTY by id instead of spawning a fresh shell.
 export const SESSION_ID_QUERY_PARAM = "sid";
+// Query param a reconnecting or switching client carries to attach to a live
+// PTY by id instead of spawning a fresh shell.
+// The per-browser-profile handle a terminal tab carries so the daemon can group
+// the clients attached to a session by profile (for the session picker's peer
+// display). Minted client-side and persisted in `localStorage`, which the
+// browser partitions per profile, so every tab/window of one profile shares it
+// and a different profile gets a different one.
+export const WINDOW_ID_QUERY_PARAM = "wid";
 // Query param an automation-run tab carries so the server can claim the run
 // (single-use) and pair the WS with the CDP target that opened it.
 export const AUTOMATION_RUN_QUERY_PARAM = "run";
@@ -671,6 +679,11 @@ export const WS_CLOSE_CAPACITY_REACHED = 4503;
 export const LOCALTERM_TAB_TOKEN_PROPERTY = "__LOCALTERM_TAB_TOKEN";
 export const LOCALTERM_TAB_TOKEN_EVENT = "localterm-token";
 export const MAX_TAB_TOKEN_LENGTH = 128;
+// Max length of a client-minted window/profile id (the `?wid=` query param).
+// The terminal sends a `crypto.randomUUID()` (36 chars); the cap just bounds a
+// hostile/garbage value so it can't bloat the per-client record or the list
+// payload. A longer or empty value degrades to the unknown-profile group.
+export const MAX_WINDOW_ID_LENGTH = 64;
 // Frontend globals the daemon's CDP automation (screenshot/mouse) reads off a
 // viewer tab's window, mirroring LOCALTERM_TAB_TOKEN_PROPERTY: well-known names
 // so the wire protocol stays authoritative (no parallel literals). The

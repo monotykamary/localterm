@@ -43,7 +43,12 @@ import {
 import { GitMetadataCoordinator } from "./git-metadata-coordinator.js";
 import { Session } from "./session.js";
 import type { SessionEventName } from "./session-event-manager.js";
-import type { GitBranchPr, ServerToClientMessage, SpawnPtyInput } from "./types.js";
+import type {
+  GitBranchPr,
+  ServerToClientMessage,
+  SessionClientProfile,
+  SpawnPtyInput,
+} from "./types.js";
 import type { CompressMode } from "./schemas.js";
 import type { SessionOwner } from "./identity/types.js";
 
@@ -162,6 +167,13 @@ interface ManagedClient {
   rows: number;
   pixelWidth?: number;
   pixelHeight?: number;
+  // The per-browser-profile handle this tab carried on the WS upgrade (the
+  // `?wid=` query param). Shared by every tab/window of one browser profile
+  // (minted client-side into localStorage, which the browser partitions per
+  // profile), so the session list can group a row's attached clients by
+  // profile for the picker's peer display. `""` for a back-compat client that
+  // didn't send one.
+  windowId: string;
   coordinator: GitMetadataCoordinator | null;
   compressMode: CompressMode;
   brotliEncoder: BrotliEncoder | null;
@@ -346,9 +358,24 @@ export class SessionManager {
       createdAt: managed.createdAt,
       lastOutputAt: managed.lastOutputAt,
       clients: managed.clients.size,
+      clientProfiles: this.clientProfilesFor(managed),
       state: this.computeState(managed),
       pinned: managed.pinned,
     }));
+  }
+
+  // The attached clients grouped by their per-browser-profile handle, for the
+  // session picker's per-profile peer display. Each entry counts how many of
+  // that profile's windows are viewing this PTY; sorted by count desc then id
+  // for a stable order (the picker re-ranks its own profile to the front).
+  private clientProfilesFor(managed: ManagedSession): SessionClientProfile[] {
+    const counts = new Map<string, number>();
+    for (const client of managed.clients) {
+      counts.set(client.windowId, (counts.get(client.windowId) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([windowId, count]) => ({ windowId, count }))
+      .sort((a, b) => b.count - a.count || a.windowId.localeCompare(b.windowId));
   }
 
   // Every live PTY whose current cwd is inside `targetPath` (or equals it). A
@@ -452,10 +479,11 @@ export class SessionManager {
     input: SpawnPtyInput,
     automation?: AutomationContext,
     owner: SessionOwner = null,
+    windowId: string = "",
   ): ManagedSession | null {
     const spawned = this.spawn(input, automation, owner);
     if (!spawned) return null;
-    return this.attach(ws, spawned.id, owner);
+    return this.attach(ws, spawned.id, owner, windowId);
   }
 
   // Resolve a live, owned session for an id-based (REST/CLI) operation. Returns
@@ -473,7 +501,12 @@ export class SessionManager {
 
   // Attach `ws` to a live PTY by id. Returns the session to reattach to, or
   // null when the id is unknown / already exited — the caller spawns fresh.
-  attach(ws: ClientSocket, id: string, owner: SessionOwner = null): ManagedSession | null {
+  attach(
+    ws: ClientSocket,
+    id: string,
+    owner: SessionOwner = null,
+    windowId: string = "",
+  ): ManagedSession | null {
     const managed = this.sessionFor(id, owner);
     if (!managed) return null;
     // Re-subscribing cancels the no-clients grace timer (if armed): the shell
@@ -494,6 +527,7 @@ export class SessionManager {
       pendingTimer: null,
       cols: 0,
       rows: 0,
+      windowId,
       coordinator,
       compressMode: null,
       brotliEncoder: null,
@@ -1579,6 +1613,7 @@ export interface SessionListItem {
   createdAt: number;
   lastOutputAt: number;
   clients: number;
+  clientProfiles?: SessionClientProfile[];
   state: SessionActivityState;
   pinned: boolean;
 }

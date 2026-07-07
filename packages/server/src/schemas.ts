@@ -49,6 +49,7 @@ import {
   MAX_ROWS,
   MAX_SHELL_PATH_LENGTH,
   MAX_TAB_TOKEN_LENGTH,
+  MAX_WINDOW_ID_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_WORKTREEINCLUDE_FILE_BYTES,
   MAX_WORKTREE_OPEN_IN_COMMANDS,
@@ -113,8 +114,26 @@ export const cdpConnectResultSchema = z
 // foreground program but quiet, ready = idle) so the row icon colors match the
 // tab the user is looking at and gate the grace reap. `lastOutputAt` is the
 // last PTY output time, exposed so the picker can sort by recency of activity.
-// The current tab matches on `id` against the session frame it received.
+// `clientProfiles` breaks `clients` down by the attached tabs' browser-profile
+// handle (`windowId`), so the picker can show how many peers are attached and
+// group them by profile — distinguishing "this profile" from "another profile."
+// Optional for back-compat with a daemon that predates per-profile tracking;
+// the picker falls back to a single anonymous group. The current tab matches on
+// `id` against the session frame it received.
 export const sessionActivityStateSchema = z.enum(["running", "alive-quiet", "ready"]);
+
+// One profile's attached-window count within a session row. `windowId` is the
+// per-browser-profile handle minted client-side and sent on the WS upgrade;
+// `""` groups back-compat clients that didn't send one (allowed here so the
+// server can surface them as an unknown-profile group instead of dropping
+// the count). `count` is how many of that profile's windows are viewing this
+// PTY right now.
+export const sessionClientProfileSchema = z
+  .object({
+    windowId: z.string().max(MAX_WINDOW_ID_LENGTH),
+    count: z.number().int().nonnegative(),
+  })
+  .strict();
 
 export const sessionListItemSchema = z
   .object({
@@ -127,6 +146,7 @@ export const sessionListItemSchema = z
     createdAt: z.number().int().nonnegative(),
     lastOutputAt: z.number().int().nonnegative(),
     clients: z.number().int().nonnegative(),
+    clientProfiles: z.array(sessionClientProfileSchema).optional(),
     state: sessionActivityStateSchema,
     pinned: z.boolean(),
   })

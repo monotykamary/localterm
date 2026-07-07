@@ -62,6 +62,7 @@ import type {
   sessionListItemSchema,
   sessionsListResponseSchema,
   sessionActivityStateSchema,
+  sessionClientProfileSchema,
   createSessionInputSchema,
   sessionResponseSchema,
   updateSessionInputSchema,
@@ -193,6 +194,7 @@ export type GitDiffSummary = z.infer<typeof gitDiffSummarySchema>;
 export type SessionListItem = z.infer<typeof sessionListItemSchema>;
 export type SessionListResponse = z.infer<typeof sessionsListResponseSchema>;
 export type SessionActivityState = z.infer<typeof sessionActivityStateSchema>;
+export type SessionClientProfile = z.infer<typeof sessionClientProfileSchema>;
 export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
 export type SessionResponse = z.infer<typeof sessionResponseSchema>;
 export type UpdateSessionInput = z.infer<typeof updateSessionInputSchema>;

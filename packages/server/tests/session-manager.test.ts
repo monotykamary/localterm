@@ -89,6 +89,29 @@ describe("SessionManager no-clients grace", { tags: ["integration"] }, () => {
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
 
+  it("groups attached clients by window id in clientProfiles", () => {
+    manager = createManager(50);
+    const wsA = createFakeSocket();
+    const wsB = createFakeSocket();
+    const wsC = createFakeSocket();
+    const spawned = manager.spawnAndAttach(wsA, shellInput, undefined, null, "profile-a");
+    expect(spawned).not.toBeNull();
+    if (!spawned) return;
+    const sid = spawned.id;
+    // A second tab of the same browser profile joins, plus one of another.
+    manager.attach(wsB, sid, null, "profile-a");
+    manager.attach(wsC, sid, null, "profile-b");
+    const item = manager.list()[0];
+    expect(item?.clients).toBe(3);
+    expect(item?.clientProfiles).toEqual([
+      { windowId: "profile-a", count: 2 },
+      { windowId: "profile-b", count: 1 },
+    ]);
+    manager.detach(wsA);
+    manager.detach(wsB);
+    manager.detach(wsC);
+  });
+
   it("keeps a dormant PTY alive while it's still producing output", async () => {
     manager = createManager(40);
     const ws = createFakeSocket();

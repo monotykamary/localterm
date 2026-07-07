@@ -64,6 +64,7 @@ import {
   SERVER_STOP_GRACE_MS,
   SESSION_ID_QUERY_PARAM,
   SESSION_ACTIVITY_WINDOW_MS,
+  WINDOW_ID_QUERY_PARAM,
   WAIT_DEFAULT_TIMEOUT_MS,
   WS_BACKPRESSURE_THRESHOLD_BYTES,
   WS_CLOSE_BACKPRESSURE,
@@ -77,6 +78,7 @@ import {
   AUTH_COOKIE_NAME,
 } from "./constants.js";
 import { getDefaultShell, listKnownShells, resolveShellOverride } from "./default-shell.js";
+import { resolveWindowId } from "./utils/resolve-window-id.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
 import { openChromeInspect } from "./utils/open-chrome-inspect.js";
 import { ServerErrorException, serverError } from "./errors.js";
@@ -2552,6 +2554,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       const requestedShell = resolveShellOverride(context.req.query("shell"));
       const requestedRunId = context.req.query(AUTOMATION_RUN_QUERY_PARAM);
       const requestedSid = context.req.query(SESSION_ID_QUERY_PARAM) ?? null;
+      const requestedWindowId = resolveWindowId(context.req.query(WINDOW_ID_QUERY_PARAM));
       // A plain tab may carry an initial command (a worktree's setup script) —
       // distinct from an automation run (`?run=`), which still takes precedence
       // when both are present. The command is written to the PTY as if the user
@@ -2579,7 +2582,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           // transient drop, or a switch from the session picker). A miss
           // (shell exited while dormant, killed, or reaped by the idle
           // sweep) falls through to a fresh spawn.
-          const attached = requestedSid ? registry.attach(ws, requestedSid, owner) : null;
+          const attached = requestedSid
+            ? registry.attach(ws, requestedSid, owner, requestedWindowId)
+            : null;
           if (attached) {
             managed = attached;
             sessionId = attached.id;
@@ -2615,6 +2620,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               },
               automation,
               owner,
+              requestedWindowId,
             );
             if (!spawned) {
               ws.close(WS_CLOSE_CAPACITY_REACHED, "session capacity reached");
