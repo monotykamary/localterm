@@ -1,5 +1,7 @@
 # localterm-server
 
+## 2.55.0
+
 ## 2.54.0
 
 ### Minor Changes
