@@ -702,15 +702,22 @@ export class Session extends EventEmitter<SessionEvents> {
     // terminal's foreground group id disambiguates without depending on the
     // shell's proctitle timing: the shell is its own pgrp leader holding the
     // terminal at idle (tpgid == pty.pid), a foreground program runs in its own
-    // group (tpgid != pty.pid). When tpgid confirms the shell is idle the
-    // current reading IS the shell's alias name — learn it (cached per shell
-    // path, see utils/shell-process-name.ts, so the sync ps runs at most once
-    // per aliased path) and report no foreground; otherwise the name is a real
-    // program, reported as foreground. macOS-only: Linux node-pty reads
-    // /proc/<pgrp>/cmdline (the invoked name, already in the set), so an unknown
-    // name there is just a foreground program.
+    // group (tpgid != pty.pid). When tpgid confirms the shell is idle the current
+    // reading IS the shell's alias name — learn it (cached per shell path, see
+    // utils/shell-process-name.ts, so the sync ps runs at most once per aliased
+    // path) and report no foreground; otherwise the name is a real program,
+    // reported as foreground. The getter re-reads pty.process *after* the tpgid
+    // check so a short-lived program that exits between `raw`'s read and the ps
+    // read can't be cached as the shell's name (which would permanently hide
+    // every later run of that program, e.g. `node`/`pi`, as "idle"). macOS-only:
+    // Linux node-pty reads /proc/<pgrp>/cmdline (the invoked name, already in
+    // the set), so an unknown name there is just a foreground program.
     if (process.platform === "darwin") {
-      const confirmed = confirmShellProcessName(this.shell, this.pty.pid, raw);
+      const confirmed = confirmShellProcessName(
+        this.shell,
+        this.pty.pid,
+        () => this.pty.process?.trim() ?? "",
+      );
       if (confirmed) {
         this.shellProcessNames.add(confirmed);
         if (confirmed === raw) return null;
