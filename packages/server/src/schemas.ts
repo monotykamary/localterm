@@ -25,6 +25,8 @@ import {
   MAX_SECRET_ENV_VAR_LENGTH,
   MAX_SECRET_NAME_LENGTH,
   MAX_SECRET_VALUE_LENGTH,
+  SECRET_EXPORT_VERSION,
+  MAX_SECRET_EXPORT_PASSPHRASE_LENGTH,
   MAX_SECRETS,
   MAX_PROCESS_NAME_LENGTH,
   MAX_PROCESS_REQUESTED_SECRETS,
@@ -1740,6 +1742,57 @@ export const secretsFileSchema = z
   .object({
     version: z.literal(SECRETS_FILE_VERSION),
     secrets: z.array(secretEntrySchema).max(MAX_SECRETS),
+  })
+  .strict();
+// age-encrypted secrets export. The plaintext the export wraps — a versioned
+// {name, envVar, value} per secret — is distinct from the on-disk policy file
+// (secrets.json) because it carries VALUES and travels off-machine. Validated
+// on decrypt so a corrupt or foreign file fails closed instead of seeding the
+// store with garbage. `value` is required (a value-less entry can't be
+// re-imported; the daemon rejects a value-less create) so export skips
+// policy-only rows.
+export const secretExportEntrySchema = z
+  .object({
+    name: secretNameSchema,
+    envVar: secretEnvVarSchema,
+    value: z.string().min(1).max(MAX_SECRET_VALUE_LENGTH),
+  })
+  .strict();
+export const secretExportPayloadSchema = z
+  .object({
+    version: z.literal(SECRET_EXPORT_VERSION),
+    secrets: z.array(secretExportEntrySchema).max(MAX_SECRETS),
+  })
+  .strict();
+// POST /api/secrets/export body. The passphrase transits the loopback body
+// once (same posture as a `secret set` value) and is consumed by age; the
+// response carries only the age-armored ciphertext, never plaintext values.
+export const secretExportRequestSchema = z
+  .object({ passphrase: z.string().min(1).max(MAX_SECRET_EXPORT_PASSPHRASE_LENGTH) })
+  .strict();
+export const secretExportResponseSchema = z
+  .object({
+    data: z.string(),
+    count: z.number().int().min(0),
+    skipped: z.number().int().min(0),
+  })
+  .strict();
+// POST /api/secrets/import body. `data` is the age-armored ciphertext from an
+// export; the daemon decrypts with the passphrase and upserts each entry
+// through the same write path as PUT /api/secrets/:name. The response never
+// echoes values — only counts and per-name error reasons.
+export const secretImportRequestSchema = z
+  .object({
+    passphrase: z.string().min(1).max(MAX_SECRET_EXPORT_PASSPHRASE_LENGTH),
+    data: z.string().min(1),
+  })
+  .strict();
+export const secretImportResponseSchema = z
+  .object({
+    imported: z.number().int().min(0),
+    created: z.number().int().min(0),
+    updated: z.number().int().min(0),
+    errors: z.array(z.object({ name: secretNameSchema, error: z.string() }).strict()),
   })
   .strict();
 // Frozen v1 file shape — read only by the one-time migrator in

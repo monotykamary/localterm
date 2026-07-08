@@ -71,6 +71,7 @@
     "@octokit/rest": "^22.0.1",
     "@simplewebauthn/server": "^13.3.2",
     "@xterm/headless": "6.1.0-beta.287",
+    "age-encryption": "^0.3.0",
     "gray-matter": "^4.0.3",
     "hono": "^4.6.13",
     "node-pty": "1.1.0",

@@ -60,6 +60,7 @@ import {
   SECRETS_FILENAME,
   THEMES_FILENAME,
   SECRETS_SHIMS_DIRNAME,
+  SECRET_EXPORT_SCRYPT_WORK_FACTOR,
   AUTOMATION_AGENT_SESSIONS_DIRNAME,
   SERVER_STOP_GRACE_MS,
   SESSION_ID_QUERY_PARAM,
@@ -103,6 +104,7 @@ import { ThemeStore } from "./theme-store.js";
 import { parseImportedTheme } from "./theme-parser.js";
 import { isBuiltinThemeId, BUILTIN_THEME_IDS } from "./terminal-themes.js";
 import { regenerateShims } from "./secret-shims.js";
+import { encryptSecretExport, decryptSecretExport } from "./secret-export.js";
 import { ProcessActivityWatcher } from "./process-activity-watcher.js";
 import { parseCronExpression } from "./cron-expression.js";
 import { createGitWorktree, listGitWorktrees, removeGitWorktree } from "./git-worktrees.js";
@@ -123,6 +125,8 @@ import {
   resetAutomationInputSchema,
   secretEntrySchema,
   secretSetInputSchema,
+  secretExportRequestSchema,
+  secretImportRequestSchema,
   sessionInputSchema,
   sessionResizeSchema,
   processNameSchema,
@@ -256,6 +260,12 @@ export interface ServerOptions {
    */
   secretBackend?: SecretBackend;
   /**
+   * Scrypt work factor (log2 N) for the age passphrase on secrets export.
+   * Defaults to SECRET_EXPORT_SCRYPT_WORK_FACTOR. Injectable so tests use a
+   * cheap factor instead of the ~2s pure-JS production KDF per export.
+   */
+  secretExportScryptWorkFactor?: number;
+  /**
    * Override how automatic-mode keep-awake inspects running processes. Defaults
    * to a real `ps` snapshot. Injectable so tests can drive automatic detection
    * deterministically without spawning processes.
@@ -376,6 +386,7 @@ interface DaemonContext {
   ownerFor: (context: Context) => SessionOwner;
   cdpClient: CdpClient | null;
   secretBackend: SecretBackend;
+  secretExportScryptWorkFactor: number;
   secretStore: SecretStore;
   shimsDir: string;
   stateDirectory: string;
@@ -491,6 +502,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     ownerFor,
     cdpClient,
     secretBackend,
+    secretExportScryptWorkFactor,
     secretStore,
     shimsDir,
     processStore,
@@ -862,6 +874,33 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   const unknownRequestedSecrets = (names: readonly string[]): string[] =>
     names.filter((name) => !secretStore.get(name));
 
+  // Shared value-present upsert for PUT /secrets/:name (when a value is sent)
+  // and POST /secrets/import. Validates nothing — callers parse name/envVar/
+  // value against the schemas first — and owns the capacity gate, the backend
+  // write, and the store upsert. Returns ok + hasValue, or one of unsupported |
+  // capacity | backend (all map to 409 at the route). Does NOT re-bake shims;
+  // the caller syncs once (PUT after a single entry, import once after the
+  // loop) so a multi-entry import doesn't rebuild every shim per entry.
+  const upsertSecretValue = async (
+    name: string,
+    envVar: string,
+    value: string,
+  ): Promise<{ ok: true; hasValue: boolean } | { ok: false; error: string }> => {
+    if (!secretBackend.supported) return { ok: false, error: "unsupported" };
+    const existing = secretStore.get(name);
+    if (secretStore.list().length >= MAX_SECRETS && !existing) {
+      return { ok: false, error: "capacity" };
+    }
+    try {
+      await secretBackend.set(name, value);
+    } catch {
+      return { ok: false, error: "backend" };
+    }
+    const stored = secretStore.upsert({ name, envVar });
+    if (!stored) return { ok: false, error: "capacity" };
+    return { ok: true, hasValue: await secretBackend.has(name) };
+  };
+
   // Per-process secret injection. The policy (which processes get which secret
   // as which env var) is served as names only — VALUES are never returned over
   // the network. The `/api/*` surface is gated by a network-origin check
@@ -901,36 +940,32 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     if (!parsed.success) {
       return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
     }
+    if (parsed.data.value !== undefined) {
+      const result = await upsertSecretValue(name, parsed.data.envVar, parsed.data.value);
+      if (!result.ok) {
+        return context.json({ error: result.error }, HTTP_STATUS_CONFLICT);
+      }
+      // An envVar change re-bakes every process shim that requests this secret.
+      syncSecretShims();
+      return context.json({ name, envVar: parsed.data.envVar, hasValue: result.hasValue });
+    }
+    // Policy-only update (no value): keep the stored value, change only envVar.
     const existing = secretStore.get(name);
     if (secretStore.list().length >= MAX_SECRETS && !existing) {
       return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
     }
-    if (parsed.data.value !== undefined) {
-      try {
-        await secretBackend.set(name, parsed.data.value);
-      } catch {
-        return context.json({ error: "backend" }, HTTP_STATUS_CONFLICT);
-      }
-    } else if (!existing) {
+    if (!existing) {
       // Creating a new secret without a value leaves a policy row with nothing
       // to inject; reject so the UI doesn't show a secret that never works.
       return context.json({ error: "value_required" }, HTTP_STATUS_BAD_REQUEST);
     }
-    const stored = secretStore.upsert({
-      name,
-      envVar: parsed.data.envVar,
-    });
+    const stored = secretStore.upsert({ name, envVar: parsed.data.envVar });
     if (!stored) {
       return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
     }
-    // An envVar change re-bakes every process shim that requests this secret.
     syncSecretShims();
     const hasValue = await secretBackend.has(name);
-    return context.json({
-      name: stored.name,
-      envVar: stored.envVar,
-      hasValue,
-    });
+    return context.json({ name: stored.name, envVar: stored.envVar, hasValue });
   });
 
   // Delete a secret's identity, its backend value, and every reference to it.
@@ -954,6 +989,78 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     syncSecretShims();
     if (changedAutomations) broadcastAutomations();
     return context.json({ ok: true });
+  });
+
+  // POST /api/secrets/export — encrypt every secret's VALUE with an age
+  // passphrase and return the ASCII-armored ciphertext. Values are read from
+  // the backend server-side and leave the daemon only as ciphertext; the
+  // passphrase crosses the loopback body once (same posture as a `secret set`
+  // value). Policy-only rows (no value set) are skipped — they can't be
+  // re-imported (the daemon rejects a value-less create) and carry nothing
+  // worth encrypting. The armored file is interoperable with the stock `age`
+  // CLI (`age -d -p`).
+  api.post("/secrets/export", async (context) => {
+    if (!secretBackend.supported) {
+      return context.json({ error: "unsupported" }, HTTP_STATUS_CONFLICT);
+    }
+    const parsed = secretExportRequestSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) {
+      return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const entries = secretStore.list();
+    const withValues: { name: string; envVar: string; value: string }[] = [];
+    let skipped = 0;
+    for (const entry of entries) {
+      const value = await secretBackend.get(entry.name);
+      if (value === null) {
+        skipped += 1;
+        continue;
+      }
+      withValues.push({ name: entry.name, envVar: entry.envVar, value });
+    }
+    const data = await encryptSecretExport(
+      withValues,
+      parsed.data.passphrase,
+      secretExportScryptWorkFactor,
+    );
+    return context.json({ data, count: withValues.length, skipped });
+  });
+
+  // POST /api/secrets/import — decrypt an age-armored export and upsert each
+  // entry through the same write path as PUT /secrets/:name (so the capacity
+  // gate and the shim re-bake are identical). Values never appear in the
+  // response — only counts and per-name error reasons. A wrong passphrase or a
+  // foreign file fails decryption (age's AEAD) and maps to a 400 before any
+  // write, so a bad import never touches the store or backend.
+  api.post("/secrets/import", async (context) => {
+    if (!secretBackend.supported) {
+      return context.json({ error: "unsupported" }, HTTP_STATUS_CONFLICT);
+    }
+    const parsed = secretImportRequestSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) {
+      return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const decrypted = await decryptSecretExport(parsed.data.data, parsed.data.passphrase).catch(
+      () => null,
+    );
+    if (decrypted === null) {
+      return context.json({ error: "decrypt" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    let created = 0;
+    let updated = 0;
+    const errors: { name: string; error: string }[] = [];
+    for (const entry of decrypted.secrets) {
+      const existedBefore = secretStore.get(entry.name) !== undefined;
+      const result = await upsertSecretValue(entry.name, entry.envVar, entry.value);
+      if (!result.ok) {
+        errors.push({ name: entry.name, error: result.error });
+        continue;
+      }
+      if (existedBefore) updated += 1;
+      else created += 1;
+    }
+    if (created + updated > 0) syncSecretShims();
+    return context.json({ imported: created + updated, created, updated, errors });
   });
 
   // Per-process secret wiring. A process is a binary name + the secret names it
@@ -2447,6 +2554,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     ownerFor,
     cdpClient,
     secretBackend,
+    secretExportScryptWorkFactor:
+      options.secretExportScryptWorkFactor ?? SECRET_EXPORT_SCRYPT_WORK_FACTOR,
     secretStore,
     shimsDir,
     processStore,

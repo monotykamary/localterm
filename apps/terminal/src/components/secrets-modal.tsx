@@ -1,4 +1,4 @@
-import { Boxes, Key, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { Boxes, Download, Key, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,14 @@ import {
 import { cn } from "@/lib/utils";
 import type { Process, SecretEntryResponse } from "@monotykamary/localterm-server/protocol";
 import { deleteProcess, fetchProcesses, putProcess } from "@/utils/fetch-processes";
-import { deleteSecret, fetchSecrets, putSecret } from "@/utils/fetch-secrets";
+import {
+  deleteSecret,
+  exportSecrets,
+  fetchSecrets,
+  importSecrets,
+  putSecret,
+} from "@/utils/fetch-secrets";
+import { downloadTextFile } from "@/utils/download-text-file";
 
 interface SecretsModalProps {
   open: boolean;
@@ -215,6 +222,18 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   const [secretSaving, setSecretSaving] = useState(false);
   const [secretDeletingName, setSecretDeletingName] = useState<string | null>(null);
   const [secretArmedDeleteName, setSecretArmedDeleteName] = useState<string | null>(null);
+  const [exportForm, setExportForm] = useState<{ passphrase: string; confirm: string } | null>(
+    null,
+  );
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [importForm, setImportForm] = useState<{
+    passphrase: string;
+    data: string | null;
+    filename: string;
+  } | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const [processForm, setProcessForm] = useState<ProcessEditForm | null>(null);
   const [processFormError, setProcessFormError] = useState<string | null>(null);
   const [processSaving, setProcessSaving] = useState(false);
@@ -260,6 +279,10 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
       setSecretForm(null);
       setSecretFormError(null);
       setSecretArmedDeleteName(null);
+      setExportForm(null);
+      setExportError(null);
+      setImportForm(null);
+      setImportError(null);
       setProcessForm(null);
       setProcessFormError(null);
       setProcessArmedDeleteName(null);
@@ -274,6 +297,8 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
     }
     setSettled(false);
     setSecretArmedDeleteName(null);
+    setExportForm(null);
+    setImportForm(null);
     setProcessArmedDeleteName(null);
     if (mounted) {
       const timer = window.setTimeout(() => setMounted(false), SECRETS_MODAL_CLOSE_TRANSITION_MS);
@@ -323,12 +348,14 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
       event.preventDefault();
       event.stopPropagation();
       if (secretForm) setSecretForm(null);
+      else if (exportForm) setExportForm(null);
+      else if (importForm) setImportForm(null);
       else if (processForm) setProcessForm(null);
       else onClose();
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [open, mounted, secretForm, processForm, onClose]);
+  }, [open, mounted, secretForm, exportForm, importForm, processForm, onClose]);
 
   const switchTab = (next: ModalTab) => {
     setTab(next);
@@ -336,6 +363,10 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
     setSecretForm(null);
     setSecretFormError(null);
     setSecretArmedDeleteName(null);
+    setExportForm(null);
+    setExportError(null);
+    setImportForm(null);
+    setImportError(null);
     setProcessForm(null);
     setProcessFormError(null);
     setProcessArmedDeleteName(null);
@@ -344,6 +375,89 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   const startAddSecret = () => {
     setSecretFormError(null);
     setSecretForm({ ...EMPTY_SECRET_FORM });
+  };
+
+  const startExport = () => {
+    setSecretForm(null);
+    setSecretFormError(null);
+    setExportError(null);
+    setImportForm(null);
+    setImportError(null);
+    setExportForm({ passphrase: "", confirm: "" });
+  };
+
+  const startImport = () => {
+    setSecretForm(null);
+    setSecretFormError(null);
+    setExportForm(null);
+    setExportError(null);
+    setImportError(null);
+    setImportForm({ passphrase: "", data: null, filename: "" });
+  };
+
+  const handleImportFile = async (file: File) => {
+    if (!importForm) return;
+    try {
+      const data = await file.text();
+      setImportForm({ ...importForm, data, filename: file.name });
+      setImportError(null);
+    } catch {
+      setImportError("Couldn't read that file.");
+    }
+  };
+
+  const handleImport = async () => {
+    if (!importForm) return;
+    if (importForm.data === null) {
+      setImportError("Choose an export file to import.");
+      return;
+    }
+    if (!importForm.passphrase) {
+      setImportError("Enter the passphrase for the export file.");
+      return;
+    }
+    setImporting(true);
+    setImportError(null);
+    const result = await importSecrets(importForm.data, importForm.passphrase);
+    setImporting(false);
+    if (!result) {
+      setImportError("Couldn't import — wrong passphrase, or the daemon is down.");
+      return;
+    }
+    if (result.errors.length > 0) {
+      setImportError(
+        `Imported ${result.imported} (${result.created} new, ${result.updated} updated); ${result.errors.length} failed: ${result.errors
+          .map((entry) => `${entry.name} (${entry.error})`)
+          .join(", ")}.`,
+      );
+      void refresh();
+      return;
+    }
+    setImportForm(null);
+    void refresh();
+  };
+
+  const handleExport = async () => {
+    if (!exportForm) return;
+    const passphrase = exportForm.passphrase;
+    if (!passphrase) {
+      setExportError("Enter a passphrase for the export file.");
+      return;
+    }
+    if (passphrase !== exportForm.confirm) {
+      setExportError("Passphrases do not match.");
+      return;
+    }
+    setExporting(true);
+    setExportError(null);
+    const result = await exportSecrets(passphrase);
+    setExporting(false);
+    if (!result) {
+      setExportError("Couldn't export — the daemon may be down or secrets unsupported here.");
+      return;
+    }
+    downloadTextFile("localterm-secrets.age", result.data);
+    setExportForm(null);
   };
 
   const startEditSecret = (secret: SecretEntryResponse) => {
@@ -469,7 +583,10 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
   const isEditingProcess = processForm !== null && processForm.originalName !== null;
   const secretEnvVars = new Map(secretsList.map((secret) => [secret.name, secret.envVar]));
   const activeCount = tab === "secrets" ? secrets?.length : processes?.length;
-  const activeFormOpen = tab === "secrets" ? secretForm !== null : processForm !== null;
+  const activeFormOpen =
+    tab === "secrets"
+      ? secretForm !== null || exportForm !== null || importForm !== null
+      : processForm !== null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]">
@@ -594,6 +711,128 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
                   <div className="mx-2.5 mb-2 rounded-sm border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
                     Secret storage isn't supported on this server's platform (it uses macOS
                     Keychain). Run the localterm daemon on a Mac to manage secrets here.
+                  </div>
+                ) : null}
+
+                {importForm ? (
+                  <div className="m-1.5 rounded-sm border border-border/40 bg-muted/20 p-2.5">
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+                          Export file
+                        </label>
+                        <label className="flex h-7 cursor-pointer items-center gap-2 rounded-sm border border-border/50 px-2 text-xs text-muted-foreground hover:text-foreground">
+                          <Upload className="size-3.5 shrink-0" aria-hidden="true" />
+                          <span className="truncate">{importForm.filename || "Choose file…"}</span>
+                          <input
+                            type="file"
+                            accept=".age,text/plain"
+                            className="hidden"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              if (file) void handleImportFile(file);
+                            }}
+                          />
+                        </label>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+                          Passphrase
+                        </label>
+                        <Input
+                          type="password"
+                          value={importForm.passphrase}
+                          autoComplete="current-password"
+                          aria-label="import passphrase"
+                          onChange={(event) =>
+                            setImportForm({ ...importForm, passphrase: event.target.value })
+                          }
+                          className="h-7 px-2 font-mono text-xs"
+                        />
+                      </div>
+                      <div className="text-[10px] leading-relaxed text-muted-foreground/60">
+                        Decrypts an age export and upserts each secret. A secret with the same name
+                        is overwritten.
+                      </div>
+                      {importError ? (
+                        <div className="text-[11px] text-red-500 dark:text-red-400">
+                          {importError}
+                        </div>
+                      ) : null}
+                      <div className="flex items-center justify-end gap-1.5 pt-1">
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => setImportForm(null)}
+                          disabled={importing}
+                        >
+                          Cancel
+                        </Button>
+                        <Button size="xs" onClick={() => void handleImport()} disabled={importing}>
+                          {importing ? <Spinner className="size-3.5" /> : "Import"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {exportForm ? (
+                  <div className="m-1.5 rounded-sm border border-border/40 bg-muted/20 p-2.5">
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+                          Passphrase
+                        </label>
+                        <Input
+                          type="password"
+                          value={exportForm.passphrase}
+                          autoFocus
+                          autoComplete="new-password"
+                          aria-label="export passphrase"
+                          onChange={(event) =>
+                            setExportForm({ ...exportForm, passphrase: event.target.value })
+                          }
+                          className="h-7 px-2 font-mono text-xs"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+                          Confirm passphrase
+                        </label>
+                        <Input
+                          type="password"
+                          value={exportForm.confirm}
+                          autoComplete="new-password"
+                          aria-label="confirm export passphrase"
+                          onChange={(event) =>
+                            setExportForm({ ...exportForm, confirm: event.target.value })
+                          }
+                          className="h-7 px-2 font-mono text-xs"
+                        />
+                      </div>
+                      <div className="text-[10px] leading-relaxed text-muted-foreground/60">
+                        Encrypts every secret's value into an age file. Keep the passphrase — it
+                        can't be recovered. The file also decrypts with the stock `age` CLI.
+                      </div>
+                      {exportError ? (
+                        <div className="text-[11px] text-red-500 dark:text-red-400">
+                          {exportError}
+                        </div>
+                      ) : null}
+                      <div className="flex items-center justify-end gap-1.5 pt-1">
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => setExportForm(null)}
+                          disabled={exporting}
+                        >
+                          Cancel
+                        </Button>
+                        <Button size="xs" onClick={() => void handleExport()} disabled={exporting}>
+                          {exporting ? <Spinner className="size-3.5" /> : "Export"}
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 ) : null}
 
@@ -871,16 +1110,44 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
 
         <div className="flex items-center border-t border-border/40 px-4 py-1.5 text-[10px] text-muted-foreground/60">
           {!hasError && tab === "secrets" && supported ? (
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={startAddSecret}
-              disabled={secretForm !== null}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <Plus className="size-3.5" aria-hidden="true" />
-              New secret
-            </Button>
+            <>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={startAddSecret}
+                disabled={secretForm !== null || exportForm !== null || importForm !== null}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Plus className="size-3.5" aria-hidden="true" />
+                New secret
+              </Button>
+              {secrets?.some((secret) => secret.hasValue) ? (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={startExport}
+                  disabled={
+                    secretForm !== null || exportForm !== null || importForm !== null || exporting
+                  }
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Download className="size-3.5" aria-hidden="true" />
+                  Export
+                </Button>
+              ) : null}
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={startImport}
+                disabled={
+                  secretForm !== null || exportForm !== null || importForm !== null || importing
+                }
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Upload className="size-3.5" aria-hidden="true" />
+                Import
+              </Button>
+            </>
           ) : null}
           {!hasError && tab === "processes" ? (
             <Button

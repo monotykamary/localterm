@@ -178,6 +178,34 @@ export const createProgram = (): Command => {
       const { runSecretDelete } = await import("./commands/secret.js");
       await runSecretDelete(name);
     });
+  secret
+    .command("export")
+    .description(
+      "export all secrets to an age-encrypted file (passphrase-protected; decrypts with the stock `age` CLI)",
+    )
+    .option("-o, --output <file>", 'output file (default ./localterm-secrets.age; "-" for stdout)')
+    .option(
+      "-p, --passphrase <pass>",
+      'passphrase (use "-" to read from stdin; omit to be prompted)',
+    )
+    .action(async (options: { output?: string; passphrase?: string }) => {
+      const { runSecretExport } = await import("./commands/secret.js");
+      await runSecretExport(options);
+    });
+  secret
+    .command("import")
+    .description(
+      "import secrets from an age-encrypted file (upserts each; values never over HTTP in plaintext)",
+    )
+    .option("-i, --input <file>", 'input file (default ./localterm-secrets.age; "-" for stdin)')
+    .option(
+      "-p, --passphrase <pass>",
+      'passphrase (use "-" to read from stdin; omit to be prompted)',
+    )
+    .action(async (options: { input?: string; passphrase?: string }) => {
+      const { runSecretImport } = await import("./commands/secret.js");
+      await runSecretImport(options);
+    });
 
   const processCommand = program
     .command("process")

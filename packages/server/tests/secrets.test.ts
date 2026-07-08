@@ -190,3 +190,164 @@ describe("secrets API on an unsupported backend", () => {
     expect(response.status).toBe(409);
   });
 });
+
+describe("secrets export/import", () => {
+  const makeServer = async () => {
+    const stateDirectory = mkdtempSync(path.join(os.tmpdir(), "localterm-secrets-export-"));
+    const backend = new FakeBackend();
+    const server = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      stateDirectory,
+      secretBackend: backend,
+      secretExportScryptWorkFactor: 10,
+      tabController: { open: async () => null, close: async () => {} },
+    });
+    return { server, backend, baseUrl: `http://127.0.0.1:${server.port}`, stateDirectory };
+  };
+
+  const putSecret = async (baseUrl: string, name: string, envVar: string, value: string) =>
+    fetch(`${baseUrl}/api/secrets/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ envVar, value }),
+    });
+
+  it("exports secrets as age-armored ciphertext and round-trips into a fresh store", async () => {
+    const source = await makeServer();
+    const target = await makeServer();
+    try {
+      await putSecret(source.baseUrl, "anthropic-api-key", "ANTHROPIC_API_KEY", "sk-test");
+      await putSecret(source.baseUrl, "github-token", "GITHUB_TOKEN", "ghp_test");
+
+      const exportResponse = await fetch(`${source.baseUrl}/api/secrets/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ passphrase: "correct-horse-battery-staple" }),
+      });
+      expect(exportResponse.status).toBe(200);
+      const exported = (await exportResponse.json()) as {
+        data: string;
+        count: number;
+        skipped: number;
+      };
+      expect(exported.count).toBe(2);
+      expect(exported.skipped).toBe(0);
+      // Ciphertext is age-armored; the plaintext values never appear in it.
+      expect(exported.data).toContain("-----BEGIN AGE ENCRYPTED FILE-----");
+      expect(exported.data).not.toContain("sk-test");
+      expect(exported.data).not.toContain("ghp_test");
+
+      const importResponse = await fetch(`${target.baseUrl}/api/secrets/import`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ passphrase: "correct-horse-battery-staple", data: exported.data }),
+      });
+      expect(importResponse.status).toBe(200);
+      const imported = (await importResponse.json()) as {
+        imported: number;
+        created: number;
+        updated: number;
+        errors: { name: string; error: string }[];
+      };
+      expect(imported.imported).toBe(2);
+      expect(imported.created).toBe(2);
+      expect(imported.updated).toBe(0);
+      expect(imported.errors).toEqual([]);
+
+      // Values landed in the target backend (never echoed over HTTP) and the
+      // policy file carries the names + env vars — never the values.
+      expect(target.backend.store.get("anthropic-api-key")).toBe("sk-test");
+      expect(target.backend.store.get("github-token")).toBe("ghp_test");
+      const policyFile = readFileSync(path.join(target.stateDirectory, "secrets.json"), "utf8");
+      expect(policyFile).not.toContain("sk-test");
+      expect(policyFile).toContain("anthropic-api-key");
+      expect(policyFile).toContain("GITHUB_TOKEN");
+    } finally {
+      await source.server.stop();
+      await target.server.stop();
+      rmSync(source.stateDirectory, { recursive: true, force: true });
+      rmSync(target.stateDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("updates an existing secret on import and reports created vs updated", async () => {
+    const server = await makeServer();
+    try {
+      await putSecret(server.baseUrl, "anthropic-api-key", "ANTHROPIC_API_KEY", "old-value");
+      const exportResponse = await fetch(`${server.baseUrl}/api/secrets/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ passphrase: "p" }),
+      });
+      const exported = (await exportResponse.json()) as { data: string; count: number };
+      expect(exported.count).toBe(1);
+
+      // Import back over the existing entry; the value survives the round-trip.
+      const importResponse = await fetch(`${server.baseUrl}/api/secrets/import`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ passphrase: "p", data: exported.data }),
+      });
+      const imported = (await importResponse.json()) as {
+        imported: number;
+        created: number;
+        updated: number;
+      };
+      expect(imported.imported).toBe(1);
+      expect(imported.updated).toBe(1);
+      expect(imported.created).toBe(0);
+      expect(server.backend.store.get("anthropic-api-key")).toBe("old-value");
+    } finally {
+      await server.server.stop();
+      rmSync(server.stateDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an import with the wrong passphrase before any write", async () => {
+    const source = await makeServer();
+    const target = await makeServer();
+    try {
+      await putSecret(source.baseUrl, "anthropic-api-key", "ANTHROPIC_API_KEY", "sk-test");
+      const exportResponse = await fetch(`${source.baseUrl}/api/secrets/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ passphrase: "right" }),
+      });
+      const exported = (await exportResponse.json()) as { data: string };
+
+      const importResponse = await fetch(`${target.baseUrl}/api/secrets/import`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ passphrase: "wrong", data: exported.data }),
+      });
+      expect(importResponse.status).toBe(400);
+      expect(target.backend.store.size).toBe(0);
+    } finally {
+      await source.server.stop();
+      await target.server.stop();
+      rmSync(source.stateDirectory, { recursive: true, force: true });
+      rmSync(target.stateDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("skips policy-only secrets (no value) on export", async () => {
+    const source = await makeServer();
+    try {
+      await putSecret(source.baseUrl, "anthropic-api-key", "ANTHROPIC_API_KEY", "sk-test");
+      // Strip the value directly, leaving a policy-only row the store still lists.
+      source.backend.store.delete("anthropic-api-key");
+      const exportResponse = await fetch(`${source.baseUrl}/api/secrets/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ passphrase: "p" }),
+      });
+      const exported = (await exportResponse.json()) as { count: number; skipped: number };
+      expect(exported.count).toBe(0);
+      expect(exported.skipped).toBe(1);
+    } finally {
+      await source.server.stop();
+      rmSync(source.stateDirectory, { recursive: true, force: true });
+    }
+  });
+});

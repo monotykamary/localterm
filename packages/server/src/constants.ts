@@ -149,6 +149,20 @@ export const MAX_THEME_SOURCE_LENGTH = 128;
 export const MAX_THEME_IMPORT_TEXT_LENGTH = 256 * 1024;
 export const MAX_PROCESS_REQUESTED_SECRETS = 32;
 export const MAX_SECRET_VALUE_LENGTH = 8192;
+// Versioned plaintext shape the age-encrypted export wraps. Independent of
+// SECRETS_FILE_VERSION (the on-disk policy file): the export is a portable
+// {version, secrets:[{name,envVar,value}]} blob a future format can bump
+// without touching the policy store. Decrypt validates the literal so a
+// mismatched file fails closed rather than silently mis-parsing.
+export const SECRET_EXPORT_VERSION = 1;
+// Caps the export passphrase sent over the loopback body so a runaway body
+// can't pin the daemon on scrypt. Generous (a passphrase is never this long);
+// the real minimum (non-empty) is enforced by the request schema.
+export const MAX_SECRET_EXPORT_PASSPHRASE_LENGTH = 4096;
+// Scrypt work factor (log2 N) for the age passphrase on secrets export. age's
+// default is 18; the noble pure-JS scrypt makes each export ~1-2s, acceptable
+// for a one-time bulk export of all secrets. Tests inject a lower factor.
+export const SECRET_EXPORT_SCRYPT_WORK_FACTOR = 18;
 // `security` is always at /usr/bin/security on darwin; baking the absolute path
 // into the generated shim means the shim doesn't depend on PATH lookup.
 export const SECURITY_BINARY_PATH = "/usr/bin/security";

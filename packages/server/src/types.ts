@@ -78,6 +78,12 @@ import type {
   secretEntryResponseSchema,
   secretsListResponseSchema,
   secretSetInputSchema,
+  secretExportEntrySchema,
+  secretExportPayloadSchema,
+  secretExportRequestSchema,
+  secretExportResponseSchema,
+  secretImportRequestSchema,
+  secretImportResponseSchema,
   processSchema,
   processSetInputSchema,
   processesListResponseSchema,
@@ -132,6 +138,12 @@ export type SecretEntry = z.infer<typeof secretEntrySchema>;
 export type SecretEntryResponse = z.infer<typeof secretEntryResponseSchema>;
 export type SecretsListResponse = z.infer<typeof secretsListResponseSchema>;
 export type SecretSetInput = z.infer<typeof secretSetInputSchema>;
+export type SecretExportEntry = z.infer<typeof secretExportEntrySchema>;
+export type SecretExportPayload = z.infer<typeof secretExportPayloadSchema>;
+export type SecretExportRequest = z.infer<typeof secretExportRequestSchema>;
+export type SecretExportResponse = z.infer<typeof secretExportResponseSchema>;
+export type SecretImportRequest = z.infer<typeof secretImportRequestSchema>;
+export type SecretImportResponse = z.infer<typeof secretImportResponseSchema>;
 export type Process = z.infer<typeof processSchema>;
 export type ProcessSetInput = z.infer<typeof processSetInputSchema>;
 export type ProcessesListResponse = z.infer<typeof processesListResponseSchema>;

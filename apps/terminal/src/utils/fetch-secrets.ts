@@ -1,6 +1,8 @@
 import {
   secretsListResponseSchema,
   type SecretEntryResponse,
+  type SecretExportResponse,
+  type SecretImportResponse,
   type SecretsListResponse,
 } from "@monotykamary/localterm-server/protocol";
 
@@ -59,5 +61,44 @@ export const deleteSecret = async (name: string): Promise<boolean> => {
     return response.ok;
   } catch {
     return false;
+  }
+};
+
+// Export every secret's value as an age-encrypted, ASCII-armored file. The
+// passphrase transits to the daemon once (same posture as a `secret set`
+// value); the daemon returns only the ciphertext — values never leave it in
+// plaintext. Returns the armored text + counts, or null on failure.
+export const exportSecrets = async (passphrase: string): Promise<SecretExportResponse | null> => {
+  try {
+    const response = await fetch(new URL(`${SECRETS_ENDPOINT}/export`, window.location.href), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ passphrase }),
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as SecretExportResponse;
+  } catch {
+    return null;
+  }
+};
+
+// Import an age-armored export: the daemon decrypts with the passphrase and
+// upserts each entry through the same write path as a secret save. The
+// ciphertext + passphrase transit once (same posture as `secret set`); the
+// response carries only counts + per-name error reasons, never values.
+export const importSecrets = async (
+  data: string,
+  passphrase: string,
+): Promise<SecretImportResponse | null> => {
+  try {
+    const response = await fetch(new URL(`${SECRETS_ENDPOINT}/import`, window.location.href), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ passphrase, data }),
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as SecretImportResponse;
+  } catch {
+    return null;
   }
 };
