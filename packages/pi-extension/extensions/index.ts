@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerAgentNotify } from "./agent-notify.js";
 import { registerBashSecretScrub } from "./bash-secret-scrub.js";
 import { registerKittyImages } from "./kitty-images.js";
 
@@ -6,11 +7,15 @@ import { registerKittyImages } from "./kitty-images.js";
 // injected into every localterm PTY; when it's absent, nothing is registered
 // and pi behaves exactly as default. Inside localterm this (1) force-enables
 // Kitty graphics + OSC 8 links the xterm.js renderer supports but pi-tui can't
-// detect, and (2) scrubs localterm-managed secret env vars from the agent's
+// detect, (2) scrubs localterm-managed secret env vars from the agent's
 // bash-tool children so a generated command can't read keys the shim injected
-// into pi's own env.
+// into pi's own env, and (3) writes an OSC 9 desktop notification on
+// agent_end (reusing localterm's existing OSC 9 -> browser notification
+// pipeline) so a user who stepped away from the pi tab learns the agent
+// finished.
 export default (pi: ExtensionAPI): void => {
   if (process.env.LOCALTERM !== "1") return;
   registerKittyImages(pi);
   registerBashSecretScrub(pi);
+  registerAgentNotify(pi);
 };

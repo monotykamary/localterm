@@ -22,3 +22,15 @@ export const PI_SETTINGS_FILENAME = "settings.json";
 export const SECRET_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 export const PROCESS_NAME_PATTERN = /^[A-Za-z0-9_.+-]+$/;
 export const ENV_VAR_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+
+// Mirror localterm-server's MAX_NOTIFICATION_LENGTH: the daemon slices any
+// OSC 9 body past this many UTF-16 code units, which can split a surrogate
+// pair. We cap the body ourselves before framing so the emitted sequence is
+// always within the daemon's limit and never split. Used by the OSC 9
+// notification builder.
+export const NOTIFICATION_MAX_LENGTH = 1024;
+
+// Only push a desktop notification when the agent turn ran at least this long,
+// so quick back-and-forth turns don't spam a user actively watching the pi
+// tab. Tunable: lower to notify sooner, raise to stay quieter while focused.
+export const AGENT_NOTIFY_MIN_ELAPSED_MS = 30_000;

@@ -1,9 +1,10 @@
 {
   "name": "@monotykamary/pi-localterm",
   "version": "0.1.2",
-  "description": "localterm <-> pi integration: Kitty graphics for the browser renderer, and scrubbing localterm-managed secret env vars from the agent's bash-tool children.",
+  "description": "localterm <-> pi integration: Kitty graphics for the browser renderer, scrubbing localterm-managed secret env vars from the agent's bash-tool children, and OSC 9 desktop notifications when the agent finishes a long turn.",
   "keywords": [
     "localterm",
+    "notifications",
     "pi",
     "pi-package",
     "secrets"
