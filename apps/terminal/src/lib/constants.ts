@@ -136,6 +136,34 @@ export const SESSIONS_MESSAGE_BLOCK_MIN_HEIGHT_PX = 112;
 // a "+N" overflow. Most sessions have a handful of attached clients, so this
 // caps the cluster's width; the count is still exact via the overflow suffix.
 export const SESSIONS_MAX_PEER_DOTS = 5;
+// Edge length (px) of a peer avatar face in a session picker row. Big enough
+// to read each profile's distinct face, small enough to fit the 36px row
+// (py-2 leaves 20px of content) and keep a 5-face cluster's width modest.
+export const SESSIONS_PEER_FACE_SIZE_PX = 16;
+// Curated palette a profile's peer faces draw their background from
+// (peerProfileColor hashes the windowId into this). Distinct hues around the
+// wheel so each browser profile reads as a different color. Nine entries so
+// two profiles rarely share a color.
+export const SESSIONS_PEER_FACE_PALETTE = [
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#06b6d4",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+  "#f43f5e",
+];
+// Face-feature ink — facehash draws its eyes + first-letter mouth in
+// `currentColor` (this). Black so the features read dark on the colored bg, not
+// the inherited foreground (white) of the picker row. Also drives the
+// self-ring (ring-black) so the "me" outline matches the features.
+export const SESSIONS_PEER_FACE_INK_HEX = "#000000";
+// Corner radius of the peer-face squircle (a continuous-corner rounded square),
+// as a percentage of the face size so it scales. Less than 50% (a circle) so
+// the avatar reads as a squircle, not a dot.
+export const SESSIONS_PEER_FACE_RADIUS_PCT = "30%";
 
 // Open dev ports modal: mirrors the sessions modal's palette-style overlay and
 // close timing. Each poll runs `ps` + `lsof` on the daemon (heavier than the

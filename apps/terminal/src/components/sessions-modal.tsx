@@ -23,6 +23,9 @@ import {
   SESSIONS_MAX_PEER_DOTS,
   SESSIONS_MESSAGE_BLOCK_MIN_HEIGHT_PX,
   SESSIONS_MODAL_CLOSE_TRANSITION_MS,
+  SESSIONS_PEER_FACE_INK_HEX,
+  SESSIONS_PEER_FACE_RADIUS_PCT,
+  SESSIONS_PEER_FACE_SIZE_PX,
   SESSIONS_POLL_INTERVAL_MS,
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -34,7 +37,7 @@ import { fetchSessions, killSession } from "@/utils/fetch-sessions";
 import { formatRelativeTime } from "@/utils/format-relative-time";
 import { resolveInitialSessionIndex } from "@/utils/resolve-initial-session-index";
 import { sortSessions } from "@/utils/sort-sessions";
-import { buildPeerColorMap } from "@/utils/peer-color";
+import { peerFaceIndex, peerProfileColor } from "@/utils/peer-avatar";
 import { loadWindowId } from "@/utils/window-id";
 
 interface SessionsModalProps {
@@ -79,7 +82,6 @@ interface SessionOptionProps {
   isActive: boolean;
   nowMs: number;
   windowId: string;
-  peerColors: Map<string, string>;
   isKilling: boolean;
   onSetActive: () => void;
   onSwitch: () => void;
@@ -104,63 +106,141 @@ const SessionIcon = ({ state }: { state: SessionActivityState }) => (
   />
 );
 
-// Peer cluster: one solid dot per attached client, grouped by browser
-// profile. The picker's own profile leads and renders in the foreground color
-// ("me"); each other profile gets a hue from a golden-angle sequence ranked
-// across every profile visible in the picker (see buildPeerColorMap), so any N
-// profiles land near-optimally spaced on the wheel — two can never collapse to
-// the same hue the way a per-id hash can (two uuids once hashed to ~12° apart:
-// indistinguishable purples, hiding a third client). A back-compat client with
-// no profile id groups under a muted neutral. Dots within a profile touch; a
-// wider gap separates profiles — so the cluster reads at a glance as "two of
-// mine, one of another profile." A dormant shell (no viewers) shows a single
-// hollow dot, distinct from a 1-peer solid dot; the activity icon already says
-// what the shell is doing, this says who's watching it. Beyond
-// SESSIONS_MAX_PEER_DOTS the tail collapses into "+N" so a busy row can't
-// overflow. Distinct from the trailing Check, which marks the row this tab is
-// currently viewing (orthogonal — a session can be current and have peers, or
-// be a peer-only row another of this profile's tabs views).
-type PeerDotColor = { kind: "self" } | { kind: "unknown" } | { kind: "other"; color: string };
+// Peer cluster: one face per attached client, grouped by browser profile.
+// Each face is a local port of facehash: one of its 4 eye variations (round
+// dots, plus signs, dot+line, curved) plus its first-letter mouth (the first
+// character of the windowId), both picked deterministically by facehash's
+// hash of the windowId — so a profile keeps one face across every row, and
+// the count of faces is the viewer count. The bg color is per-profile
+// (peerProfileColor hashes the windowId into SESSIONS_PEER_FACE_PALETTE),
+// painted on the wrapper. Features render in SESSIONS_PEER_FACE_INK_HEX
+// (currentColor) so they read dark on the colored bg. The picker's own
+// profile leads and wears a black ring ("me"); the avatar is a squircle (a
+// continuous-corner rounded square, not a circle). A back-compat client
+// with no profile id groups under a muted face. Faces within a profile
+// touch; a wider gap separates profiles. An orphaned shell (no viewers)
+// shows no peer cluster. Beyond SESSIONS_MAX_PEER_DOTS the tail collapses
+// into "+N". Distinct from the trailing Check, which marks this tab's
+// current session.
+const EYE_SVG_STYLE = {
+  width: "60%",
+  height: "auto",
+  maxWidth: "90%",
+  maxHeight: "40%",
+};
 
-const PeerDot = ({ color }: { color: PeerDotColor }) => (
+// facehash's 4 eye variations, ported from the library (viewBoxes + coords
+// unchanged) so the local avatar matches facehash's shapes exactly.
+const EYE_FACES: readonly ReactNode[] = [
+  <svg
+    key="round"
+    viewBox="0 0 63 15"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+    style={EYE_SVG_STYLE}
+  >
+    <circle cx="55.2" cy="7.2" r="7.2" fill="currentColor" />
+    <circle cx="7.2" cy="7.2" r="7.2" fill="currentColor" />
+  </svg>,
+  <svg
+    key="cross"
+    viewBox="0 0 71 23"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+    style={EYE_SVG_STYLE}
+  >
+    <rect x="8" y="0" width="7" height="23" rx="3.5" fill="currentColor" />
+    <rect x="0" y="8" width="23" height="7" rx="3.5" fill="currentColor" />
+    <rect x="55.2" y="0" width="7" height="23" rx="3.5" fill="currentColor" />
+    <rect x="47.3" y="8" width="23" height="7" rx="3.5" fill="currentColor" />
+  </svg>,
+  <svg
+    key="line"
+    viewBox="0 0 82 8"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+    style={EYE_SVG_STYLE}
+  >
+    <rect x="0.07" y="0.16" width="6.9" height="6.9" rx="3.5" fill="currentColor" />
+    <rect x="7.9" y="0.16" width="20.7" height="6.9" rx="3.5" fill="currentColor" />
+    <rect x="74.7" y="0.16" width="6.9" height="6.9" rx="3.5" fill="currentColor" />
+    <rect x="53.1" y="0.16" width="20.7" height="6.9" rx="3.5" fill="currentColor" />
+  </svg>,
+  <svg
+    key="curved"
+    viewBox="0 0 63 9"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+    style={EYE_SVG_STYLE}
+  >
+    <path
+      d="M0 5.1c0-.1 0-.2 0-.3.1-.5.3-1 .7-1.3.1 0 .1-.1.2-.1C2.4 2.2 6 0 10.5 0S18.6 2.2 20.2 3.3c.1 0 .1.1.1.1.4.3.7.9.7 1.3v.3c0 1 0 1.4 0 1.7-.2 1.3-1.2 1.9-2.5 1.6-.2 0-.7-.3-1.8-.8C15 6.7 12.8 6 10.5 6s-4.5.7-6.3 1.5c-1 .5-1.5.7-1.8.8-1.3.3-2.3-.3-2.5-1.6v-1.7z"
+      fill="currentColor"
+    />
+    <path
+      d="M42 5.1c0-.1 0-.2 0-.3.1-.5.3-1 .7-1.3.1 0 .1-.1.2-.1C44.4 2.2 48 0 52.5 0S60.6 2.2 62.2 3.3c.1 0 .1.1.1.1.4.3.7.9.7 1.3v.3c0 1 0 1.4 0 1.7-.2 1.3-1.2 1.9-2.5 1.6-.2 0-.7-.3-1.8-.8C57 6.7 54.8 6 52.5 6s-4.5.7-6.3 1.5c-1 .5-1.5.7-1.8.8-1.3.3-2.3-.3-2.5-1.6v-1.7z"
+      fill="currentColor"
+    />
+  </svg>,
+];
+
+const PeerAvatarFace = ({ windowId }: { windowId: string }) => {
+  const faceIndex = peerFaceIndex(windowId, EYE_FACES.length);
+  const initial = windowId.charAt(0).toUpperCase();
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        width: SESSIONS_PEER_FACE_SIZE_PX,
+        height: SESSIONS_PEER_FACE_SIZE_PX,
+        containerType: "size",
+      }}
+    >
+      {EYE_FACES[faceIndex]}
+      <span style={{ marginTop: "8%", fontSize: "26cqw", lineHeight: 1 }}>{initial}</span>
+    </span>
+  );
+};
+
+const PeerFace = ({
+  windowId,
+  profileColor,
+  isSelf,
+  isUnknown,
+}: {
+  windowId: string;
+  profileColor: string;
+  isSelf: boolean;
+  isUnknown: boolean;
+}) => (
   <span
     aria-hidden="true"
-    style={color.kind === "other" ? { backgroundColor: color.color } : undefined}
     className={cn(
-      "size-1.5 rounded-full",
-      color.kind === "self" && "bg-foreground",
-      color.kind === "unknown" && "bg-foreground/30",
+      "shrink-0 overflow-hidden",
+      isSelf && "ring-1 ring-black",
+      isUnknown && "opacity-40",
     )}
-  />
+    style={{
+      backgroundColor: profileColor,
+      borderRadius: SESSIONS_PEER_FACE_RADIUS_PCT,
+      color: SESSIONS_PEER_FACE_INK_HEX,
+    }}
+  >
+    <PeerAvatarFace windowId={windowId} />
+  </span>
 );
 
-const PeerDots = ({
-  session,
-  windowId,
-  peerColors,
-}: {
-  session: SessionListItem;
-  windowId: string;
-  peerColors: Map<string, string>;
-}) => {
+const PeerDots = ({ session, windowId }: { session: SessionListItem; windowId: string }) => {
   const total = session.clients;
-  if (total === 0) {
-    return (
-      <span
-        className="flex shrink-0 items-center"
-        aria-label="no peers attached (dormant)"
-        title="No one is viewing this shell"
-      >
-        <span className="size-1.5 rounded-full ring-1 ring-foreground/25" aria-hidden="true" />
-      </span>
-    );
-  }
-  const resolveColor = (groupWindowId: string): PeerDotColor => {
-    if (windowId !== "" && groupWindowId === windowId) return { kind: "self" };
-    if (groupWindowId === "") return { kind: "unknown" };
-    const resolved = peerColors.get(groupWindowId);
-    return resolved !== undefined ? { kind: "other", color: resolved } : { kind: "unknown" };
-  };
+  if (total === 0) return null;
   const groups = (session.clientProfiles ?? [{ windowId: "", count: total }]).slice();
   groups.sort((a, b) => {
     const aSelf = a.windowId !== "" && a.windowId === windowId;
@@ -173,19 +253,29 @@ const PeerDots = ({
   for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
     if (rendered >= SESSIONS_MAX_PEER_DOTS) break;
     const group = groups[groupIndex];
-    const color = resolveColor(group.windowId);
-    const dots: ReactNode[] = [];
+    const isSelf = group.windowId !== "" && group.windowId === windowId;
+    const isUnknown = group.windowId === "";
+    const profileColor = peerProfileColor(group.windowId);
+    const faces: ReactNode[] = [];
     for (
-      let dotIndex = 0;
-      dotIndex < group.count && rendered < SESSIONS_MAX_PEER_DOTS;
-      dotIndex += 1
+      let faceIndex = 0;
+      faceIndex < group.count && rendered < SESSIONS_MAX_PEER_DOTS;
+      faceIndex += 1
     ) {
-      dots.push(<PeerDot key={dotIndex} color={color} />);
+      faces.push(
+        <PeerFace
+          key={faceIndex}
+          windowId={group.windowId}
+          profileColor={profileColor}
+          isSelf={isSelf}
+          isUnknown={isUnknown}
+        />,
+      );
       rendered += 1;
     }
     renderedGroups.push(
       <span key={group.windowId || groupIndex} className="flex items-center gap-px">
-        {dots}
+        {faces}
       </span>,
     );
   }
@@ -218,7 +308,6 @@ const SessionOption = ({
   isActive,
   nowMs,
   windowId,
-  peerColors,
   isKilling,
   onSetActive,
   onSwitch,
@@ -238,7 +327,7 @@ const SessionOption = ({
   >
     <SessionIcon state={session.state} />
     <span className="min-w-0 flex-1 truncate text-left">{session.title || session.cwd}</span>
-    <PeerDots session={session} windowId={windowId} peerColors={peerColors} />
+    <PeerDots session={session} windowId={windowId} />
     <span className="hidden shrink-0 items-center font-mono text-[10px] tabular-nums text-muted-foreground/60 sm:flex">
       <span className="min-w-[3rem] text-right">
         {formatRelativeTime(session.createdAt, nowMs)}
@@ -363,14 +452,6 @@ export const SessionsModal = ({
   const ordered = useMemo(
     () => (sessions ? sortSessions(sessions, currentId, normalizedQuery, windowId) : []),
     [sessions, currentId, normalizedQuery, windowId],
-  );
-  // One well-separated hue per other profile visible anywhere in the picker
-  // (golden-angle rank, see buildPeerColorMap), so two profiles never render as
-  // the same color. Built from the full unfiltered list so a profile keeps its
-  // color while a search query filters the rows.
-  const peerColors = useMemo(
-    () => buildPeerColorMap(sessions ?? [], windowId),
-    [sessions, windowId],
   );
 
   useEffect(() => {
@@ -586,7 +667,6 @@ export const SessionsModal = ({
                         isActive={virtualRow.index === activeIndex}
                         nowMs={nowMs}
                         windowId={windowId}
-                        peerColors={peerColors}
                         isKilling={killingId === session.id}
                         onSetActive={() => {
                           if (virtualRow.index !== activeIndex) setActiveIndex(virtualRow.index);
