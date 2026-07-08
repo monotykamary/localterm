@@ -106,7 +106,7 @@ describe("createHeaderIdentityProvider", () => {
   });
 });
 
-describe("SessionManager owner partition", () => {
+describe("SessionManager owner partition", { tags: ["integration"] }, () => {
   let manager: SessionManager;
 
   afterEach(() => {
