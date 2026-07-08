@@ -1942,7 +1942,19 @@ export const Terminal = () => {
           hasForegroundProcess = nowHasProcess;
         } else if (message.type === "notification") {
           if ("Notification" in window && Notification.permission === "granted") {
-            new Notification(message.body);
+            // The tab has one WS per active session, so a notification arrives
+            // only for the session it's currently viewing — capture that id
+            // now so a later click can focus the window and switch back to that
+            // PTY if the tab has since moved to another session.
+            const sid = liveSessionIdRef.current;
+            const notification = new Notification(message.body);
+            notification.onclick = () => {
+              window.focus();
+              if (sid && switchSessionRef.current && sid !== liveSessionIdRef.current) {
+                switchSessionRef.current(sid);
+              }
+              notification.close();
+            };
           }
         } else if (message.type === "exit") {
           resetFavicon();
