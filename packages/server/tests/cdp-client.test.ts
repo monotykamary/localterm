@@ -40,7 +40,7 @@ const servers: MockBrowser[] = [];
 /** A CDP-browser-level WS endpoint that answers the calls CdpClient makes. */
 const startMockBrowser = async (
   mode: MockMode = "ok",
-  options: { silenceProbe?: boolean } = {},
+  options: { silenceProbe?: boolean; windowCloseDestroysTarget?: boolean } = {},
 ): Promise<MockBrowser> => {
   const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
   await new Promise<void>((resolve) => wss.once("listening", resolve));
@@ -48,6 +48,10 @@ const startMockBrowser = async (
   let targetCounter = 0;
   // sessionId -> targetId, so a window.close() evaluate can be attributed.
   const sessionTargets = new Map<string, string>();
+  // targetIds window.close() already destroyed (when windowCloseDestroysTarget
+  // is set) so a follow-up Target.closeTarget errors "No target with given id
+  // found" — the real-browser path where window.close() does the actual close.
+  const closedByWindow = new Set<string>();
   let closeInFlight = 0;
   // Active client socket — captured on each connect so emit* helpers can push
   // unsolicited Target events to the CdpClient the way a real browser does
@@ -137,13 +141,27 @@ const startMockBrowser = async (
         const targetId = message.sessionId ? sessionTargets.get(message.sessionId) : undefined;
         if (targetId && message.params?.expression === "window.close()") {
           browser.windowClosed.push(targetId);
+          if (options.windowCloseDestroysTarget) closedByWindow.add(targetId);
         }
         reply({ result: { type: "undefined" } });
         return;
       }
       if (message.method === "Target.closeTarget") {
-        if (message.params?.targetId) browser.closed.push(message.params.targetId);
+        const targetId = message.params?.targetId;
         closeInFlight--;
+        if (targetId && closedByWindow.has(targetId)) {
+          // window.close() already destroyed the target — mirror a real
+          // browser returning "No target with given id found" (the closeTab
+          // path where window.close() did the actual close).
+          socket.send(
+            JSON.stringify({
+              id: message.id,
+              error: { code: -32000, message: "No target with given id found" },
+            }),
+          );
+          return;
+        }
+        if (targetId) browser.closed.push(targetId);
         reply({ success: true });
         return;
       }
@@ -224,6 +242,9 @@ describe("CdpClient.openBackgroundTab", { tags: ["integration"] }, () => {
     const browser = await startMockBrowser("error");
     const client = new CdpClient({ detect: async () => [detected(browser.wsUrl)] });
     expect(await client.openBackgroundTab("http://x/?run=1")).toBeNull();
+    // A CDP denial is a reply on a healthy socket — no reconnect, no second WS
+    // upgrade (which would re-fire the browser's remote-debugging prompt).
+    expect(browser.connections).toBe(1);
     client.close();
   });
 
@@ -342,6 +363,34 @@ describe("CdpClient.closeTab", { tags: ["integration"] }, () => {
     expect(browser.closed).toEqual(["target-1"]);
     // One connection for the open, a second for the close-time reconnect.
     expect(browser.connections).toBe(2);
+    client.close();
+  });
+
+  it("keeps the persistent socket when closeTarget reports the tab already closed", async () => {
+    // Real browsers close the tab via window.close(); the follow-up
+    // Target.closeTarget then errors "No target with given id found" while the
+    // debug WS stays perfectly healthy. Tearing down on that reply drops the one
+    // socket kept for the daemon's lifetime — and the forced reconnect re-fires
+    // the browser's remote-debugging consent dialog on every close (i.e. every
+    // automation run). closeTab must swallow the reply, not reconnect.
+    const browser = await startMockBrowser("ok", { windowCloseDestroysTarget: true });
+    const client = new CdpClient({
+      detect: async () => [detected(browser.wsUrl)],
+      connectTimeoutMs: 500,
+      callTimeoutMs: 500,
+    });
+    const handle = await client.openBackgroundTab("http://x/?run=1");
+    expect(handle).toBe("target-1");
+    expect(browser.connections).toBe(1);
+
+    await client.closeTab("target-1");
+    // window.close() ran (the real close); closeTarget was attempted but the
+    // tab was already gone, so it errored and recorded no close.
+    expect(browser.windowClosed).toEqual(["target-1"]);
+    expect(browser.closed).toEqual([]);
+    // The persistent socket stayed up — no second WS upgrade, no re-prompt.
+    expect(client.isConnected()).toBe(true);
+    expect(browser.connections).toBe(1);
     client.close();
   });
 });

@@ -39,6 +39,14 @@ const CLOSE_SETTLE_MS = 100;
 
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void };
 
+/** A CDP error *reply* — the browser answered a call with an error result (e.g.
+ * "No target with given id found"), as opposed to a transport drop or a call
+ * timeout. A reply leaves the persistent socket healthy, so the open/close
+ * teardown paths must NOT tear it down on a reply: that would drop the one
+ * socket kept for the daemon's lifetime and force a reconnect, which re-fires
+ * the browser's remote-debugging consent dialog on every automation run. */
+class CdpReplyError extends Error {}
+
 export type CdpClientOptions = {
   /** Override browser detection (tests). Defaults to detectChromiumBrowsers. */
   detect?: () => Promise<DetectedBrowser[]>;
@@ -231,7 +239,7 @@ export class CdpClient {
       if (!pending) return;
       this.pending.delete(message.id);
       if (message.error)
-        pending.reject(new Error(`CDP error: ${message.error.message ?? "unknown"}`));
+        pending.reject(new CdpReplyError(`CDP error: ${message.error.message ?? "unknown"}`));
       else pending.resolve(message.result);
       return;
     }
@@ -630,11 +638,13 @@ export class CdpClient {
           targetId?: unknown;
         };
         return typeof result?.targetId === "string" ? result.targetId : null;
-      } catch {
-        // Socket went stale between runs (browser restarted, or a call timed
-        // out while still OPEN). Close it explicitly — failPending doesn't
-        // close() on its own — to avoid leaking a second live socket alongside
-        // the next connect()'s new one, and reset maps/handlers in one place.
+      } catch (error) {
+        // A CDP error reply (e.g. createTarget "denied") leaves the socket
+        // healthy — finish without dropping it, or the forced reconnect
+        // re-fires the browser's remote-debugging consent prompt for nothing.
+        // Only a transport drop or a call timeout is a stale socket; close it
+        // explicitly (failPending doesn't close() on its own) and reset maps.
+        if (error instanceof CdpReplyError) return null;
         const stale = this.ws;
         if (stale) {
           try {
@@ -701,11 +711,14 @@ export class CdpClient {
         try {
           await this.call("Target.closeTarget", { targetId });
           return;
-        } catch {
-          // Socket went stale mid-close (browser restarted, or a call timed
-          // out while still OPEN). Tear it down so the next attempt
-          // reconnects — the targetId is still valid when only the debug WS
-          // dropped, so the close lands on the fresh socket.
+        } catch (error) {
+          // A CDP error reply (e.g. "No target with given id found") means the
+          // tab is already closed (window.close() above did it) and the socket
+          // is healthy — finish without dropping it, or the forced reconnect
+          // re-fires the browser's remote-debugging consent prompt on every
+          // automation run. Only a transport drop or a call timeout is a stale
+          // socket worth tearing down for the retry to reconnect.
+          if (error instanceof CdpReplyError) return;
           const stale = this.ws;
           if (stale) {
             try {
