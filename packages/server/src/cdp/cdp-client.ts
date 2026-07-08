@@ -650,11 +650,19 @@ export class CdpClient {
   }
 
   /**
-   * Close a tab previously opened by `openBackgroundTab`. Mirrors
-   * browser-harness-js: drive the browser's own close path via
-   * `window.close()` (reliable on forks like Dia/Arc that ignore a bare
-   * `Target.closeTarget`), then tear down the CDP target. Best-effort and never
-   * throws — a missing browser/target is treated as already closed.
+   * Close a tab. Mirrors browser-harness-js: drive the browser's own close
+   * path via `window.close()` (reliable on forks like Dia/Arc that ignore a
+   * bare `Target.closeTarget`), then tear down the CDP target. Best-effort
+   * and never throws — a missing browser/target is treated as already closed.
+   *
+   * Reconnects the persistent socket if it has dropped (sleep/wake, transient
+   * error, heartbeat teardown). The Ctrl+D shell-exit path drives this from
+   * `onClientExit` the instant the PTY dies; if the debug WS is momentarily
+   * down then, the tab/targetId is still valid (same browser session) and a
+   * reconnect lands the close. Without it, `window.close()` is a no-op on
+   * URL-opened tabs and the dead-session mask is left behind. One reconnect is
+   * attempted if the close itself fails on a stale socket — same shape as
+   * `openBackgroundTab`.
    *
    * Closes are SERIALIZED through `closeQueue`: each waits for the previous to
    * finish. Without this, concurrent closes over the one shared socket can
@@ -664,31 +672,50 @@ export class CdpClient {
    */
   closeTab(targetId: string): Promise<void> {
     const doClose = async () => {
-      if (!this.isConnected()) return;
-      try {
-        const attached = (await this.call("Target.attachToTarget", {
-          targetId,
-          flatten: true,
-        })) as { sessionId?: string };
-        if (attached?.sessionId) {
-          try {
-            await this.call(
-              "Runtime.evaluate",
-              { expression: "window.close()" },
-              attached.sessionId,
-            );
-          } catch {
-            /* tab may already be navigating/closing */
-          }
-          await new Promise((resolve) => setTimeout(resolve, CLOSE_SETTLE_MS));
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await this.connect();
+        } catch {
+          return; // no reachable browser — treat as already closed
         }
-      } catch {
-        /* attach failed (already gone, or fork without attach) — try closeTarget */
-      }
-      try {
-        await this.call("Target.closeTarget", { targetId });
-      } catch {
-        /* already closed */
+        try {
+          const attached = (await this.call("Target.attachToTarget", {
+            targetId,
+            flatten: true,
+          })) as { sessionId?: string };
+          if (attached?.sessionId) {
+            try {
+              await this.call(
+                "Runtime.evaluate",
+                { expression: "window.close()" },
+                attached.sessionId,
+              );
+            } catch {
+              /* tab may already be navigating/closing */
+            }
+            await new Promise((resolve) => setTimeout(resolve, CLOSE_SETTLE_MS));
+          }
+        } catch {
+          /* attach failed (already gone, or fork without attach) — try closeTarget */
+        }
+        try {
+          await this.call("Target.closeTarget", { targetId });
+          return;
+        } catch {
+          // Socket went stale mid-close (browser restarted, or a call timed
+          // out while still OPEN). Tear it down so the next attempt
+          // reconnects — the targetId is still valid when only the debug WS
+          // dropped, so the close lands on the fresh socket.
+          const stale = this.ws;
+          if (stale) {
+            try {
+              stale.close();
+            } catch {
+              /* ignore */
+            }
+            this.failPending(stale, new Error("CDP closeTab call failed; dropping stale socket"));
+          }
+        }
       }
     };
     // Chain onto the queue with doClose as both handlers so a failed close

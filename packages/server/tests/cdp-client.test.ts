@@ -28,6 +28,10 @@ type MockBrowser = {
   emitTargetCreated: (targetInfo: TargetInfo) => void;
   /** Server-side push of a Target.targetDestroyed event to the connected socket. */
   emitTargetDestroyed: (targetId: string) => void;
+  /** Terminate the active client socket without stopping the server — models a
+   * dropped debug WS while the tab/targetId stays valid (sleep/wake, transient
+   * error, heartbeat teardown). */
+  dropConnection: () => void;
   close: () => Promise<void>;
 };
 
@@ -67,6 +71,15 @@ const startMockBrowser = async (
       activeSocket?.send(
         JSON.stringify({ method: "Target.targetDestroyed", params: { targetId } }),
       );
+    },
+    dropConnection: () => {
+      // Terminate the CdpClient's socket the way a sleep/wake or transient WS
+      // error does — the server stays up so a reconnect lands on the same
+      // browser with the same targetId space.
+      if (activeSocket) {
+        activeSocket.terminate();
+        activeSocket = null;
+      }
     },
     close: () =>
       new Promise<void>((resolve) => {
@@ -303,6 +316,32 @@ describe("CdpClient.closeTab", { tags: ["integration"] }, () => {
     await Promise.all(handles.map((handle) => client.closeTab(handle as string)));
     expect(browser.closed.sort()).toEqual(["target-1", "target-2", "target-3", "target-4"]);
     expect(browser.maxCloseConcurrency).toBe(1);
+    client.close();
+  });
+
+  it("reconnects after the socket drops and still closes the tab", async () => {
+    const browser = await startMockBrowser("ok");
+    const client = new CdpClient({
+      detect: async () => [detected(browser.wsUrl)],
+      connectTimeoutMs: 500,
+      callTimeoutMs: 500,
+    });
+    const handle = await client.openBackgroundTab("http://x/?run=1");
+    expect(handle).toBe("target-1");
+    expect(client.isConnected()).toBe(true);
+
+    // The persistent debug WS drops (sleep/wake, transient error, heartbeat
+    // teardown) while the tab/targetId stays valid — the exact Ctrl+D case that
+    // orphaned tabs before the fix (closeTab bailed on !isConnected).
+    browser.dropConnection();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(client.isConnected()).toBe(false);
+
+    await client.closeTab("target-1");
+    expect(browser.windowClosed).toEqual(["target-1"]);
+    expect(browser.closed).toEqual(["target-1"]);
+    // One connection for the open, a second for the close-time reconnect.
+    expect(browser.connections).toBe(2);
     client.close();
   });
 });
