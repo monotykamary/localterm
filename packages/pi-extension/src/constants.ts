@@ -34,3 +34,11 @@ export const NOTIFICATION_MAX_LENGTH = 1024;
 // so quick back-and-forth turns don't spam a user actively watching the pi
 // tab. Tunable: lower to notify sooner, raise to stay quieter while focused.
 export const AGENT_NOTIFY_MIN_ELAPSED_MS = 30_000;
+
+// Cap on the assistant-response excerpt carried by the "pi finished"
+// notification body, counted in UTF-16 code units after whitespace is
+// collapsed. Long enough to surface a sentence or two of the agent's final
+// answer so a user who stepped away can tell what concluded; short enough to
+// stay readable in an OS banner (which truncates visually well before the
+// daemon's 1024-unit OSC cap that NOTIFICATION_MAX_LENGTH mirrors).
+export const AGENT_NOTIFY_EXCERPT_MAX_CHARS = 160;

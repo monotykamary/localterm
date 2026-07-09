@@ -1,8 +1,8 @@
 import { NOTIFICATION_MAX_LENGTH } from "../constants.js";
+import { collapseWhitespace } from "./collapse-whitespace.js";
 
 const OSC9_PREFIX = "\x1b]9;";
 const OSC9_BEL = "\x07";
-const WHITESPACE_RUN = /\s+/g;
 
 // A BEL in the body would terminate the OSC sequence early and leak the rest
 // as visible garbage; an ESC would let the body forge an ST terminator. Other
@@ -27,7 +27,7 @@ export const buildOsc9Sequence = (
   maxLength: number = NOTIFICATION_MAX_LENGTH,
 ): string => {
   const sanitized = Array.from(body, (char) => (isControlOrDel(char) ? " " : char)).join("");
-  const cleaned = sanitized.replace(WHITESPACE_RUN, " ").trim();
+  const cleaned = collapseWhitespace(sanitized);
   const capped = cleaned.slice(0, maxLength);
   return `${OSC9_PREFIX}${capped}${OSC9_BEL}`;
 };

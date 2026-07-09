@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { AGENT_NOTIFY_MIN_ELAPSED_MS } from "../src/constants.js";
-import { formatAgentEndBody } from "../src/utils/agent-notify-body.js";
+import { extractAssistantExcerpt, formatAgentEndBody } from "../src/utils/agent-notify-body.js";
 import { buildOsc9Sequence } from "../src/utils/osc-sequence.js";
 
 // pi's only notification primitive is ctx.ui.notify — an in-TUI banner that's
@@ -26,11 +26,15 @@ export const registerAgentNotify = (pi: ExtensionAPI): void => {
     turnStartedAt = Date.now();
   });
 
-  pi.on("agent_end", (_event, ctx) => {
+  pi.on("agent_end", (event, ctx) => {
     if (ctx.mode !== "tui" || turnStartedAt === undefined) return;
     const elapsedMs = Date.now() - turnStartedAt;
     if (elapsedMs < AGENT_NOTIFY_MIN_ELAPSED_MS) return;
-    const body = formatAgentEndBody(elapsedMs, pi.getSessionName());
+    const body = formatAgentEndBody(
+      elapsedMs,
+      pi.getSessionName(),
+      extractAssistantExcerpt(event.messages),
+    );
     process.stdout.write(buildOsc9Sequence(body));
   });
 };
