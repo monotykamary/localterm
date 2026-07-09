@@ -52,31 +52,42 @@ self.addEventListener("activate", (event) => {
 });
 
 // Clicking a desktop notification the SW showed (via registration.showNotification
-// from the page) should focus an open localterm tab and switch it to the
-// emitting session. WindowClient.focus() — unlike a main-thread window.focus()
-// from a Notification onclick — is the API browsers honor to raise a background
-// tab, which is why notifications are shown through the SW registration. The
-// page tags each notification per session so duplicate fan-out deliveries across
-// the user's tabs coalesce into one OS notification.
+// from the page) should open the emitting terminal. WindowClient.focus() — unlike
+// a main-thread window.focus() from a Notification onclick — is the API browsers
+// honor to raise a background tab, which is why notifications are shown through
+// the SW registration. The page suppresses the notification in profiles that
+// don't host the session, so a click lands in the right profile and focuses the
+// tab there; an orphaned session (no viewer anywhere) reopens in a fresh tab.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const sid = event.notification.data && event.notification.data.sid;
+  const data = event.notification.data || {};
+  const sid = data.sid;
+  // `hasViewers` is a snapshot from emit time. Default to true when absent
+  // (older notification) so we never open a second client on a viewed session.
+  const hasViewers = data.hasViewers !== false;
   event.waitUntil(
     (async () => {
       const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       const own = clients.filter((client) => client.url.startsWith(self.location.origin));
       // Prefer a tab already viewing this session (its URL carries ?sid=<sid>),
-      // so the click just focuses it instead of switching another tab over.
-      const target =
-        (sid && own.find((client) => client.url.includes(`sid=${encodeURIComponent(sid)}`))) ||
-        own[0];
-      if (target) {
-        await target.focus();
-        if (sid) target.postMessage({ type: "focus-session", sid });
+      // so the click just focuses it instead of opening another tab over it.
+      const onSession =
+        sid && own.find((client) => client.url.includes(`sid=${encodeURIComponent(sid)}`));
+      if (onSession) {
+        await onSession.focus();
+        if (sid) onSession.postMessage({ type: "focus-session", sid });
         return;
       }
-      // No open localterm tab — open one seeded with the session so it attaches
-      // to the right PTY on load (the client reads ?sid= on initial connect).
+      // No tab in this profile is on the session. If it's viewed elsewhere
+      // (another profile, or this profile's tab URL isn't synced yet), opening
+      // or switching a tab here would create a second client the SW can't
+      // replace — so just bring localterm forward instead.
+      if (hasViewers) {
+        if (own[0]) await own[0].focus();
+        return;
+      }
+      // Orphaned (no viewer anywhere): open a fresh tab seeded with ?sid= so it
+      // attaches to the right PTY on load, rather than repurposing a tab in use.
       const url = sid
         ? `${self.location.origin}/?sid=${encodeURIComponent(sid)}`
         : `${self.location.origin}/`;

@@ -1951,21 +1951,33 @@ export const Terminal = () => {
             // user's other tabs into one OS notification. Falls back to a
             // page-owned Notification when no SW is active (dev / not controlling).
             const sid = message.sessionId;
+            // Only the tab viewing this session shows the notification, so the
+            // click is handled by the same profile's SW (which can focus that
+            // tab and raise its window — a profile-isolated SW can't reach
+            // another profile's tab). A session with no viewer anywhere still
+            // pings from every tab and reopens on click; one viewed in another
+            // profile is left to that profile, avoiding a second client.
+            const isViewer = sid === liveSessionIdRef.current;
+            if (!isViewer && message.hasViewers) return;
             const sw = navigator.serviceWorker;
             if (sw?.controller) {
               void sw.ready.then((reg) =>
                 reg.showNotification(NOTIFICATION_TITLE, {
                   body: message.body,
                   tag: `${NOTIFICATION_TAG_PREFIX}${sid}`,
-                  data: { sid },
+                  data: { sid, hasViewers: message.hasViewers },
                 }),
               );
             } else {
               const notification = new Notification(message.body);
               notification.onclick = () => {
                 window.focus();
-                if (sid && switchSessionRef.current && sid !== liveSessionIdRef.current) {
-                  switchSessionRef.current(sid);
+                if (!isViewer && sid) {
+                  // Orphaned (suppression only shows this when !hasViewers):
+                  // open a fresh tab on the session instead of hijacking this one.
+                  const url = new URL(window.location.href);
+                  url.searchParams.set(SESSION_ID_QUERY_PARAM, sid);
+                  window.open(url.toString(), "_blank");
                 }
                 notification.close();
               };

@@ -628,7 +628,42 @@ describe("SessionManager notification fan-out", { tags: ["integration"] }, () =>
     expect(notifications.some((entry) => entry.ws === a)).toBe(true);
     expect(notifications.some((entry) => entry.ws === b)).toBe(true);
     const toB = notifications.find((entry) => entry.ws === b)?.payload;
-    expect(toB).toEqual({ type: "notification", sessionId: first.id, body: "build done" });
+    expect(toB).toEqual({
+      type: "notification",
+      sessionId: first.id,
+      body: "build done",
+      hasViewers: true,
+    });
+  });
+
+  it("flags an orphaned session (no viewer) so a click can reopen it", () => {
+    const sent: { ws: ClientSocket; payload: ServerToClientMessage }[] = [];
+    manager = new SessionManager({
+      sendControl: (ws, payload) => sent.push({ ws, payload }),
+      hooks: noopHooks,
+    });
+    const a = createFakeSocket();
+    const b = createFakeSocket();
+    const first = manager.spawnAndAttach(a, shellInput);
+    const second = manager.spawnAndAttach(b, shellInput);
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    if (!first || !second) return;
+    manager.promote(a, false);
+    manager.promote(b, false);
+    // `a`'s tab closed (detach); `first` is now viewerless but kept alive by
+    // the daemon. `b`, viewing `second`, still gets the ping — flagged so a
+    // click opens a fresh tab on `first` instead of assuming it's viewed.
+    manager.detach(a);
+    manager.emitNotificationForTest(first.id, "build done");
+    const notifications = sent.filter((entry) => entry.payload.type === "notification");
+    const toB = notifications.find((entry) => entry.ws === b)?.payload;
+    expect(toB).toEqual({
+      type: "notification",
+      sessionId: first.id,
+      body: "build done",
+      hasViewers: false,
+    });
   });
 
   it("does not deliver a notification across an owner boundary", () => {

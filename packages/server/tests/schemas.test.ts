@@ -165,6 +165,27 @@ describe("serverToClientMessageSchema", () => {
     );
   });
 
+  it("accepts a notification carrying hasViewers", () => {
+    expect(
+      serverToClientMessageSchema.safeParse({
+        type: "notification",
+        sessionId: "00000000-0000-0000-0000-000000000000",
+        body: "build done",
+        hasViewers: true,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a notification missing hasViewers", () => {
+    expect(
+      serverToClientMessageSchema.safeParse({
+        type: "notification",
+        sessionId: "00000000-0000-0000-0000-000000000000",
+        body: "build done",
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects the legacy snapshot frame", () => {
     expect(
       serverToClientMessageSchema.safeParse({

@@ -1411,8 +1411,16 @@ export class SessionManager {
     });
     session.on("notification", (body: string) => {
       // Fan out across the owner's tabs, not just this session's viewers: a
-      // user who stepped away to another session still gets the ping.
-      this.broadcastToOwner(managed, { type: "notification", sessionId: managed.id, body });
+      // user who stepped away to another session still gets the ping. `hasViewers`
+      // lets each receiving tab suppress the notification when the session is
+      // already viewed in another browser profile, and tells the SW's click
+      // handler whether to open a fresh tab (orphaned) or not (avoid a duplicate).
+      this.broadcastToOwner(managed, {
+        type: "notification",
+        sessionId: managed.id,
+        body,
+        hasViewers: managed.clients.size > 0,
+      });
       if (!managed.automation && session.lastEmittedCwd) {
         this.hooks.onSessionEvent("notification", session.lastEmittedCwd);
       }

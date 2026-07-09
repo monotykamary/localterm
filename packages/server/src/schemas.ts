@@ -600,6 +600,11 @@ const notificationMessageSchema = z
     // The session that emitted the OSC 9, so a click can focus a tab on it.
     sessionId: z.string().uuid(),
     body: z.string().min(1).max(MAX_NOTIFICATION_LENGTH),
+    // Whether the emitting session currently has any viewer. Drives client-side
+    // suppression (don't show a notification for a session viewed in another
+    // browser profile — the SW there can't focus that profile's tab) and the
+    // SW's click branch (orphaned → open a fresh tab; viewed → don't duplicate).
+    hasViewers: z.boolean(),
   })
   .strict();
 
