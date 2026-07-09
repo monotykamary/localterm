@@ -589,3 +589,67 @@ describe("SessionManager sessionsInPath", { tags: ["integration"] }, () => {
     }
   });
 });
+
+describe("SessionManager notification fan-out", { tags: ["integration"] }, () => {
+  const noopHooks = {
+    onOutputActivity: () => {},
+    onSessionActivity: () => {},
+    onSessionEvent: () => {},
+    onAutomationExit: () => {},
+    onClientExit: () => {},
+  };
+  let manager: SessionManager;
+
+  afterEach(() => {
+    manager?.disposeAll();
+  });
+
+  it("delivers a notification to a same-owner client viewing a different session", () => {
+    const sent: { ws: ClientSocket; payload: ServerToClientMessage }[] = [];
+    manager = new SessionManager({
+      sendControl: (ws, payload) => sent.push({ ws, payload }),
+      hooks: noopHooks,
+    });
+    const a = createFakeSocket();
+    const b = createFakeSocket();
+    const first = manager.spawnAndAttach(a, shellInput);
+    const second = manager.spawnAndAttach(b, shellInput);
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    if (!first || !second) return;
+    // Promote so sendControl delivers immediately instead of buffering.
+    manager.promote(a, false);
+    manager.promote(b, false);
+
+    // `a` views `first`, `b` views `second`; `first` emits an OSC 9 notification.
+    manager.emitNotificationForTest(first.id, "build done");
+    const notifications = sent.filter((entry) => entry.payload.type === "notification");
+    // `b` — viewing a different session — still receives `first`'s notification.
+    expect(notifications.some((entry) => entry.ws === a)).toBe(true);
+    expect(notifications.some((entry) => entry.ws === b)).toBe(true);
+    const toB = notifications.find((entry) => entry.ws === b)?.payload;
+    expect(toB).toEqual({ type: "notification", sessionId: first.id, body: "build done" });
+  });
+
+  it("does not deliver a notification across an owner boundary", () => {
+    const sent: { ws: ClientSocket; payload: ServerToClientMessage }[] = [];
+    manager = new SessionManager({
+      sendControl: (ws, payload) => sent.push({ ws, payload }),
+      hooks: noopHooks,
+    });
+    const ownerA = createFakeSocket();
+    const ownerB = createFakeSocket();
+    const a = manager.spawnAndAttach(ownerA, shellInput, undefined, "identity-A");
+    const b = manager.spawnAndAttach(ownerB, shellInput, undefined, "identity-B");
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    if (!a || !b) return;
+    manager.promote(ownerA, false);
+    manager.promote(ownerB, false);
+
+    manager.emitNotificationForTest(a.id, "owner-A ping");
+    const notifications = sent.filter((entry) => entry.payload.type === "notification");
+    expect(notifications.some((entry) => entry.ws === ownerA)).toBe(true);
+    expect(notifications.some((entry) => entry.ws === ownerB)).toBe(false);
+  });
+});

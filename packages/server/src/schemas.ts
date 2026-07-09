@@ -597,6 +597,8 @@ const foregroundMessageSchema = z
 const notificationMessageSchema = z
   .object({
     type: z.literal("notification"),
+    // The session that emitted the OSC 9, so a click can focus a tab on it.
+    sessionId: z.string().uuid(),
     body: z.string().min(1).max(MAX_NOTIFICATION_LENGTH),
   })
   .strict();

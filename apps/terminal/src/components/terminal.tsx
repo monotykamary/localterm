@@ -94,6 +94,8 @@ import {
   KITTY_KEYBOARD_SET_MODE_AND_NOT,
   KITTY_KEYBOARD_SET_MODE_OR,
   KITTY_KEYBOARD_SET_MODE_REPLACE,
+  NOTIFICATION_TAG_PREFIX,
+  NOTIFICATION_TITLE,
   RECONNECT_DELAY_MS,
   RECONNECT_FAST_POLL_DURATION_MS,
   RECONNECT_FAST_POLL_INTERVAL_MS,
@@ -1942,19 +1944,32 @@ export const Terminal = () => {
           hasForegroundProcess = nowHasProcess;
         } else if (message.type === "notification") {
           if ("Notification" in window && Notification.permission === "granted") {
-            // The tab has one WS per active session, so a notification arrives
-            // only for the session it's currently viewing — capture that id
-            // now so a later click can focus the window and switch back to that
-            // PTY if the tab has since moved to another session.
-            const sid = liveSessionIdRef.current;
-            const notification = new Notification(message.body);
-            notification.onclick = () => {
-              window.focus();
-              if (sid && switchSessionRef.current && sid !== liveSessionIdRef.current) {
-                switchSessionRef.current(sid);
-              }
-              notification.close();
-            };
+            // Show via the SW so the click fires the SW's notificationclick,
+            // which can focus a background tab through WindowClient.focus() —
+            // the API browsers honor, unlike a main-thread window.focus(). The
+            // per-session tag coalesces the copies the daemon fanned out to the
+            // user's other tabs into one OS notification. Falls back to a
+            // page-owned Notification when no SW is active (dev / not controlling).
+            const sid = message.sessionId;
+            const sw = navigator.serviceWorker;
+            if (sw?.controller) {
+              void sw.ready.then((reg) =>
+                reg.showNotification(NOTIFICATION_TITLE, {
+                  body: message.body,
+                  tag: `${NOTIFICATION_TAG_PREFIX}${sid}`,
+                  data: { sid },
+                }),
+              );
+            } else {
+              const notification = new Notification(message.body);
+              notification.onclick = () => {
+                window.focus();
+                if (sid && switchSessionRef.current && sid !== liveSessionIdRef.current) {
+                  switchSessionRef.current(sid);
+                }
+                notification.close();
+              };
+            }
           }
         } else if (message.type === "exit") {
           resetFavicon();
@@ -2529,6 +2544,24 @@ export const Terminal = () => {
         window.clearTimeout(copyFeedbackTimerRef.current);
         copyFeedbackTimerRef.current = null;
       }
+    };
+  }, []);
+
+  // Service worker → page: a notification click the SW handled focuses a tab and
+  // asks it to switch to the emitting session. Registered at component scope
+  // (not inside the WS effect) so it survives reconnects — the SW fires it once
+  // per click, independent of the current WebSocket lifecycle.
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const onServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type !== "focus-session") return;
+      const sid = event.data?.sid;
+      if (typeof sid !== "string") return;
+      switchSessionRef.current?.(sid);
+    };
+    navigator.serviceWorker.addEventListener("message", onServiceWorkerMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener("message", onServiceWorkerMessage);
     };
   }, []);
 

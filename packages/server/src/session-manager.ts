@@ -434,6 +434,16 @@ export class SessionManager {
     managed.hasForeground = running;
   }
 
+  // Test-only: emit a notification on a session as if its PTY wrote an OSC 9,
+  // exercising the fan-out wiring without racing a real shell's output. Real
+  // notifications come from session.ts's PTY output parser; production code
+  // never needs this.
+  emitNotificationForTest(id: string, body: string): void {
+    const managed = this.sessions.get(id);
+    if (!managed) return;
+    managed.session.emit("notification", body);
+  }
+
   spawn(
     input: SpawnPtyInput,
     automation?: AutomationContext,
@@ -1214,6 +1224,18 @@ export class SessionManager {
     for (const client of managed.clients) this.sendToClient(client, payload);
   }
 
+  // Fan a control message out to every client currently viewing any session
+  // owned by the same identity as `managed`, not just `managed`'s own viewers.
+  // Used for notifications so a user who stepped away to another session still
+  // gets the ping; owner-scoped so a notification never crosses an identity
+  // boundary (a non-operator client can only be attached to an owner-matching
+  // session, so matching session.owner === managed.owner is the partition).
+  private broadcastToOwner(managed: ManagedSession, payload: ServerToClientMessage): void {
+    for (const { client, session } of this.wsToClient.values()) {
+      if (session.owner === managed.owner) this.sendToClient(client, payload);
+    }
+  }
+
   private onSessionOutput(managed: ManagedSession, data: string): void {
     managed.outputBatch += data;
     managed.lastOutputAt = Date.now();
@@ -1388,7 +1410,9 @@ export class SessionManager {
       }
     });
     session.on("notification", (body: string) => {
-      this.broadcast(managed, { type: "notification", body });
+      // Fan out across the owner's tabs, not just this session's viewers: a
+      // user who stepped away to another session still gets the ping.
+      this.broadcastToOwner(managed, { type: "notification", sessionId: managed.id, body });
       if (!managed.automation && session.lastEmittedCwd) {
         this.hooks.onSessionEvent("notification", session.lastEmittedCwd);
       }

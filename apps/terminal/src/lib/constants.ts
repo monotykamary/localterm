@@ -27,6 +27,11 @@ export const DEFAULT_TERMINAL_SCROLL_ON_USER_INPUT = true;
 export const FALLBACK_TERMINAL_BACKGROUND_HEX = "#101010";
 export const DEFAULT_DOCUMENT_TITLE = "localterm";
 export const DEAD_SESSION_TITLE_PREFIX = "† ";
+// Title and per-session tag for desktop notifications shown via the service
+// worker. The tag is per-session so fan-out deliveries across the user's tabs
+// coalesce into one OS notification, while different sessions each keep a slot.
+export const NOTIFICATION_TITLE = "localterm";
+export const NOTIFICATION_TAG_PREFIX = "localterm:";
 export const DISCONNECT_MODAL_THRESHOLD_FAILURES = 2;
 export const RESTART_COMMAND = "npx @monotykamary/localterm@latest start";
 export const COPY_FEEDBACK_MS = 1500;
