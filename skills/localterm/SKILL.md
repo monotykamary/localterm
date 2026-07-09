@@ -240,6 +240,7 @@ curl -s "$BASE/agent-skills?cwd=/Users/me/project"         # discoverable pi ski
 curl -s "$BASE/automations/<id>/session?runId=<runId>"     # thread session transcript up to a run
 curl -s "$BASE/automations/<id>/agent-session-url"          # tab URL to resume a thread session in pi
 curl -s -X POST "$BASE/automations/<id>/compact"           # manually compact a thread session
+curl -s -X POST "$BASE/automations/<id>/clear-thread"       # restart a thread from fresh (drops its context)
 curl -s -X POST "$BASE/automations/<id>/runs/<runId>/read"  # mark one run's findings read
 curl -s -X POST "$BASE/triage/mark-all-read"               # mark every run read
 curl -s -X POST "$BASE/triage/clear-history"              # clear every automation's run history

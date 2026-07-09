@@ -22,6 +22,7 @@ import {
   Pencil,
   Play,
   Plus,
+  RefreshCw,
   RotateCcw,
   Search,
   Sparkles,
@@ -76,6 +77,7 @@ import { cn } from "@/lib/utils";
 import { computeAutomationsHeaderLayout } from "@/utils/compute-automations-header-layout";
 import { clearAutomationHistory } from "@/utils/clear-automation-history";
 import { clearAutomationRuns } from "@/utils/clear-automation-runs";
+import { clearThreadSession } from "@/utils/clear-thread-session";
 import { compactAutomation } from "@/utils/compact-automation";
 import { createAutomation } from "@/utils/create-automation";
 import { deleteAutomation } from "@/utils/delete-automation";
@@ -818,6 +820,7 @@ export const AutomationsModal = ({
   const [saveError, setSaveError] = useState(false);
   const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
   const [armedClearId, setArmedClearId] = useState<string | null>(null);
+  const [armedClearThreadId, setArmedClearThreadId] = useState<string | null>(null);
   const [runFilter, setRunFilter] = useState<"all" | "unread" | "failed" | "skipped">("all");
   const loadSortFromStorage = (): AutomationsSort => {
     try {
@@ -879,6 +882,7 @@ export const AutomationsModal = ({
       setSaveError(false);
       setArmedDeleteId(null);
       setArmedClearId(null);
+      setArmedClearThreadId(null);
       setSearch("");
       return;
     }
@@ -1132,6 +1136,19 @@ export const AutomationsModal = ({
 
   const handleCompact = async (automation: AutomationWithNextRun) => {
     await compactAutomation(automation.id);
+    await refreshAutomations();
+  };
+
+  // Drop a thread session's accumulated context so the next fire starts a
+  // fresh branch (compaction keeps context; this clears it). Two-click
+  // confirm like delete/clear-history — clearing throws away the whole thread.
+  const handleClearThread = async (automation: AutomationWithNextRun) => {
+    if (armedClearThreadId !== automation.id) {
+      setArmedClearThreadId(automation.id);
+      return;
+    }
+    setArmedClearThreadId(null);
+    await clearThreadSession(automation.id);
     await refreshAutomations();
   };
 
@@ -1404,6 +1421,8 @@ export const AutomationsModal = ({
                     onToggleEnabled={(enabled) => void handleToggleEnabled(selected, enabled)}
                     onReset={() => void handleReset(selected)}
                     onCompact={() => void handleCompact(selected)}
+                    onClearThread={() => void handleClearThread(selected)}
+                    armedClearThread={armedClearThreadId === selected.id}
                     onClearHistory={() => void handleClearRuns(selected)}
                     armedClear={armedClearId === selected.id}
                     onOpenLog={(run) => void openRunLog(selected.id, run)}
@@ -1436,6 +1455,8 @@ const AutomationDetail = ({
   onToggleEnabled,
   onReset,
   onCompact,
+  onClearThread,
+  armedClearThread,
   onClearHistory,
   armedClear,
   onOpenLog,
@@ -1449,6 +1470,8 @@ const AutomationDetail = ({
   onToggleEnabled: (enabled: boolean) => void;
   onReset: () => void;
   onCompact?: () => void;
+  onClearThread?: () => void;
+  armedClearThread: boolean;
   onClearHistory: () => void;
   armedClear: boolean;
   onOpenLog: (run: AutomationRunRecord) => void;
@@ -1503,6 +1526,31 @@ const AutomationDetail = ({
                 onClick={onCompact}
               >
                 <Minimize2 />
+              </Button>
+            ) : null}
+            {compactable && onClearThread ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={
+                  armedClearThread
+                    ? `confirm clear ${automation.name} thread`
+                    : `clear ${automation.name} thread`
+                }
+                title={
+                  armedClearThread
+                    ? "Click again to confirm — drops the whole thread"
+                    : "Restart the thread from fresh (drops its context)"
+                }
+                className={cn(
+                  "rounded-full",
+                  armedClearThread
+                    ? "text-red-400 hover:bg-red-500/10 hover:text-red-400"
+                    : "hover:bg-foreground/10 hover:text-foreground",
+                )}
+                onClick={onClearThread}
+              >
+                <RefreshCw />
               </Button>
             ) : null}
             <Button

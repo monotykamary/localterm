@@ -36,6 +36,8 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
+const PI_HARNESS = { kind: "pi", extensions: true, skills: true, contextFiles: true } as const;
+
 const automation = (overrides: Partial<AutomationWithNextRun> = {}): AutomationWithNextRun => ({
   id: "automation-1",
   name: "nightly build",
@@ -146,6 +148,48 @@ describe("AutomationsModal", () => {
     expect(
       fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/triage/clear-history")),
     ).toBe(false);
+  });
+
+  it("clears a thread agent's session via the clear-thread button (two-click confirm)", async () => {
+    renderModal([
+      automation({
+        name: "reviewer",
+        runner: {
+          kind: "agent",
+          prompt: "review commits",
+          sessionMode: "thread",
+          harness: PI_HARNESS,
+        },
+      }),
+    ]);
+    const clearButton = await screen.findByLabelText("clear reviewer thread");
+    // First click arms (two-click confirm, like delete); no request yet.
+    fireEvent.click(clearButton);
+    expect(screen.getByLabelText("confirm clear reviewer thread")).toBeDefined();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String(call[0]).includes("/api/automations/automation-1/clear-thread"),
+      ),
+    ).toBe(false);
+    // Second click fires the clear-thread POST.
+    fireEvent.click(screen.getByLabelText("confirm clear reviewer thread"));
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String(call[0]).includes("/api/automations/automation-1/clear-thread"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not show the clear-thread button for a fresh agent automation", async () => {
+    renderModal([
+      automation({
+        name: "fresh run",
+        runner: { kind: "agent", prompt: "do a thing", sessionMode: "fresh", harness: PI_HARNESS },
+      }),
+    ]);
+    await screen.findAllByText("fresh run");
+    expect(screen.queryByLabelText("clear fresh run thread")).toBeNull();
   });
 
   it("renders a watch automation with its trigger label and on-change next run", async () => {

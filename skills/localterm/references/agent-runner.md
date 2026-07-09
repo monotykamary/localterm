@@ -265,18 +265,20 @@ curl -s "$BASE/automations/<id>/session?runId=<runId>"
 | `GET /automations/:id/session?runId=`            | thread session transcript up to a run                     |
 | `GET /automations/:id/agent-session-url`         | tab URL to resume a thread session interactively in pi    |
 | `POST /automations/:id/compact`                  | manually compact a thread session in place                |
+| `POST /automations/:id/clear-thread`             | restart a thread from fresh (drops its session/context)   |
 
 ### Error responses
 
 `400 {"error":"invalid_body"}` (a malformed runner/agent body), `404
 {"error":"not_found"}` (unknown id/run), `409 {"error":"not_thread"}` (asked
-for a session URL on a non-thread automation), `409
+for a session URL or a thread clear on a non-thread automation), `409
 {"error":"not_compactable"}` (asked to compact a fresh/shell automation),
 `400 {"error":"compact_failed","message":"…"}` (compaction ran but failed),
-`400 {"error":"launch_failed"}` (`POST …/run` could not launch — only happens
-for non-manual triggers, which `…/run` never sends, so in practice you won't
-see it). `invalid_secret` (400) is returned at create/update for an unknown
-`requestedSecrets` name.
+`400 {"error":"clear_thread_failed","message":"…"}` (thread session file
+could not be removed), `400 {"error":"launch_failed"}` (`POST …/run` could not
+launch — only happens for non-manual triggers, which `…/run` never sends, so
+in practice you won't see it). `invalid_secret` (400) is returned at
+create/update for an unknown `requestedSecrets` name.
 
 ## Playbook for agents
 
@@ -286,7 +288,10 @@ see it). `invalid_secret` (400) is returned at create/update for an unknown
 2. **Default to `fresh` session mode.** Use `thread` only when the agent
    should remember across fires (a standing review rota, a long-lived triage
    agent). Thread sessions accumulate context — and a session file under
-   `~/.localterm/agent-sessions/` — so they're heavier.
+   `~/.localterm/agent-sessions/` — so they're heavier. To start over without
+   deleting the automation, `POST …/clear-thread` drops the session file so the
+   next fire begins a blank branch (compaction keeps context; clearing resets
+   it).
 3. **`prompt` is natural language, not a shell line.** For multi-step logic,
    point the agent at a script in `cwd` ("run `bash review.sh` and summarize
    its output") rather than embedding a 4000-char pipeline in the prompt.

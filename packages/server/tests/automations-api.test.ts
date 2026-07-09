@@ -1038,6 +1038,51 @@ describe("automations REST API", { tags: ["integration"] }, () => {
     const { status } = await request("GET", `/${automationId}/agent-session-url`);
     expect(status).toBe(409);
   });
+
+  it("clears a thread agent's session via /automations/:id/clear-thread so the next fire starts fresh", async () => {
+    const created = await request("POST", "", {
+      name: "reviewer",
+      trigger: { kind: "schedule", schedule: "0 9 * * *" },
+      cwd: os.tmpdir(),
+      runner: { kind: "agent", prompt: "review commits", sessionMode: "thread" },
+    });
+    const automationId = (created.body.automation as { id: string }).id;
+    const sessionsDir = path.join(testContext.stateDirectory, "agent-sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const sessionFile = path.join(sessionsDir, `${automationId}.jsonl`);
+    fs.writeFileSync(
+      sessionFile,
+      `${JSON.stringify({ type: "session", id: "s1", cwd: os.tmpdir() })}\n`,
+      "utf8",
+    );
+    expect(fs.existsSync(sessionFile)).toBe(true);
+
+    const res = await request("POST", `/${automationId}/clear-thread`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(fs.existsSync(sessionFile)).toBe(false);
+    // Idempotent: clearing when the session file is already absent still ok.
+    const resAgain = await request("POST", `/${automationId}/clear-thread`);
+    expect(resAgain.status).toBe(200);
+  });
+
+  it("rejects /automations/:id/clear-thread for a fresh agent (no session to clear)", async () => {
+    const created = await request("POST", "", {
+      name: "reviewer",
+      trigger: { kind: "schedule", schedule: "0 9 * * *" },
+      cwd: os.tmpdir(),
+      runner: { kind: "agent", prompt: "review commits", sessionMode: "fresh" },
+    });
+    const automationId = (created.body.automation as { id: string }).id;
+    const { status, body } = await request("POST", `/${automationId}/clear-thread`);
+    expect(status).toBe(409);
+    expect(body.error).toBe("not_thread");
+  });
+
+  it("returns 404 for /automations/:id/clear-thread on an unknown automation", async () => {
+    const { status } = await request("POST", "/no-such-id/clear-thread");
+    expect(status).toBe(404);
+  });
   it("truncates the transcript at the run's finishedAt so an older run sees the branch as it was then", async () => {
     const created = await request("POST", "", {
       name: "reviewer",

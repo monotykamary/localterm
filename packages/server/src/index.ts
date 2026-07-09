@@ -1818,6 +1818,30 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     return context.json({ ok: true, message: result.message });
   });
 
+  // Restart a thread-mode agent automation from a fresh session: delete the
+  // persisted session file so the next fire starts a blank branch instead of
+  // resuming (compaction keeps context; this drops it). Fresh/shell runs have
+  // no session file to clear — a 409 tells the client to hide the button.
+  api.post("/automations/:id/clear-thread", async (context) => {
+    const automation = automationStore.get(context.req.param("id"));
+    if (!automation) return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    if (automation.runner.kind !== "agent" || automation.runner.sessionMode !== "thread") {
+      return context.json({ error: "not_thread" }, HTTP_STATUS_CONFLICT);
+    }
+    const sessionFile = path.join(
+      stateDirectory,
+      AUTOMATION_AGENT_SESSIONS_DIRNAME,
+      `${automation.id}.jsonl`,
+    );
+    try {
+      await fs.promises.rm(sessionFile, { force: true });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return context.json({ error: "clear_thread_failed", message }, HTTP_STATUS_BAD_REQUEST);
+    }
+    return context.json({ ok: true });
+  });
+
   // Daemon config (the editable CDP port). GET is a cheap read of the live
   // value; PUT persists it, drops the persistent CDP socket so the next
   // `connect()` re-detects against the new port, and kicks a best-effort
