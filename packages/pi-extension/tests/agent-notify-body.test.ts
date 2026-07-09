@@ -140,7 +140,9 @@ describe("extractAssistantExcerpt", () => {
   it("returns undefined when no assistant message carries text", () => {
     const messages: AgentEndEvent["messages"] = [
       user("run the tests"),
-      assistant([{ type: "toolCall", id: "call", name: "bash", arguments: { command: "pnpm test" } }]),
+      assistant([
+        { type: "toolCall", id: "call", name: "bash", arguments: { command: "pnpm test" } },
+      ]),
       toolResult(),
     ];
     expect(extractAssistantExcerpt(messages)).toBeUndefined();

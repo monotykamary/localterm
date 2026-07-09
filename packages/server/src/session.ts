@@ -173,8 +173,7 @@ export class Session extends EventEmitter<SessionEvents> {
     //    automation-exit OSC, and unsets it.
     //  - Unhooked shells (sh/dash/arbitrary) get the at-spawn PTY write — they
     //    have no prompt hook to eval with.
-    const useHookEval =
-      !!input.initialCommand && HOOKED_SHELL_NAMES.has(this.shellName);
+    const useHookEval = !!input.initialCommand && HOOKED_SHELL_NAMES.has(this.shellName);
     if (input.initialCommand && useHookEval) {
       env.LOCALTERM_INITIAL_COMMAND = input.initialCommand;
     }
