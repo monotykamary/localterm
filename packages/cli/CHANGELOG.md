@@ -1,5 +1,13 @@
 # localterm
 
+## 2.55.2
+
+### Patch Changes
+
+- 26c32e0: Bump root devDependencies: @types/node, turbo, knip, @voidzero-dev/vite-plus-core, vite-plus.
+- Updated dependencies [26c32e0]
+  - @monotykamary/localterm-server@2.55.2
+
 ## 2.55.1
 
 ### Patch Changes
