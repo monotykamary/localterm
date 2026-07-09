@@ -418,10 +418,10 @@ describe("Session", { tags: ["integration"] }, () => {
     }
   }, 20_000);
 
-  it("runs a non-fullscreen initial command via the prompt hook (no PTY typing)", async () => {
-    // A non-fullscreen initial command (an automation shell-runner command, a
-    // worktree's setup script) for a hooked shell (zsh/bash/fish) runs via the
-    // prompt hook — `eval "$LOCALTERM_INITIAL_COMMAND"` in precmd /
+  it("runs an initial command via the prompt hook (no PTY typing)", async () => {
+    // An initial command (an automation shell-runner command, a worktree's
+    // setup script, an "open in neovim" tab) for a hooked shell (zsh/bash/fish)
+    // runs via the prompt hook — `eval "$LOCALTERM_INITIAL_COMMAND"` in precmd /
     // PROMPT_COMMAND — instead of being typed into the PTY, so it can't race
     // the line editor's ECHO or double-echo. The hook also emits the
     // automation-exit OSC with the command's exit status, so the run completes

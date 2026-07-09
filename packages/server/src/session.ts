@@ -30,7 +30,6 @@ import { shimPathPrependLine } from "./secret-shims.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
 import type { SpawnPtyInput } from "./types.js";
 import { formatWorkingDirectoryTitle } from "./utils/format-working-directory-title.js";
-import { isFullscreenTuiCommand } from "./utils/is-fullscreen-tui-command.js";
 import { parseAltScreenFromChunk } from "./utils/parse-alt-screen.js";
 import { parseOsc7FromChunk } from "./utils/parse-osc7.js";
 import { parseOscAutomationExitFromChunk } from "./utils/parse-osc-automation-exit.js";
@@ -172,15 +171,10 @@ export class Session extends EventEmitter<SessionEvents> {
     //    ECHO or double-echo. The command is passed through the
     //    LOCALTERM_INITIAL_COMMAND env var; the hook evals it, emits the
     //    automation-exit OSC, and unsets it.
-    //  - Fullscreen TUIs (nvim/vim/less/…) and unhooked shells get the at-spawn
-    //    PTY write. A fullscreen TUI clears the screen on alt-screen enter, so
-    //    the line discipline's echo of the typed command is invisible; running
-    //    a full-screen app inside a precmd hook is fragile, so it takes the PTY
-    //    path. Unhooked shells (sh/dash) have no hook to eval with.
+    //  - Unhooked shells (sh/dash/arbitrary) get the at-spawn PTY write — they
+    //    have no prompt hook to eval with.
     const useHookEval =
-      !!input.initialCommand &&
-      HOOKED_SHELL_NAMES.has(this.shellName) &&
-      !isFullscreenTuiCommand(input.initialCommand);
+      !!input.initialCommand && HOOKED_SHELL_NAMES.has(this.shellName);
     if (input.initialCommand && useHookEval) {
       env.LOCALTERM_INITIAL_COMMAND = input.initialCommand;
     }
@@ -642,8 +636,8 @@ export class Session extends EventEmitter<SessionEvents> {
   // hook in the prompt chain — without this the first git-dirty only fires
   // once the command finishes), evals the local, and emits the
   // automation-exit OSC with the eval's exit status. Prepended first in the
-  // prompt chain; fullscreen TUIs and unhooked shells don't reach here (they
-  // take the at-spawn PTY write).
+  // prompt chain; unhooked shells don't reach here (they take the at-spawn
+  // PTY write).
   // LOCALTERM_INITIAL_COMMAND is on PTY_ENV_DENYLIST so a stale or inherited
   // value from the daemon env can't reach the hook — the constructor's set is
   // the only source.
