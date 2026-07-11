@@ -402,6 +402,13 @@ export const WS_HEARTBEAT_GRACE_MS = 15_000;
 // still replies) is reused, avoiding a needless reopen.
 export const CDP_HEARTBEAT_INTERVAL_MS = 20_000;
 export const CDP_HEARTBEAT_TIMEOUT_MS = 60_000;
+// Reply-wait granted to the keepalive's liveness probe before it declares the
+// socket stale — mirrors WS_HEARTBEAT_GRACE_MS's "one grace chance before
+// terminate": the probe uses this (not the per-call timeout) so a slow-but-live
+// browser (post-wake scheduling delay, a momentary main-thread block on a
+// devtools fork) replies in time and is reused, not torn down. Under the
+// interval so a probe never overlaps the next tick.
+export const CDP_HEARTBEAT_GRACE_MS = 15_000;
 export const FOREGROUND_POLL_INTERVAL_MS = 250;
 // Hard ceiling for server.stop() — clients get terminated, then the http
 // server is given this long to actually close before we resolve anyway. Keeps

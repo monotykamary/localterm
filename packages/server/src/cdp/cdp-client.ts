@@ -18,6 +18,7 @@
 import { randomUUID } from "node:crypto";
 import { detectChromiumBrowsers, type DetectedBrowser } from "./detect-chromium.js";
 import {
+  CDP_HEARTBEAT_GRACE_MS,
   CDP_HEARTBEAT_INTERVAL_MS,
   CDP_HEARTBEAT_TIMEOUT_MS,
   LOCALTERM_TAB_TOKEN_EVENT,
@@ -58,6 +59,8 @@ export type CdpClientOptions = {
   heartbeatIntervalMs?: number;
   /** Quiet window after which the keepalive treats the socket as stale and probes it. */
   heartbeatTimeoutMs?: number;
+  /** Reply-wait for the keepalive's liveness probe before it declares the socket stale. */
+  heartbeatGraceMs?: number;
   /**
    * Predicate over a candidate target's URL. Only page-type targets that pass
    * get an ambient token injected; everything else the user has open in their
@@ -78,6 +81,7 @@ export class CdpClient {
   private readonly callTimeoutMs: number;
   private readonly heartbeatIntervalMs: number;
   private readonly heartbeatTimeoutMs: number;
+  private readonly heartbeatGraceMs: number;
   /** Timestamp of the last inbound CDP frame (reply or event). */
   private lastReplyAt = 0;
   /** Background keepalive timer; unref'd so it never blocks daemon shutdown. */
@@ -108,6 +112,7 @@ export class CdpClient {
     this.callTimeoutMs = options.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? CDP_HEARTBEAT_INTERVAL_MS;
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? CDP_HEARTBEAT_TIMEOUT_MS;
+    this.heartbeatGraceMs = options.heartbeatGraceMs ?? CDP_HEARTBEAT_GRACE_MS;
     this.tabUrlFilter = options.tabUrlFilter;
   }
 
@@ -767,15 +772,23 @@ export class CdpClient {
   private heartbeatTick(): void {
     if (!this.isConnected()) return;
     if (Date.now() - this.lastReplyAt < this.heartbeatTimeoutMs) return;
-    // Quiet past the threshold: probe liveness rather than assume death. A
-    // reply resets lastReplyAt (via onMessage) and keeps the socket; a timeout
-    // or transport error tears it down. One probe at a time is fine — the
-    // interval is larger than the call timeout, so probes never overlap.
-    void this.call(CDP_HEARTBEAT_PROBE_METHOD, {})
+    // Quiet past the threshold: probe liveness rather than assume death. The
+    // probe gets its own generous reply-wait (heartbeatGraceMs, not the per-call
+    // timeout) so a slow-but-live browser — post-wake scheduling delay, a
+    // momentary main-thread block — replies in time and is reused, not torn
+    // down. One probe at a time is fine: the interval is larger than the grace
+    // window, so probes never overlap.
+    void this.call(CDP_HEARTBEAT_PROBE_METHOD, {}, undefined, this.heartbeatGraceMs)
       .then(() => {
         this.lastReplyAt = Date.now();
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        // A CDP error *reply* means the browser answered on a healthy socket
+        // (onMessage already reset lastReplyAt) — keep it. Same guard as
+        // openBackgroundTab/closeTab: a reply must never drop the one persistent
+        // socket kept for the daemon's lifetime. Only a transport drop or a
+        // probe timeout is a genuinely stale socket worth tearing down.
+        if (error instanceof CdpReplyError) return;
         this.teardownStale("CDP heartbeat probe failed; dropping socket");
       });
   }

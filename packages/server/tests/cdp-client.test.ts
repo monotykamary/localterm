@@ -40,7 +40,11 @@ const servers: MockBrowser[] = [];
 /** A CDP-browser-level WS endpoint that answers the calls CdpClient makes. */
 const startMockBrowser = async (
   mode: MockMode = "ok",
-  options: { silenceProbe?: boolean; windowCloseDestroysTarget?: boolean } = {},
+  options: {
+    silenceProbe?: boolean;
+    probeError?: boolean;
+    windowCloseDestroysTarget?: boolean;
+  } = {},
 ): Promise<MockBrowser> => {
   const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
   await new Promise<void>((resolve) => wss.once("listening", resolve));
@@ -173,8 +177,17 @@ const startMockBrowser = async (
       if (message.method === "Target.getTargets") {
         // Heartbeat liveness probe. `silenceProbe` simulates a half-open
         // socket (OPEN but never replies) so the keepalive's probe times out
-        // and tears the socket down instead of stalling a real call.
-        if (!options.silenceProbe) reply({ targetInfos: [] });
+        // and tears the socket down; `probeError` simulates the browser
+        // answering the probe with a CDP error — a healthy socket, so the
+        // keepalive must keep it (the CdpReplyError guard).
+        if (options.silenceProbe) return;
+        if (options.probeError) {
+          socket.send(
+            JSON.stringify({ id: message.id, error: { code: -32000, message: "probe denied" } }),
+          );
+          return;
+        }
+        reply({ targetInfos: [] });
         return;
       }
       if (message.method === "Page.enable") {
@@ -491,6 +504,7 @@ describe("CdpClient keepalive (wake-from-sleep)", { tags: ["integration"] }, () 
       detect: async () => [detected(browser.wsUrl)],
       connectTimeoutMs: 500,
       callTimeoutMs: 50,
+      heartbeatGraceMs: 50,
       heartbeatIntervalMs: 5,
       heartbeatTimeoutMs: 1,
     });
@@ -498,7 +512,7 @@ describe("CdpClient keepalive (wake-from-sleep)", { tags: ["integration"] }, () 
     expect(client.isConnected()).toBe(true);
     expect(browser.connections).toBe(1);
 
-    // Wait past the probe's call timeout so the keepalive tears the socket
+    // Wait past the probe's reply-wait so the keepalive tears the socket
     // down proactively, rather than the next real call stalling on it.
     await new Promise((resolve) => setTimeout(resolve, 120));
     expect(client.isConnected()).toBe(false);
@@ -527,6 +541,37 @@ describe("CdpClient keepalive (wake-from-sleep)", { tags: ["integration"] }, () 
     // socket replies (resetting lastReplyAt via onMessage) and is reused — no
     // teardown, no fresh socket, so no re-trigger of the browser's debugging
     // prompt. This is the wake-from-sleep recovery path.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(client.isConnected()).toBe(true);
+    expect(browser.connections).toBe(connectionsBefore);
+
+    const handle = await client.openBackgroundTab("http://x/?run=1");
+    expect(handle).toBe("target-1");
+    expect(browser.connections).toBe(connectionsBefore);
+    client.close();
+  });
+
+  it("keeps the socket when the liveness probe gets a CDP error reply (healthy socket)", async () => {
+    // probeError: the browser ANSWERS the keepalive's Target.getTargets probe
+    // with a CDP error — a devtools fork rejecting the method, or a transient
+    // browser state. A reply (even an error) proves the socket is live, so the
+    // keepalive must not tear it down: the same CdpReplyError invariant
+    // openBackgroundTab/closeTab already enforce, and the fix for the heartbeat
+    // killing a healthy socket on an idle probe.
+    const browser = await startMockBrowser("ok", { probeError: true });
+    const client = new CdpClient({
+      detect: async () => [detected(browser.wsUrl)],
+      connectTimeoutMs: 500,
+      callTimeoutMs: 500,
+      heartbeatIntervalMs: 5,
+      heartbeatTimeoutMs: 1,
+    });
+    await client.connect();
+    const connectionsBefore = browser.connections;
+
+    // A quiet window elapses; the keepalive probes and the browser replies
+    // with an error. The socket stays up — no teardown, no reopen.
     await new Promise((resolve) => setTimeout(resolve, 60));
 
     expect(client.isConnected()).toBe(true);
