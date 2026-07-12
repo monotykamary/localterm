@@ -35,6 +35,7 @@
         "src/constants.ts",
         "src/completion/index.ts",
         "src/terminal-themes.ts",
+        "src/terminal-fonts.ts",
         "vitest.config.ts"
       ]
     },

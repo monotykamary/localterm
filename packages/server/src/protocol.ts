@@ -154,6 +154,9 @@ export {
   importThemeInputSchema,
   setActiveThemeInputSchema,
   migrateThemesInputSchema,
+  fontsResponseSchema,
+  updateFontsInputSchema,
+  migrateFontsInputSchema,
 } from "./schemas.js";
 export type { CompressMode } from "./schemas.js";
 export type {
@@ -201,6 +204,9 @@ export type {
   ImportThemeInput,
   SetActiveThemeInput,
   MigrateThemesInput,
+  FontsResponse,
+  UpdateFontsInput,
+  MigrateFontsInput,
   GitBaseSource,
   GitBranchInfo,
   GitBranchPr,

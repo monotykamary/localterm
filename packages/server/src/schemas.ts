@@ -36,6 +36,9 @@ import {
   MAX_THEME_ID_LENGTH,
   MAX_THEME_SOURCE_LENGTH,
   MAX_THEME_IMPORT_TEXT_LENGTH,
+  FONTS_FILE_VERSION,
+  MAX_FONT_ID_LENGTH,
+  MAX_CUSTOM_FONT_FAMILY_LENGTH,
   PROCESSES_FILE_VERSION,
   SECRETS_FILE_VERSION,
   THEMES_FILE_VERSION,
@@ -1958,6 +1961,65 @@ export const migrateThemesInputSchema = z
   })
   .strict();
 
+// ----------------------------------------------------------------------------
+// Terminal fonts (file format v1).
+//
+// The active font id + the user-entered custom family + the Nerd Font /
+// ligatures toggles, stored in ~/.localterm/fonts.json so the `localterm font`
+// CLI and every browser tab share one source of truth — replacing the
+// per-browser localStorage the UI used to keep (the same promotion themes
+// got). The browser keeps a localStorage cache for instant initial render and
+// reconciles once on mount, plus a one-time migrate of the legacy cache on
+// first contact with an uninitialized store.
+// ----------------------------------------------------------------------------
+
+export const fontsFileSchema = z
+  .object({
+    version: z.literal(FONTS_FILE_VERSION),
+    activeFontId: z.string().min(1).max(MAX_FONT_ID_LENGTH),
+    customFontFamily: z.string().max(MAX_CUSTOM_FONT_FAMILY_LENGTH),
+    nerdFontEnabled: z.boolean(),
+    ligaturesEnabled: z.boolean(),
+  })
+  .strict();
+
+export const fontsResponseSchema = z
+  .object({
+    activeFontId: z.string().min(1).max(MAX_FONT_ID_LENGTH),
+    customFontFamily: z.string().max(MAX_CUSTOM_FONT_FAMILY_LENGTH),
+    nerdFontEnabled: z.boolean(),
+    ligaturesEnabled: z.boolean(),
+    initialized: z.boolean(),
+  })
+  .strict();
+
+// PUT /api/fonts body: a partial of the font settings (the client pushes only
+// the field that changed). `activeFontId` is validated against the built-ins
+// (incl. "custom") at the route layer; the rest are free-form. At least one
+// field is required so an empty PUT is rejected rather than a silent no-op.
+export const updateFontsInputSchema = z
+  .object({
+    activeFontId: z.string().min(1).max(MAX_FONT_ID_LENGTH).optional(),
+    customFontFamily: z.string().max(MAX_CUSTOM_FONT_FAMILY_LENGTH).optional(),
+    nerdFontEnabled: z.boolean().optional(),
+    ligaturesEnabled: z.boolean().optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, { message: "empty update" });
+
+// POST /api/fonts/migrate body: the browser's legacy localStorage font state,
+// pushed once on first contact with an uninitialized store so an upgrade
+// preserves the user's font selection + toggles. No-op if the store is already
+// initialized (the CLI or another tab wrote first).
+export const migrateFontsInputSchema = z
+  .object({
+    activeFontId: z.string().min(1).max(MAX_FONT_ID_LENGTH),
+    customFontFamily: z.string().max(MAX_CUSTOM_FONT_FAMILY_LENGTH),
+    nerdFontEnabled: z.boolean(),
+    ligaturesEnabled: z.boolean(),
+  })
+  .strict();
+
 // The full theme state (active id + custom library + the `initialized` flag),
 // pushed to every tab on any theme mutation (import/set/delete/migrate) so open
 // terminals reflect a CLI or other-tab change instantly — no polling. Mirrors
@@ -1968,6 +2030,21 @@ const themesMessageSchema = z
     type: z.literal("themes"),
     activeThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
     customThemes: z.array(storedThemeSchema).max(MAX_CUSTOM_THEMES),
+    initialized: z.boolean(),
+  })
+  .strict();
+
+// The full font state (active id + custom family + toggles + the `initialized`
+// flag), pushed to every tab on any font mutation (set/family/toggle/migrate)
+// so open terminals reflect a CLI or other-tab change instantly — no polling.
+// Mirrors the themes broadcast.
+const fontsMessageSchema = z
+  .object({
+    type: z.literal("fonts"),
+    activeFontId: z.string().min(1).max(MAX_FONT_ID_LENGTH),
+    customFontFamily: z.string().max(MAX_CUSTOM_FONT_FAMILY_LENGTH),
+    nerdFontEnabled: z.boolean(),
+    ligaturesEnabled: z.boolean(),
     initialized: z.boolean(),
   })
   .strict();
@@ -1992,6 +2069,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   automationsMessageSchema,
   caffeinateStateMessageSchema,
   themesMessageSchema,
+  fontsMessageSchema,
   cdpControlledMessageSchema,
   replayEndMessageSchema,
   compressMessageSchema,

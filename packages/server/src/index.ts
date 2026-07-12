@@ -59,6 +59,7 @@ import {
   PROCESSES_FILENAME,
   SECRETS_FILENAME,
   THEMES_FILENAME,
+  FONTS_FILENAME,
   SECRETS_SHIMS_DIRNAME,
   SECRET_EXPORT_SCRYPT_WORK_FACTOR,
   AUTOMATION_AGENT_SESSIONS_DIRNAME,
@@ -104,8 +105,10 @@ import { createDefaultSecretBackend, type SecretBackend } from "./secret-backend
 import { SecretStore } from "./secret-store.js";
 import { ProcessStore } from "./process-store.js";
 import { ThemeStore } from "./theme-store.js";
+import { FontStore } from "./font-store.js";
 import { parseImportedTheme } from "./theme-parser.js";
 import { isBuiltinThemeId, BUILTIN_THEME_IDS } from "./terminal-themes.js";
+import { isBuiltinFontId } from "./terminal-fonts.js";
 import { regenerateShims } from "./secret-shims.js";
 import { encryptSecretExport, decryptSecretExport } from "./secret-export.js";
 import { ProcessActivityWatcher } from "./process-activity-watcher.js";
@@ -137,6 +140,8 @@ import {
   importThemeInputSchema,
   setActiveThemeInputSchema,
   migrateThemesInputSchema,
+  updateFontsInputSchema,
+  migrateFontsInputSchema,
   updateAutomationInputSchema,
   updateDaemonConfigInputSchema,
   updateSessionInputSchema,
@@ -410,10 +415,12 @@ interface DaemonContext {
   stateDirectory: string;
   processStore: ProcessStore;
   themeStore: ThemeStore;
+  fontStore: FontStore;
   syncSecretShims: () => void;
   automationStore: AutomationStore;
   broadcastAutomations: () => void;
   broadcastThemes: () => void;
+  broadcastFonts: () => void;
   syncFolderWatchers: () => void;
   syncSessionEventListeners: () => void;
   webhookTriggerManager: WebhookTriggerManager;
@@ -526,6 +533,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     shimsDir,
     processStore,
     themeStore,
+    fontStore,
     syncSecretShims,
     automationStore,
     broadcastAutomations,
@@ -547,6 +555,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     mintViewerCookie,
     stateDirectory,
     broadcastThemes,
+    broadcastFonts,
     updateCheckStore,
   } = ctx;
 
@@ -1214,6 +1223,61 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     const activeThemeId = themeStore.setActive(id);
     broadcastThemes();
     return context.json({ activeThemeId });
+  });
+
+  // Terminal fonts: the active font id + the user-entered custom family + the
+  // Nerd Font / ligatures toggles, stored in ~/.localterm/fonts.json so the
+  // `localterm font` CLI and every browser tab share one source of truth
+  // (replacing the per-browser localStorage the UI used to keep). GET returns
+  // the full state in one read so the client reconciles its localStorage cache
+  // in a single round-trip.
+  api.get("/fonts", (context) =>
+    context.json({
+      activeFontId: fontStore.getActive(),
+      customFontFamily: fontStore.getCustomFontFamily(),
+      nerdFontEnabled: fontStore.getNerdFontEnabled(),
+      ligaturesEnabled: fontStore.getLigaturesEnabled(),
+      initialized: fontStore.isInitialized(),
+    }),
+  );
+
+  // One-time migration of the browser's legacy localStorage font state. No-ops
+  // once the store is initialized (the CLI or another tab wrote first) and
+  // returns the current state so the caller can reconcile regardless.
+  api.post("/fonts/migrate", async (context) => {
+    const parsed = migrateFontsInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    fontStore.migrate(parsed.data);
+    broadcastFonts();
+    return context.json({
+      activeFontId: fontStore.getActive(),
+      customFontFamily: fontStore.getCustomFontFamily(),
+      nerdFontEnabled: fontStore.getNerdFontEnabled(),
+      ligaturesEnabled: fontStore.getLigaturesEnabled(),
+      initialized: fontStore.isInitialized(),
+    });
+  });
+
+  // Update any subset of the font settings. The client pushes only the field
+  // that changed; `activeFontId` is validated against the built-ins (incl.
+  // "custom") so a typo can't select a font that won't resolve (the client
+  // would silently fall back to the default family otherwise). Returns the
+  // full state so the caller reconciles in one read.
+  api.put("/fonts", async (context) => {
+    const parsed = updateFontsInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    if (parsed.data.activeFontId !== undefined && !isBuiltinFontId(parsed.data.activeFontId)) {
+      return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    }
+    fontStore.update(parsed.data);
+    broadcastFonts();
+    return context.json({
+      activeFontId: fontStore.getActive(),
+      customFontFamily: fontStore.getCustomFontFamily(),
+      nerdFontEnabled: fontStore.getNerdFontEnabled(),
+      ligaturesEnabled: fontStore.getLigaturesEnabled(),
+      initialized: fontStore.isInitialized(),
+    });
   });
 
   // Open dev ports: TCP listening sockets owned by processes descended from a
@@ -2087,6 +2151,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   });
   const processStore = new ProcessStore(path.join(stateDirectory, PROCESSES_FILENAME));
   const themeStore = new ThemeStore({ filePath: path.join(stateDirectory, THEMES_FILENAME) });
+  const fontStore = new FontStore({ filePath: path.join(stateDirectory, FONTS_FILENAME) });
   const activityDir = path.join(stateDirectory, ACTIVITY_DIRNAME);
   const syncSecretShims = () =>
     regenerateShims(
@@ -2317,6 +2382,23 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       activeThemeId: themeStore.getActive(),
       customThemes: themeStore.list(),
       initialized: themeStore.isInitialized(),
+    };
+    for (const clientSocket of clientSockets) {
+      safeSend(clientSocket, payload);
+    }
+  };
+
+  // Push the full font state to every tab on any mutation (set/family/toggle/
+  // migrate) so open terminals reflect a CLI or other-tab change instantly —
+  // the browser applies the {type:"fonts"} WS message directly, no polling.
+  const broadcastFonts = () => {
+    const payload: ServerToClientMessage = {
+      type: "fonts",
+      activeFontId: fontStore.getActive(),
+      customFontFamily: fontStore.getCustomFontFamily(),
+      nerdFontEnabled: fontStore.getNerdFontEnabled(),
+      ligaturesEnabled: fontStore.getLigaturesEnabled(),
+      initialized: fontStore.isInitialized(),
     };
     for (const clientSocket of clientSockets) {
       safeSend(clientSocket, payload);
@@ -2627,6 +2709,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     shimsDir,
     processStore,
     themeStore,
+    fontStore,
     syncSecretShims,
     automationStore,
     broadcastAutomations,
@@ -2644,6 +2727,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     getGraceSeconds,
     applyGraceSeconds,
     broadcastThemes,
+    broadcastFonts,
     connectCdpNow,
     buildTabUrl: (sessionId: string) => {
       const url = new URL(

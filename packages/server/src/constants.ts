@@ -116,6 +116,8 @@ export const PROCESSES_FILE_VERSION = 1;
 export const PROCESSES_FILENAME = "processes.json";
 export const THEMES_FILENAME = "themes.json";
 export const THEMES_FILE_VERSION = 1;
+export const FONTS_FILENAME = "fonts.json";
+export const FONTS_FILE_VERSION = 1;
 export const SECRETS_SHIMS_DIRNAME = "shims";
 export const LOCALTERM_STATE_DIRNAME = ".localterm";
 // Subdir of the state dir holding one activity-signal file per watched
@@ -147,6 +149,11 @@ export const MAX_THEME_NAME_LENGTH = 64;
 export const MAX_THEME_ID_LENGTH = 64;
 export const MAX_THEME_SOURCE_LENGTH = 128;
 export const MAX_THEME_IMPORT_TEXT_LENGTH = 256 * 1024;
+// Font ids are short slugs ("geist-mono"); the "custom" pseudo-id is the only
+// non-catalog id. The custom family is a free-form CSS name the OS resolves
+// ("JetBrainsMono Nerd Font Mono"), capped to bound a runaway value.
+export const MAX_FONT_ID_LENGTH = 64;
+export const MAX_CUSTOM_FONT_FAMILY_LENGTH = 128;
 export const MAX_PROCESS_REQUESTED_SECRETS = 32;
 export const MAX_SECRET_VALUE_LENGTH = 8192;
 // Versioned plaintext shape the age-encrypted export wraps. Independent of

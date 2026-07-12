@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import { MAX_FOREGROUND_LENGTH, MAX_INPUT_BYTES, MAX_TITLE_LENGTH } from "../src/constants.js";
-import { clientToServerMessageSchema, serverToClientMessageSchema } from "../src/schemas.js";
+import {
+  clientToServerMessageSchema,
+  serverToClientMessageSchema,
+  updateFontsInputSchema,
+  migrateFontsInputSchema,
+} from "../src/schemas.js";
 
 describe("clientToServerMessageSchema", () => {
   it("accepts an input frame", () => {
@@ -367,5 +372,56 @@ describe("serverToClientMessageSchema", () => {
 
   it("rejects git-branch-pr frames missing the pr field", () => {
     expect(serverToClientMessageSchema.safeParse({ type: "git-branch-pr" }).success).toBe(false);
+  });
+
+  it("accepts a fonts state frame", () => {
+    const result = serverToClientMessageSchema.safeParse({
+      type: "fonts",
+      activeFontId: "geist-mono",
+      customFontFamily: "",
+      nerdFontEnabled: false,
+      ligaturesEnabled: false,
+      initialized: true,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects fonts frames missing a toggle", () => {
+    expect(
+      serverToClientMessageSchema.safeParse({
+        type: "fonts",
+        activeFontId: "geist-mono",
+        customFontFamily: "",
+        nerdFontEnabled: false,
+        ligaturesEnabled: false,
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("font input schemas", () => {
+  it("updateFontsInputSchema accepts a single-field partial", () => {
+    expect(updateFontsInputSchema.safeParse({ activeFontId: "custom" }).success).toBe(true);
+    expect(updateFontsInputSchema.safeParse({ nerdFontEnabled: true }).success).toBe(true);
+  });
+
+  it("updateFontsInputSchema rejects an empty update", () => {
+    expect(updateFontsInputSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("updateFontsInputSchema rejects an unknown field (strict)", () => {
+    expect(updateFontsInputSchema.safeParse({ bogus: 1 }).success).toBe(false);
+  });
+
+  it("migrateFontsInputSchema requires all four fields", () => {
+    expect(
+      migrateFontsInputSchema.safeParse({
+        activeFontId: "custom",
+        customFontFamily: "MesloLGS NF",
+        nerdFontEnabled: true,
+        ligaturesEnabled: false,
+      }).success,
+    ).toBe(true);
+    expect(migrateFontsInputSchema.safeParse({ activeFontId: "custom" }).success).toBe(false);
   });
 });

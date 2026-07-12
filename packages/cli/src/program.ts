@@ -286,6 +286,54 @@ export const createProgram = (): Command => {
       await runThemeDelete(id);
     });
 
+  const font = program
+    .command("font")
+    .description("manage terminal fonts (built-ins + a custom family; shared with the browser UI)");
+  font
+    .command("list")
+    .description("list every selectable font (built-ins + custom) with the active one marked")
+    .action(async () => {
+      const { runFontList } = await import("./commands/font.js");
+      await runFontList();
+    });
+  font
+    .command("get")
+    .description("print the active font id and name")
+    .action(async () => {
+      const { runFontGet } = await import("./commands/font.js");
+      await runFontGet();
+    });
+  font
+    .command("set <id>")
+    .description("set the active font (a built-in id, or 'custom')")
+    .action(async (id: string) => {
+      const { runFontSet } = await import("./commands/font.js");
+      await runFontSet(id);
+    });
+  font
+    .command("family <name>")
+    .description(
+      "set the custom font family (a system-installed family like 'JetBrainsMono Nerd Font Mono') and activate it",
+    )
+    .action(async (name: string) => {
+      const { runFontFamily } = await import("./commands/font.js");
+      await runFontFamily(name);
+    });
+  font
+    .command("nerd-font <on|off>")
+    .description("toggle the bundled Nerd Font symbol layer")
+    .action(async (value: string) => {
+      const { runFontNerdFont } = await import("./commands/font.js");
+      await runFontNerdFont(value);
+    });
+  font
+    .command("ligatures <on|off>")
+    .description("toggle ligature joining (Fira Code etc.)")
+    .action(async (value: string) => {
+      const { runFontLigatures } = await import("./commands/font.js");
+      await runFontLigatures(value);
+    });
+
   program
     .command("exec")
     .description("run a one-shot command in a transient PTY and print its output")

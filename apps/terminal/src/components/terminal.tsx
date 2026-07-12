@@ -507,6 +507,7 @@ export const Terminal = () => {
     handleImportTheme,
     handleDeleteCustomTheme,
     applyThemesState,
+    applyFontsState,
   } = useTerminalSettings({ terminalRef, fitAddonRef, terminalReady, localEchoRef });
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
   const openDiffViewerRef = useRef<(() => void) | null>(null);
@@ -1913,6 +1914,14 @@ export const Terminal = () => {
           applyThemesState({
             activeThemeId: message.activeThemeId,
             customThemes: message.customThemes,
+          });
+        } else if (message.type === "fonts") {
+          applyFontsState({
+            activeFontId: message.activeFontId,
+            customFontFamily: message.customFontFamily,
+            nerdFontEnabled: message.nerdFontEnabled,
+            ligaturesEnabled: message.ligaturesEnabled,
+            initialized: message.initialized,
           });
         } else if (message.type === "caffeinate") {
           setCaffeinateSupported(message.supported);

@@ -1,4 +1,5 @@
 import type { Command, Option } from "commander";
+import { BUILTIN_FONT_IDS } from "@monotykamary/localterm-server/fonts";
 import type {
   CommandSpec,
   CommandSpecNode,
@@ -8,6 +9,7 @@ import type {
 
 const IDENTITY_PROVIDERS = ["none", "header", "passkey", "oidc"] as const;
 const SCROLL_DIRECTIONS = ["up", "down"] as const;
+const TOGGLE_VALUES = ["on", "off"] as const;
 
 // Per-command positional completion, keyed by the command path the walker
 // descends through (e.g. "session kill"). Slot 0 is the first positional; a
@@ -39,6 +41,9 @@ const positionalDeclarations: Record<string, PositionalSpec[]> = {
   "process delete": [{ kind: "dynamic", source: "processes" }],
   "theme set": [{ kind: "dynamic", source: "themes" }],
   "theme delete": [{ kind: "dynamic", source: "customThemes" }],
+  "font set": [{ kind: "static", values: BUILTIN_FONT_IDS }],
+  "font nerd-font": [{ kind: "static", values: TOGGLE_VALUES }],
+  "font ligatures": [{ kind: "static", values: TOGGLE_VALUES }],
   "config identity": [{ kind: "static", values: IDENTITY_PROVIDERS }],
 };
 

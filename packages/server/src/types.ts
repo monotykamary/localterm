@@ -93,6 +93,9 @@ import type {
   importThemeInputSchema,
   setActiveThemeInputSchema,
   migrateThemesInputSchema,
+  fontsResponseSchema,
+  updateFontsInputSchema,
+  migrateFontsInputSchema,
 } from "./schemas.js";
 
 export interface SpawnPtyInput {
@@ -154,6 +157,10 @@ export type ThemeResponse = z.infer<typeof themeResponseSchema>;
 export type ImportThemeInput = z.infer<typeof importThemeInputSchema>;
 export type SetActiveThemeInput = z.infer<typeof setActiveThemeInputSchema>;
 export type MigrateThemesInput = z.infer<typeof migrateThemesInputSchema>;
+
+export type FontsResponse = z.infer<typeof fontsResponseSchema>;
+export type UpdateFontsInput = z.infer<typeof updateFontsInputSchema>;
+export type MigrateFontsInput = z.infer<typeof migrateFontsInputSchema>;
 
 export type AutomationLastRunStatus = z.infer<typeof automationLastRunStatusSchema>;
 export type AutomationLastRun = z.infer<typeof automationLastRunSchema>;

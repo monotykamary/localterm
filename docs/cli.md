@@ -86,6 +86,25 @@ deletable from the CLI. `import` accepts the same formats as the browser upload
 `theme set` completes built-ins + `auto` + customs; `theme delete` completes
 customs.
 
+## font — terminal fonts
+
+```bash
+localterm font list                       # built-ins + the custom entry, active one marked
+localterm font get                        # print the active font id + name (+ custom family, toggles)
+localterm font set <id>                   # a built-in id, or 'custom'
+localterm font family <name>              # set the custom family (a system font) + activate it
+localterm font nerd-font <on|off>          # toggle the Nerd Font symbol layer
+localterm font ligatures <on|off>          # toggle ligature joining (Fira Code etc.)
+```
+
+The active font id, the custom font family, and the Nerd Font / ligatures
+toggles are server-managed in `~/.localterm/fonts.json` and shared with the
+browser UI — a font set or a custom family entered from the CLI shows up in
+every browser tab. `font family <name>` sets the custom family **and**
+activates the `custom` font in one step; a blank name clears the family back
+to the bundled default. Tab-completion: `font set` completes built-ins +
+`custom`; `font nerd-font` / `font ligatures` complete `on`/`off`.
+
 ## Related
 
 - [Appearance](appearance.md) — themes (built-ins, importing, creating) and fonts.

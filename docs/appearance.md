@@ -141,6 +141,16 @@ xterm `ITheme` shape directly:
 
 ## Fonts
 
+The active font, the custom font family, and the Nerd Font / ligatures toggles
+are server-managed in `~/.localterm/fonts.json` and shared with the `localterm
+font` CLI (see [CLI reference](cli.md#font--terminal-fonts)) — a font set or
+custom family entered in one browser tab (or from the CLI) shows up in every
+other tab instantly, the daemon pushing the change over each tab's WebSocket.
+The browser keeps a `localStorage` cache for instant initial render. If you
+configured fonts in an earlier version (when they were kept per-browser in
+`localStorage`), they're moved to the daemon's store on your next launch — your
+font selection and toggles carry over, so an upgrade never loses them.
+
 ### Bundled fonts
 
 All 11 fonts are bundled as static assets (no network fetch), so they work on an
@@ -165,6 +175,27 @@ Nerd Font.
 — most useful for a system-installed Nerd Font such as
 `JetBrainsMono Nerd Font Mono` or `MesloLGS NF`, which the browser resolves
 through the OS font stack (fontconfig on Linux, Font Book on macOS). A blank
-field falls back to the bundled default. The family is stored in `localStorage`
-and applied exactly like a built-in font, with the Nerd Font symbols layered on
-top when that toggle is on.
+field falls back to the bundled default. The family is stored on the daemon
+(alongside the active font id and the Nerd Font / ligatures toggles) and applied
+exactly like a built-in font, with the Nerd Font symbols layered on top when
+that toggle is on.
+
+### From the CLI
+
+You can also switch fonts and set a custom family from the terminal, which is
+handy for scripting or a headless host with no browser open:
+
+```bash
+localterm font list                       # built-ins + the custom entry, active one marked
+localterm font get                        # print the active font id + name (+ custom family, toggles)
+localterm font set jetbrains-mono          # a built-in id, or `custom`
+localterm font family "JetBrainsMono Nerd Font Mono"   # set the custom family + activate it
+localterm font nerd-font on                # toggle the Nerd Font symbol layer on/off
+localterm font ligatures off               # toggle ligature joining on/off
+```
+
+`font family <name>` sets the custom family **and** activates the `custom`
+font in one step (setting a family you won't use is pointless); a blank name
+clears the family back to the bundled default. The Nerd Font symbols and
+ligatures toggles are also part of the persisted font state, so they follow you
+across tabs and CLI sessions just like the font itself.

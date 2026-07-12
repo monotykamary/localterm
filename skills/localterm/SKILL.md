@@ -400,3 +400,18 @@ localterm theme delete <id>                # delete an imported custom (resets a
 ```
 
 Import accepts a JSON theme (`{name, colors}` or a bare xterm `ITheme` colors object) or an iTerm `.itermcolors` plist; the daemon parses — one parser shared with the browser UI's upload — and returns the stored theme with a server-minted id. The active theme is also settable over REST (`GET`/`POST /themes/import`, `PUT /themes/active`, `DELETE /themes/:id`, plus a one-time `POST /themes/migrate` the browser uses on upgrade). For the full surface — endpoints, error responses, import formats, and the `auto`/light-dark resolution — see [references/themes.md](references/themes.md).
+
+## Fonts
+
+Terminal fonts (the active font id + the user-entered custom family + the Nerd Font / ligatures toggles) are server-managed in `~/.localterm/fonts.json`, shared by the `localterm font` CLI and every browser tab — the same promotion themes got, replacing the per-browser `localStorage` the UI used to keep. Manage them from the terminal:
+
+```bash
+localterm font list                       # built-ins + the custom entry, active one marked
+localterm font get                        # active font id + name (+ custom family, toggles)
+localterm font set <id>                   # a built-in id, or 'custom'
+localterm font family "<name>"            # set the custom family (a system font) + activate it
+localterm font nerd-font <on|off>          # toggle the Nerd Font symbol layer
+localterm font ligatures <on|off>         # toggle ligature joining (Fira Code etc.)
+```
+
+`font family <name>` sets the custom family **and** activates the `custom` font in one step; a blank name clears the family back to the bundled default. The font state is also settable over REST (`GET`/`PUT /fonts`, plus a one-time `POST /fonts/migrate` the browser uses on upgrade). For the full surface — endpoints, error responses, the built-in catalog, and the `"custom"` resolution — see [references/fonts.md](references/fonts.md).

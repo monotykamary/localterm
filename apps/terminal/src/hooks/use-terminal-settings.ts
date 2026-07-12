@@ -30,6 +30,8 @@ import {
   setActiveTheme as pushActiveTheme,
   deleteTheme as removeRemoteTheme,
 } from "@/utils/fetch-themes";
+import { fetchFonts, migrateFonts, updateFonts } from "@/utils/fetch-fonts";
+import type { FontsResponse } from "@monotykamary/localterm-server/protocol";
 import {
   loadStoredCustomThemes,
   storeCustomThemes,
@@ -222,6 +224,19 @@ export const useTerminalSettings = ({
   const [activeCustomFontFamily, setActiveCustomFontFamily] = useState<string>(
     initialCustomFontFamilyRef.current,
   );
+  // The daemon is the source of truth for the font state (active id + custom
+  // family + Nerd Font / ligatures toggles, kept in ~/.localterm/fonts.json);
+  // localStorage is a cache for instant initial render. These refs mirror the
+  // state so the stable `applyFontsState` (called from the WS dispatcher) reads
+  // the latest without re-creating per change.
+  const activeFontIdRef = useRef(activeFontId);
+  activeFontIdRef.current = activeFontId;
+  const activeCustomFontFamilyRef = useRef(activeCustomFontFamily);
+  activeCustomFontFamilyRef.current = activeCustomFontFamily;
+  const activeNerdFontEnabledRef = useRef(activeNerdFontEnabled);
+  activeNerdFontEnabledRef.current = activeNerdFontEnabled;
+  const activeLigaturesEnabledRef = useRef(activeLigaturesEnabled);
+  activeLigaturesEnabledRef.current = activeLigaturesEnabled;
   const effectiveFont = useMemo(
     () =>
       effectiveFontId === CUSTOM_FONT_ID
@@ -333,6 +348,32 @@ export const useTerminalSettings = ({
     [],
   );
 
+  // Apply a font state the daemon pushed ({type:"fonts"} WS message) or that the
+  // mount reconcile read — the daemon is the source of truth, localStorage a
+  // cache. Stable (reads current state via refs) so the mount-once WS
+  // dispatcher captures it for the tab's lifetime. No-op when the state already
+  // matches (the browser's own write-through change, confirmed by the
+  // broadcast). `initialized` is the migrate gate, not a setting, so it's
+  // ignored here.
+  const applyFontsState = useCallback((state: FontsResponse) => {
+    if (state.activeFontId !== activeFontIdRef.current) {
+      setActiveFontId(state.activeFontId);
+      storeTerminalFontId(state.activeFontId);
+    }
+    if (state.customFontFamily !== activeCustomFontFamilyRef.current) {
+      setActiveCustomFontFamily(state.customFontFamily);
+      storeCustomFontFamily(state.customFontFamily);
+    }
+    if (state.nerdFontEnabled !== activeNerdFontEnabledRef.current) {
+      setActiveNerdFontEnabled(state.nerdFontEnabled);
+      storeNerdFontEnabled(state.nerdFontEnabled);
+    }
+    if (state.ligaturesEnabled !== activeLigaturesEnabledRef.current) {
+      setActiveLigaturesEnabled(state.ligaturesEnabled);
+      storeLigaturesEnabled(state.ligaturesEnabled);
+    }
+  }, []);
+
   // One-shot on mount: fetch the server state so the cache reconciles, and push
   // the legacy localStorage themes once on first contact with an uninitialized
   // store (an upgrade from the localStorage era). No poll — the daemon pushes
@@ -351,6 +392,29 @@ export const useTerminalSettings = ({
     void reconcileThemes();
   }, [reconcileThemes]);
 
+  // One-shot on mount: fetch the server font state so the cache reconciles, and
+  // push the legacy localStorage font state once on first contact with an
+  // uninitialized store (an upgrade from the localStorage era). No poll — the
+  // daemon pushes {type:"fonts"} on every change.
+  const reconcileFonts = useCallback(async (): Promise<void> => {
+    const data = await fetchFonts();
+    if (data === null) return; // daemon down / non-2xx → keep the cache
+    if (!data.initialized) {
+      await migrateFonts({
+        activeFontId: loadStoredTerminalFontId(),
+        customFontFamily: loadStoredCustomFontFamily(),
+        nerdFontEnabled: loadStoredNerdFontEnabled(),
+        ligaturesEnabled: loadStoredLigaturesEnabled(),
+      });
+      return;
+    }
+    applyFontsState(data);
+  }, [applyFontsState]);
+
+  useEffect(() => {
+    void reconcileFonts();
+  }, [reconcileFonts]);
+
   // Re-resolve the "Auto (system)" theme when the desktop color-scheme changes.
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -364,16 +428,19 @@ export const useTerminalSettings = ({
     setActiveFontId(nextFontId);
     setPreviewFontId(null);
     storeTerminalFontId(nextFontId);
+    void updateFonts({ activeFontId: nextFontId });
   }, []);
 
   const handleNerdFontEnabledChange = useCallback((nextEnabled: boolean) => {
     setActiveNerdFontEnabled(nextEnabled);
     storeNerdFontEnabled(nextEnabled);
+    void updateFonts({ nerdFontEnabled: nextEnabled });
   }, []);
 
   const handleLigaturesEnabledChange = useCallback((nextEnabled: boolean) => {
     setActiveLigaturesEnabled(nextEnabled);
     storeLigaturesEnabled(nextEnabled);
+    void updateFonts({ ligaturesEnabled: nextEnabled });
   }, []);
 
   // registerCharacterJoiner/deregisterCharacterJoiner each refresh the whole
@@ -530,6 +597,7 @@ export const useTerminalSettings = ({
   const handleCustomFontFamilyChange = useCallback((nextCustomFontFamily: string) => {
     setActiveCustomFontFamily(nextCustomFontFamily);
     storeCustomFontFamily(nextCustomFontFamily);
+    void updateFonts({ customFontFamily: nextCustomFontFamily });
   }, []);
 
   // Settings persist to localStorage, so changing one in any tab fires a
@@ -613,5 +681,6 @@ export const useTerminalSettings = ({
     handleImportTheme,
     handleDeleteCustomTheme,
     applyThemesState,
+    applyFontsState,
   };
 };
