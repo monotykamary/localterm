@@ -78,6 +78,14 @@ export const createProgram = (): Command => {
     });
 
   program
+    .command("update")
+    .description("update localterm to the latest npm release, then restart the daemon if running")
+    .action(async () => {
+      const { runUpdate } = await import("./commands/update.js");
+      await runUpdate();
+    });
+
+  program
     .command("install")
     .description("install auto-start service (launchd on macOS, systemd user unit on Linux)")
     .option("-p, --port <port>", "port to bind", parsePortOption, resolveInitialPort())

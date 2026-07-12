@@ -95,6 +95,20 @@ export const healthSchema = z
   })
   .strict();
 
+// Result of `GET /api/update-status` — the daemon's cached npm update check.
+// `latest`/`checkedAt` are null before the first successful fetch; `current` is
+// the version the running daemon reports. The CLI banner resolves this with
+// `?wait=1` (blocks on a fresh fetch when the cache is stale); browser tabs
+// poll it without `wait` and read the non-blocking cache.
+export const updateStatusSchema = z
+  .object({
+    current: z.string(),
+    latest: z.string().nullable(),
+    updateAvailable: z.boolean(),
+    checkedAt: z.number().int().nullable(),
+  })
+  .strict();
+
 // Result of an explicit `POST /api/cdp/connect` (the Settings → Automation
 // browser → Connect button). `connected` mirrors `/api/health`'s `cdp.connected`;
 // `error` carries the reason on failure (e.g. a timed-out handshake hinting at

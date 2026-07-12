@@ -29,6 +29,14 @@ export const TAILSCALE_DOWNLOAD_URL = "https://tailscale.com/download";
 // launched with this flag, so this is the universal, definitely-correct step.
 export const CDP_REMOTE_DEBUGGING_HINT = "launch your browser with --remote-debugging-port=9222";
 export const STOP_COMMAND = "npx @monotykamary/localterm@latest stop";
+// The command `localterm update` runs to pull the latest npm release. Shown to
+// the user in the `start`/`status` banner when an update is available, and
+// executed by `localterm update` itself.
+export const UPDATE_SELF_COMMAND = "npm install -g @monotykamary/localterm@latest";
+// Client-side backstop for the banner's blocking `/api/update-status?wait=1`
+// fetch. The server bounds the registry fetch at UPDATE_CHECK_HTTP_TIMEOUT_MS;
+// this covers a hung daemon (so the banner never hangs indefinitely).
+export const UPDATE_BANNER_FETCH_TIMEOUT_MS = 5_000;
 export const DAEMON_CHILD_ENV_FLAG = "LOCALTERM_DAEMON_CHILD";
 export const RESTART_DAEMON_ENV_FLAG = "LOCALTERM_RESTART_DAEMON";
 /**

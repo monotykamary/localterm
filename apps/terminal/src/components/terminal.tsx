@@ -74,6 +74,7 @@ import { useGitBranchInfo } from "@/hooks/use-git-branch-info";
 import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
 import { useScreenWakeLock } from "@/hooks/use-screen-wake-lock";
 import { useTerminalSettings } from "@/hooks/use-terminal-settings";
+import { useUpdateStatus } from "@/hooks/use-update-status";
 import { createGitWorktree, type CreateWorktreeOptions } from "@/utils/fetch-git-worktrees";
 import {
   COPY_FEEDBACK_MS,
@@ -674,6 +675,7 @@ export const Terminal = () => {
   useScreenWakeLock(caffeinateActive);
   const [isDiffViewerOpen, setIsDiffViewerOpen] = useState(false);
   const { summary: diffSummary, setGitDiffSummary } = useGitDiffSummary();
+  const { updateAvailable, latest: latestUpdateVersion } = useUpdateStatus();
   // Bumps every time the server pushes a git-diff-summary from a real git-dirty
   // signal, giving the diff viewer a trigger for near-realtime updates.
   // Starts undefined so the diff viewer doesn't treat the initial render as a
@@ -3034,6 +3036,8 @@ export const Terminal = () => {
                     notificationsPermission={notificationsPermission}
                     onNotificationsPermissionRequest={handleNotificationsPermissionRequest}
                     sessionInfo={sessionInfo}
+                    updateAvailable={updateAvailable}
+                    latestVersion={latestUpdateVersion}
                     onOpenChange={handleSettingsOpenChange}
                     onClose={refocusTerminalRef.current ?? undefined}
                   />

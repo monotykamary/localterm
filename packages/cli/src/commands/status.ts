@@ -5,6 +5,7 @@ import { cliError, exitCodeForCliError } from "../errors.js";
 import { clearPid, isAlive, readHost, readPid, readPort } from "../state.js";
 import { resolveDaemonUrl } from "../utils/portless.js";
 import { reportCliError } from "../utils/report-cli-error.js";
+import { printUpdateAvailableLine } from "../utils/print-update-line.js";
 
 const formatCdpStatusLine = (cdp: CdpHealth): string => {
   if (cdp === null) return kleur.dim("disabled");
@@ -57,6 +58,9 @@ export const runStatus = async (): Promise<void> => {
     console.log(`  raw:      ${kleur.dim(getDirectUrl(port, resolvedHost))}`);
     console.log(`  sessions: ${health.sessions}`);
     console.log(`  cdp:      ${formatCdpStatusLine(health.cdp)}`);
+    // Mirror the daemon's cached update check (non-blocking) so `localterm
+    // status` surfaces an available update alongside the running state.
+    await printUpdateAvailableLine(resolvedHost, port, false);
   } catch (error) {
     const healthError = cliError.healthCheckFailed(
       pid,

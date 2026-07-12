@@ -10,6 +10,7 @@ import {
 import { createPortal } from "react-dom";
 import { NumberStepper } from "@/components/number-stepper";
 import { SettingsSelect, type SettingsSelectItem } from "@/components/settings-select";
+import { UpdateBanner } from "@/components/update-banner";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -101,6 +102,8 @@ interface SettingsMenuProps {
   notificationsPermission: NotificationPermission | "unsupported";
   onNotificationsPermissionRequest: () => void;
   sessionInfo?: TerminalSessionInfo | null;
+  updateAvailable: boolean;
+  latestVersion: string | null;
   onOpenChange?: (open: boolean) => void;
   onClose?: () => void;
 }
@@ -374,6 +377,8 @@ export const SettingsMenu = ({
   notificationsPermission,
   onNotificationsPermissionRequest,
   sessionInfo,
+  updateAvailable,
+  latestVersion,
   onOpenChange,
   onClose,
 }: SettingsMenuProps) => {
@@ -511,10 +516,18 @@ export const SettingsMenu = ({
         onClick={() => handleOpenChange(!isOpen)}
       >
         <Settings />
-        {cdpDisconnected && (
+        {/* The amber CDP-disconnected dot yields to the sky update dot when both
+            apply so the gear shows a single, unambiguous “look here” indicator;            the CDP state is still surfaced inside the panel. */}
+        {cdpDisconnected && !updateAvailable && (
           <span
             aria-hidden="true"
             className="absolute right-1 top-1 size-1.5 rounded-full bg-amber-400"
+          />
+        )}
+        {updateAvailable && (
+          <span
+            aria-hidden="true"
+            className="absolute right-1 top-1 size-1.5 rounded-full bg-sky-400"
           />
         )}
       </Button>
@@ -559,6 +572,9 @@ export const SettingsMenu = ({
                 </div>
                 <div className="flex-1 overflow-y-auto overscroll-contain p-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   <FieldGroup className="gap-3">
+                    {updateAvailable && latestVersion ? (
+                      <UpdateBanner latest={latestVersion} />
+                    ) : null}
                     <Field orientation="vertical" className="gap-1.5">
                       <FieldLabel className={SECTION_LABEL_CLASSES}>Automation browser</FieldLabel>
                       <Tooltip>

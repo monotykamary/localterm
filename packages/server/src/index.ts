@@ -77,11 +77,14 @@ import {
   WS_READY_STATE_OPEN,
   AUTH_SECRET_FILENAME,
   AUTH_COOKIE_NAME,
+  UPDATE_CHECK_FILENAME,
 } from "./constants.js";
 import { getDefaultShell, listKnownShells, resolveShellOverride } from "./default-shell.js";
 import { resolveWindowId } from "./utils/resolve-window-id.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
 import { openChromeInspect } from "./utils/open-chrome-inspect.js";
+import { readServerVersion } from "./utils/read-server-version.js";
+import { UpdateCheckStore, type LatestVersionFetcher } from "./update-check-store.js";
 import { ServerErrorException, serverError } from "./errors.js";
 import { AutomationGitWatcher } from "./automation-git-watcher.js";
 import { FolderWatchManager } from "./folder-watch-manager.js";
@@ -141,6 +144,7 @@ import {
   worktreeIncludeFileInputSchema,
   waitInputSchema,
   mouseInputSchema,
+  updateStatusSchema,
 } from "./schemas.js";
 import { createNetworkPolicyMiddleware, isAllowedSourceIp, isLoopbackHost } from "./security.js";
 import type { Context } from "hono";
@@ -197,6 +201,20 @@ export interface ServerOptions {
   host?: string;
   staticRoot?: string | null;
   stateDirectory?: string;
+  /**
+   * The version the daemon should report as `current` in update checks.
+   * The CLI passes its published package version so the comparison reflects
+   * the package the user actually installed; embedders/tests that omit it
+   * fall back to the server package's version (it ships in lockstep).
+   */
+  currentVersion?: string;
+  /**
+   * Override how the daemon fetches the latest published localterm version
+   * from the npm registry. Defaults to a real `fetch` against the registry's
+   * `/latest` endpoint. Injectable so tests drive the update check
+   * deterministically without touching the network.
+   */
+  updateCheckFetcher?: LatestVersionFetcher;
   /**
    * Identity provider config — scopes the session registry per authenticated
    * user. `null`/omitted = no provider (single-authority mode, byte-identical
@@ -432,6 +450,7 @@ interface DaemonContext {
     automation: Automation,
     trigger: "schedule" | "manual" | "watch" | "event" | "webhook",
   ) => string | null;
+  updateCheckStore: UpdateCheckStore;
 }
 
 type ParsedWait = z.infer<typeof waitInputSchema>;
@@ -528,6 +547,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     mintViewerCookie,
     stateDirectory,
     broadcastThemes,
+    updateCheckStore,
   } = ctx;
 
   // Headless SGR-1006 fallback for `mouse` when no CDP tab is reachable:
@@ -570,6 +590,21 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
         : null,
     }),
   );
+
+  // The daemon's cached npm update check. By default returns the non-blocking
+  // cache and kicks a background refresh when stale — so a poll from every open
+  // tab can't wedge on the registry. `?wait=1` (the CLI banner path) awaits a
+  // fresh fetch when the cache is stale so `localterm start`/`status` can print
+  // an accurate line (bounded by UPDATE_CHECK_HTTP_TIMEOUT_MS). Auth-gated like
+  // the rest of /api/*; the CLI injects the operator bearer token, the browser
+  // tab carries its session cookie.
+  api.get("/update-status", async (context) => {
+    if (context.req.query("wait") === "1") {
+      return context.json(updateStatusSchema.parse(await updateCheckStore.getFreshStatus()));
+    }
+    updateCheckStore.refreshIfStaleBackground();
+    return context.json(updateStatusSchema.parse(updateCheckStore.getStatus()));
+  });
 
   // Completion fast path: the shell scripts curl this with the command line
   // (repeated `argv=` query params) so the daemon resolves candidates
@@ -2572,6 +2607,14 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
   };
 
+  const updateCheckStore = new UpdateCheckStore({
+    filePath: path.join(stateDirectory, UPDATE_CHECK_FILENAME),
+    currentVersion: options.currentVersion ?? readServerVersion(),
+    fetcher: options.updateCheckFetcher,
+    enabled:
+      process.env.LOCALTERM_SKIP_UPDATE_CHECK !== "1" &&
+      process.env.LOCALTERM_SKIP_UPDATE_CHECK !== "true",
+  });
   const ctx: DaemonContext = {
     registry,
     resolveIdentity,
@@ -2611,6 +2654,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     },
     mintViewerCookie,
     stateDirectory,
+    updateCheckStore,
   };
   const api = buildApiRoutes(ctx);
   app.route("/api", api);
@@ -3010,6 +3054,13 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   syncFolderWatchers();
   syncSessionEventListeners();
 
+  // Kick the first npm update check + arm the daily refresh so the cache stays
+  // warm for the CLI banner and the browser indicator even while no tab is
+  // open. Fire-and-forget on startup; the `?wait=1` banner path awaits the
+  // in-flight fetch, and here it just primes the cache without blocking boot.
+  updateCheckStore.start();
+  updateCheckStore.refreshIfStaleBackground();
+
   // Open the persistent CDP connection now, while the user is present at
   // `start` to clear any one-time remote-debugging prompt. Fire-and-forget:
   // failure just means runs fall back to the OS opener.
@@ -3032,6 +3083,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     automationScheduler.dispose();
     folderWatchManager.dispose();
     automationGitWatcher.dispose();
+    updateCheckStore.dispose();
     webhookTriggerManager.dispose();
     caffeinateManager.dispose();
     processActivityWatcher?.dispose();
@@ -3103,7 +3155,11 @@ export {
   oidcConfigSchema,
   passkeyConfigSchema,
   updateDaemonConfigInputSchema,
+  updateStatusSchema,
 } from "./schemas.js";
+export { UpdateCheckStore } from "./update-check-store.js";
+export type { UpdateStatus, LatestVersionFetcher } from "./update-check-store.js";
+export { NPM_PACKAGE_NAME } from "./constants.js";
 export type {
   Identity,
   IdentityConfig,

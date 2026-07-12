@@ -821,3 +821,19 @@ export const AUTH_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 export const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 export const HTTP_STATUS_UNAUTHORIZED = 401;
 export const HTTP_STATUS_FORBIDDEN = 403;
+
+// Update check. The daemon is the long-lived host, so it owns the one npm
+// registry lookup shared by every CLI invocation (`localterm start`/`status`
+// banner) and every open browser tab (the settings indicator). The result is
+// cached to disk so a daemon restart reads the prior value instantly without
+// re-fetching, and refreshed on this interval. Set `LOCALTERM_SKIP_UPDATE_CHECK=1`
+// (or `~/.localterm/config.json` `updateCheck.enabled: false`) to disable.
+export const NPM_PACKAGE_NAME = "@monotykamary/localterm";
+export const NPM_REGISTRY_LATEST_URL = `https://registry.npmjs.org/${NPM_PACKAGE_NAME}/latest`;
+export const UPDATE_CHECK_FILENAME = "update-check.json";
+export const UPDATE_CHECK_FILE_VERSION = 1;
+export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// Upper bound on a single registry fetch. A slow/offline network fails fast so
+// neither the daemon's event loop nor a blocking `/api/update-status?wait=1`
+// (the CLI banner path) hangs waiting on the registry.
+export const UPDATE_CHECK_HTTP_TIMEOUT_MS = 3_000;

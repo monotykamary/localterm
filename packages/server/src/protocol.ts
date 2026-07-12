@@ -80,6 +80,7 @@ export {
   oidcConfigSchema,
   passkeyConfigSchema,
   updateDaemonConfigInputSchema,
+  updateStatusSchema,
   gitBaseSourceSchema,
   gitBranchInfoSchema,
   gitBranchPrLeaseSchema,
@@ -256,3 +257,4 @@ export type {
   IdentityProviderInfo,
   IdentityProviderKind,
 } from "./identity/types.js";
+export type { UpdateStatus } from "./update-check-store.js";

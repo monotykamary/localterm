@@ -348,3 +348,11 @@ export const WS_OUTPUT_GZIP = 0x01;
 export const WS_OUTPUT_BROTLI = 0x02;
 export const WS_OUTPUT_BROTLI_CTX = 0x03;
 export const WS_OUTPUT_CTX_HEADER_BYTES = 5;
+
+// How often the terminal polls the daemon's cached update check (the daemon
+// refreshes it once per UPDATE_CHECK_INTERVAL_MS on its own; this cadence just
+// picks up a refreshed cache, so it stays lax). A poll returns the
+// non-blocking cache and triggers a background refresh only when stale.
+export const UPDATE_STATUS_POLL_INTERVAL_MS = 30 * 60 * 1000;
+// How long the update banner's copy button shows its “copied” feedback.
+export const UPDATE_COPY_FEEDBACK_MS = 1500;

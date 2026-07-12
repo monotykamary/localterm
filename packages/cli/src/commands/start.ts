@@ -43,6 +43,9 @@ import { runStartPreflight } from "../utils/run-start-preflight.js";
 import { sleep } from "../utils/sleep.js";
 import { spawnDaemon } from "../utils/spawn-daemon.js";
 import { writeCommandSpec } from "../utils/command-spec.js";
+import { readUpdateStatus, resolveApiHost } from "../utils/read-update-status.js";
+import { formatUpdateLine, printUpdateAvailableLine } from "../utils/print-update-line.js";
+import { readPackageVersion } from "../utils/read-package-version.js";
 import { runStop } from "./stop.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -156,6 +159,11 @@ const printCdpAvailabilityLine = async (): Promise<void> => {
 };
 
 const printDaemonStartedBanner = async (port: number): Promise<ResolveUrlResult> => {
+  const host = readHost() ?? "127.0.0.1";
+  // Kick the update check in parallel with URL resolution + the CDP probe so the
+  // registry fetch (bounded on the server) overlaps work already in flight
+  // rather than serializing after it.
+  const updateStatusPromise = readUpdateStatus(resolveApiHost(host), port, true);
   const resolved = await resolveDaemonUrl(port);
   console.log(`${kleur.green("✔")} running at ${kleur.cyan(resolved.url)}`);
   announceResolvedUrl(resolved.url, resolved.surface);
@@ -163,6 +171,8 @@ const printDaemonStartedBanner = async (port: number): Promise<ResolveUrlResult>
     console.log(kleur.yellow(`  ⚠ ${warning}`));
   }
   await printCdpAvailabilityLine();
+  const updateLine = formatUpdateLine(await updateStatusPromise);
+  if (updateLine) console.log(updateLine);
   console.log(`  stop with ${kleur.bold(STOP_COMMAND)}`);
   return resolved;
 };
@@ -234,6 +244,7 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
       port: options.port,
       host: options.host,
       staticRoot,
+      currentVersion: readPackageVersion(),
     });
   } catch (caughtError) {
     const isEaddrInuse =
@@ -252,6 +263,7 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
           port: options.port,
           host: options.host,
           staticRoot,
+          currentVersion: readPackageVersion(),
         });
       } catch (retryError) {
         console.error(
@@ -311,6 +323,7 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
       console.log(kleur.yellow(`  ⚠ ${warning}`));
     }
     await printCdpAvailabilityLine();
+    await printUpdateAvailableLine(options.host, server.port, true);
     console.log(`  press ${kleur.bold("Ctrl+C")} to stop`);
   }
 

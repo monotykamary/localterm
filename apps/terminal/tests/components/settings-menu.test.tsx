@@ -67,6 +67,8 @@ interface SettingsMenuHarnessProps {
   notificationsPermission?: NotificationPermission | "unsupported";
   onNotificationsPermissionRequest?: () => void;
   sessionInfo?: TerminalSessionInfo | null;
+  updateAvailable?: boolean;
+  latestVersion?: string | null;
 }
 
 const renderSettingsMenu = ({
@@ -116,6 +118,8 @@ const renderSettingsMenu = ({
   notificationsPermission = "default",
   onNotificationsPermissionRequest = () => {},
   sessionInfo,
+  updateAvailable = false,
+  latestVersion = null,
 }: SettingsMenuHarnessProps = {}) =>
   render(
     <TooltipProvider delay={0}>
@@ -170,6 +174,8 @@ const renderSettingsMenu = ({
         notificationsPermission={notificationsPermission}
         onNotificationsPermissionRequest={onNotificationsPermissionRequest}
         sessionInfo={sessionInfo}
+        updateAvailable={updateAvailable}
+        latestVersion={latestVersion}
       />
     </TooltipProvider>,
   );
@@ -182,6 +188,21 @@ describe("SettingsMenu trigger", () => {
   it("renders a labelled gear button", () => {
     renderSettingsMenu();
     expect(screen.getByLabelText("terminal settings")).toBeDefined();
+  });
+});
+
+describe("SettingsMenu update banner", () => {
+  it("surfaces an available update inside the settings panel", () => {
+    renderSettingsMenu({ updateAvailable: true, latestVersion: "9.9.9" });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    expect(screen.getByText("9.9.9")).toBeDefined();
+    expect(screen.getByLabelText("copy update command")).toBeDefined();
+  });
+
+  it("hides the banner when no update is available", () => {
+    renderSettingsMenu({ updateAvailable: false, latestVersion: null });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    expect(screen.queryByLabelText("copy update command")).toBeNull();
   });
 });
 
