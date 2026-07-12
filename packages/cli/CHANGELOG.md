@@ -1,5 +1,16 @@
 # localterm
 
+## 2.57.0
+
+### Minor Changes
+
+- Add an npm update-check workflow: the daemon checks for new localterm releases on a schedule and surfaces available updates through the CLI banner (`localterm start`/`status`), a new `localterm update` command, and a settings-panel indicator in the terminal UI. Honors `LOCALTERM_SKIP_UPDATE_CHECK=1`.
+
+### Patch Changes
+
+- Updated dependencies
+  - @monotykamary/localterm-server@2.57.0
+
 ## 2.56.3
 
 ### Patch Changes
