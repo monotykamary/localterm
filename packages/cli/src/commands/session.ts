@@ -418,7 +418,12 @@ const runOneShotExecImpl = async (
 // `localterm session attach <id>` — open a browser tab onto a live PTY by id.
 // No REST needed (attaching is the browser's job); this just resolves the
 // daemon's surface URL and opens it with `?sid=` so the WS attaches to the
-// existing shell instead of spawning a fresh one.
+// existing shell instead of spawning a fresh one. Opens at the daemon-local
+// surface (`localUrl`: portless https://localterm.localhost, else loopback)
+// for the same reason automation run tabs do — `session attach` opens in the
+// daemon's own browser, where a flapping `tailscale serve` (laptop wake, DERP
+// relay, cert renewal) would fail the tab load, so it never rides the tailnet
+// even when `resolveDaemonUrl` picks the tailnet URL as the remote `url`.
 const runAttach = async (id: string): Promise<void> => {
   const port = readPort();
   if (!port) {
@@ -427,7 +432,7 @@ const runAttach = async (id: string): Promise<void> => {
     return;
   }
   const resolved = await resolveDaemonUrl(port);
-  const url = new URL(resolved.url);
+  const url = new URL(resolved.localUrl ?? resolved.url);
   url.searchParams.set("sid", id);
   await open(url.href);
   console.log(kleur.green(`✓ opening ${shortId(id)} at ${url.href}`));
