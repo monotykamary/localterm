@@ -101,6 +101,7 @@ curl -s -X DELETE "$BASE/sessions/<id>"
 
 ```bash
 localterm session ls [--json]
+localterm session current [--json]      # self-reference: the id of the session this process runs in
 localterm session new [--cwd <path>] [--cmd <command>] [--shell <path>] [--name <t>] [--cols N] [--rows N] [--no-pin] [--json]
 localterm session attach <id>          # open a browser tab at <surface>/?sid=<id>
 localterm session kill <id>
@@ -122,6 +123,31 @@ localterm session unpin <id>
 `--json` emits a stable machine shape; without it, commands print human tables
 or confirmation lines. `new` prints the session id (or the full object with
 `--json`).
+
+### Self-reference: which session am I in?
+
+Every PTY localterm spawns gets `LOCALTERM_SESSION_ID` injected into its env
+(set in the server at spawn, inherited by every child process — shells, nested
+`localterm` calls, agent tool processes). `LOCALTERM=1` says "I'm inside a
+localterm PTY"; `LOCALTERM_SESSION_ID` says _which one_.
+
+```bash
+# Zero-dependency, no daemon needed — read the id directly:
+echo "$LOCALTERM_SESSION_ID"
+
+# Resolve it to the full live session object (cwd, title, state, clients):
+localterm session current
+localterm session current --json    # → the session object (same shape as `ls --json` rows)
+```
+
+Use this when an agent needs its own context (cwd, title, how many tabs are
+viewing this shell) without scanning `session ls` and guessing which row is
+its own — the env var is the unambiguous self-reference. `current` resolves
+the env id against `GET /api/sessions/:id`; if the daemon is down it degrades
+to the bare id (still a valid self-reference), and if the id isn't a live
+session (stale/spoofed env) it reports that and exits 1. Run from a plain
+terminal (outside any localterm PTY) it prints "not running inside a
+localterm session" and exits 1.
 
 ## exec
 

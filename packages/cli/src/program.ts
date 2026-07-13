@@ -373,6 +373,14 @@ export const createProgram = (): Command => {
       await runSessionList(options);
     });
   session
+    .command("current")
+    .description("print the id of the localterm session this process is running in")
+    .option("--json", "emit the full live session object as JSON")
+    .action(async (options: { json: boolean }) => {
+      const { runSessionCurrent } = await import("./commands/session.js");
+      await runSessionCurrent(options);
+    });
+  session
     .command("new")
     .description("spawn a detached PTY (pinned by default so it survives between calls)")
     .option("--cwd <path>", "working directory")

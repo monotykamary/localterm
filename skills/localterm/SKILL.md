@@ -1,6 +1,6 @@
 ---
 name: localterm
-description: Drive the localterm daemon's HTTP API and CLI — schedule automations, set up event-driven triggers (git changes, shell notifications, directory changes), trigger runs, manage per-program secrets (Keychain-backed PATH shims), control PTYs like tmux (list, create, send-keys, capture-pane, resize, rename, kill), run synchronous exec commands with captured output + exit code, run headless agent sessions (the built-in pi harness or a custom command, fresh or thread), send named keys (press), wait for a pane state, screenshot a pane to PNG (capture --png via the browser), drive TUIs with the mouse (click/drag/move/scroll, by coords or label), manage terminal themes (list/import/set/delete, shared with the browser UI), inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage automations, secrets, sessions, themes, run shell commands, or drive headless agent runs in localterm, or to script against the localterm server.
+description: Drive the localterm daemon's HTTP API and CLI — schedule automations, set up event-driven triggers (git changes, shell notifications, directory changes), trigger runs, manage per-program secrets (Keychain-backed PATH shims), control PTYs like tmux (list, create, send-keys, capture-pane, resize, rename, kill, self-reference the current session), run synchronous exec commands with captured output + exit code, run headless agent sessions (the built-in pi harness or a custom command, fresh or thread), send named keys (press), wait for a pane state, screenshot a pane to PNG (capture --png via the browser), drive TUIs with the mouse (click/drag/move/scroll, by coords or label), manage terminal themes (list/import/set/delete, shared with the browser UI), inspect git diffs, and check server health. Use when the user asks to schedule, list, or manage automations, secrets, sessions, themes, run shell commands, or drive headless agent runs in localterm, or to script against the localterm server.
 ---
 
 # localterm API
@@ -343,6 +343,7 @@ CLI equivalents:
 localterm exec "pnpm test 2>&1 | tail -20" --cwd /Users/me/project --timeout 60 --json
 localterm exec "fish -c 'status'" --shell /usr/bin/fish --json   # --shell overrides the daemon default (create/new/exec only)
 localterm session new --cwd /Users/me/project --shell /usr/bin/fish --json   # prints the session id
+localterm session current [--json]            # the id of the session this process runs in
 localterm session exec <id> "cd src && pwd" --json
 localterm session send-keys <id> 'ls\n'                # \n=Enter, \x03=Ctrl-C
 localterm session press <id> Escape : w q Enter      # named keys (F2, Ctrl-C, literal text)

@@ -156,6 +156,7 @@ export class Session extends EventEmitter<SessionEvents> {
     env.TERM = TERM_TYPE;
     env.COLORTERM = COLORTERM_VALUE;
     env.LOCALTERM = LOCALTERM_VALUE;
+    env.LOCALTERM_SESSION_ID = this.id;
 
     const [shellArgs, shellEnv] = this.prepareOsc7Hook(this.shellName, env);
     if (shellEnv) {

@@ -162,6 +162,63 @@ const runList = async (options: { json: boolean }): Promise<void> => {
   }
 };
 
+// `localterm session current [--json]` — self-reference: the id of the localterm
+// session this process is running in. The daemon injects LOCALTERM_SESSION_ID
+// into every PTY's env at spawn (inherited by all child processes), so a call
+// inside a tab resolves to its own session without scanning `session ls`.
+// Degrades to the bare id when the daemon is down; a non-live id (stale/spoofed
+// env) is reported and exits 1.
+const runCurrent = async (options: { json: boolean }): Promise<void> => {
+  const id = process.env.LOCALTERM_SESSION_ID;
+  if (!id) {
+    if (options.json) {
+      console.log(JSON.stringify({ error: "not_in_session" }));
+    } else {
+      console.log(kleur.red("✗ not running inside a localterm session"));
+      console.log(
+        kleur.dim("  env.LOCALTERM_SESSION_ID is set when a shell is spawned in a localterm PTY"),
+      );
+    }
+    process.exitCode = 1;
+    return;
+  }
+  let response: Response | null;
+  try {
+    const base = daemonBaseUrl();
+    response = await daemonFetch(`${base}/sessions/${encodeURIComponent(id)}`);
+  } catch {
+    response = null;
+  }
+  if (response === null) {
+    if (options.json) {
+      console.log(JSON.stringify({ id }));
+    } else {
+      console.log(`${kleur.cyan(shortId(id))}  ${kleur.dim("(daemon unreachable)")}`);
+      console.log(kleur.dim(`  ${id}`));
+    }
+    return;
+  }
+  if (!response.ok) {
+    if (options.json) {
+      console.log(JSON.stringify({ id, live: false }));
+    } else {
+      console.log(`${kleur.cyan(shortId(id))}  ${kleur.red("(not a live session)")}`);
+      console.log(kleur.dim(`  ${id}`));
+    }
+    process.exitCode = 1;
+    return;
+  }
+  const body = (await response.json()) as { session: SessionListItem };
+  const session = body.session;
+  if (options.json) {
+    console.log(JSON.stringify(session));
+    return;
+  }
+  console.log(
+    `${kleur.green("✓")} ${kleur.cyan(shortId(session.id))}  ${session.shellName}  ${kleur.dim(session.cwd)}  ${stateColor(session.state)}  ${kleur.dim(`· ${session.clients} client(s)`)}`,
+  );
+};
+
 // `localterm session new` — spawn a detached PTY. Pinned by default so an
 // agent's shell survives between calls; `--no-pin` enters the grace window.
 // Prints the session id (or the full session object with `--json`).
@@ -580,6 +637,7 @@ const runMouseState = async (id: string): Promise<void> => {
 };
 
 export const runSessionList = runList;
+export const runSessionCurrent = runCurrent;
 export const runSessionNew = runNew;
 export const runSessionKill = runKill;
 export const runSessionSendKeys = runSendKeys;
