@@ -24,13 +24,21 @@ export interface CharKey {
   readonly grow?: number;
 }
 
-export type SpecialAction = "backspace" | "enter" | "shift" | "control" | "alternate";
+export type SpecialAction =
+  | "backspace"
+  | "enter"
+  | "shift"
+  | "control"
+  | "alternate"
+  | "command"
+  | "function";
 
 export interface SpecialKey {
   readonly type: "special";
   readonly action: SpecialAction;
   readonly label: string;
   readonly symbol?: string;
+  readonly alternates?: Partial<Record<SlideDirection, KeyGlyph>>;
   readonly grow?: number;
 }
 
@@ -50,6 +58,8 @@ export interface ModifierState {
   readonly shift: ModifierMode;
   readonly control: ModifierMode;
   readonly alternate: ModifierMode;
+  readonly command: ModifierMode;
+  readonly function: ModifierMode;
 }
 
 export const ALL_SLIDE_DIRECTIONS: readonly SlideDirection[] = [
@@ -98,12 +108,14 @@ const special = (
   label: string,
   grow?: number,
   symbol?: string,
+  alternates?: Partial<Record<SlideDirection, string | KeyGlyph>>,
 ): SpecialKey => ({
   type: "special",
   action,
   label,
   symbol,
   grow,
+  alternates: alternates ? buildAlternates(alternates) : undefined,
 });
 
 const SPACE_KEY: CharKey = {
@@ -119,15 +131,19 @@ const SPACE_KEY: CharKey = {
   grow: 5,
 };
 
-// qwerty + number row. Each key shows its center glyph and the corner symbols
-// drawn around it; slide past the threshold toward a corner to type that
-// symbol (Unexpected Keyboard's slide mechanic). Punctuation sits on the
-// diagonal corners — number-row shifted symbols at northEast (shift = up), and
-// the row-end clusters on the keys that physically hold them (`, ~ on 1; -, =,
-// _ on 0; [, ], {, } on p; ;, :, ', " on l; ,, ., /, ? on m; \, |, <, > on n).
+// qwerty + number row. Each key shows its center glyph and corner symbols;
+// slide past the threshold toward a corner to type that symbol (Unexpected
+// Keyboard's slide mechanic). Punctuation sits on the diagonal corners,
+// spread across each row-end key and its left neighbor so no key is crowded:
+// ` ~ on 1; ( and - _ on 9, ) and = + on 0; [ { and | on o, ] } and \ on p
+// (brackets and angle brackets open on the left, close on the right; \ |
+// live on the qwerty row); ; : on k, ' " on l; , < and ? on n, . > and / on
+// m. Shifted symbols sit on the top corners, unshifted on the bottom
+// (shift = up). The ctrl and alt faces show the macOS modifier glyphs
+// (⌃ ⌥) and carry fn/cmd on their north-east swipe (popups are text only).
 // Cardinal slides (up/down/left/right) are reserved for drag-to-correct —
-// slide to a neighboring key before lifting to fix a mis-press. Space carries
-// the arrows on its four edges.
+// slide to a neighboring key before lifting to fix a mis-press. Space
+// carries the arrows on its four edges.
 export const qwertyLayout: KeyboardLayout = {
   rows: [
     {
@@ -140,8 +156,8 @@ export const qwertyLayout: KeyboardLayout = {
         char("6", { northEast: "^" }),
         char("7", { northEast: "&" }),
         char("8", { northEast: "*" }),
-        char("9", { northEast: "(" }),
-        char("0", { northEast: ")", southEast: "-", southWest: "=", northWest: "_" }),
+        char("9", { northEast: "(", southEast: "-", northWest: "_" }),
+        char("0", { northEast: ")", southEast: "=", northWest: "+" }),
       ],
     },
     {
@@ -154,8 +170,8 @@ export const qwertyLayout: KeyboardLayout = {
         char("y"),
         char("u"),
         char("i"),
-        char("o"),
-        char("p", { northEast: "{", northWest: "}", southEast: "[", southWest: "]" }),
+        char("o", { southWest: "[", northWest: "{", northEast: "|" }),
+        char("p", { southEast: "]", northEast: "}", southWest: BACKSLASH }),
       ],
     },
     {
@@ -167,13 +183,8 @@ export const qwertyLayout: KeyboardLayout = {
         char("g"),
         char("h"),
         char("j"),
-        char("k"),
-        char("l", {
-          northEast: SINGLE_QUOTE,
-          northWest: DOUBLE_QUOTE,
-          southEast: ";",
-          southWest: ":",
-        }),
+        char("k", { southEast: ";", northEast: ":" }),
+        char("l", { southEast: SINGLE_QUOTE, northEast: DOUBLE_QUOTE }),
       ],
     },
     {
@@ -184,15 +195,19 @@ export const qwertyLayout: KeyboardLayout = {
         char("c"),
         char("v"),
         char("b"),
-        char("n", { northEast: "<", northWest: ">", southEast: BACKSLASH, southWest: "|" }),
-        char("m", { northEast: "/", northWest: "?", southEast: ",", southWest: "." }),
+        char("n", { southWest: ",", northWest: "<", northEast: "?" }),
+        char("m", { southWest: ".", northWest: ">", southEast: "/" }),
         special("backspace", "delete", 1.5),
       ],
     },
     {
       cells: [
-        special("control", "ctrl", 1),
-        special("alternate", "alt", 1),
+        special("control", "ctrl", 1, "⌃", {
+          northEast: { label: "fn", output: "", name: "function" },
+        }),
+        special("alternate", "alt", 1, "⌥", {
+          northEast: { label: "cmd", output: "", name: "command" },
+        }),
         SPACE_KEY,
         special("enter", "return", 2),
       ],

@@ -80,7 +80,13 @@ interface RepeatState {
   fired: boolean;
 }
 
-const INITIAL_MODIFIERS: ModifierState = { shift: "off", control: "off", alternate: "off" };
+const INITIAL_MODIFIERS: ModifierState = {
+  shift: "off",
+  control: "off",
+  alternate: "off",
+  command: "off",
+  function: "off",
+};
 
 const cycleModifier = (mode: ModifierMode): ModifierMode => {
   if (mode === "off") return "oneShot";
@@ -92,6 +98,8 @@ const consumeOneShot = (state: ModifierState): ModifierState => ({
   shift: state.shift === "oneShot" ? "off" : state.shift,
   control: state.control === "oneShot" ? "off" : state.control,
   alternate: state.alternate === "oneShot" ? "off" : state.alternate,
+  command: state.command === "oneShot" ? "off" : state.command,
+  function: state.function === "oneShot" ? "off" : state.function,
 });
 
 const SPECIAL_ICONS: Partial<Record<SpecialAction, LucideIcon>> = {
@@ -244,7 +252,7 @@ export const OnScreenKeyboard = ({
       if (gesture.cell.type === "char") {
         onInput(buildCharOutput(gesture.selected ?? gesture.cell.center, modifiersRef.current));
       } else {
-        onInput(buildSpecialOutput(gesture.cell.action));
+        onInput(buildSpecialOutput(gesture.cell.action, modifiersRef.current));
       }
     },
     [onInput],
@@ -294,9 +302,21 @@ export const OnScreenKeyboard = ({
             alternate: cycleModifier(modifiersRef.current.alternate),
           });
           return;
+        case "command":
+          applyModifiers({
+            ...modifiersRef.current,
+            command: cycleModifier(modifiersRef.current.command),
+          });
+          return;
+        case "function":
+          applyModifiers({
+            ...modifiersRef.current,
+            function: cycleModifier(modifiersRef.current.function),
+          });
+          return;
         default: {
           const current = modifiersRef.current;
-          onInput(buildSpecialOutput(cell.action));
+          onInput(buildSpecialOutput(cell.action, current));
           applyModifiers(consumeOneShot(current));
         }
       }
@@ -371,6 +391,20 @@ export const OnScreenKeyboard = ({
           resolved = true;
         }
       }
+      if (pressed.type === "special" && pressed.alternates) {
+        const target = computeKeyboardSlideTarget(
+          deltaX,
+          deltaY,
+          KEYBOARD_SLIDE_THRESHOLD_PX,
+          pressed.alternates,
+        );
+        if (target) {
+          nextSelected = target.glyph;
+          nextActiveCell = pressed;
+          nextActiveRect = gesture.rect;
+          resolved = true;
+        }
+      }
       if (!resolved) {
         const hit = findNearestKey(event.clientX, event.clientY);
         if (hit && hit.keyId !== gesture.keyId) {
@@ -425,8 +459,17 @@ export const OnScreenKeyboard = ({
           const shiftHeld = shiftHoldRef.current.fired;
           shiftHoldRef.current = { timeout: undefined, fired: false };
           if (isDragCorrect || (isTap && !shiftHeld)) handleSpecialTap(active);
-        } else if (isDragCorrect || isTap) {
-          handleSpecialTap(active);
+        } else {
+          const selected = gesture.selected;
+          if (selected && (selected.name === "command" || selected.name === "function")) {
+            handleSpecialTap({
+              type: "special",
+              action: selected.name,
+              label: selected.label,
+            });
+          } else if (isDragCorrect || isTap) {
+            handleSpecialTap(active);
+          }
         }
         return;
       }
@@ -463,8 +506,10 @@ export const OnScreenKeyboard = ({
     let modifierActive = false;
     if (cell.type === "special") {
       if (cell.action === "shift") modifierActive = modifiers.shift !== "off";
-      else if (cell.action === "control") modifierActive = modifiers.control !== "off";
-      else if (cell.action === "alternate") modifierActive = modifiers.alternate !== "off";
+      else if (cell.action === "control")
+        modifierActive = modifiers.control !== "off" || modifiers.function !== "off";
+      else if (cell.action === "alternate")
+        modifierActive = modifiers.alternate !== "off" || modifiers.command !== "off";
     }
     const grow = cell.grow ?? 1;
     const fontSize = cell.type === "special" ? KEYBOARD_SPECIAL_FONT_SIZE_PX : charFontSize;
@@ -509,12 +554,39 @@ export const OnScreenKeyboard = ({
       );
     } else {
       const Icon = SPECIAL_ICONS[cell.action];
-      content = cell.symbol ? (
-        <span className="leading-none">{cell.symbol}</span>
-      ) : Icon ? (
-        <Icon size={KEYBOARD_ICON_SIZE_PX} />
-      ) : (
-        <span className="leading-none">{faceLabel}</span>
+      const specialAlternates = cell.alternates;
+      content = (
+        <>
+          {cell.symbol ? (
+            <span className="leading-none">{cell.symbol}</span>
+          ) : Icon ? (
+            <Icon size={KEYBOARD_ICON_SIZE_PX} />
+          ) : (
+            <span className="leading-none">{faceLabel}</span>
+          )}
+          {ALL_SLIDE_DIRECTIONS.map((direction) => {
+            const glyph = specialAlternates?.[direction];
+            if (glyph == null) return null;
+            const isAlternateSelected = gesture?.selected === glyph;
+            return (
+              <span
+                key={direction}
+                className={cn(
+                  "absolute leading-none",
+                  isAlternateSelected
+                    ? "text-accent-foreground font-bold"
+                    : "text-muted-foreground",
+                )}
+                style={{
+                  ...SLIDE_CORNER_STYLE[direction],
+                  fontSize: KEYBOARD_ALTERNATE_FONT_SIZE_PX,
+                }}
+              >
+                {glyph.label}
+              </span>
+            );
+          })}
+        </>
       );
     }
     return (
@@ -594,6 +666,8 @@ export const OnScreenKeyboard = ({
               : modifiers.shift === "off"
                 ? "shift"
                 : "off";
+          } else if (gesture.selected != null) {
+            label = gesture.selected.label;
           } else {
             label = gesture.activeCell.label;
           }
