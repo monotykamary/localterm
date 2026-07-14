@@ -618,6 +618,7 @@ export const OnScreenKeyboard = ({
     <>
       <div
         ref={containerRef}
+        data-on-screen-keyboard
         className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 backdrop-blur-sm"
         style={{
           paddingBottom: "calc(" + KEYBOARD_BOTTOM_PADDING_PX + "px + env(safe-area-inset-bottom))",

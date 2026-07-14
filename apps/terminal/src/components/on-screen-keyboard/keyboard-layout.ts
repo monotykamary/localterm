@@ -17,7 +17,7 @@ export interface KeyGlyph {
   readonly icon?: LucideIcon;
 }
 
-export interface CharKey {
+interface CharKey {
   readonly type: "char";
   readonly icon?: LucideIcon;
   readonly center: KeyGlyph;
@@ -46,7 +46,7 @@ export interface SpecialKey {
 
 export type KeyboardCell = CharKey | SpecialKey;
 
-export interface KeyboardRow {
+interface KeyboardRow {
   readonly cells: readonly KeyboardCell[];
 }
 

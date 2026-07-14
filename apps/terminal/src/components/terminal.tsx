@@ -87,7 +87,7 @@ import {
   DEFAULT_DOCUMENT_TITLE,
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
   TERMINAL_TAP_MOVEMENT_THRESHOLD_PX,
-  TERMINAL_KEYBOARD_HIDE_VIEWPORT_GROWTH_PX,
+  TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX,
   TERMINAL_VIEWPORT_WIDTH_STABLE_PX,
   ENTER_KEY_CODE,
   FALLBACK_TERMINAL_BACKGROUND_HEX,
@@ -145,11 +145,13 @@ import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider"
 import { extractKeyboardModifiers } from "@/utils/extract-keyboard-modifiers";
 import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
 import { formatShellExitMarker } from "@/utils/format-shell-exit-marker";
+import { dismissSystemKeyboard } from "@/utils/dismiss-system-keyboard";
 import { triggerHapticFeedback } from "@/utils/haptic-feedback";
 import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anchor";
 import { outputBatcher } from "@/utils/write-terminal-output";
 import { shouldBlockTerminalScrollbackPurge } from "@/utils/should-block-terminal-scrollback-purge";
+import { suppressTerminalSystemKeyboard } from "@/utils/suppress-terminal-system-keyboard";
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { detectLikelyKeepAwakeSupported } from "@/utils/detect-likely-keep-awake-supported";
 import { formatDiffCount } from "@/utils/format-diff-count";
@@ -576,21 +578,97 @@ export const Terminal = () => {
   const isTouchDevice = useMemo(() => isCoarsePointer(), []);
   const isAppleWebKit = useMemo(detectIsAppleWebKit, []);
   const deviceTier = useDeviceTier();
-  const [isOnScreenKeyboardOpen, setOnScreenKeyboardOpen] = useState(false);
+  const [isOnScreenKeyboardOpen, setIsOnScreenKeyboardOpen] = useState(false);
   const [onScreenKeyboardHeight, setOnScreenKeyboardHeight] = useState(0);
   const onScreenKeyboardOpenRef = useRef(false);
   const sendInputRef = useRef<((data: string) => void) | null>(null);
-  useEffect(() => {
-    onScreenKeyboardOpenRef.current = isOnScreenKeyboardOpen;
-  }, [isOnScreenKeyboardOpen]);
+  const closeOnScreenKeyboard = useCallback(() => {
+    onScreenKeyboardOpenRef.current = false;
+    setIsOnScreenKeyboardOpen(false);
+  }, []);
+  const openOnScreenKeyboard = useCallback(() => {
+    suppressTerminalSystemKeyboard(terminalRef.current?.textarea);
+    dismissSystemKeyboard();
+    onScreenKeyboardOpenRef.current = true;
+    setIsOnScreenKeyboardOpen(true);
+  }, []);
+  const toggleOnScreenKeyboard = useCallback(() => {
+    if (onScreenKeyboardOpenRef.current) closeOnScreenKeyboard();
+    else openOnScreenKeyboard();
+  }, [closeOnScreenKeyboard, openOnScreenKeyboard]);
 
-  // Focus the terminal cursor whenever the on-screen keyboard opens — inputMode
-  // stays "none" so the system keyboard stays suppressed — and re-focus after
-  // each keystroke so the cursor block stays solid while typing through the OSK.
+  useEffect(() => {
+    if (deviceTier === "desktop") closeOnScreenKeyboard();
+  }, [closeOnScreenKeyboard, deviceTier]);
+
+  // Focus the terminal cursor whenever the on-screen keyboard opens. The
+  // guarded helper textarea keeps the system keyboard suppressed, and re-focus
+  // after each keystroke keeps xterm's cursor block solid while using the OSK.
   useEffect(() => {
     if (!isOnScreenKeyboardOpen) return;
     refocusTerminalRef.current?.();
   }, [isOnScreenKeyboardOpen]);
+
+  useEffect(() => {
+    if (!isOnScreenKeyboardOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (containerRef.current?.contains(target)) return;
+      if (
+        target instanceof Element &&
+        target.closest("[data-on-screen-keyboard], [data-on-screen-keyboard-toggle]")
+      ) {
+        return;
+      }
+      closeOnScreenKeyboard();
+    };
+    const handleFocusIn = (event: FocusEvent) => {
+      if (event.target === terminalRef.current?.textarea) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-on-screen-keyboard-toggle]")
+      ) {
+        return;
+      }
+      closeOnScreenKeyboard();
+    };
+    // Some Android IMEs ignore both flags on an already-focused textarea. A large,
+    // width-stable viewport shrink is the final signal to evict that stale IME.
+    const visualViewport = window.visualViewport;
+    let baselineViewportHeight = visualViewport?.height ?? 0;
+    let baselineViewportWidth = visualViewport?.width ?? 0;
+    const handleViewportResize = () => {
+      if (!visualViewport) return;
+      const viewportHeight = visualViewport.height;
+      const viewportWidth = visualViewport.width;
+      const didViewportWidthChange =
+        Math.abs(viewportWidth - baselineViewportWidth) >= TERMINAL_VIEWPORT_WIDTH_STABLE_PX;
+      if (didViewportWidthChange) {
+        baselineViewportHeight = viewportHeight;
+        baselineViewportWidth = viewportWidth;
+        return;
+      }
+      const didSystemKeyboardOpen =
+        viewportHeight < baselineViewportHeight - TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX;
+      if (onScreenKeyboardOpenRef.current && didSystemKeyboardOpen) {
+        baselineViewportHeight = viewportHeight;
+        suppressTerminalSystemKeyboard(terminalRef.current?.textarea);
+        dismissSystemKeyboard();
+        refocusTerminalRef.current?.();
+        return;
+      }
+      baselineViewportHeight = Math.max(baselineViewportHeight, viewportHeight);
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("focusin", handleFocusIn, true);
+    visualViewport?.addEventListener("resize", handleViewportResize);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("focusin", handleFocusIn, true);
+      visualViewport?.removeEventListener("resize", handleViewportResize);
+    };
+  }, [closeOnScreenKeyboard, isOnScreenKeyboardOpen]);
 
   // Hardware back / iOS edge-swipe dismisses the on-screen keyboard instead of
   // navigating: push a history entry on open and pop it on close so a back
@@ -598,13 +676,13 @@ export const Terminal = () => {
   useEffect(() => {
     if (!isOnScreenKeyboardOpen) return;
     window.history.pushState({ localtermOsk: true }, "");
-    const onPopState = () => setOnScreenKeyboardOpen(false);
+    const onPopState = () => closeOnScreenKeyboard();
     window.addEventListener("popstate", onPopState);
     return () => {
       window.removeEventListener("popstate", onPopState);
       if (window.history.state?.localtermOsk) window.history.back();
     };
-  }, [isOnScreenKeyboardOpen]);
+  }, [closeOnScreenKeyboard, isOnScreenKeyboardOpen]);
   // Apple WebKit ignores `interactive-widget=resizes-content` (set in
   // index.html) — its keyboard overlays the layout viewport, where Chromium
   // shrinks it above the keyboard in one browser-driven pass. Only WebKit
@@ -1025,6 +1103,7 @@ export const Terminal = () => {
       helperTextArea.setAttribute("autocapitalize", "off");
       helperTextArea.setAttribute("autocorrect", "off");
       helperTextArea.spellcheck = false;
+      if (isTouchDevice) suppressTerminalSystemKeyboard(helperTextArea);
     }
 
     let tapStartClientX = 0;
@@ -1035,7 +1114,7 @@ export const Terminal = () => {
     // terminal. inputMode "none" keeps the system keyboard suppressed on touch
     // while still focusing the textarea so xterm's cursor block stays solid.
     const refocusTerminalQuietly = () => {
-      if (isTouchDevice && terminal.textarea) terminal.textarea.inputMode = "none";
+      if (isTouchDevice) suppressTerminalSystemKeyboard(terminal.textarea);
       if (terminal.textarea !== document.activeElement) terminal.focus();
     };
     const handleTerminalTouchStart = (event: TouchEvent) => {
@@ -1066,34 +1145,30 @@ export const Terminal = () => {
         return;
       }
       if (onScreenKeyboardOpenRef.current) return;
-      setOnScreenKeyboardOpen(true);
+      openOnScreenKeyboard();
     };
     const tapListenerAbort = new AbortController();
     if (isTouchDevice) {
-      // inputMode="none" on the helper textarea prevents the virtual keyboard
-      // opening on focus, so xterm's scroll-release / viewport-refocus can't
-      // pop it. A reactive blur-on-focus loses the race vs iOS's synchronous
-      // keyboard-open; the guard prevents it at focus time. Taps + explicit
-      // refocuses flip inputMode back to "" to allow typing.
+      // inputMode="none" is the primary IME guard; readOnly backs it up for
+      // Android keyboards that ignore inputMode when xterm re-focuses an
+      // already-active helper textarea. Keeping both on every focus path makes
+      // the terminal custom-keyboard-only without affecting the app's inputs.
       const guardTextarea = () => {
-        if (terminal.textarea) terminal.textarea.inputMode = "none";
+        suppressTerminalSystemKeyboard(terminal.textarea);
       };
       const blurAndGuardTextarea = () => {
-        if (terminal.textarea) {
-          terminal.textarea.blur();
-          terminal.textarea.inputMode = "none";
-        }
+        suppressTerminalSystemKeyboard(terminal.textarea);
+        terminal.textarea?.blur();
       };
       guardTextarea();
       terminal.textarea?.addEventListener("blur", guardTextarea, {
         signal: tapListenerAbort.signal,
       });
-      // Keyboard-dismiss paths that DON'T blur the textarea (Android back,
-      // OSK hide-toggle, iOS swipe-down) leave it focused with inputMode="",
-      // so the next scroll's re-focus reopens the keyboard. visualViewport
-      // growing back (height up, width stable) is the cross-platform
-      // keyboard-hide signal — blur + re-guard there, resetting to the
-      // unfocused + guarded (cold) state.
+      // A native keyboard that was already active can dismiss without blurring
+      // xterm's helper (Android back, an IME hide-toggle, iOS swipe-down). A
+      // growing visualViewport is the cross-platform hide signal; reset the
+      // helper there so a later xterm scroll-refocus starts from the guarded,
+      // unfocused state instead of reviving the stale IME session.
       const visualViewport = window.visualViewport;
       if (visualViewport) {
         let prevViewportHeight = visualViewport.height;
@@ -1101,7 +1176,7 @@ export const Terminal = () => {
         const onViewportResize = () => {
           const height = visualViewport.height;
           const width = visualViewport.width;
-          const grew = height > prevViewportHeight + TERMINAL_KEYBOARD_HIDE_VIEWPORT_GROWTH_PX;
+          const grew = height > prevViewportHeight + TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX;
           const widthStable =
             Math.abs(width - prevViewportWidth) < TERMINAL_VIEWPORT_WIDTH_STABLE_PX;
           if (grew && widthStable) blurAndGuardTextarea();
@@ -1609,7 +1684,7 @@ export const Terminal = () => {
 
     observer.observe(container);
     fitToContainer();
-    if (!onScreenKeyboardOpenRef.current) requestAnimationFrame(() => terminal.focus());
+    if (!onScreenKeyboardOpenRef.current) requestAnimationFrame(refocusTerminalQuietly);
 
     const showDeadSessionMask = (exitCode: number | null) => {
       if (disposed) return;
@@ -2808,9 +2883,8 @@ export const Terminal = () => {
       if (cancelled) return;
       if (wsConnectedRef.current) return;
       if (healthy) {
-        const terminal = terminalRef.current;
-        if (terminal && !onScreenKeyboardOpenRef.current) {
-          terminal.focus();
+        if (terminalRef.current && !onScreenKeyboardOpenRef.current) {
+          refocusTerminalRef.current?.();
         }
         manualReconnectRef.current?.();
         return;
@@ -3278,7 +3352,8 @@ export const Terminal = () => {
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      onClick={() => setOnScreenKeyboardOpen((open) => !open)}
+                      data-on-screen-keyboard-toggle
+                      onClick={toggleOnScreenKeyboard}
                       aria-label="toggle on-screen keyboard"
                       className={cn(
                         "hover:text-foreground",

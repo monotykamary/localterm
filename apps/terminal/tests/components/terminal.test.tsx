@@ -332,6 +332,22 @@ const stubBrowserGlobals = () => {
   );
 };
 
+const installTouchMatchMedia = () => {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockImplementation((query: string) => ({
+      matches: query === "(pointer: coarse)",
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  );
+};
+
 const dispatchFindShortcut = (handle: FakeXtermHandle | undefined): boolean | undefined => {
   if (!handle?.customKeyEventHandler) return undefined;
   const event = new KeyboardEvent("keydown", { key: "f", metaKey: true });
@@ -730,6 +746,64 @@ const dispatchEnterKey = (
   const handlerResult = handle.customKeyEventHandler(event);
   return { preventDefaultCalls, handlerResult };
 };
+
+describe("Terminal on-screen keyboard arbitration", () => {
+  const queryOnScreenKeyboard = () => document.querySelector("[data-on-screen-keyboard]");
+  const openOnScreenKeyboard = () => {
+    fireEvent.click(screen.getByLabelText("toggle on-screen keyboard"));
+    const keyboard = queryOnScreenKeyboard();
+    if (!keyboard) throw new Error("on-screen keyboard did not open");
+    return keyboard;
+  };
+
+  beforeEach(() => {
+    installTouchMatchMedia();
+    vi.spyOn(window.history, "back").mockImplementation(() => {
+      window.history.replaceState(null, "");
+    });
+  });
+
+  it("dismisses an active system-keyboard input before opening for the terminal", () => {
+    render(<Terminal />);
+    const outsideInput = document.createElement("input");
+    document.body.appendChild(outsideInput);
+    outsideInput.focus();
+    const blurSpy = vi.spyOn(outsideInput, "blur");
+
+    openOnScreenKeyboard();
+
+    expect(blurSpy).toHaveBeenCalledOnce();
+    expect(document.activeElement).not.toBe(outsideInput);
+    outsideInput.remove();
+  });
+
+  it("closes before a pointer outside the terminal can summon the system keyboard", () => {
+    render(<Terminal />);
+    openOnScreenKeyboard();
+
+    fireEvent.pointerDown(screen.getByLabelText("terminal session"));
+    expect(queryOnScreenKeyboard()).not.toBeNull();
+
+    fireEvent.pointerDown(screen.getByLabelText("find in terminal"));
+    expect(queryOnScreenKeyboard()).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("find in terminal"));
+    expect(document.activeElement).toBe(screen.getByLabelText("find query"));
+  });
+
+  it("closes when a non-terminal input receives programmatic focus", () => {
+    render(<Terminal />);
+    openOnScreenKeyboard();
+    const outsideInput = document.createElement("input");
+    document.body.appendChild(outsideInput);
+
+    act(() => outsideInput.focus());
+
+    expect(queryOnScreenKeyboard()).toBeNull();
+    expect(document.activeElement).toBe(outsideInput);
+    outsideInput.remove();
+  });
+});
 
 describe("Terminal kitty keyboard Shift+Enter", () => {
   it("emits CSI u for Shift+Enter once the TUI pushes the kitty disambiguate flag", () => {
