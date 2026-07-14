@@ -48,6 +48,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { EventTriggerSelector } from "@/components/event-trigger-selector";
 import { AgentComposer } from "@/components/agent-composer";
+import { FilePreviewModal } from "@/components/file-preview-modal";
 import { SecretSelector } from "@/components/secret-selector";
 import { fetchAgentSession } from "@/utils/fetch-agent-session";
 import { fetchAgentSessionUrl } from "@/utils/fetch-agent-session-url";
@@ -288,7 +289,12 @@ const ToolLogEntry = ({ entry }: { entry: Extract<AgentSessionEntry, { type: "to
 // logs scroll here instead of expanding inline, which invited bad UX.
 // Colors follow pi's transcript conventions: grey for user, transparent for
 // assistant, green for tool, purple for compaction.
-const renderLogEntry = (entry: AgentSessionEntry, index: number) => {
+const renderLogEntry = (
+  entry: AgentSessionEntry,
+  index: number,
+  cwd: string | undefined,
+  onOpenFile: ((filePath: string) => void) | undefined,
+) => {
   if (entry.type === "compaction") {
     return (
       <div key={index} className="rounded-sm border border-purple-800/40 bg-purple-950/50 p-2">
@@ -300,7 +306,9 @@ const renderLogEntry = (entry: AgentSessionEntry, index: number) => {
             : ""}
         </div>
         <div className="mt-0.5 text-zinc-400">
-          <Markdown>{entry.summary}</Markdown>
+          <Markdown cwd={cwd} onOpenFile={onOpenFile}>
+            {entry.summary}
+          </Markdown>
         </div>
       </div>
     );
@@ -323,7 +331,9 @@ const renderLogEntry = (entry: AgentSessionEntry, index: number) => {
           </div>
         ) : null}
         <div className="mt-0.5 text-zinc-200">
-          <Markdown>{entry.text}</Markdown>
+          <Markdown cwd={cwd} onOpenFile={onOpenFile}>
+            {entry.text}
+          </Markdown>
         </div>
       </div>
     );
@@ -348,6 +358,8 @@ const RunLogView = ({
 }) => {
   const [sessionEntries, setSessionEntries] = useState<AgentSessionEntry[] | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const handleOpenFile = useCallback((filePath: string) => setPreviewPath(filePath), []);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollContentRef = useRef<HTMLDivElement | null>(null);
   const automation = automations.find((candidate) => candidate.id === automationId);
@@ -481,7 +493,14 @@ const RunLogView = ({
             </p>
           ) : displayEntries ? (
             <div className="flex flex-col gap-2 font-mono text-[11px] leading-relaxed">
-              {displayEntries.map((entry, index) => renderLogEntry(entry, index))}
+              {displayEntries.map((entry, index) =>
+                renderLogEntry(
+                  entry,
+                  index,
+                  automation.cwd,
+                  automation.cwd ? handleOpenFile : undefined,
+                ),
+              )}
             </div>
           ) : textLog ? (
             <pre className="whitespace-pre-wrap break-words rounded-sm bg-foreground/5 p-3 font-mono text-[11px] leading-relaxed text-foreground/80">
@@ -509,6 +528,13 @@ const RunLogView = ({
       >
         <ChevronDown className="size-4" aria-hidden="true" />
       </button>
+      {previewPath ? (
+        <FilePreviewModal
+          cwd={automation.cwd}
+          filePath={previewPath}
+          onClose={() => setPreviewPath(null)}
+        />
+      ) : null}
     </div>
   );
 };

@@ -438,6 +438,13 @@ export const HTTP_STATUS_CONFLICT = 409;
 export const HTTP_STATUS_PAYLOAD_TOO_LARGE = 413;
 export const HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE = 415;
 
+// /api/file/content text preview. A hard byte cap keeps a giant generated file
+// from ballooning the response, and the NUL-byte sample (git's binary-detection
+// window) rejects binaries so the preview never shows mojibake for an image or
+// compiled artifact.
+export const FILE_PREVIEW_MAX_BYTES = 1_000_000;
+export const FILE_PREVIEW_BINARY_SAMPLE_BYTES = 8_000;
+
 // Git diff endpoints. The summary endpoint is polled by the browser every few
 // seconds, so every limit here exists to keep one poll cheap and to keep a
 // pathological working tree (huge generated file, thousands of untracked

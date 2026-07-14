@@ -182,6 +182,7 @@ import { encodeClick, encodeDrag, encodeMove, encodeScroll } from "./utils/sgr-m
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 import { isContained, resolveStaticAsset } from "./static-resolver.js";
 import { resolveImageAsset } from "./utils/resolve-image-asset.js";
+import { resolveTextAsset } from "./utils/resolve-text-asset.js";
 import { extensionForImageContentType } from "./utils/image-extensions.js";
 import { sweepStaleWorktrees } from "./utils/worktree-sweep.js";
 import {
@@ -1463,6 +1464,35 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
       headers["content-security-policy"] = "default-src 'none'; style-src 'unsafe-inline'";
     }
     return new Response(new Uint8Array(asset.body), { status: 200, headers });
+  });
+
+  // Text content for the agent-log file preview. Served as text/plain (never
+  // parsed as HTML) with a default-src 'none' CSP and no-store, so clicking a
+  // relative path in a transcript previews source/config safely. The same
+  // sanitizeDiffPath guard rejects absolute and ".." paths; resolveTextAsset
+  // adds containment, a byte cap, and a NUL-byte binary check.
+  api.get("/file/content", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    const filePath = sanitizeDiffPath(context.req.query("path"));
+    if (!filePath) return context.json({ error: "invalid_path" }, HTTP_STATUS_BAD_REQUEST);
+    const asset = resolveTextAsset(cwd, filePath);
+    if (asset === null) return context.text("not found", HTTP_STATUS_NOT_FOUND);
+    if (!asset.ok) {
+      if (asset.reason === "too_large") {
+        return context.text("too large", HTTP_STATUS_PAYLOAD_TOO_LARGE);
+      }
+      return context.text("binary", HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE);
+    }
+    return new Response(asset.content, {
+      status: 200,
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "content-disposition": "inline",
+        "content-security-policy": "default-src 'none'",
+        "cache-control": "no-store",
+      },
+    });
   });
 
   // POST /api/upload-image — a pasted or file-picked image from the PWA. The

@@ -136,6 +136,7 @@ import { TERMINAL_THEMES, findTerminalThemeById } from "@/lib/terminal-themes";
 import { generateExtendedPalette } from "@/utils/generate-extended-palette";
 import { awaitFontReady } from "@/utils/await-font-ready";
 import { buildKittyKeySequence } from "@/utils/build-kitty-key-sequence";
+import { buildTerminalEditingOutput } from "@/utils/build-terminal-editing-output";
 import {
   captureTerminalScrollAnchor,
   type TerminalScrollAnchor,
@@ -1460,6 +1461,24 @@ export const Terminal = () => {
         if (event.type === "keydown") {
           event.preventDefault();
           openSearchOverlayRef.current?.();
+        }
+        return false;
+      }
+      const terminalEditingOutput = buildTerminalEditingOutput({
+        key: event.key,
+        alternate: event.altKey,
+        command: isMac && event.metaKey,
+        control: event.ctrlKey,
+      });
+      if (terminalEditingOutput !== null) {
+        event.preventDefault();
+        if (event.type === "keydown") {
+          const localEcho = localEchoRef.current;
+          if (localEcho) {
+            localEcho.handleInput(terminalEditingOutput);
+          } else {
+            send({ type: "input", data: terminalEditingOutput });
+          }
         }
         return false;
       }

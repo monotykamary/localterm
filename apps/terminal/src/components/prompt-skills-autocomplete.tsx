@@ -90,6 +90,15 @@ export const PromptSkillsAutocomplete = ({
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (!menuOpen || !hasItems) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setActiveToken(null);
+      return;
+    }
+    // Modifier-bearing keys fall through to the textarea so Cmd/Ctrl/Alt/Shift
+    // + arrow keeps moving (and selecting) the cursor, and Cmd+Enter can
+    // submit, instead of the open menu stealing the key.
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setHighlightedIndex((index) => Math.min(filtered.length - 1, index + 1));
@@ -104,11 +113,6 @@ export const PromptSkillsAutocomplete = ({
       event.preventDefault();
       const skill = filtered[highlightedIndex];
       if (skill) insertSkill(skill);
-      return;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setActiveToken(null);
     }
   };
 

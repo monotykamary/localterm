@@ -85,6 +85,7 @@ import {
 } from "@/lib/pr-state";
 import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "@/utils/fetch-git-diff";
 import { buildFileUrl } from "@/utils/build-file-url";
+import { splitFilePath } from "@/utils/split-file-path";
 import { PrefetchQueue, type PrefetchQueueItem } from "@/utils/prefetch-queue";
 import {
   annotationRangeStart,
@@ -206,12 +207,6 @@ const DELETIONS_CLASSES = "text-red-400";
 
 const LINE_NUMBER_CELL_CLASSES =
   "w-12 shrink-0 select-none px-2 text-right text-muted-foreground/50 tabular-nums";
-
-const splitFilePath = (filePath: string): { directory: string; basename: string } => {
-  const lastSlash = filePath.lastIndexOf("/");
-  if (lastSlash === -1) return { directory: "", basename: filePath };
-  return { directory: filePath.slice(0, lastSlash + 1), basename: filePath.slice(lastSlash + 1) };
-};
 
 // Picks the open-file action for the header button: images open in a new tab
 // (the server serves the bytes directly), text files open in neovim, and
