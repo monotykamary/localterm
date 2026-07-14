@@ -23,6 +23,7 @@ export {
   MAX_COLS,
   MAX_CONCURRENT_SESSIONS,
   MAX_CRON_EXPRESSION_LENGTH,
+  MAX_IMAGE_UPLOAD_BYTES,
   MAX_INPUT_BYTES,
   MAX_NOTIFICATION_LENGTH,
   MAX_OUTPUT_BYTES,
@@ -255,7 +256,7 @@ export type {
 } from "./types.js";
 export { compileSchedule, compileScheduleAll } from "./utils/compile-schedule.js";
 export type { BrowserCandidate, DetectedBrowser } from "./cdp/detect-chromium.js";
-export { isImagePath } from "./utils/image-extensions.js";
+export { extensionForImageContentType, isImagePath } from "./utils/image-extensions.js";
 export type { ServerError, ServerErrorCode, ServerErrorKind } from "./errors.js";
 export type {
   AuthSession,

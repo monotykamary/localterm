@@ -19,6 +19,7 @@ import {
   Copy,
   FileDiff,
   FolderGit2,
+  ImageIcon,
   Key,
   Keyboard,
   MonitorCog,
@@ -81,6 +82,7 @@ import { useUpdateStatus } from "@/hooks/use-update-status";
 import { createGitWorktree, type CreateWorktreeOptions } from "@/utils/fetch-git-worktrees";
 import {
   COPY_FEEDBACK_MS,
+  PASTED_IMAGE_FEEDBACK_MS,
   DEAD_SESSION_TITLE_PREFIX,
   DEFAULT_DOCUMENT_TITLE,
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
@@ -151,6 +153,7 @@ import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { detectLikelyKeepAwakeSupported } from "@/utils/detect-likely-keep-awake-supported";
 import { formatDiffCount } from "@/utils/format-diff-count";
 import { shellQuoteArg } from "@/utils/shell-quote-arg";
+import { uploadPastedImage } from "@/utils/upload-pasted-image";
 import { buildFileUrl } from "@/utils/build-file-url";
 import { isAutomationsShortcut } from "@/utils/is-automations-shortcut";
 import { isBinaryMessageData } from "@/utils/is-binary-message-data";
@@ -189,6 +192,7 @@ import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer
 import { computePtyViewportOverlay } from "@/utils/compute-pty-viewport-overlay";
 
 import {
+  MAX_IMAGE_UPLOAD_BYTES,
   MAX_INPUT_BYTES,
   type ClientToServerMessage,
   type CompressMode,
@@ -2516,6 +2520,144 @@ export const Terminal = () => {
     pasteToTerminalRef.current?.(text);
   }, []);
 
+  const [pastedImageNotice, setPastedImageNotice] = useState<{
+    kind: "uploading" | "done" | "error";
+    message: string;
+  } | null>(null);
+  const pastedImageTimerRef = useRef<number | null>(null);
+  const pasteImageFromBlobRef = useRef<((blob: Blob, filename: string) => Promise<void>) | null>(
+    null,
+  );
+
+  const showPastedImageNotice = useCallback(
+    (notice: { kind: "uploading" | "done" | "error"; message: string } | null) => {
+      if (pastedImageTimerRef.current !== null) {
+        window.clearTimeout(pastedImageTimerRef.current);
+        pastedImageTimerRef.current = null;
+      }
+      setPastedImageNotice(notice);
+      if (notice && notice.kind !== "uploading") {
+        pastedImageTimerRef.current = window.setTimeout(() => {
+          pastedImageTimerRef.current = null;
+          setPastedImageNotice(null);
+        }, PASTED_IMAGE_FEEDBACK_MS);
+      }
+    },
+    [],
+  );
+
+  const pasteImageFromBlob = useCallback(
+    async (blob: Blob, filename: string) => {
+      const cwd = liveCwdRef.current;
+      if (!blob.type.startsWith("image/")) {
+        showPastedImageNotice({ kind: "error", message: "Not an image" });
+        return;
+      }
+      if (blob.size > MAX_IMAGE_UPLOAD_BYTES) {
+        showPastedImageNotice({ kind: "error", message: "Image too large" });
+        return;
+      }
+      if (!cwd) {
+        showPastedImageNotice({ kind: "error", message: "No working directory yet" });
+        return;
+      }
+      showPastedImageNotice({ kind: "uploading", message: "Pasting image…" });
+      try {
+        const absolutePath = await uploadPastedImage(cwd, blob, filename);
+        pasteToTerminalRef.current?.(shellQuoteArg(absolutePath));
+        const basename = absolutePath.split(/[/\\]/).pop() ?? absolutePath;
+        showPastedImageNotice({ kind: "done", message: `Pasted ${basename}` });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Upload failed";
+        showPastedImageNotice({ kind: "error", message });
+      }
+    },
+    [showPastedImageNotice],
+  );
+
+  useEffect(() => {
+    pasteImageFromBlobRef.current = pasteImageFromBlob;
+  }, [pasteImageFromBlob]);
+
+  useEffect(() => {
+    return () => {
+      if (pastedImageTimerRef.current !== null) {
+        window.clearTimeout(pastedImageTimerRef.current);
+      }
+    };
+  }, []);
+
+  // The mobile entry point: open the system photo/file picker. A hidden
+  // appended <input type=file> is the cross-platform path (iOS Safari blocks
+  // clipboard image reads and mobile paste into xterm's off-screen textarea is
+  // unreliable), so the button/keyboard key both route here. Desktop clipboard
+  // paste + drag-drop are handled by the listeners below.
+  const pickAndPasteImage = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.style.display = "none";
+    document.body.appendChild(input);
+    input.onchange = () => {
+      const file = input.files?.[0];
+      document.body.removeChild(input);
+      if (file) void pasteImageFromBlobRef.current?.(file, file.name);
+    };
+    input.click();
+  }, []);
+
+  // Clipboard paste (Ctrl/Cmd+V) and drag-drop onto the terminal surface. Both
+  // fire on the container, which is an ancestor of xterm's helper textarea, so
+  // a paste bubbles here; the capture-phase listener intercepts an image paste
+  // before xterm reads the clipboard's empty text representation. Text pastes
+  // fall through (no image item) so xterm's normal text paste is untouched.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const imageFromDataTransfer = (
+      dataTransfer: DataTransfer | null,
+    ): { blob: Blob; name: string } | null => {
+      const items = dataTransfer?.items;
+      if (!items) return null;
+      for (let index = 0; index < items.length; index++) {
+        const item = items[index];
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) return { blob: file, name: file.name || "image" };
+        }
+      }
+      return null;
+    };
+    const handlePaste = (event: ClipboardEvent) => {
+      const image = imageFromDataTransfer(event.clipboardData);
+      if (!image) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void pasteImageFromBlobRef.current?.(image.blob, image.name);
+    };
+    // Suppress the browser default (navigate to the dropped file) for ANY file
+    // drop so an accidental drop never leaves the terminal; only images upload.
+    const handleDrop = (event: DragEvent) => {
+      const image = imageFromDataTransfer(event.dataTransfer);
+      const hasFile = event.dataTransfer?.types?.includes("Files") ?? false;
+      if (!image && !hasFile) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (image) void pasteImageFromBlobRef.current?.(image.blob, image.name);
+    };
+    const handleDragOver = (event: DragEvent) => {
+      if (event.dataTransfer?.types?.includes("Files")) event.preventDefault();
+    };
+    container.addEventListener("paste", handlePaste, true);
+    container.addEventListener("drop", handleDrop, true);
+    container.addEventListener("dragover", handleDragOver);
+    return () => {
+      container.removeEventListener("paste", handlePaste, true);
+      container.removeEventListener("drop", handleDrop, true);
+      container.removeEventListener("dragover", handleDragOver);
+    };
+  }, []);
+
   const handleSearchInputChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const next = event.target.value;
@@ -3088,6 +3230,18 @@ export const Terminal = () => {
                   >
                     <Search />
                   </Button>
+                  {deviceTier !== "desktop" ? (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={pickAndPasteImage}
+                      aria-label="paste or pick an image into the terminal"
+                      title="Paste or pick an image into the terminal"
+                      className="hover:text-foreground"
+                    >
+                      <ImageIcon />
+                    </Button>
+                  ) : null}
                   {isTouchDevice ? (
                     <Button
                       variant="ghost"
@@ -3427,12 +3581,30 @@ export const Terminal = () => {
           )}
         </AlertDialogContent>
       </AlertDialog>
+      {pastedImageNotice ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn(
+            "pointer-events-none fixed left-1/2 z-[60] -translate-x-1/2 rounded-md border border-border/60 bg-background/90 px-3 py-1.5 text-xs shadow-md backdrop-blur-md",
+            pastedImageNotice.kind === "error"
+              ? "text-red-400"
+              : pastedImageNotice.kind === "done"
+                ? "text-emerald-400"
+                : "text-muted-foreground",
+          )}
+          style={{ bottom: onScreenKeyboardHeight + 12 }}
+        >
+          {pastedImageNotice.message}
+        </div>
+      ) : null}
       {deviceTier !== "desktop" && isOnScreenKeyboardOpen ? (
         <OnScreenKeyboard
           onInput={(data) => {
             sendInputRef.current?.(data);
             refocusTerminalRef.current?.();
           }}
+          onAttachImage={pickAndPasteImage}
           onHeightChange={setOnScreenKeyboardHeight}
           deviceTier={deviceTier}
         />

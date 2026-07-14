@@ -52,7 +52,10 @@ import {
   HTTP_STATUS_CONFLICT,
   HTTP_STATUS_CREATED,
   HTTP_STATUS_NOT_FOUND,
+  HTTP_STATUS_PAYLOAD_TOO_LARGE,
+  HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE,
   MAX_AUTOMATIONS,
+  MAX_IMAGE_UPLOAD_BYTES,
   MAX_PROCESSES,
   MAX_SECRETS,
   MS_PER_MINUTE,
@@ -177,8 +180,9 @@ import {
 import { capturePanePng, sendMouse, type MouseAction } from "./session-automation.js";
 import { encodeClick, encodeDrag, encodeMove, encodeScroll } from "./utils/sgr-mouse.js";
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
-import { resolveStaticAsset } from "./static-resolver.js";
+import { isContained, resolveStaticAsset } from "./static-resolver.js";
 import { resolveImageAsset } from "./utils/resolve-image-asset.js";
+import { extensionForImageContentType } from "./utils/image-extensions.js";
 import { sweepStaleWorktrees } from "./utils/worktree-sweep.js";
 import {
   readWorktreeIncludeFile,
@@ -1459,6 +1463,50 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
       headers["content-security-policy"] = "default-src 'none'; style-src 'unsafe-inline'";
     }
     return new Response(new Uint8Array(asset.body), { status: 200, headers });
+  });
+
+  // POST /api/upload-image — a pasted or file-picked image from the PWA. The
+  // client uploads the Blob as multipart/form-data; the daemon writes it into
+  // the caller's cwd as a uniquely-named file and returns the absolute path,
+  // which the client pastes (shell-quoted) into the prompt. Writing to the
+  // caller's own cwd is not an escalation (they already have a shell), so the
+  // only guards are the image-type allowlist (no SVG / text), the byte cap, and
+  // a containment check so a generated name can't escape the cwd via a symlink.
+  api.post("/upload-image", async (context) => {
+    const declaredLength = Number(context.req.header("content-length") ?? 0);
+    if (declaredLength > MAX_IMAGE_UPLOAD_BYTES) {
+      return context.json({ error: "too_large" }, HTTP_STATUS_PAYLOAD_TOO_LARGE);
+    }
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    let form: Record<string, unknown> | null = null;
+    try {
+      form = (await context.req.parseBody()) as Record<string, unknown>;
+    } catch {
+      return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    const image = form?.image;
+    if (!(image instanceof File) || image.size === 0) {
+      return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    if (image.size > MAX_IMAGE_UPLOAD_BYTES) {
+      return context.json({ error: "too_large" }, HTTP_STATUS_PAYLOAD_TOO_LARGE);
+    }
+    const extension = extensionForImageContentType(image.type);
+    if (!extension) {
+      return context.json({ error: "unsupported_type" }, HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE);
+    }
+    const filename = `pasted-${Date.now()}-${randomUUID().slice(0, 8)}.${extension}`;
+    const absolutePath = path.resolve(cwd, filename);
+    if (!isContained(cwd, absolutePath)) {
+      return context.json({ error: "invalid_path" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    try {
+      fs.writeFileSync(absolutePath, new Uint8Array(await image.arrayBuffer()));
+    } catch {
+      return context.json({ error: "write_failed" }, HTTP_STATUS_BAD_REQUEST);
+    }
+    return context.json({ path: absolutePath }, HTTP_STATUS_CREATED);
   });
 
   const readJsonBody = async (context: { req: { json: () => Promise<unknown> } }) => {

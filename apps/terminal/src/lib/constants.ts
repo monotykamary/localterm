@@ -36,6 +36,9 @@ export const DISCONNECT_MODAL_THRESHOLD_FAILURES = 2;
 export const RESTART_COMMAND = "npx @monotykamary/localterm@latest start";
 export const COPY_FEEDBACK_MS = 1500;
 export const RETRY_BUTTON_FEEDBACK_MS = 800;
+// A pasted/shared image upload can take a few seconds on a slow mobile link;
+// keep the "pasting image…" / outcome toast up briefly once it settles.
+export const PASTED_IMAGE_FEEDBACK_MS = 1800;
 export const HAPTIC_TAP_MS = 10;
 export const RECONNECT_FAST_POLL_INTERVAL_MS = 250;
 export const RECONNECT_FAST_POLL_DURATION_MS = 5000;

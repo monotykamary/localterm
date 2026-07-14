@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronUp, CornerDownLeft, Delete, type LucideIcon } from "lucide-react";
+import { ChevronUp, CornerDownLeft, Delete, ImageIcon, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DeviceTier } from "@/utils/detect-device-tier";
 import { buildCharOutput, buildSpecialOutput } from "@/utils/build-keyboard-output";
@@ -49,6 +49,7 @@ import {
 interface OnScreenKeyboardProps {
   readonly onInput: (data: string) => void;
   readonly onHeightChange: (height: number) => void;
+  readonly onAttachImage: () => void;
   readonly deviceTier: DeviceTier;
 }
 
@@ -106,6 +107,7 @@ const SPECIAL_ICONS: Partial<Record<SpecialAction, LucideIcon>> = {
   backspace: Delete,
   enter: CornerDownLeft,
   control: ChevronUp,
+  "attach-image": ImageIcon,
 };
 
 const MODIFIER_POPUP_LABEL: Partial<Record<SpecialAction, string>> = {
@@ -127,6 +129,7 @@ const SLIDE_CORNER_STYLE: Record<SlideDirection, CSSProperties> = {
 export const OnScreenKeyboard = ({
   onInput,
   onHeightChange,
+  onAttachImage,
   deviceTier,
 }: OnScreenKeyboardProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -320,6 +323,9 @@ export const OnScreenKeyboard = ({
             function: cycleModifier(modifiersRef.current.function),
           });
           return;
+        case "attach-image":
+          onAttachImage();
+          return;
         default: {
           const current = modifiersRef.current;
           onInput(buildSpecialOutput(cell.action, current));
@@ -327,7 +333,7 @@ export const OnScreenKeyboard = ({
         }
       }
     },
-    [applyModifiers, onInput, vibrate],
+    [applyModifiers, onAttachImage, onInput, vibrate],
   );
 
   const handlePointerDown = useCallback(
@@ -435,7 +441,8 @@ export const OnScreenKeyboard = ({
         nextActiveCell.type === "special" &&
         (nextActiveCell.action === "shift" ||
           nextActiveCell.action === "control" ||
-          nextActiveCell.action === "alternate")
+          nextActiveCell.action === "alternate" ||
+          nextActiveCell.action === "attach-image")
       );
       if (repeatable) startRepeat(event.pointerId);
       syncGestures();

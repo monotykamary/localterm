@@ -207,6 +207,11 @@ export const PTY_ENV_DENYLIST = [
 
 export const MAX_INPUT_BYTES = 64 * 1024;
 export const MAX_OUTPUT_BYTES = 1 * 1024 * 1024;
+// Cap for a pasted/shared image upload (POST /api/upload-image). A phone
+// screenshot is ~1-3 MB and a photo ~5-12 MB; 32 MB is generous for any real
+// raster while rejecting an accidental or hostile dump that would wedge the
+// multipart parse.
+export const MAX_IMAGE_UPLOAD_BYTES = 32 * 1024 * 1024;
 export const MAX_FOREGROUND_LENGTH = 256;
 export const MAX_TITLE_LENGTH = 4 * 1024;
 export const MAX_NOTIFICATION_LENGTH = 1024;
@@ -430,6 +435,8 @@ export const HTTP_STATUS_NOT_FOUND = 404;
 export const HTTP_STATUS_BAD_REQUEST = 400;
 export const HTTP_STATUS_ACCEPTED = 202;
 export const HTTP_STATUS_CONFLICT = 409;
+export const HTTP_STATUS_PAYLOAD_TOO_LARGE = 413;
+export const HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE = 415;
 
 // Git diff endpoints. The summary endpoint is polled by the browser every few
 // seconds, so every limit here exists to keep one poll cheap and to keep a

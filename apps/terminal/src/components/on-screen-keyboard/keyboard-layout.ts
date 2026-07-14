@@ -31,7 +31,8 @@ export type SpecialAction =
   | "control"
   | "alternate"
   | "command"
-  | "function";
+  | "function"
+  | "attach-image";
 
 export interface SpecialKey {
   readonly type: "special";
@@ -128,7 +129,7 @@ const SPACE_KEY: CharKey = {
     east: { label: "→", output: ESC + "[C" },
     south: { label: "↓", output: ESC + "[B" },
   },
-  grow: 5,
+  grow: 4,
 };
 
 // qwerty + number row. Each key shows its center glyph and corner symbols;
@@ -201,6 +202,7 @@ export const qwertyLayout: KeyboardLayout = {
     },
     {
       cells: [
+        special("attach-image", "image", 1),
         special("control", "ctrl", 1, undefined, {
           northEast: { label: "fn", output: "", name: "function" },
         }),
