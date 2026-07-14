@@ -197,7 +197,7 @@ export const AgentComposer = ({
 }: AgentComposerProps) => {
   const thinkingId = agentThinking || "default";
   return (
-    <div className="flex flex-col rounded-xl border border-border/60 bg-background shadow-sm transition-colors focus-within:border-ring/50 focus-within:shadow-md">
+    <div className="flex flex-col rounded-xl border border-border/60 bg-foreground/[0.02] transition-colors focus-within:border-ring/50 focus-within:shadow-md">
       <PromptSkillsAutocomplete
         value={prompt}
         placeholder="Review the latest commits on origin/main and post an exec briefing."
