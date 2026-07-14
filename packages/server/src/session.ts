@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, type IPty } from "node-pty";
 import {
+  ALT_SCREEN_FOREGROUND,
   COLORTERM_VALUE,
   DEFAULT_COLS,
   DEFAULT_ROWS,
@@ -24,7 +25,6 @@ import {
 // TUIs (e.g. Cursor Agent / Claude Code use DECSET 2026 synchronized output
 // mode and any byte landing inside that frame breaks the parser state).
 import { ensureSpawnHelperExecutable } from "./ensure-spawn-helper-executable.js";
-import { ForegroundWatcher } from "./foreground-watcher.js";
 import { getDefaultShell } from "./default-shell.js";
 import { shimPathPrependLine } from "./secret-shims.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
@@ -35,8 +35,8 @@ import { parseOsc7FromChunk } from "./utils/parse-osc7.js";
 import { parseOscAutomationExitFromChunk } from "./utils/parse-osc-automation-exit.js";
 import { parseOscDirtyFromChunk } from "./utils/parse-osc-dirty.js";
 import { parseOscNotificationsFromChunk } from "./utils/parse-osc-notification.js";
+import { parseOscForegroundFromChunk } from "./utils/parse-osc-foreground.js";
 import { parseOscTitleFromChunk } from "./utils/parse-osc-title.js";
-import { confirmShellProcessName } from "./utils/shell-process-name.js";
 import { TerminalModeState } from "./utils/terminal-mode-state.js";
 import { terminalQueryResponder } from "./utils/terminal-query-responder.js";
 
@@ -60,16 +60,19 @@ export class Session extends EventEmitter<SessionEvents> {
 
   private readonly pty: IPty;
   private readonly shellName: string;
-  // Process names pty.process reports for the shell itself: the invoked
-  // basename and full path, plus the shell's alias name on macOS where they
-  // differ. On macOS node-pty reads kp_proc.p_comm, which an aliased shell
-  // overrides: /bin/sh is bash, so an idle /bin/sh reports "bash" — not the
-  // invoked basename "sh" — forever, which the original basename-only check
-  // misread as a running foreground program. The alias name is learned from
-  // the pty.process reading the first time the terminal's foreground group id
-  // (tpgid) confirms the shell is idle (see inferForegroundProcess), so it
-  // never absorbs a genuine program and never races a user-typed command.
-  private readonly shellProcessNames = new Set<string>();
+  // Foreground state from the shell hook (preexec/precmd) — the authoritative
+  // source. null = the shell is at its prompt (precmd emitted fg-idle); a
+  // string = a program is running (preexec emitted fg;<token>). Takes
+  // precedence over altScreenActive so a hooked shell's named program wins
+  // over the alt-screen fallback.
+  private foregroundFromHook: string | null = null;
+  // Whether a TUI is currently on the alternate screen (DECSET/DECRST 1049).
+  // The fallback foreground signal for shells without a preexec hook (sh/dash;
+  // bash is precmd-only): a TUI entering the alt screen marks the session
+  // alive even without a named program, so a closed tab never reaps a running
+  // editor. A hooked shell's preexec names the program first, so this only
+  // fills the gap for unhooked/precmd-only shells.
+  private altScreenActive = false;
   private currentCols: number;
   private currentRows: number;
   private exited = false;
@@ -77,7 +80,7 @@ export class Session extends EventEmitter<SessionEvents> {
   private initialTitle = "";
   private lastEmittedTitle = "";
   private lastEmittedCwdValue = "";
-  private lastEmittedForegroundValue: string | null | undefined = undefined;
+  private lastEmittedForegroundValue: string | null = null;
   private pixelResizeSupported: boolean | null = null;
   private hookCleanupPaths: string[] = [];
   private pendingParse = "";
@@ -94,7 +97,6 @@ export class Session extends EventEmitter<SessionEvents> {
   // have scrolled out of the 256KB replay window — otherwise the wheel scrolls
   // xterm's scrollback instead of the TUI.
   private readonly modeState = new TerminalModeState();
-  private readonly foregroundWatcher: ForegroundWatcher;
   private readonly reportInitialCommandExit: boolean;
   private hasEmittedAutomationExit = false;
 
@@ -112,8 +114,6 @@ export class Session extends EventEmitter<SessionEvents> {
     ensureSpawnHelperExecutable();
     this.shell = input.shell ?? getDefaultShell();
     this.shellName = path.basename(this.shell);
-    this.shellProcessNames.add(this.shellName);
-    this.shellProcessNames.add(this.shell);
     this.cwd = input.cwd ?? os.homedir();
     this.currentCols = input.cols ?? DEFAULT_COLS;
     this.currentRows = input.rows ?? DEFAULT_ROWS;
@@ -214,12 +214,6 @@ export class Session extends EventEmitter<SessionEvents> {
     }
 
     this.emitInitialMetadata();
-    this.foregroundWatcher = new ForegroundWatcher(
-      () => this.inferForegroundProcess(),
-      (next) => this.handleForegroundChange(next),
-      () => !this.exited,
-    );
-    this.foregroundWatcher.start();
   }
 
   get pid(): number {
@@ -263,13 +257,12 @@ export class Session extends EventEmitter<SessionEvents> {
     return this.lastEmittedCwdValue;
   }
 
-  // Current foreground process name (or null at the shell prompt), snapshotted
-  // at attach time alongside cwd/title so a reattaching client re-syncs the
-  // favicon state the watcher won't re-emit (it dedups consecutive equal
-  // values). `undefined` is coerced to null for the protocol — only possible
-  // mid-construction before emitInitialMetadata() runs.
+  // Current foreground value (a program name, the alt-screen marker, or null
+  // at the shell prompt), snapshotted at attach time alongside cwd/title so a
+  // reattaching client re-syncs the favicon state the deduping emitter won't
+  // re-emit on its own.
   get lastEmittedForeground(): string | null {
-    return this.lastEmittedForegroundValue ?? null;
+    return this.lastEmittedForegroundValue;
   }
 
   // Force the session's title from the REST/CLI rename surface. The shell's
@@ -353,7 +346,6 @@ export class Session extends EventEmitter<SessionEvents> {
   dispose(): void {
     this.kill();
     this.exited = true;
-    this.foregroundWatcher.dispose();
     this.cleanUpHookFiles();
     this.removeAllListeners();
   }
@@ -429,8 +421,13 @@ export class Session extends EventEmitter<SessionEvents> {
     }
 
     const altScreen = parseAltScreenFromChunk(combined);
-    if (altScreen !== null && !altScreen) {
-      this.foregroundWatcher.set(null);
+    if (altScreen !== null) {
+      this.handleAltScreenChange(altScreen);
+    }
+
+    const foregroundSignal = parseOscForegroundFromChunk(combined);
+    if (foregroundSignal !== undefined) {
+      this.handleForegroundChange(foregroundSignal);
     }
 
     const notifications = parseOscNotificationsFromChunk(combined);
@@ -522,6 +519,10 @@ export class Session extends EventEmitter<SessionEvents> {
           "__localterm_osc7_chpwd",
           "__localterm_git_dirty() { printf '\\e]7777;git-dirty\\a'; }",
           "precmd_functions=(${precmd_functions[@]} __localterm_git_dirty)",
+          "__localterm_fg_preexec() { printf '\\e]7777;fg;%s\\a' \"${1%% *}\"; }",
+          "preexec_functions=(${preexec_functions[@]} __localterm_fg_preexec)",
+          "__localterm_fg_precmd() { printf '\\e]7777;fg-idle\\a'; }",
+          "precmd_functions=(__localterm_fg_precmd ${precmd_functions[@]})",
           ...(this.reportInitialCommandExit
             ? [
                 ...this.automationExitHookFunctionLines("__localterm_automation_exit_precmd"),
@@ -563,9 +564,10 @@ export class Session extends EventEmitter<SessionEvents> {
           // zsh case for why the ordering matters).
           shimsPrepend,
           hookScript,
-          'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt;__localterm_git_dirty"',
+          'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt;__localterm_git_dirty;__localterm_fg_precmd"',
           "__localterm_osc7_prompt",
           "__localterm_git_dirty() { printf '\\e]7777;git-dirty\\a'; }",
+          "__localterm_fg_precmd() { printf '\\e]7777;fg-idle\\a'; }",
           ...(this.reportInitialCommandExit
             ? [
                 ...this.automationExitHookFunctionLines("__localterm_automation_exit_prompt"),
@@ -602,6 +604,9 @@ export class Session extends EventEmitter<SessionEvents> {
           "end",
           "__localterm_osc7",
           shimsPrepend,
+          "function __localterm_fg_preexec --on-event fish_preexec",
+          "    printf '\\e]7777;fg;%s\\a' (string split ' ' -- $argv[1])[1]",
+          "end",
           "function __localterm_prompt_hook --on-event fish_prompt",
           "    printf '\\e]7777;git-dirty\\a'",
           ...(this.reportInitialCommandExit
@@ -610,11 +615,13 @@ export class Session extends EventEmitter<SessionEvents> {
                 "        set -l __localterm_initial_command $LOCALTERM_INITIAL_COMMAND",
                 "        set -e LOCALTERM_INITIAL_COMMAND",
                 "        printf '+ %s\\n' $__localterm_initial_command",
+                "        printf '\\e]7777;fg;%s\\a' (string split ' ' -- $__localterm_initial_command)[1]",
                 "        eval $__localterm_initial_command",
                 "        printf '\\e]7777;automation-exit;%d\\a' $status",
                 "    end",
               ]
             : []),
+          "    printf '\\e]7777;fg-idle\\a'",
           "end",
         ];
         return [["-C", lines.join("\n")], null];
@@ -650,6 +657,7 @@ export class Session extends EventEmitter<SessionEvents> {
       "    unset LOCALTERM_INITIAL_COMMAND",
       "    printf '+ %s\\n' \"$__localterm_initial_command\"",
       "    printf '\\e]7777;git-dirty\\a'",
+      "    printf '\\e]7777;fg;%s\\a' \"${__localterm_initial_command%% *}\"",
       '    eval "$__localterm_initial_command"',
       "    __localterm_command_exit=$?",
       "    printf '\\e]7777;automation-exit;%d\\a' \"$__localterm_command_exit\"",
@@ -675,6 +683,25 @@ export class Session extends EventEmitter<SessionEvents> {
   }
 
   private handleForegroundChange(next: string | null): void {
+    this.foregroundFromHook = next;
+    this.emitEffectiveForeground();
+  }
+
+  private handleAltScreenChange(entered: boolean): void {
+    this.altScreenActive = entered;
+    this.emitEffectiveForeground();
+  }
+
+  // Combine the hook signal (authoritative: a named program or idle) with the
+  // alt-screen fallback (a TUI is on screen but no hook named it), dedup against
+  // the last emitted value, and broadcast. The hook always wins — a hooked
+  // shell's preexec names the program before the TUI enters the alt screen, so
+  // the alt-screen marker only fills the gap for shells without a preexec hook
+  // (sh/dash; bash is precmd-only). On the idle transition (a program exits and
+  // the shell returns to its prompt) the title reverts to the cwd-derived form.
+  private emitEffectiveForeground(): void {
+    const next = this.foregroundFromHook ?? (this.altScreenActive ? ALT_SCREEN_FOREGROUND : null);
+    if (next === this.lastEmittedForegroundValue) return;
     const hadForeground = this.lastEmittedForegroundValue != null;
     this.lastEmittedForegroundValue = next;
     this.emit("foreground", next);
@@ -685,39 +712,6 @@ export class Session extends EventEmitter<SessionEvents> {
         this.emit("title", cwdTitle);
       }
     }
-  }
-
-  private inferForegroundProcess(): string | null {
-    const raw = this.pty.process?.trim() ?? "";
-    if (!raw) return null;
-    if (this.shellProcessNames.has(raw)) return null;
-    // An unknown name is either the shell under an alias (idle /bin/sh reports
-    // "bash", not the invoked "sh") or a genuine foreground program. The
-    // terminal's foreground group id disambiguates without depending on the
-    // shell's proctitle timing: the shell is its own pgrp leader holding the
-    // terminal at idle (tpgid == pty.pid), a foreground program runs in its own
-    // group (tpgid != pty.pid). When tpgid confirms the shell is idle the current
-    // reading IS the shell's alias name — learn it (cached per shell path, see
-    // utils/shell-process-name.ts, so the sync ps runs at most once per aliased
-    // path) and report no foreground; otherwise the name is a real program,
-    // reported as foreground. The getter re-reads pty.process *after* the tpgid
-    // check so a short-lived program that exits between `raw`'s read and the ps
-    // read can't be cached as the shell's name (which would permanently hide
-    // every later run of that program, e.g. `node`/`pi`, as "idle"). macOS-only:
-    // Linux node-pty reads /proc/<pgrp>/cmdline (the invoked name, already in
-    // the set), so an unknown name there is just a foreground program.
-    if (process.platform === "darwin") {
-      const confirmed = confirmShellProcessName(
-        this.shell,
-        this.pty.pid,
-        () => this.pty.process?.trim() ?? "",
-      );
-      if (confirmed) {
-        this.shellProcessNames.add(confirmed);
-        if (confirmed === raw) return null;
-      }
-    }
-    return raw;
   }
 
   private cleanUpHookFiles(): void {

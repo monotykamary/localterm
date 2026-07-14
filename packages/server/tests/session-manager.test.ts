@@ -157,34 +157,23 @@ describe("SessionManager no-clients grace", { tags: ["integration"] }, () => {
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
 
-  it("reaps an idle /bin/sh whose pty.process aliases the shell (macOS sh→bash)", async () => {
-    // Regression: on macOS /bin/sh is bash (GNU bash 3.2 in sh-mode), which
-    // overrides its kernel process name at startup so node-pty's pty.process
-    // reports "bash" for an idle /bin/sh while the invoked basename is "sh".
-    // The shell's own settled name must read as "no foreground" — otherwise the
-    // idle shell at its prompt is misreported as a running program, the
-    // no-clients grace reap sees "alive-quiet" forever, and the orphaned PTY
-    // never clears. Unlike the tests above, hasForeground is NOT forced off
-    // here; the real ForegroundWatcher reading pty.process drives the reap
-    // gate, so the alias mismatch is exercised end-to-end.
+  it("reaps an idle /bin/sh — an unhooked shell reports no foreground", async () => {
+    // /bin/sh is not in HOOKED_SHELL_NAMES, so it gets no preexec/precmd hook
+    // and never reports a foreground program. An idle /bin/sh therefore reads
+    // "ready" and reaps. (This replaces the old pty.process alias check: on
+    // macOS /bin/sh is bash in sh-mode and overrode its kernel process name, so
+    // pty.process reported "bash" for an idle shell — a mismatch the tpgid
+    // disambiguator handled. The foreground state now comes from the shell
+    // hook, which /bin/sh doesn't install, so the alias can no longer mislead.)
     manager = createManager(150);
     const ws = createFakeSocket();
     const spawned = manager.spawnAndAttach(ws, shellInput);
     expect(spawned).not.toBeNull();
     if (!spawned) return;
 
-    // Let the shell settle and the resolver learn "bash" as a shell name (ps
-    // ucomm of pty.pid reads "bash" once bash sets its proctitle, ~+20ms).
-    // ~1.4s covers the override plus the ForegroundWatcher's first polls.
-    await wait(1400);
-
-    // Force output idleness WITHOUT clearing hasForeground — the foreground
-    // gate must be exercised against the real pty.process reading, not masked.
+    // Force output idleness without clearing hasForeground: /bin/sh has no
+    // hook, so hasForeground is already false and the idle shell reads "ready".
     manager.markOutputIdleForTest(spawned.id);
-
-    // An idle shell at its prompt must read "ready", not "alive-quiet". With
-    // the bug, pty.process="bash" is never recognized as the shell →
-    // hasForeground stays true → alive-quiet, and the grace reap never fires.
     expect(manager.list()[0]?.state).toBe("ready");
 
     manager.detach(ws);
@@ -234,46 +223,39 @@ describe("SessionManager no-clients grace", { tags: ["integration"] }, () => {
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
 
-  it("still reports a real foreground program in /bin/sh (alive-quiet)", async () => {
-    // Guards the fix against over-suppression: learning the shell's alias name
-    // ("bash") must not absorb a genuine foreground program. A program the user
-    // runs reads as a NEW name on its first poll (not in the shell set), so it's
-    // reported as foreground → alive-quiet while it runs quietly.
+  it("keeps a dormant shell alive while the hook reports a foreground program (alive-quiet)", async () => {
+    // The shell hook drives hasForeground via the session's `foreground` event
+    // (preexec → fg;<token>, precmd → fg-idle). This exercises the grace reap's
+    // foreground gate against that signal: a quiet-but-running program (set
+    // here deterministically via markForegroundForTest, mirroring what the hook
+    // would set) holds the shell past the grace window, and releasing it reaps.
     manager = createManager(150);
     const ws = createFakeSocket();
     const spawned = manager.spawnAndAttach(ws, shellInput);
     expect(spawned).not.toBeNull();
     if (!spawned) return;
 
-    // Settle so "bash" is learned as a shell name.
-    await wait(1400);
+    // A foreground program is running but output has gone quiet → alive-quiet.
+    manager.markOutputIdleForTest(spawned.id);
+    manager.markForegroundForTest(spawned.id);
+    expect(manager.list()[0]?.state).toBe("alive-quiet");
 
-    // Run a quiet foreground program. It reads as a NEW name ("sleep") not in
-    // the shell set, so it's reported as foreground despite "bash" being learned.
-    spawned.session.write("sleep 2\n");
+    // With a client attached the grace timer isn't armed, so it survives.
+    await wait(250);
+    expect(manager.size()).toBe(1);
+    expect(spawned.session.isExited).toBe(false);
 
-    // sleep produces no output, so once the echo's output recency fades past the
-    // activity window the state is alive-quiet (foreground running, output
-    // quiet). Poll for it so the assertion absorbs the ForegroundWatcher's tick
-    // and output-recency timing under load.
-    let sawAliveQuiet = false;
-    for (let i = 0; i < 12; i++) {
-      await wait(250);
-      if (manager.list()[0]?.state === "alive-quiet") {
-        sawAliveQuiet = true;
-        break;
-      }
-    }
-    expect(sawAliveQuiet).toBe(true);
-
-    // sleep exits → shell returns to prompt; output recency fades → ready.
-    // Detach and the grace reap tears it down.
-    await wait(3000);
+    // The client leaves; the grace re-check sees alive-quiet and reschedules.
     manager.detach(ws);
-    await wait(400);
-    expect(manager.size()).toBe(0);
+    await wait(250);
+    expect(manager.size()).toBe(1);
+    expect(spawned.session.isExited).toBe(false);
+
+    // The program exits (precmd → fg-idle) → ready → reaped.
+    manager.markForegroundForTest(spawned.id, false);
+    expect(await pollFor(() => manager.size() === 0)).toBe(true);
     expect(spawned.session.isExited).toBe(true);
-  }, 15_000);
+  }, 10_000);
 
   it("returns null when attaching to an unknown id (caller spawns fresh)", () => {
     manager = createManager(60_000);

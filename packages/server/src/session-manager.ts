@@ -400,7 +400,7 @@ export class SessionManager {
   // Pauses the PTY (a real /bin/sh keeps emitting its prompt, which would
   // reschedule the grace forever), backdates last output past the activity
   // window, and clears any foreground program, so computeState() reads "ready"
-  // regardless of what the foreground watcher reports. Production code never
+  // regardless of the foreground hook's state. Production code never
   // needs this — a live shell's actual output recency and foreground status
   // drive the reap.
   markIdleForTest(id: string): void {
@@ -413,9 +413,8 @@ export class SessionManager {
 
   // Test-only: force output idleness (pause + backdate lastOutputAt) WITHOUT
   // clearing hasForeground, so the grace reap's foreground gate is exercised
-  // against the real pty.process reading instead of being masked (markIdleForTest
-  // clears both, which hides the alias-mismatch regression). Pair with a wait
-  // long enough for the ForegroundWatcher to have ticked at least once.
+  // against the real hook-driven foreground state instead of being masked
+  // (markIdleForTest clears both, which hides a missed foreground signal).
   // Production code never needs this.
   markOutputIdleForTest(id: string): void {
     const managed = this.sessions.get(id);
@@ -425,10 +424,10 @@ export class SessionManager {
   }
 
   // Test-only: mark a foreground program as running (or clear it) so the grace
-  // reap's alive-quiet path can be exercised without racing a real shell's
-  // process-group introspection (pty.process is transient during spawn and
-  // load-sensitive). Pair with markIdleForTest to model a quiet-but-running
-  // shell. Production code never needs this.
+  // reap's alive-quiet path can be exercised without racing the shell hook's
+  // preexec/precmd timing (the hook emits fg;<token> on preexec and fg-idle on
+  // precmd). Pair with markIdleForTest to model a quiet-but-running shell.
+  // Production code never needs this.
   markForegroundForTest(id: string, running = true): void {
     const managed = this.sessions.get(id);
     if (!managed) return;
