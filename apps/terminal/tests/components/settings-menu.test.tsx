@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { SettingsMenu } from "../../src/components/settings-menu";
+import { NumberStepper } from "../../src/components/number-stepper";
 import type { TerminalSessionInfo } from "../../src/lib/terminal-session-info";
 import type { TerminalTheme } from "../../src/lib/terminal-themes";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
@@ -441,13 +442,28 @@ describe("SettingsMenu pin-to-bottom-on-input switch", () => {
 });
 
 describe("NumberStepper drag scrubber (via the font size stepper)", () => {
+  // Mount NumberStepper directly instead of through the full SettingsMenu: the
+  // drag math is NumberStepper's own, and rendering the whole panel just to
+  // reach the slider is what timed the first drag test out under parallel load.
+  const renderFontSizeStepper = (value: number, onValueChange: (value: number) => void) =>
+    render(
+      <NumberStepper
+        value={value}
+        min={TERMINAL_FONT_SIZE_MIN_PX}
+        max={TERMINAL_FONT_SIZE_MAX_PX}
+        step={TERMINAL_FONT_SIZE_STEP_PX}
+        ariaLabel="terminal font size"
+        decrementAriaLabel="decrease font size"
+        incrementAriaLabel="increase font size"
+        onValueChange={onValueChange}
+      />,
+    );
+
   const findFontSizeSlider = () => screen.getByRole("slider", { name: "terminal font size" });
 
   it("dragging the value cell to the right increases the value by step per scrub-pixel-threshold", () => {
     const onFontSizeChange = vi.fn();
-    renderSettingsMenu({ initialFontSize: 13, onFontSizeChange });
-
-    fireEvent.click(screen.getByLabelText("terminal settings"));
+    renderFontSizeStepper(13, onFontSizeChange);
     const valueCell = findFontSizeSlider();
 
     fireEvent.pointerDown(valueCell, { clientX: 100, pointerId: 1, button: 0 });
@@ -459,9 +475,7 @@ describe("NumberStepper drag scrubber (via the font size stepper)", () => {
 
   it("dragging left decreases the value", () => {
     const onFontSizeChange = vi.fn();
-    renderSettingsMenu({ initialFontSize: 18, onFontSizeChange });
-
-    fireEvent.click(screen.getByLabelText("terminal settings"));
+    renderFontSizeStepper(18, onFontSizeChange);
     const valueCell = findFontSizeSlider();
 
     fireEvent.pointerDown(valueCell, { clientX: 200, pointerId: 1, button: 0 });
@@ -473,9 +487,7 @@ describe("NumberStepper drag scrubber (via the font size stepper)", () => {
 
   it("does not fire onValueChange while the pointer drift is below the scrub threshold", () => {
     const onFontSizeChange = vi.fn();
-    renderSettingsMenu({ initialFontSize: 13, onFontSizeChange });
-
-    fireEvent.click(screen.getByLabelText("terminal settings"));
+    renderFontSizeStepper(13, onFontSizeChange);
     const valueCell = findFontSizeSlider();
 
     fireEvent.pointerDown(valueCell, { clientX: 100, pointerId: 1, button: 0 });
@@ -487,9 +499,7 @@ describe("NumberStepper drag scrubber (via the font size stepper)", () => {
 
   it("clears drag state on pointerCancel so subsequent moves do not fire", () => {
     const onFontSizeChange = vi.fn();
-    renderSettingsMenu({ initialFontSize: 13, onFontSizeChange });
-
-    fireEvent.click(screen.getByLabelText("terminal settings"));
+    renderFontSizeStepper(13, onFontSizeChange);
     const valueCell = findFontSizeSlider();
 
     fireEvent.pointerDown(valueCell, { clientX: 100, pointerId: 1, button: 0 });
