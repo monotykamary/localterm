@@ -578,11 +578,13 @@ export const Terminal = () => {
   const onScreenKeyboardOpenRef = useRef(false);
   const sendInputRef = useRef<((data: string) => void) | null>(null);
   const focusForInputRef = useRef<(() => void) | null>(null);
+  const systemKeyboardActiveRef = useRef(false);
   useEffect(() => {
     onScreenKeyboardOpenRef.current = isOnScreenKeyboardOpen;
   }, [isOnScreenKeyboardOpen]);
 
   const handleSwitchToSystemKeyboard = useCallback(() => {
+    systemKeyboardActiveRef.current = true;
     setOnScreenKeyboardOpen(false);
     focusForInputRef.current?.();
   }, []);
@@ -1057,7 +1059,13 @@ export const Terminal = () => {
         return;
       }
       if (onScreenKeyboardOpenRef.current) return;
-      focusTerminalForInput();
+      if (systemKeyboardActiveRef.current) {
+        focusTerminalForInput();
+        return;
+      }
+      systemKeyboardActiveRef.current = false;
+      terminal.textarea?.blur();
+      setOnScreenKeyboardOpen(true);
     };
     const tapListenerAbort = new AbortController();
     if (isTouchDevice) {
@@ -3103,8 +3111,13 @@ export const Terminal = () => {
                       variant="ghost"
                       size="icon-sm"
                       onClick={() => {
-                        if (!isOnScreenKeyboardOpen) terminalRef.current?.textarea?.blur();
-                        setOnScreenKeyboardOpen((open) => !open);
+                        if (!isOnScreenKeyboardOpen) {
+                          systemKeyboardActiveRef.current = false;
+                          terminalRef.current?.textarea?.blur();
+                          setOnScreenKeyboardOpen(true);
+                        } else {
+                          setOnScreenKeyboardOpen(false);
+                        }
                       }}
                       aria-label="toggle on-screen keyboard"
                       className={cn(

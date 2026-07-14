@@ -370,6 +370,7 @@ export const KEYBOARD_KEY_RADIUS_PX = 5;
 export const KEYBOARD_FONT_SIZE_PX = 22;
 export const KEYBOARD_ALTERNATE_FONT_SIZE_PX = 11;
 export const KEYBOARD_SPECIAL_FONT_SIZE_PX = 15;
+export const KEYBOARD_ICON_SIZE_PX = 20;
 // Slide distance from the press point before a corner alternate is selected.
 // Below it the center char stays (filters jitter and grazing touches, the iOS
 // touch slop); past it the nearest defined alternate by angle wins.

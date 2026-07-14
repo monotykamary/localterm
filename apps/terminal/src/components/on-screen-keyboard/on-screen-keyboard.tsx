@@ -5,8 +5,10 @@ import {
   useState,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { CornerDownLeft, Delete, Globe, KeyboardOff, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DeviceTier } from "@/utils/detect-device-tier";
 import { buildCharOutput, buildSpecialOutput } from "@/utils/build-keyboard-output";
@@ -19,6 +21,7 @@ import {
   type ModifierMode,
   type ModifierState,
   type SlideDirection,
+  type SpecialAction,
   type SpecialKey,
 } from "./keyboard-layout";
 import {
@@ -28,6 +31,7 @@ import {
   KEYBOARD_FONT_SIZE_PX,
   KEYBOARD_GAP_PX,
   KEYBOARD_HORIZONTAL_PADDING_PX,
+  KEYBOARD_ICON_SIZE_PX,
   KEYBOARD_KEY_HEIGHT_PX,
   KEYBOARD_KEY_RADIUS_PX,
   KEYBOARD_ROW_GAP_PX,
@@ -71,6 +75,13 @@ const consumeOneShot = (state: ModifierState): ModifierState => ({
   control: state.control === "oneShot" ? "off" : state.control,
   alternate: state.alternate === "oneShot" ? "off" : state.alternate,
 });
+
+const SPECIAL_ICONS: Partial<Record<SpecialAction, LucideIcon>> = {
+  backspace: Delete,
+  enter: CornerDownLeft,
+  systemKeyboard: Globe,
+  dismiss: KeyboardOff,
+};
 
 const SLIDE_CORNER_STYLE: Record<SlideDirection, CSSProperties> = {
   north: { top: 3, left: "50%", transform: "translateX(-50%)" },
@@ -245,7 +256,6 @@ export const OnScreenKeyboard = ({
     const height = isBottomRow ? KEYBOARD_BOTTOM_KEY_HEIGHT_PX : KEYBOARD_KEY_HEIGHT_PX;
     const gesture = gestures.find((item) => item.keyId === keyId) ?? null;
     const armed = gesture !== null;
-    const isChar = cell.type === "char";
     const centerLabel = cell.type === "char" ? cell.center.label : cell.label;
     const alternates = cell.type === "char" ? cell.alternates : undefined;
     let modifierActive = false;
@@ -261,6 +271,43 @@ export const OnScreenKeyboard = ({
       : modifierActive
         ? "bg-primary text-primary-foreground"
         : "bg-muted text-foreground";
+    let content: ReactNode;
+    if (cell.type === "char") {
+      content = (
+        <>
+          <span className="leading-none">{centerLabel}</span>
+          {ALL_SLIDE_DIRECTIONS.map((direction) => {
+            const glyph = alternates?.[direction];
+            if (glyph == null) return null;
+            const isAlternateSelected = gesture?.selected === glyph;
+            return (
+              <span
+                key={direction}
+                className={cn(
+                  "absolute leading-none",
+                  isAlternateSelected
+                    ? "text-accent-foreground font-bold"
+                    : "text-muted-foreground",
+                )}
+                style={{
+                  ...SLIDE_CORNER_STYLE[direction],
+                  fontSize: KEYBOARD_ALTERNATE_FONT_SIZE_PX,
+                }}
+              >
+                {glyph.label}
+              </span>
+            );
+          })}
+        </>
+      );
+    } else {
+      const Icon = SPECIAL_ICONS[cell.action];
+      content = Icon ? (
+        <Icon size={KEYBOARD_ICON_SIZE_PX} />
+      ) : (
+        <span className="leading-none">{centerLabel}</span>
+      );
+    }
     return (
       <div
         key={keyId}
@@ -283,35 +330,7 @@ export const OnScreenKeyboard = ({
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
       >
-        {isChar ? (
-          <>
-            <span className="leading-none">{centerLabel}</span>
-            {ALL_SLIDE_DIRECTIONS.map((direction) => {
-              const glyph = alternates?.[direction];
-              if (glyph == null) return null;
-              const isAlternateSelected = gesture?.selected === glyph;
-              return (
-                <span
-                  key={direction}
-                  className={cn(
-                    "absolute leading-none",
-                    isAlternateSelected
-                      ? "text-accent-foreground font-bold"
-                      : "text-muted-foreground",
-                  )}
-                  style={{
-                    ...SLIDE_CORNER_STYLE[direction],
-                    fontSize: KEYBOARD_ALTERNATE_FONT_SIZE_PX,
-                  }}
-                >
-                  {glyph.label}
-                </span>
-              );
-            })}
-          </>
-        ) : (
-          <span className="leading-none">{centerLabel}</span>
-        )}
+        {content}
       </div>
     );
   };
