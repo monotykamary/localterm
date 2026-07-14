@@ -35,11 +35,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.2",
-    "@earendil-works/pi-tui": "^0.80.2",
-    "@types/node": "^26.1.0",
-    "typescript": "^6.0.3",
-    "vite-plus": "^0.2.2"
+    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@earendil-works/pi-tui": "^0.80.6",
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
+    "vite-plus": "^0.2.4"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
