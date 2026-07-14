@@ -1,5 +1,7 @@
 # localterm-server
 
+## 2.59.1
+
 ## 2.59.0
 
 ### Minor Changes
