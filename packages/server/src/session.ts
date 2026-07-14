@@ -67,11 +67,11 @@ export class Session extends EventEmitter<SessionEvents> {
   // over the alt-screen fallback.
   private foregroundFromHook: string | null = null;
   // Whether a TUI is currently on the alternate screen (DECSET/DECRST 1049).
-  // The fallback foreground signal for shells without a preexec hook (sh/dash;
-  // bash is precmd-only): a TUI entering the alt screen marks the session
-  // alive even without a named program, so a closed tab never reaps a running
-  // editor. A hooked shell's preexec names the program first, so this only
-  // fills the gap for unhooked/precmd-only shells.
+  // The fallback foreground signal for shells without a preexec hook (sh/dash):
+  // a TUI entering the alt screen marks the session alive even without a named
+  // program, so a closed tab never reaps a running editor. A hooked shell's
+  // preexec names the program first, so this only fills the gap for unhooked
+  // shells (sh/dash).
   private altScreenActive = false;
   private currentCols: number;
   private currentRows: number;
@@ -564,10 +564,17 @@ export class Session extends EventEmitter<SessionEvents> {
           // zsh case for why the ordering matters).
           shimsPrepend,
           hookScript,
-          'PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt;__localterm_git_dirty;__localterm_fg_precmd"',
+          'PROMPT_COMMAND="__localterm_prompt_start;${PROMPT_COMMAND:+${PROMPT_COMMAND};}__localterm_osc7_prompt;__localterm_git_dirty;__localterm_fg_precmd"',
           "__localterm_osc7_prompt",
           "__localterm_git_dirty() { printf '\\e]7777;git-dirty\\a'; }",
-          "__localterm_fg_precmd() { printf '\\e]7777;fg-idle\\a'; }",
+          "__localterm_fg_precmd() { printf '\\e]7777;fg-idle\\a'; __localterm_in_prompt=0; }",
+          "__localterm_prompt_start() { __localterm_in_prompt=1; }",
+          "__localterm_in_prompt=0",
+          '__localterm_fg_debug() { [ "$__localterm_in_prompt" = 1 ] && return; case "$BASH_COMMAND" in __localterm_*) return ;; esac; printf \'\\e]7777;fg;%s\\a\' "${BASH_COMMAND%% *}"; }',
+          "__localterm_prev_debug_body=",
+          '__localterm_capture_debug() { local __t; __t=$(trap -p DEBUG); [ -z "$__t" ] && return; __t=${__t#trap -- }; __t=${__t% DEBUG}; __localterm_prev_debug_body=$__t; }',
+          "__localterm_capture_debug",
+          'if [ -n "$__localterm_prev_debug_body" ]; then trap \'__localterm_fg_debug; eval "$__localterm_prev_debug_body"\' DEBUG; else trap __localterm_fg_debug DEBUG; fi',
           ...(this.reportInitialCommandExit
             ? [
                 ...this.automationExitHookFunctionLines("__localterm_automation_exit_prompt"),
@@ -697,7 +704,7 @@ export class Session extends EventEmitter<SessionEvents> {
   // the last emitted value, and broadcast. The hook always wins — a hooked
   // shell's preexec names the program before the TUI enters the alt screen, so
   // the alt-screen marker only fills the gap for shells without a preexec hook
-  // (sh/dash; bash is precmd-only). On the idle transition (a program exits and
+  // (sh/dash). On the idle transition (a program exits and
   // the shell returns to its prompt) the title reverts to the cwd-derived form.
   private emitEffectiveForeground(): void {
     const next = this.foregroundFromHook ?? (this.altScreenActive ? ALT_SCREEN_FOREGROUND : null);

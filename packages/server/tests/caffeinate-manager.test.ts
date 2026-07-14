@@ -37,6 +37,7 @@ describe("CaffeinateManager", () => {
   let snapshot: ProcessSnapshotEntry[];
   let recentOutputPids: number[];
   let peerClientPresent: boolean;
+  let foregroundNames: Map<number, string>;
   let batteryStatus: {
     percent: number;
     isOnBattery: boolean;
@@ -45,16 +46,18 @@ describe("CaffeinateManager", () => {
 
   const build = (supported = true) => {
     const { controller, spawned } = createFakeController(supported);
+    const snapshotProcesses = vi.fn(async () => snapshot);
     const manager = new CaffeinateManager({
       controller,
       store,
       listSessionPids: () => sessionPids,
-      snapshotProcesses: async () => snapshot,
+      snapshotProcesses,
       hasRecentOutput: (pids) => pids.some((pid) => recentOutputPids.includes(pid)),
       hasPeerClient: () => peerClientPresent,
       batteryProbe: async () => batteryStatus,
+      foregroundNames: () => foregroundNames,
     });
-    return { manager, controller, spawned };
+    return { manager, controller, spawned, snapshotProcesses };
   };
 
   beforeEach(() => {
@@ -64,6 +67,7 @@ describe("CaffeinateManager", () => {
     snapshot = [];
     recentOutputPids = [];
     peerClientPresent = false;
+    foregroundNames = new Map();
     // Default to a healthy plugged-out battery well above the 20% floor, so
     // the guard is armed but never suppresses unless a test sets a low value.
     batteryStatus = { percent: 80, isOnBattery: true, minutesToEmpty: 240 };
@@ -110,6 +114,40 @@ describe("CaffeinateManager", () => {
     await manager.pollNow();
     expect(controller.active).toBe(false);
     expect(manager.activeTrigger).toBeNull();
+    manager.dispose();
+  });
+
+  it("engages from the shell-hook foreground name without a ps snapshot", async () => {
+    const { manager, controller, snapshotProcesses } = build();
+    sessionPids = [100];
+    // The hook reports the foreground program directly (OSC 7777 fg;<token>).
+    foregroundNames = new Map([[100, "claude"]]);
+    recentOutputPids = [100];
+    // An empty snapshot means a `ps` walk would find nothing — so active +
+    // the trigger proves the hook name drove it, and the spy proves the walk
+    // was skipped entirely (the common keep-awake case: the user runs a
+    // trigger directly, no process-tree walk needed).
+    snapshot = [];
+    await manager.pollNow();
+    expect(controller.active).toBe(true);
+    expect(manager.activeTrigger).toBe("claude");
+    expect(snapshotProcesses).not.toHaveBeenCalled();
+    manager.dispose();
+  });
+
+  it("falls back to the ps walk when the hook name is not a trigger", async () => {
+    const { manager, controller, snapshotProcesses } = build();
+    sessionPids = [100];
+    // The foreground command ("ls") is not a trigger, so the hook name does
+    // not short-circuit; the process-tree walk must run and find the trigger
+    // child (claude under the shell) — exactly the make -> ffmpeg case.
+    foregroundNames = new Map([[100, "ls"]]);
+    snapshot = claudeUnderSession(100);
+    recentOutputPids = [100];
+    await manager.pollNow();
+    expect(controller.active).toBe(true);
+    expect(manager.activeTrigger).toBe("claude");
+    expect(snapshotProcesses).toHaveBeenCalledTimes(1);
     manager.dispose();
   });
 

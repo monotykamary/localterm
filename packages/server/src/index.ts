@@ -2282,6 +2282,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     batteryProbe: options.caffeinateBatteryProbe,
     hasRecentOutput: (pids, withinMs) => registry.hasRecentOutput(pids, withinMs),
     hasPeerClient: () => registry.hasPeerClient(),
+    foregroundNames: () => registry.foregroundNames(),
   });
   // Open dev ports: the daemon reads the process tree (ps) and the listening
   // socket table (lsof) on demand while the ports modal is open. Both are

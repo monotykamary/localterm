@@ -8,6 +8,7 @@ import {
 } from "./caffeinate-battery.js";
 import {
   anySessionRunsTrigger,
+  commandMatchesTriggers,
   defaultSnapshotProcesses,
   type SnapshotProcesses,
 } from "./caffeinate-process-match.js";
@@ -21,6 +22,8 @@ import {
   MS_PER_MINUTE,
 } from "./constants.js";
 import type { CaffeinateMode } from "./types.js";
+
+const EMPTY_FOREGROUND_NAMES: Map<number, string> = new Map();
 
 export interface CaffeinateManagerOptions {
   controller: CaffeinateController;
@@ -42,6 +45,14 @@ export interface CaffeinateManagerOptions {
   // held for the peer's lifetime and bypassing the activity gate so an
   // idle-but-attached phone must not release the machine to sleep.
   hasPeerClient?: () => boolean;
+  // Live foreground program name reported per session by the shell's preexec
+  // hook (OSC 7777 fg;<token>), keyed by the session shell's pid. When a
+  // session's reported name is itself a keep-awake trigger, automatic mode
+  // engages caffeinate WITHOUT a `ps` snapshot — the common case (the user
+  // runs vim/ffmpeg/etc. directly). The process-tree walk still runs when no
+  // hook name matches, so triggers that are children of the foreground command
+  // (make -> ffmpeg) or running in an unhooked shell (sh/dash) keep working.
+  foregroundNames?: () => Map<number, string>;
   // Injectable battery probe for tests; defaults to a real `pmset` read on
   // macOS and a sysfs read on Linux. The battery floor is enforced on an
   // adaptive schedule that mirrors the activity gate's design: status-driven (a
@@ -57,8 +68,10 @@ interface CaffeinateManagerEvents {
 // Decides *when* the daemon's single keep-awake process runs, on top of the
 // dumb CaffeinateController (which only knows start/stop). In "on" it is always
 // active, in "off" never, and in "automatic" it tracks whether any recognized
-// program is running in a localterm session — discovered by walking the `ps`
-// process tree under each session's shell. When the activity gate is enabled
+// program is running in a localterm session — discovered by matching each
+// session's shell-hook foreground name (OSC 7777 fg;<token>) against the trigger
+// set, falling back to a `ps` process-tree walk under the session's shell when
+// no hook name matches. When the activity gate is enabled
 // (the default), caffeinate further requires that a recognized program is
 // producing output; after CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS of silence,
 // caffeinate releases. When peer keep-awake is enabled (also the default),
@@ -70,11 +83,12 @@ interface CaffeinateManagerEvents {
 // (mode/active/commands/batteryThreshold/peerKeepAwake) moves.
 //
 // Automatic detection is event-driven: it never polls on a timer. A `ps`
-// snapshot is taken only in response to an event — a session's foreground
-// process changing, a session connecting/disconnecting, an output-activity
-// change, or a mode/command change — via the debounced `pokeAuto`. (The
-// foreground signal itself rides on node-pty's existing per-session foreground
-// tracking, which powers the favicon and exists independently of keep-awake.)
+// snapshot is taken only when no session's hook foreground name matches a
+// trigger, in response to an event — a session's foreground process changing,
+// a session connecting/disconnecting, an output-activity change, or a
+// mode/command change — via the debounced `pokeAuto`. (The foreground name
+// comes from the shell's own preexec/precmd hooks — the same signal that
+// powers the favicon — independently of keep-awake.)
 // The activity gate is driven by a trailing-edge timer: output resets it, and
 // when it finally fires (no output for the debounce window), it pokes a
 // re-check.
@@ -97,6 +111,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
   private readonly snapshotProcesses: SnapshotProcesses;
   private readonly checkRecentOutput?: (pids: readonly number[], withinMs: number) => boolean;
   private readonly hasPeerClient: () => boolean;
+  private readonly foregroundNames?: () => Map<number, string>;
   private readonly batteryProbe: BatteryProbe;
   readonly defaultCommands: readonly string[];
 
@@ -143,6 +158,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.defaultCommands = options.defaultCommands ?? CAFFEINATE_AUTO_DEFAULT_COMMANDS;
     this.checkRecentOutput = options.hasRecentOutput;
     this.hasPeerClient = options.hasPeerClient ?? (() => false);
+    this.foregroundNames = options.foregroundNames;
     this.batteryProbe = options.batteryProbe ?? defaultBatteryProbe;
 
     // An unexpected death of the caffeinate process flips controller state; pass
@@ -312,6 +328,22 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     for (const command of this.defaultCommands) triggers.add(command.toLowerCase());
     for (const command of this.store.getCommands()) triggers.add(command.toLowerCase());
     return triggers;
+  }
+
+  // Whether any live session's shell-hook foreground name (OSC 7777 fg;<token>)
+  // is itself a keep-awake trigger — the cheap, walk-free path used before
+  // falling back to the `ps` process-tree snapshot. Returns the matching
+  // trigger (lowercased) or null when no session's name matches.
+  private hookTriggerFor(pids: readonly number[], triggers: ReadonlySet<string>): string | null {
+    const names = this.foregroundNames?.() ?? EMPTY_FOREGROUND_NAMES;
+    for (const pid of pids) {
+      const name = names.get(pid);
+      if (name) {
+        const match = commandMatchesTriggers(name, triggers);
+        if (match) return match;
+      }
+    }
+    return null;
   }
 
   private recompute(): void {
@@ -489,8 +521,18 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
       let programActive = false;
       let programTrigger: string | null = null;
       if (pids.length > 0) {
-        const snapshot = await this.snapshotProcesses();
-        programTrigger = anySessionRunsTrigger(pids, snapshot, this.triggerSet());
+        const triggers = this.triggerSet();
+        // Short-circuit: if any live session's hook-reported foreground name is
+        // itself a trigger, engage without a `ps` snapshot (the common case —
+        // the user runs vim/ffmpeg/etc. directly). Only fall back to the
+        // process-tree walk when no hook name matches, which still catches
+        // triggers that are children of the foreground command (make -> ffmpeg)
+        // or running in an unhooked shell (sh/dash).
+        programTrigger = this.hookTriggerFor(pids, triggers);
+        if (programTrigger === null) {
+          const snapshot = await this.snapshotProcesses();
+          programTrigger = anySessionRunsTrigger(pids, snapshot, triggers);
+        }
         if (programTrigger) {
           if (!this.activityGate) {
             programActive = true;

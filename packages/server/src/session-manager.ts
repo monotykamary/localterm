@@ -203,6 +203,10 @@ export interface ManagedSession {
   // "is this shell still doing something" signal.
   lastOutputAt: number;
   hasForeground: boolean;
+  // The shell hook's reported foreground program name (OSC 7777 fg;<token>) or
+  // null when idle — feeds keep-awake's trigger short-circuit so automatic mode
+  // can match a trigger from the hook without walking `ps`.
+  foregroundName: string | null;
   // No-clients grace timer: armed when the last subscriber detaches, cancelled
   // when any subscriber re-attached. On fire, re-checks activity — if the shell
   // is still doing something (output arriving, or a foreground program alive
@@ -320,6 +324,18 @@ export class SessionManager {
   // localterm, not anything else on the machine.
   pids(): number[] {
     return [...this.sessions.values()].map((managed) => managed.session.pid);
+  }
+
+  // Each live session's shell-hook foreground name (OSC 7777 fg;<token>), keyed
+  // by the session shell's pid — fed to keep-awake so automatic mode can match a
+  // trigger from the hook without walking `ps`. Excludes idle sessions (null
+  // names) and, since it iterates live sessions only, prunes exited ones.
+  foregroundNames(): Map<number, string> {
+    const names = new Map<number, string>();
+    for (const managed of this.sessions.values()) {
+      if (managed.foregroundName) names.set(managed.session.pid, managed.foregroundName);
+    }
+    return names;
   }
 
   // Whether any live session currently has a second client attached — a peer
@@ -466,6 +482,7 @@ export class SessionManager {
       gitWatcher: new GitDiffWatcher(),
       lastOutputAt: Date.now(),
       hasForeground: false,
+      foregroundName: null,
       graceTimer: null,
       parkedAt: null,
       pinned: false,
@@ -1403,6 +1420,7 @@ export class SessionManager {
     });
     session.on("foreground", (process: string | null) => {
       managed.hasForeground = process !== null;
+      managed.foregroundName = process;
       this.broadcast(managed, { type: "foreground", process });
       this.hooks.onSessionActivity();
       if (!managed.automation && session.lastEmittedCwd) {

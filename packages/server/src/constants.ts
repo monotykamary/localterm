@@ -423,12 +423,12 @@ export const CDP_HEARTBEAT_TIMEOUT_MS = 60_000;
 // interval so a probe never overlaps the next tick.
 export const CDP_HEARTBEAT_GRACE_MS = 15_000;
 // Foreground value reported when a TUI is on the alternate screen but no shell
-// hook named the program. Shells without a preexec hook (sh/dash; bash is
-// precmd-only) have no foreground-start signal, so the alt-screen enter/exit is
-// the only marker that a program is running — enough to keep a closed tab from
-// reaping a running editor and to hold the favicon "alive". Never displayed:
-// clients treat foreground purely as `!== null` (the favicon alive/idle flag),
-// so an opaque marker suffices. Hooked shells (zsh/fish) name the program via
+// hook named the program. Shells without a preexec hook (sh/dash) have no
+// foreground-start signal, so the alt-screen enter/exit is the only marker
+// that a program is running — enough to keep a closed tab from reaping a
+// running editor and to hold the favicon "alive". Never displayed: clients
+// treat foreground purely as `!== null` (the favicon alive/idle flag), so an
+// opaque marker suffices. Hooked shells (zsh/bash/fish) name the program via
 // preexec and take precedence over this fallback.
 export const ALT_SCREEN_FOREGROUND = "(alt-screen)";
 // Hard ceiling for server.stop() — clients get terminated, then the http
