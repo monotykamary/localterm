@@ -196,7 +196,7 @@ const WorktreeRow = ({
         </span>
       )}
     </div>
-    <div className="flex items-center gap-2 pl-5.5">
+    <div className="flex items-center gap-2 pl-5.5 opacity-0 transition-opacity group-hover/worktree:opacity-100 group-focus-within/worktree:opacity-100">
       <span className="min-w-0 flex-1 truncate text-left font-mono text-[10px] text-muted-foreground">
         {worktree.displayPath}
       </span>
