@@ -100,6 +100,7 @@ const makeBrotliEncoder = (level: number): BrotliEncoder => {
   return { flush, release };
 };
 import { resolveNamedKeys } from "./utils/named-keys.js";
+import { deletePasteImagesForSession } from "./utils/paste-image-store.js";
 import { stripAnsi } from "./utils/strip-ansi.js";
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 
@@ -1495,6 +1496,7 @@ export class SessionManager {
     managed.parkedAt = null;
     managed.captureRenderer?.dispose();
     managed.captureRenderer = undefined;
+    deletePasteImagesForSession(managed.id);
     if (managed.outputBatchTimer !== null) {
       clearTimeout(managed.outputBatchTimer);
       managed.outputBatchTimer = null;

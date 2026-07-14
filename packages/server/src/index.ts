@@ -180,10 +180,11 @@ import {
 import { capturePanePng, sendMouse, type MouseAction } from "./session-automation.js";
 import { encodeClick, encodeDrag, encodeMove, encodeScroll } from "./utils/sgr-mouse.js";
 import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
-import { isContained, resolveStaticAsset } from "./static-resolver.js";
+import { resolveStaticAsset } from "./static-resolver.js";
 import { resolveImageAsset } from "./utils/resolve-image-asset.js";
 import { resolveTextAsset } from "./utils/resolve-text-asset.js";
 import { extensionForImageContentType } from "./utils/image-extensions.js";
+import { isValidPasteSessionId, writePastedImage } from "./utils/paste-image-store.js";
 import { sweepStaleWorktrees } from "./utils/worktree-sweep.js";
 import {
   readWorktreeIncludeFile,
@@ -1496,19 +1497,24 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   });
 
   // POST /api/upload-image — a pasted or file-picked image from the PWA. The
-  // client uploads the Blob as multipart/form-data; the daemon writes it into
-  // the caller's cwd as a uniquely-named file and returns the absolute path,
-  // which the client pastes (shell-quoted) into the prompt. Writing to the
-  // caller's own cwd is not an escalation (they already have a shell), so the
-  // only guards are the image-type allowlist (no SVG / text), the byte cap, and
-  // a containment check so a generated name can't escape the cwd via a symlink.
+  // client uploads the Blob as multipart/form-data with the live session id;
+  // the daemon writes it into a session-scoped ephemeral temp dir and returns
+  // the absolute path, which the client pastes (shell-quoted) into the prompt.
+  // Session-scoped: the dir is reaped when the session is torn down (the tab
+  // closes, the shell exits, or the idle grace reaps it), so a pasted image
+  // lives only as long as the session that received it — never written into the
+  // user's project tree. The sid is sanitized to a single path component so a
+  // crafted ?sid can't escape the temp root; the image-type allowlist (no SVG /
+  // text) and the byte cap are the other guards.
   api.post("/upload-image", async (context) => {
     const declaredLength = Number(context.req.header("content-length") ?? 0);
     if (declaredLength > MAX_IMAGE_UPLOAD_BYTES) {
       return context.json({ error: "too_large" }, HTTP_STATUS_PAYLOAD_TOO_LARGE);
     }
-    const cwd = resolveCwdQuery(context.req.query("cwd"));
-    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    const sessionId = context.req.query(SESSION_ID_QUERY_PARAM);
+    if (!sessionId || !isValidPasteSessionId(sessionId)) {
+      return context.json({ error: "invalid_session" }, HTTP_STATUS_BAD_REQUEST);
+    }
     let form: Record<string, unknown> | null = null;
     try {
       form = (await context.req.parseBody()) as Record<string, unknown>;
@@ -1526,13 +1532,13 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     if (!extension) {
       return context.json({ error: "unsupported_type" }, HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE);
     }
-    const filename = `pasted-${Date.now()}-${randomUUID().slice(0, 8)}.${extension}`;
-    const absolutePath = path.resolve(cwd, filename);
-    if (!isContained(cwd, absolutePath)) {
-      return context.json({ error: "invalid_path" }, HTTP_STATUS_BAD_REQUEST);
-    }
+    let absolutePath: string;
     try {
-      fs.writeFileSync(absolutePath, new Uint8Array(await image.arrayBuffer()));
+      absolutePath = writePastedImage(
+        sessionId,
+        new Uint8Array(await image.arrayBuffer()),
+        extension,
+      );
     } catch {
       return context.json({ error: "write_failed" }, HTTP_STATUS_BAD_REQUEST);
     }

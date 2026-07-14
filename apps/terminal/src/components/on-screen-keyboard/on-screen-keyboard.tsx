@@ -28,6 +28,7 @@ import {
 import {
   HAPTIC_TAP_MS,
   KEYBOARD_ALTERNATE_FONT_SIZE_PX,
+  KEYBOARD_ALTERNATE_ICON_SIZE_PX,
   KEYBOARD_BOTTOM_KEY_HEIGHT_PX,
   KEYBOARD_BOTTOM_PADDING_PX,
   KEYBOARD_CALLOUT_CHAR_WIDTH_FACTOR,
@@ -124,6 +125,31 @@ const SLIDE_CORNER_STYLE: Record<SlideDirection, CSSProperties> = {
   west: { left: 4, top: "50%", transform: "translateY(-50%)" },
   northWest: { top: 3, left: 4 },
 };
+
+const renderAlternateCorners = (
+  alternates: Partial<Record<SlideDirection, KeyGlyph>> | undefined,
+  gesture: ActiveGesture | null,
+) =>
+  ALL_SLIDE_DIRECTIONS.map((direction) => {
+    const glyph = alternates?.[direction];
+    if (glyph == null) return null;
+    const isAlternateSelected = gesture?.selected === glyph;
+    return (
+      <span
+        key={direction}
+        className={cn(
+          "absolute leading-none",
+          isAlternateSelected ? "text-accent-foreground font-bold" : "text-muted-foreground",
+        )}
+        style={{
+          ...SLIDE_CORNER_STYLE[direction],
+          fontSize: KEYBOARD_ALTERNATE_FONT_SIZE_PX,
+        }}
+      >
+        {glyph.icon ? <glyph.icon size={KEYBOARD_ALTERNATE_ICON_SIZE_PX} /> : glyph.label}
+      </span>
+    );
+  });
 
 export const OnScreenKeyboard = ({
   onInput,
@@ -544,28 +570,7 @@ export const OnScreenKeyboard = ({
           ) : (
             <span className="leading-none">{faceLabel}</span>
           )}
-          {ALL_SLIDE_DIRECTIONS.map((direction) => {
-            const glyph = alternates?.[direction];
-            if (glyph == null) return null;
-            const isAlternateSelected = gesture?.selected === glyph;
-            return (
-              <span
-                key={direction}
-                className={cn(
-                  "absolute leading-none",
-                  isAlternateSelected
-                    ? "text-accent-foreground font-bold"
-                    : "text-muted-foreground",
-                )}
-                style={{
-                  ...SLIDE_CORNER_STYLE[direction],
-                  fontSize: KEYBOARD_ALTERNATE_FONT_SIZE_PX,
-                }}
-              >
-                {glyph.label}
-              </span>
-            );
-          })}
+          {renderAlternateCorners(alternates, gesture)}
         </>
       );
     } else {
@@ -580,28 +585,7 @@ export const OnScreenKeyboard = ({
           ) : (
             <span className="leading-none">{faceLabel}</span>
           )}
-          {ALL_SLIDE_DIRECTIONS.map((direction) => {
-            const glyph = specialAlternates?.[direction];
-            if (glyph == null) return null;
-            const isAlternateSelected = gesture?.selected === glyph;
-            return (
-              <span
-                key={direction}
-                className={cn(
-                  "absolute leading-none",
-                  isAlternateSelected
-                    ? "text-accent-foreground font-bold"
-                    : "text-muted-foreground",
-                )}
-                style={{
-                  ...SLIDE_CORNER_STYLE[direction],
-                  fontSize: KEYBOARD_ALTERNATE_FONT_SIZE_PX,
-                }}
-              >
-                {glyph.label}
-              </span>
-            );
-          })}
+          {renderAlternateCorners(specialAlternates, gesture)}
         </>
       );
     }

@@ -2567,7 +2567,7 @@ export const Terminal = () => {
 
   const pasteImageFromBlob = useCallback(
     async (blob: Blob, filename: string) => {
-      const cwd = liveCwdRef.current;
+      const sessionId = liveSessionIdRef.current;
       if (!blob.type.startsWith("image/")) {
         showPastedImageNotice({ kind: "error", message: "Not an image" });
         return;
@@ -2576,13 +2576,13 @@ export const Terminal = () => {
         showPastedImageNotice({ kind: "error", message: "Image too large" });
         return;
       }
-      if (!cwd) {
-        showPastedImageNotice({ kind: "error", message: "No working directory yet" });
+      if (!sessionId) {
+        showPastedImageNotice({ kind: "error", message: "No session yet" });
         return;
       }
       showPastedImageNotice({ kind: "uploading", message: "Pasting image…" });
       try {
-        const absolutePath = await uploadPastedImage(cwd, blob, filename);
+        const absolutePath = await uploadPastedImage(sessionId, blob, filename);
         pasteToTerminalRef.current?.(shellQuoteArg(absolutePath));
         const basename = absolutePath.split(/[/\\]/).pop() ?? absolutePath;
         showPastedImageNotice({ kind: "done", message: `Pasted ${basename}` });

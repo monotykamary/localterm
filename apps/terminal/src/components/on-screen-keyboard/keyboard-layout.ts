@@ -1,4 +1,4 @@
-import { Space, type LucideIcon } from "lucide-react";
+import { ImageIcon, Space, type LucideIcon } from "lucide-react";
 
 export type SlideDirection =
   | "north"
@@ -14,6 +14,7 @@ export interface KeyGlyph {
   readonly label: string;
   readonly output: string;
   readonly name?: string;
+  readonly icon?: LucideIcon;
 }
 
 export interface CharKey {
@@ -204,7 +205,7 @@ export const qwertyLayout: KeyboardLayout = {
       cells: [
         special("control", "ctrl", 1, undefined, {
           northEast: { label: "fn", output: "", name: "function" },
-          southWest: { label: "🖼", output: "", name: "attach-image" },
+          southWest: { label: "image", output: "", name: "attach-image", icon: ImageIcon },
         }),
         special("alternate", "alt", 1, "⌥", {
           northEast: { label: "⌘", output: "", name: "command" },
