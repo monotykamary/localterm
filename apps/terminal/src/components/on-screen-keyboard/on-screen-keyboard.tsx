@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { CornerDownLeft, Delete, type LucideIcon } from "lucide-react";
+import { ChevronUp, CornerDownLeft, Delete, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DeviceTier } from "@/utils/detect-device-tier";
 import { buildCharOutput, buildSpecialOutput } from "@/utils/build-keyboard-output";
@@ -105,6 +105,12 @@ const consumeOneShot = (state: ModifierState): ModifierState => ({
 const SPECIAL_ICONS: Partial<Record<SpecialAction, LucideIcon>> = {
   backspace: Delete,
   enter: CornerDownLeft,
+  control: ChevronUp,
+};
+
+const MODIFIER_POPUP_LABEL: Partial<Record<SpecialAction, string>> = {
+  command: "command",
+  function: "fn",
 };
 
 const SLIDE_CORNER_STYLE: Record<SlideDirection, CSSProperties> = {
@@ -667,7 +673,12 @@ export const OnScreenKeyboard = ({
                 ? "shift"
                 : "off";
           } else if (gesture.selected != null) {
-            label = gesture.selected.label;
+            const altName = gesture.selected.name;
+            if (altName === "command" || altName === "function") {
+              label = MODIFIER_POPUP_LABEL[altName] ?? altName;
+            } else {
+              label = gesture.selected.label;
+            }
           } else {
             label = gesture.activeCell.label;
           }
