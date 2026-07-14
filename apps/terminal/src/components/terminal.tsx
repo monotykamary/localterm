@@ -20,6 +20,7 @@ import {
   FileDiff,
   FolderGit2,
   Key,
+  Keyboard,
   MonitorCog,
   Network,
   Plus,
@@ -28,6 +29,8 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { OnScreenKeyboard } from "@/components/on-screen-keyboard/on-screen-keyboard";
+import { useDeviceTier } from "@/hooks/use-device-tier";
 import {
   PR_DISPLAY_STATE_LABELS,
   PR_STATE_ICONS,
@@ -567,6 +570,22 @@ export const Terminal = () => {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const isTouchDevice = useMemo(() => isCoarsePointer(), []);
   const isAppleWebKit = useMemo(detectIsAppleWebKit, []);
+  const deviceTier = useDeviceTier();
+  const [isOnScreenKeyboardOpen, setOnScreenKeyboardOpen] = useState(
+    () => deviceTier !== "desktop",
+  );
+  const [onScreenKeyboardHeight, setOnScreenKeyboardHeight] = useState(0);
+  const onScreenKeyboardOpenRef = useRef(false);
+  const sendInputRef = useRef<((data: string) => void) | null>(null);
+  const focusForInputRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    onScreenKeyboardOpenRef.current = isOnScreenKeyboardOpen;
+  }, [isOnScreenKeyboardOpen]);
+
+  const handleSwitchToSystemKeyboard = useCallback(() => {
+    setOnScreenKeyboardOpen(false);
+    focusForInputRef.current?.();
+  }, []);
   // Apple WebKit ignores `interactive-widget=resizes-content` (set in
   // index.html) — its keyboard overlays the layout viewport, where Chromium
   // shrinks it above the keyboard in one browser-driven pass. Only WebKit
@@ -1006,6 +1025,7 @@ export const Terminal = () => {
     // on the terminal (handleTerminalTouchEnd) un-guards. Desktop has no virtual
     // keyboard, so a plain focus is all that's needed.
     const refocusTerminalQuietly = () => {
+      if (onScreenKeyboardOpenRef.current) return;
       if (isTouchDevice && terminal.textarea) terminal.textarea.inputMode = "none";
       terminal.focus();
     };
@@ -1036,6 +1056,7 @@ export const Terminal = () => {
         event.preventDefault();
         return;
       }
+      if (onScreenKeyboardOpenRef.current) return;
       focusTerminalForInput();
     };
     const tapListenerAbort = new AbortController();
@@ -1319,6 +1340,7 @@ export const Terminal = () => {
     const send = (message: ClientToServerMessage) => {
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
     };
+    sendInputRef.current = (data: string) => send({ type: "input", data });
 
     setCaffeinateModeRef.current = (mode: CaffeinateMode) =>
       send({ type: "caffeinate-mode", mode });
@@ -1473,6 +1495,7 @@ export const Terminal = () => {
     };
 
     refocusTerminalRef.current = refocusTerminalQuietly;
+    focusForInputRef.current = focusTerminalForInput;
     // Routes through the normal paste pipeline (bracketed paste when the
     // foreground app enables it), so multi-line text lands in the prompt
     // without executing.
@@ -1560,7 +1583,7 @@ export const Terminal = () => {
 
     observer.observe(container);
     fitToContainer();
-    requestAnimationFrame(() => terminal.focus());
+    if (!onScreenKeyboardOpenRef.current) requestAnimationFrame(() => terminal.focus());
 
     const showDeadSessionMask = (exitCode: number | null) => {
       if (disposed) return;
@@ -2622,7 +2645,7 @@ export const Terminal = () => {
       if (wsConnectedRef.current) return;
       if (healthy) {
         const terminal = terminalRef.current;
-        if (terminal) {
+        if (terminal && !onScreenKeyboardOpenRef.current) {
           terminal.focus();
         }
         manualReconnectRef.current?.();
@@ -2862,7 +2885,10 @@ export const Terminal = () => {
         background: pageBackground,
         paddingTop: "env(safe-area-inset-top, 0px)",
         paddingRight: "env(safe-area-inset-right, 0px)",
-        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        paddingBottom:
+          onScreenKeyboardHeight > 0
+            ? onScreenKeyboardHeight + "px"
+            : "env(safe-area-inset-bottom, 0px)",
         paddingLeft: "env(safe-area-inset-left, 0px)",
       }}
     >
@@ -3070,6 +3096,23 @@ export const Terminal = () => {
                       className="hover:text-foreground"
                     >
                       <Command />
+                    </Button>
+                  ) : null}
+                  {deviceTier !== "desktop" ? (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => {
+                        if (!isOnScreenKeyboardOpen) terminalRef.current?.textarea?.blur();
+                        setOnScreenKeyboardOpen((open) => !open);
+                      }}
+                      aria-label="toggle on-screen keyboard"
+                      className={cn(
+                        "hover:text-foreground",
+                        isOnScreenKeyboardOpen && "text-primary",
+                      )}
+                    >
+                      <Keyboard />
                     </Button>
                   ) : null}
                   <AutomationsButton
@@ -3384,6 +3427,15 @@ export const Terminal = () => {
           )}
         </AlertDialogContent>
       </AlertDialog>
+      {deviceTier !== "desktop" && isOnScreenKeyboardOpen ? (
+        <OnScreenKeyboard
+          onInput={(data) => sendInputRef.current?.(data)}
+          onClose={() => setOnScreenKeyboardOpen(false)}
+          onHeightChange={setOnScreenKeyboardHeight}
+          onSwitchToSystemKeyboard={handleSwitchToSystemKeyboard}
+          deviceTier={deviceTier}
+        />
+      ) : null}
     </div>
   );
 };

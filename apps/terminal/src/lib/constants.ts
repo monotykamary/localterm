@@ -356,3 +356,26 @@ export const WS_OUTPUT_CTX_HEADER_BYTES = 5;
 export const UPDATE_STATUS_POLL_INTERVAL_MS = 30 * 60 * 1000;
 // How long the update banner's copy button shows its “copied” feedback.
 export const UPDATE_COPY_FEEDBACK_MS = 1500;
+
+// On-screen keyboard (Unexpected-Keyboard-style in-app keyboard for touch).
+// Apple iOS keyboard metrics in CSS px: ~42px letter keys, ~44px bottom row,
+// ~6px gaps, ~5px radius, ~22px glyphs. Keys flex to fill the row width.
+export const KEYBOARD_KEY_HEIGHT_PX = 42;
+export const KEYBOARD_BOTTOM_KEY_HEIGHT_PX = 44;
+export const KEYBOARD_GAP_PX = 6;
+export const KEYBOARD_ROW_GAP_PX = 6;
+export const KEYBOARD_HORIZONTAL_PADDING_PX = 4;
+export const KEYBOARD_BOTTOM_PADDING_PX = 4;
+export const KEYBOARD_KEY_RADIUS_PX = 5;
+export const KEYBOARD_FONT_SIZE_PX = 22;
+export const KEYBOARD_ALTERNATE_FONT_SIZE_PX = 11;
+export const KEYBOARD_SPECIAL_FONT_SIZE_PX = 15;
+// Slide distance from the press point before a corner alternate is selected.
+// Below it the center char stays (filters jitter and grazing touches, the iOS
+// touch slop); past it the nearest defined alternate by angle wins.
+export const KEYBOARD_SLIDE_THRESHOLD_PX = 18;
+// A touch-primary device with no fine pointer or hover is a phone or tablet;
+// anything else (desktop, laptop, touch-laptop, iPad+trackpad) is desktop-class
+// and never renders the on-screen keyboard. iPadOS 13+ ships a Mac UA, so UA
+// sniffing can't tell an iPad from a Mac — matchMedia reflects real capability.
+export const DEVICE_TABLET_MIN_WIDTH_PX = 768;
