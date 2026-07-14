@@ -369,8 +369,21 @@ export const UPDATE_STATUS_POLL_INTERVAL_MS = 30 * 60 * 1000;
 export const UPDATE_COPY_FEEDBACK_MS = 1500;
 
 // On-screen keyboard (Unexpected-Keyboard-style in-app keyboard for touch).
-// Apple iOS keyboard metrics in CSS px: ~42px letter keys, ~44px bottom row,
-// ~6px gaps, ~5px radius, ~22px glyphs. Keys flex to fill the row width.
+// The 100% baseline follows Apple iOS keyboard metrics in CSS px; the compact
+// default scales every visual metric together and users can resize it in the
+// keyboard settings panel without changing the terminal's column count.
+export const DEFAULT_KEYBOARD_HEIGHT_SCALE_PERCENT = 85;
+export const KEYBOARD_HEIGHT_SCALE_MIN_PERCENT = 70;
+export const KEYBOARD_HEIGHT_SCALE_MAX_PERCENT = 120;
+export const KEYBOARD_HEIGHT_SCALE_STEP_PERCENT = 5;
+export const KEYBOARD_HEIGHT_SCALE_BASE_PERCENT = 100;
+export const DEFAULT_KEYBOARD_HAPTICS_ENABLED = true;
+export const DEFAULT_KEYBOARD_KEY_PREVIEW_ENABLED = true;
+export const DEFAULT_KEYBOARD_KEY_REPEAT_ENABLED = true;
+export const KEYBOARD_HEIGHT_SCALE_STORAGE_KEY = "localterm:keyboard-height-scale";
+export const KEYBOARD_HAPTICS_STORAGE_KEY = "localterm:keyboard-haptics";
+export const KEYBOARD_KEY_PREVIEW_STORAGE_KEY = "localterm:keyboard-key-preview";
+export const KEYBOARD_KEY_REPEAT_STORAGE_KEY = "localterm:keyboard-key-repeat";
 export const KEYBOARD_KEY_HEIGHT_PX = 42;
 export const KEYBOARD_BOTTOM_KEY_HEIGHT_PX = 44;
 export const KEYBOARD_GAP_PX = 6;
@@ -379,14 +392,16 @@ export const KEYBOARD_HORIZONTAL_PADDING_PX = 4;
 export const KEYBOARD_BOTTOM_PADDING_PX = 4;
 export const KEYBOARD_KEY_RADIUS_PX = 5;
 export const KEYBOARD_FONT_SIZE_PX = 22;
+export const KEYBOARD_TABLET_FONT_SIZE_ADDITION_PX = 2;
 export const KEYBOARD_ALTERNATE_FONT_SIZE_PX = 11;
 export const KEYBOARD_ALTERNATE_ICON_SIZE_PX = 14;
 export const KEYBOARD_SPECIAL_FONT_SIZE_PX = 15;
 export const KEYBOARD_ICON_SIZE_PX = 20;
 // Slide distance from the press point before a corner alternate is selected.
 // Below it the center char stays (filters jitter and grazing touches, the iOS
-// touch slop); past it the nearest defined alternate by angle wins.
+// touch slop); past it a defined alternate wins only near its corner angle.
 export const KEYBOARD_SLIDE_THRESHOLD_PX = 18;
+export const KEYBOARD_SLIDE_DIRECTION_TOLERANCE_RAD = Math.PI / 6;
 // Press-and-hold auto-repeats the key (hardware key-repeat feel), so holding an
 // arrow corner moves the cursor continuously. Initial delay then a steady
 // interval, tuned for smooth arrow movement.
@@ -397,6 +412,8 @@ export const KEYBOARD_KEY_REPEAT_INTERVAL_MS = 60;
 // don't clip; the char-width factor is a generous sans estimate for clamping.
 export const KEYBOARD_CALLOUT_FONT_SIZE_PX = 28;
 export const KEYBOARD_CALLOUT_CHAR_WIDTH_FACTOR = 0.6;
+export const KEYBOARD_CALLOUT_PADDING_PX = 24;
+export const KEYBOARD_CALLOUT_OFFSET_PX = 6;
 // Holding shift past this delay engages caps lock (stays on until tapped off);
 // a quick tap just toggles shift on/off.
 export const KEYBOARD_SHIFT_LONG_PRESS_MS = 400;

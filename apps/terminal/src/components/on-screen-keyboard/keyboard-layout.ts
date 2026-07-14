@@ -1,4 +1,4 @@
-import { ImageIcon, Space, type LucideIcon } from "lucide-react";
+import { ChevronDown, ImageIcon, Settings, Space, type LucideIcon } from "lucide-react";
 
 export type SlideDirection =
   | "north"
@@ -14,6 +14,7 @@ export interface KeyGlyph {
   readonly label: string;
   readonly output: string;
   readonly name?: string;
+  readonly action?: SpecialAction;
   readonly icon?: LucideIcon;
 }
 
@@ -33,7 +34,9 @@ export type SpecialAction =
   | "alternate"
   | "command"
   | "function"
-  | "attach-image";
+  | "attach-image"
+  | "keyboard-settings"
+  | "dismiss";
 
 export interface SpecialKey {
   readonly type: "special";
@@ -144,7 +147,8 @@ const SPACE_KEY: CharKey = {
 // (the cmd corner is ⌘; popups are text — "command"/"fn"). Cardinal slides
 // (up/down/left/right) are reserved for drag-to-correct — slide to a
 // neighboring key before lifting to fix a mis-press. Space carries the
-// arrows on its four edges.
+// arrows on its four edges. Alt's bottom-left corner opens keyboard settings;
+// Return's bottom-right corner dismisses the keyboard.
 export const qwertyLayout: KeyboardLayout = {
   rows: [
     {
@@ -204,14 +208,32 @@ export const qwertyLayout: KeyboardLayout = {
     {
       cells: [
         special("control", "ctrl", 1, undefined, {
-          northEast: { label: "fn", output: "", name: "function" },
-          southWest: { label: "image", output: "", name: "attach-image", icon: ImageIcon },
+          northEast: { label: "fn", output: "", action: "function" },
+          southWest: {
+            label: "image",
+            output: "",
+            action: "attach-image",
+            icon: ImageIcon,
+          },
         }),
         special("alternate", "alt", 1, "⌥", {
-          northEast: { label: "⌘", output: "", name: "command" },
+          northEast: { label: "⌘", output: "", action: "command" },
+          southWest: {
+            label: "settings",
+            output: "",
+            action: "keyboard-settings",
+            icon: Settings,
+          },
         }),
         SPACE_KEY,
-        special("enter", "return", 2),
+        special("enter", "return", 2, undefined, {
+          southEast: {
+            label: "hide",
+            output: "",
+            action: "dismiss",
+            icon: ChevronDown,
+          },
+        }),
       ],
     },
   ],

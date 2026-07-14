@@ -763,6 +763,31 @@ describe("Terminal on-screen keyboard arbitration", () => {
     });
   });
 
+  it("keeps the touch action overlay hidden until the on-screen keyboard opens", () => {
+    installFakeLocalStorage();
+    render(<Terminal />);
+    const toolbar = screen.getByRole("toolbar", { name: "terminal actions" });
+
+    expect(toolbar.className).toContain("opacity-0");
+    expect(toolbar.parentElement?.className).toContain("pointer-events-none");
+
+    openOnScreenKeyboard();
+
+    expect(toolbar.className).toContain("opacity-100");
+    expect(toolbar.parentElement?.className).toContain("pointer-events-auto");
+
+    const actionsToggle = screen.getByLabelText("Show terminal actions");
+    fireEvent.pointerDown(actionsToggle);
+    fireEvent.click(actionsToggle);
+    expect(queryOnScreenKeyboard()).not.toBeNull();
+    expect(screen.getByLabelText("Hide terminal actions")).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText("toggle on-screen keyboard"));
+
+    expect(toolbar.className).toContain("opacity-0");
+    expect(toolbar.parentElement?.className).toContain("pointer-events-none");
+  });
+
   it("dismisses an active system-keyboard input before opening for the terminal", () => {
     render(<Terminal />);
     const outsideInput = document.createElement("input");
@@ -789,6 +814,21 @@ describe("Terminal on-screen keyboard arbitration", () => {
 
     fireEvent.click(screen.getByLabelText("find in terminal"));
     expect(document.activeElement).toBe(screen.getByLabelText("find query"));
+  });
+
+  it("keeps the keyboard open while a keyboard-settings control receives focus", () => {
+    render(<Terminal />);
+    openOnScreenKeyboard();
+    const settingsBoundary = document.createElement("div");
+    const settingsButton = document.createElement("button");
+    settingsBoundary.setAttribute("data-on-screen-keyboard-settings", "");
+    settingsBoundary.appendChild(settingsButton);
+    document.body.appendChild(settingsBoundary);
+
+    act(() => settingsButton.focus());
+
+    expect(queryOnScreenKeyboard()).not.toBeNull();
+    settingsBoundary.remove();
   });
 
   it("closes when a non-terminal input receives programmatic focus", () => {

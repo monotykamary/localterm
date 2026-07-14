@@ -215,6 +215,13 @@ const SEARCH_DECORATION_OPTIONS = {
   activeMatchColorOverviewRuler: SEARCH_ACTIVE_MATCH_BORDER_HEX,
 };
 
+const ON_SCREEN_KEYBOARD_CONTROL_SELECTOR = [
+  "[data-on-screen-keyboard]",
+  "[data-on-screen-keyboard-settings]",
+  "[data-on-screen-keyboard-toggle]",
+  "[data-on-screen-keyboard-actions-toggle]",
+].join(", ");
+
 // Server-side output compression: the server compresses each binary output
 // frame (brotli if the browser can decode it, else gzip) with a 1-byte header
 // (0x00 raw / 0x01 gzip / 0x02 brotli). Feature-detect the decompressor at
@@ -583,10 +590,15 @@ export const Terminal = () => {
   const [onScreenKeyboardHeight, setOnScreenKeyboardHeight] = useState(0);
   const onScreenKeyboardOpenRef = useRef(false);
   const sendInputRef = useRef<((data: string) => void) | null>(null);
+  const refocusTerminal = useCallback(() => refocusTerminalRef.current?.(), []);
   const closeOnScreenKeyboard = useCallback(() => {
     onScreenKeyboardOpenRef.current = false;
     setIsOnScreenKeyboardOpen(false);
   }, []);
+  const dismissOnScreenKeyboard = useCallback(() => {
+    closeOnScreenKeyboard();
+    setIsActionsMenuOpen(false);
+  }, [closeOnScreenKeyboard]);
   const openOnScreenKeyboard = useCallback(() => {
     suppressTerminalSystemKeyboard(terminalRef.current?.textarea);
     dismissSystemKeyboard();
@@ -594,13 +606,13 @@ export const Terminal = () => {
     setIsOnScreenKeyboardOpen(true);
   }, []);
   const toggleOnScreenKeyboard = useCallback(() => {
-    if (onScreenKeyboardOpenRef.current) closeOnScreenKeyboard();
+    if (onScreenKeyboardOpenRef.current) dismissOnScreenKeyboard();
     else openOnScreenKeyboard();
-  }, [closeOnScreenKeyboard, openOnScreenKeyboard]);
+  }, [dismissOnScreenKeyboard, openOnScreenKeyboard]);
 
   useEffect(() => {
-    if (deviceTier === "desktop") closeOnScreenKeyboard();
-  }, [closeOnScreenKeyboard, deviceTier]);
+    if (deviceTier === "desktop") dismissOnScreenKeyboard();
+  }, [deviceTier, dismissOnScreenKeyboard]);
 
   // Focus the terminal cursor whenever the on-screen keyboard opens. The
   // guarded helper textarea keeps the system keyboard suppressed, and re-focus
@@ -616,10 +628,7 @@ export const Terminal = () => {
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (containerRef.current?.contains(target)) return;
-      if (
-        target instanceof Element &&
-        target.closest("[data-on-screen-keyboard], [data-on-screen-keyboard-toggle]")
-      ) {
+      if (target instanceof Element && target.closest(ON_SCREEN_KEYBOARD_CONTROL_SELECTOR)) {
         return;
       }
       closeOnScreenKeyboard();
@@ -628,7 +637,7 @@ export const Terminal = () => {
       if (event.target === terminalRef.current?.textarea) return;
       if (
         event.target instanceof Element &&
-        event.target.closest("[data-on-screen-keyboard-toggle]")
+        event.target.closest(ON_SCREEN_KEYBOARD_CONTROL_SELECTOR)
       ) {
         return;
       }
@@ -677,13 +686,13 @@ export const Terminal = () => {
   useEffect(() => {
     if (!isOnScreenKeyboardOpen) return;
     window.history.pushState({ localtermOsk: true }, "");
-    const onPopState = () => closeOnScreenKeyboard();
+    const onPopState = () => dismissOnScreenKeyboard();
     window.addEventListener("popstate", onPopState);
     return () => {
       window.removeEventListener("popstate", onPopState);
       if (window.history.state?.localtermOsk) window.history.back();
     };
-  }, [closeOnScreenKeyboard, isOnScreenKeyboardOpen]);
+  }, [dismissOnScreenKeyboard, isOnScreenKeyboardOpen]);
   // Apple WebKit ignores `interactive-widget=resizes-content` (set in
   // index.html) — its keyboard overlays the layout viewport, where Chromium
   // shrinks it above the keyboard in one browser-driven pass. Only WebKit
@@ -812,10 +821,16 @@ export const Terminal = () => {
     () => (branchPrDisplayState ? PR_STATE_ICONS[branchPrDisplayState] : null),
     [branchPrDisplayState],
   );
-  // Either indicator (working-changes count or PR) keeps the toolbar "peeking":
-  // the indicator stays visible while the action buttons collapse behind it and
-  // expand on hover. A stale merged PR (null display state) doesn't count.
+  // Indicators keep the desktop toolbar peeking. Touch leaves the entire
+  // ambient overlay absent while the keyboard is down so an underlying mobile
+  // app keeps its top-right controls; opening the keyboard restores our actions.
   const hasToolbarIndicator = hasDiff || branchPrDisplayState !== null;
+  const shouldShowAmbientToolbar = isTouchDevice
+    ? isOnScreenKeyboardOpen || isToolbarVisible
+    : isToolbarVisible || hasToolbarIndicator;
+  const shouldEnableAmbientToolbarPointerEvents = shouldShowAmbientToolbar || isSearchOpen;
+  const shouldShowToolbarHandle =
+    !isTouchDevice && !isToolbarVisible && !isSearchOpen && !hasToolbarIndicator;
 
   // Rectangle of the dead columns beyond the PTY's effective viewport (the
   // area right of a narrower peer's wrap), in the terminal surface's coordinate
@@ -2694,6 +2709,7 @@ export const Terminal = () => {
   // unreliable), so the button/keyboard key both route here. Desktop clipboard
   // paste + drag-drop are handled by the listeners below.
   const pickAndPasteImage = useCallback(() => {
+    setIsActionsMenuOpen(false);
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
@@ -3190,9 +3206,7 @@ export const Terminal = () => {
         <div
           className={cn(
             "absolute right-0 top-0 z-10 flex flex-col items-end pr-3 pt-1",
-            isToolbarVisible || isSearchOpen || hasToolbarIndicator || isTouchDevice
-              ? "pointer-events-auto"
-              : "pointer-events-none",
+            shouldEnableAmbientToolbarPointerEvents ? "pointer-events-auto" : "pointer-events-none",
           )}
           onMouseEnter={isTouchDevice ? undefined : handleToolbarAreaEnter}
           onMouseLeave={isTouchDevice ? undefined : handleToolbarAreaLeave}
@@ -3200,10 +3214,10 @@ export const Terminal = () => {
           <div
             aria-hidden="true"
             className={cn(
-              "pointer-events-auto mr-0.5 h-[2px] w-5 rounded-full bg-muted-foreground/25 transition-opacity duration-150",
-              isToolbarVisible || isSearchOpen || hasToolbarIndicator || isTouchDevice
-                ? "opacity-0"
-                : "opacity-100",
+              "mr-0.5 h-[2px] w-5 rounded-full bg-muted-foreground/25 transition-opacity duration-150",
+              shouldShowToolbarHandle
+                ? "pointer-events-auto opacity-100"
+                : "pointer-events-none opacity-0",
             )}
           />
           {!isSearchOpen && (
@@ -3216,7 +3230,7 @@ export const Terminal = () => {
                 "transition-[opacity,transform] duration-200 ease-snappy",
                 isTouchDevice &&
                   "overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-                isToolbarVisible || hasToolbarIndicator || isTouchDevice
+                shouldShowAmbientToolbar
                   ? "translate-y-0 opacity-100"
                   : "pointer-events-none -translate-y-1 opacity-0",
               )}
@@ -3452,6 +3466,7 @@ export const Terminal = () => {
                   {isTouchDevice ? (
                     <button
                       type="button"
+                      data-on-screen-keyboard-actions-toggle
                       onClick={toggleActionsMenu}
                       aria-label={
                         isActionsMenuOpen ? "Hide terminal actions" : "Show terminal actions"
@@ -3703,10 +3718,16 @@ export const Terminal = () => {
         <OnScreenKeyboard
           onInput={(data) => {
             sendInputRef.current?.(data);
-            refocusTerminalRef.current?.();
+            refocusTerminal();
           }}
           onAttachImage={pickAndPasteImage}
+          onDismiss={dismissOnScreenKeyboard}
+          onRefocus={refocusTerminal}
           onHeightChange={setOnScreenKeyboardHeight}
+          terminalFontSize={activeFontSize}
+          terminalLineHeight={activeLineHeight}
+          onTerminalFontSizeChange={handleFontSizeChange}
+          onTerminalLineHeightChange={handleLineHeightChange}
           deviceTier={deviceTier}
         />
       ) : null}

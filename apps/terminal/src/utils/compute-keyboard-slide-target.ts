@@ -1,5 +1,6 @@
 import type { KeyGlyph, SlideDirection } from "@/components/on-screen-keyboard/keyboard-layout";
 import { ALL_SLIDE_DIRECTIONS } from "@/components/on-screen-keyboard/keyboard-layout";
+import { KEYBOARD_SLIDE_DIRECTION_TOLERANCE_RAD } from "@/lib/constants";
 
 export interface SlideTarget {
   readonly direction: SlideDirection;
@@ -20,9 +21,9 @@ const SLIDE_DIRECTION_ANGLES: Record<SlideDirection, number> = {
 };
 
 // Picks the defined alternate whose angle is nearest to the slide vector, but
-// only once the finger has moved past the threshold from the press point. Below
-// it the center char wins, filtering jitter and grazing touches (iOS touch
-// slop). Returns null when the key has no alternates or the motion is a tap.
+// only once the finger has moved past the threshold and is heading toward that
+// alternate's corner. The angle gate leaves wrong-direction swipes available for
+// drag correction instead of triggering a key's only alternate.
 export const computeKeyboardSlideTarget = (
   deltaX: number,
   deltaY: number,
@@ -43,6 +44,7 @@ export const computeKeyboardSlideTarget = (
       nearestDirection = direction;
     }
   }
+  if (nearestDelta > KEYBOARD_SLIDE_DIRECTION_TOLERANCE_RAD) return null;
   const glyph = alternates[nearestDirection];
   return glyph == null ? null : { direction: nearestDirection, glyph };
 };

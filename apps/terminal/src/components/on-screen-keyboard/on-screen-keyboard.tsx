@@ -10,6 +10,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { ChevronUp, CornerDownLeft, Delete, type LucideIcon } from "lucide-react";
+import { KeyboardSettingsModal } from "@/components/on-screen-keyboard/keyboard-settings-modal";
+import { useOnScreenKeyboardSettings } from "@/hooks/use-on-screen-keyboard-settings";
 import { cn } from "@/lib/utils";
 import type { DeviceTier } from "@/utils/detect-device-tier";
 import { buildCharOutput, buildSpecialOutput } from "@/utils/build-keyboard-output";
@@ -26,6 +28,8 @@ import {
   type SpecialKey,
 } from "./keyboard-layout";
 import {
+  DEFAULT_TERMINAL_FONT_SIZE_PX,
+  DEFAULT_TERMINAL_LINE_HEIGHT,
   HAPTIC_TAP_MS,
   KEYBOARD_ALTERNATE_FONT_SIZE_PX,
   KEYBOARD_ALTERNATE_ICON_SIZE_PX,
@@ -33,8 +37,11 @@ import {
   KEYBOARD_BOTTOM_PADDING_PX,
   KEYBOARD_CALLOUT_CHAR_WIDTH_FACTOR,
   KEYBOARD_CALLOUT_FONT_SIZE_PX,
+  KEYBOARD_CALLOUT_OFFSET_PX,
+  KEYBOARD_CALLOUT_PADDING_PX,
   KEYBOARD_FONT_SIZE_PX,
   KEYBOARD_GAP_PX,
+  KEYBOARD_HEIGHT_SCALE_BASE_PERCENT,
   KEYBOARD_HORIZONTAL_PADDING_PX,
   KEYBOARD_ICON_SIZE_PX,
   KEYBOARD_KEY_HEIGHT_PX,
@@ -45,12 +52,19 @@ import {
   KEYBOARD_SHIFT_LONG_PRESS_MS,
   KEYBOARD_SLIDE_THRESHOLD_PX,
   KEYBOARD_SPECIAL_FONT_SIZE_PX,
+  KEYBOARD_TABLET_FONT_SIZE_ADDITION_PX,
 } from "@/lib/constants";
 
 interface OnScreenKeyboardProps {
   readonly onInput: (data: string) => void;
   readonly onHeightChange: (height: number) => void;
   readonly onAttachImage: () => void;
+  readonly onDismiss: () => void;
+  readonly onRefocus: () => void;
+  readonly terminalFontSize: number;
+  readonly terminalLineHeight: number;
+  readonly onTerminalFontSizeChange: (fontSize: number) => void;
+  readonly onTerminalLineHeightChange: (lineHeight: number) => void;
   readonly deviceTier: DeviceTier;
 }
 
@@ -129,6 +143,8 @@ const SLIDE_CORNER_STYLE: Record<SlideDirection, CSSProperties> = {
 const renderAlternateCorners = (
   alternates: Partial<Record<SlideDirection, KeyGlyph>> | undefined,
   gesture: ActiveGesture | null,
+  alternateFontSize: number,
+  alternateIconSize: number,
 ) =>
   ALL_SLIDE_DIRECTIONS.map((direction) => {
     const glyph = alternates?.[direction];
@@ -143,10 +159,10 @@ const renderAlternateCorners = (
         )}
         style={{
           ...SLIDE_CORNER_STYLE[direction],
-          fontSize: KEYBOARD_ALTERNATE_FONT_SIZE_PX,
+          fontSize: alternateFontSize,
         }}
       >
-        {glyph.icon ? <glyph.icon size={KEYBOARD_ALTERNATE_ICON_SIZE_PX} /> : glyph.label}
+        {glyph.icon ? <glyph.icon size={alternateIconSize} /> : glyph.label}
       </span>
     );
   });
@@ -155,6 +171,12 @@ export const OnScreenKeyboard = ({
   onInput,
   onHeightChange,
   onAttachImage,
+  onDismiss,
+  onRefocus,
+  terminalFontSize,
+  terminalLineHeight,
+  onTerminalFontSizeChange,
+  onTerminalLineHeightChange,
   deviceTier,
 }: OnScreenKeyboardProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -170,8 +192,46 @@ export const OnScreenKeyboard = ({
   const modifiersRef = useRef<ModifierState>(INITIAL_MODIFIERS);
   const [gestures, setGestures] = useState<readonly ActiveGesture[]>([]);
   const [modifiers, setModifiers] = useState<ModifierState>(INITIAL_MODIFIERS);
-  const charFontSize = deviceTier === "tablet" ? KEYBOARD_FONT_SIZE_PX + 2 : KEYBOARD_FONT_SIZE_PX;
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const {
+    heightScalePercent,
+    hapticsEnabled,
+    keyPreviewEnabled,
+    keyRepeatEnabled,
+    handleHeightScaleChange,
+    handleHapticsEnabledChange,
+    handleKeyPreviewEnabledChange,
+    handleKeyRepeatEnabledChange,
+    resetKeyboardSettings,
+  } = useOnScreenKeyboardSettings();
+  const keyboardScale = heightScalePercent / KEYBOARD_HEIGHT_SCALE_BASE_PERCENT;
+  const keyboardGap = KEYBOARD_GAP_PX * keyboardScale;
+  const keyboardRowGap = KEYBOARD_ROW_GAP_PX * keyboardScale;
+  const keyboardHorizontalPadding = KEYBOARD_HORIZONTAL_PADDING_PX * keyboardScale;
+  const keyboardBottomPadding = KEYBOARD_BOTTOM_PADDING_PX * keyboardScale;
+  const keyboardKeyRadius = KEYBOARD_KEY_RADIUS_PX * keyboardScale;
+  const keyboardIconSize = KEYBOARD_ICON_SIZE_PX * keyboardScale;
+  const keyboardAlternateFontSize = KEYBOARD_ALTERNATE_FONT_SIZE_PX * keyboardScale;
+  const keyboardAlternateIconSize = KEYBOARD_ALTERNATE_ICON_SIZE_PX * keyboardScale;
+  const keyboardSpecialFontSize = KEYBOARD_SPECIAL_FONT_SIZE_PX * keyboardScale;
+  const keyboardCharacterFontSize =
+    (KEYBOARD_FONT_SIZE_PX +
+      (deviceTier === "tablet" ? KEYBOARD_TABLET_FONT_SIZE_ADDITION_PX : 0)) *
+    keyboardScale;
+  const keyboardCalloutFontSize = KEYBOARD_CALLOUT_FONT_SIZE_PX * keyboardScale;
+  const keyboardCalloutPadding = KEYBOARD_CALLOUT_PADDING_PX * keyboardScale;
+  const keyboardCalloutOffset = KEYBOARD_CALLOUT_OFFSET_PX * keyboardScale;
   const shiftActive = modifiers.shift !== "off";
+  const openKeyboardSettings = useCallback(() => setIsSettingsOpen(true), []);
+  const closeKeyboardSettings = useCallback(() => {
+    setIsSettingsOpen(false);
+    onRefocus();
+  }, [onRefocus]);
+  const resetMobileSettings = useCallback(() => {
+    resetKeyboardSettings();
+    onTerminalFontSizeChange(DEFAULT_TERMINAL_FONT_SIZE_PX);
+    onTerminalLineHeightChange(DEFAULT_TERMINAL_LINE_HEIGHT);
+  }, [onTerminalFontSizeChange, onTerminalLineHeightChange, resetKeyboardSettings]);
 
   const keyCellMap = useMemo(() => {
     const map = new Map<string, KeyboardCell>();
@@ -210,46 +270,49 @@ export const OnScreenKeyboard = ({
     }
   }, [keyCellMap]);
 
-  const findNearestKey = useCallback((clientX: number, clientY: number) => {
-    type Hit = {
-      keyId: string;
-      cell: KeyboardCell;
-      rect: { left: number; top: number; width: number; height: number };
-    };
-    let best: Hit | null = null;
-    let bestDist = Infinity;
-    for (const [keyId, entry] of keyHitRef.current) {
-      const expandX = KEYBOARD_GAP_PX / 2;
-      const expandY = KEYBOARD_ROW_GAP_PX / 2;
-      if (
-        clientX < entry.rect.left - expandX ||
-        clientX > entry.rect.left + entry.rect.width + expandX ||
-        clientY < entry.rect.top - expandY ||
-        clientY > entry.rect.top + entry.rect.height + expandY
-      )
-        continue;
-      const cx = entry.rect.left + entry.rect.width / 2;
-      const cy = entry.rect.top + entry.rect.height / 2;
-      const dist = (clientX - cx) ** 2 + (clientY - cy) ** 2;
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = { keyId, cell: entry.cell, rect: entry.rect };
+  const findNearestKey = useCallback(
+    (clientX: number, clientY: number) => {
+      type Hit = {
+        keyId: string;
+        cell: KeyboardCell;
+        rect: { left: number; top: number; width: number; height: number };
+      };
+      let best: Hit | null = null;
+      let bestDist = Infinity;
+      for (const [keyId, entry] of keyHitRef.current) {
+        const expandX = keyboardGap / 2;
+        const expandY = keyboardRowGap / 2;
+        if (
+          clientX < entry.rect.left - expandX ||
+          clientX > entry.rect.left + entry.rect.width + expandX ||
+          clientY < entry.rect.top - expandY ||
+          clientY > entry.rect.top + entry.rect.height + expandY
+        )
+          continue;
+        const cx = entry.rect.left + entry.rect.width / 2;
+        const cy = entry.rect.top + entry.rect.height / 2;
+        const dist = (clientX - cx) ** 2 + (clientY - cy) ** 2;
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = { keyId, cell: entry.cell, rect: entry.rect };
+        }
       }
-    }
-    if (best) return best;
-    let fallback: Hit | null = null;
-    let fallbackDist = Infinity;
-    for (const [keyId, entry] of keyHitRef.current) {
-      const cx = entry.rect.left + entry.rect.width / 2;
-      const cy = entry.rect.top + entry.rect.height / 2;
-      const dist = (clientX - cx) ** 2 + (clientY - cy) ** 2;
-      if (dist < fallbackDist) {
-        fallbackDist = dist;
-        fallback = { keyId, cell: entry.cell, rect: entry.rect };
+      if (best) return best;
+      let fallback: Hit | null = null;
+      let fallbackDist = Infinity;
+      for (const [keyId, entry] of keyHitRef.current) {
+        const cx = entry.rect.left + entry.rect.width / 2;
+        const cy = entry.rect.top + entry.rect.height / 2;
+        const dist = (clientX - cx) ** 2 + (clientY - cy) ** 2;
+        if (dist < fallbackDist) {
+          fallbackDist = dist;
+          fallback = { keyId, cell: entry.cell, rect: entry.rect };
+        }
       }
-    }
-    return fallback;
-  }, []);
+      return fallback;
+    },
+    [keyboardGap, keyboardRowGap],
+  );
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -270,10 +333,11 @@ export const OnScreenKeyboard = ({
   }, []);
 
   const vibrate = useCallback(() => {
+    if (!hapticsEnabled) return;
     if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
       navigator.vibrate(HAPTIC_TAP_MS);
     }
-  }, []);
+  }, [hapticsEnabled]);
 
   const syncGestures = useCallback(() => {
     setGestures([...gesturesRef.current.values()]);
@@ -302,6 +366,7 @@ export const OnScreenKeyboard = ({
 
   const startRepeat = useCallback(
     (pointerId: number) => {
+      if (!keyRepeatEnabled) return;
       const state: RepeatState = { timeout: undefined, interval: undefined, fired: false };
       state.timeout = setTimeout(() => {
         state.fired = true;
@@ -311,7 +376,7 @@ export const OnScreenKeyboard = ({
       }, KEYBOARD_KEY_REPEAT_INITIAL_DELAY_MS);
       repeatStateRef.current.set(pointerId, state);
     },
-    [fireRepeat, vibrate],
+    [fireRepeat, keyRepeatEnabled, vibrate],
   );
 
   const handleSpecialTap = useCallback(
@@ -351,6 +416,12 @@ export const OnScreenKeyboard = ({
         case "attach-image":
           onAttachImage();
           return;
+        case "keyboard-settings":
+          openKeyboardSettings();
+          return;
+        case "dismiss":
+          onDismiss();
+          return;
         default: {
           const current = modifiersRef.current;
           onInput(buildSpecialOutput(cell.action, current));
@@ -358,7 +429,7 @@ export const OnScreenKeyboard = ({
         }
       }
     },
-    [applyModifiers, onAttachImage, onInput, vibrate],
+    [applyModifiers, onAttachImage, onDismiss, onInput, openKeyboardSettings, vibrate],
   );
 
   const handlePointerDown = useCallback(
@@ -498,15 +569,10 @@ export const OnScreenKeyboard = ({
           if (isDragCorrect || (isTap && !shiftHeld)) handleSpecialTap(active);
         } else {
           const selected = gesture.selected;
-          if (
-            selected &&
-            (selected.name === "command" ||
-              selected.name === "function" ||
-              selected.name === "attach-image")
-          ) {
+          if (selected?.action) {
             handleSpecialTap({
               type: "special",
-              action: selected.name,
+              action: selected.action,
               label: selected.label,
             });
           } else if (isDragCorrect || isTap) {
@@ -536,7 +602,8 @@ export const OnScreenKeyboard = ({
 
   const renderCell = (cell: KeyboardCell, keyId: string, rowIndex: number) => {
     const isBottomRow = rowIndex === qwertyLayout.rows.length - 1;
-    const height = isBottomRow ? KEYBOARD_BOTTOM_KEY_HEIGHT_PX : KEYBOARD_KEY_HEIGHT_PX;
+    const height =
+      (isBottomRow ? KEYBOARD_BOTTOM_KEY_HEIGHT_PX : KEYBOARD_KEY_HEIGHT_PX) * keyboardScale;
     const gesture = gestures.find((item) => item.activeCell === cell) ?? null;
     const armed = gesture !== null;
     const centerLabel = cell.type === "char" ? cell.center.label : cell.label;
@@ -554,7 +621,7 @@ export const OnScreenKeyboard = ({
         modifierActive = modifiers.alternate !== "off" || modifiers.command !== "off";
     }
     const grow = cell.grow ?? 1;
-    const fontSize = cell.type === "special" ? KEYBOARD_SPECIAL_FONT_SIZE_PX : charFontSize;
+    const fontSize = cell.type === "special" ? keyboardSpecialFontSize : keyboardCharacterFontSize;
     const background = armed
       ? "bg-accent text-accent-foreground"
       : modifierActive
@@ -566,11 +633,16 @@ export const OnScreenKeyboard = ({
       content = (
         <>
           {Icon ? (
-            <Icon size={KEYBOARD_ICON_SIZE_PX} />
+            <Icon size={keyboardIconSize} />
           ) : (
             <span className="leading-none">{faceLabel}</span>
           )}
-          {renderAlternateCorners(alternates, gesture)}
+          {renderAlternateCorners(
+            alternates,
+            gesture,
+            keyboardAlternateFontSize,
+            keyboardAlternateIconSize,
+          )}
         </>
       );
     } else {
@@ -581,11 +653,16 @@ export const OnScreenKeyboard = ({
           {cell.symbol ? (
             <span className="leading-none">{cell.symbol}</span>
           ) : Icon ? (
-            <Icon size={KEYBOARD_ICON_SIZE_PX} />
+            <Icon size={keyboardIconSize} />
           ) : (
             <span className="leading-none">{faceLabel}</span>
           )}
-          {renderAlternateCorners(specialAlternates, gesture)}
+          {renderAlternateCorners(
+            specialAlternates,
+            gesture,
+            keyboardAlternateFontSize,
+            keyboardAlternateIconSize,
+          )}
         </>
       );
     }
@@ -603,7 +680,7 @@ export const OnScreenKeyboard = ({
           flexGrow: grow,
           flexBasis: 0,
           height,
-          borderRadius: KEYBOARD_KEY_RADIUS_PX,
+          borderRadius: keyboardKeyRadius,
           fontSize,
           touchAction: "none",
         }}
@@ -621,7 +698,7 @@ export const OnScreenKeyboard = ({
         data-on-screen-keyboard
         className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 backdrop-blur-sm"
         style={{
-          paddingBottom: "calc(" + KEYBOARD_BOTTOM_PADDING_PX + "px + env(safe-area-inset-bottom))",
+          paddingBottom: "calc(" + keyboardBottomPadding + "px + env(safe-area-inset-bottom))",
           touchAction: "none",
         }}
         onPointerDown={(event) => {
@@ -636,12 +713,12 @@ export const OnScreenKeyboard = ({
         <div
           className="flex flex-col"
           style={{
-            gap: KEYBOARD_ROW_GAP_PX,
-            padding: KEYBOARD_ROW_GAP_PX + "px " + KEYBOARD_HORIZONTAL_PADDING_PX + "px 0",
+            gap: keyboardRowGap,
+            padding: keyboardRowGap + "px " + keyboardHorizontalPadding + "px 0",
           }}
         >
           {qwertyLayout.rows.map((row, rowIndex) => (
-            <div key={rowIndex} className="flex" style={{ gap: KEYBOARD_GAP_PX }}>
+            <div key={rowIndex} className="flex" style={{ gap: keyboardGap }}>
               {row.cells.map((cell, cellIndex) =>
                 renderCell(cell, rowIndex + "-" + cellIndex, rowIndex),
               )}
@@ -650,68 +727,92 @@ export const OnScreenKeyboard = ({
         </div>
       </div>
       <div className="pointer-events-none fixed inset-0 z-50 overflow-visible">
-        {gestures.map((gesture) => {
-          const rect = gesture.activeRect;
-          let label: string;
-          if (gesture.activeCell.type === "char") {
-            const glyph = gesture.selected ?? gesture.activeCell.center;
-            label =
-              shiftActive &&
-              gesture.selected === gesture.activeCell.center &&
-              /^[a-z]$/.test(glyph.label)
-                ? glyph.label.toUpperCase()
-                : (glyph.name ?? glyph.label);
-          } else if (gesture.activeCell.action === "shift") {
-            label = shiftHoldRef.current.fired
-              ? "caps lock"
-              : modifiers.shift === "off"
-                ? "shift"
-                : "off";
-          } else if (gesture.selected != null) {
-            const altName = gesture.selected.name;
-            if (altName === "command" || altName === "function") {
-              label = MODIFIER_POPUP_LABEL[altName] ?? altName;
-            } else {
-              label = gesture.selected.label;
-            }
-          } else {
-            label = gesture.activeCell.label;
-          }
-          const minLabelWidth =
-            Math.ceil(
-              label.length * KEYBOARD_CALLOUT_FONT_SIZE_PX * KEYBOARD_CALLOUT_CHAR_WIDTH_FACTOR,
-            ) + 24;
-          const calloutWidth = Math.max(rect.width + 24, minLabelWidth);
-          const calloutHeight = rect.height + 24;
-          const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
-          const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
-          const left = Math.max(
-            0,
-            Math.min(rect.left + rect.width / 2 - calloutWidth / 2, viewportWidth - calloutWidth),
-          );
-          const top = Math.max(
-            0,
-            Math.min(rect.top - calloutHeight - 6, viewportHeight - calloutHeight),
-          );
-          return (
-            <div
-              key={gesture.pointerId}
-              className="flex items-center justify-center rounded-md border bg-popover text-popover-foreground shadow-lg"
-              style={{
-                position: "absolute",
-                left,
-                top,
-                width: calloutWidth,
-                height: calloutHeight,
-                fontSize: KEYBOARD_CALLOUT_FONT_SIZE_PX,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {label}
-            </div>
-          );
-        })}
+        {keyPreviewEnabled
+          ? gestures.map((gesture) => {
+              const rect = gesture.activeRect;
+              let label: string;
+              if (gesture.activeCell.type === "char") {
+                const glyph = gesture.selected ?? gesture.activeCell.center;
+                label =
+                  shiftActive &&
+                  gesture.selected === gesture.activeCell.center &&
+                  /^[a-z]$/.test(glyph.label)
+                    ? glyph.label.toUpperCase()
+                    : (glyph.name ?? glyph.label);
+              } else if (gesture.activeCell.action === "shift") {
+                label = shiftHoldRef.current.fired
+                  ? "caps lock"
+                  : modifiers.shift === "off"
+                    ? "shift"
+                    : "off";
+              } else if (gesture.selected != null) {
+                const alternateAction = gesture.selected.action;
+                label = alternateAction
+                  ? (MODIFIER_POPUP_LABEL[alternateAction] ?? gesture.selected.label)
+                  : gesture.selected.label;
+              } else {
+                label = gesture.activeCell.label;
+              }
+              const minLabelWidth =
+                Math.ceil(
+                  label.length * keyboardCalloutFontSize * KEYBOARD_CALLOUT_CHAR_WIDTH_FACTOR,
+                ) + keyboardCalloutPadding;
+              const calloutWidth = Math.max(rect.width + keyboardCalloutPadding, minLabelWidth);
+              const calloutHeight = rect.height + keyboardCalloutPadding;
+              const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
+              const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
+              const left = Math.max(
+                0,
+                Math.min(
+                  rect.left + rect.width / 2 - calloutWidth / 2,
+                  viewportWidth - calloutWidth,
+                ),
+              );
+              const top = Math.max(
+                0,
+                Math.min(
+                  rect.top - calloutHeight - keyboardCalloutOffset,
+                  viewportHeight - calloutHeight,
+                ),
+              );
+              return (
+                <div
+                  key={gesture.pointerId}
+                  className="flex items-center justify-center rounded-md border bg-popover text-popover-foreground shadow-lg"
+                  style={{
+                    position: "absolute",
+                    left,
+                    top,
+                    width: calloutWidth,
+                    height: calloutHeight,
+                    fontSize: keyboardCalloutFontSize,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {label}
+                </div>
+              );
+            })
+          : null}
       </div>
+      {isSettingsOpen ? (
+        <KeyboardSettingsModal
+          heightScalePercent={heightScalePercent}
+          terminalFontSize={terminalFontSize}
+          terminalLineHeight={terminalLineHeight}
+          hapticsEnabled={hapticsEnabled}
+          keyPreviewEnabled={keyPreviewEnabled}
+          keyRepeatEnabled={keyRepeatEnabled}
+          onHeightScaleChange={handleHeightScaleChange}
+          onTerminalFontSizeChange={onTerminalFontSizeChange}
+          onTerminalLineHeightChange={onTerminalLineHeightChange}
+          onHapticsEnabledChange={handleHapticsEnabledChange}
+          onKeyPreviewEnabledChange={handleKeyPreviewEnabledChange}
+          onKeyRepeatEnabledChange={handleKeyRepeatEnabledChange}
+          onReset={resetMobileSettings}
+          onClose={closeKeyboardSettings}
+        />
+      ) : null}
     </>,
     document.body,
   );
