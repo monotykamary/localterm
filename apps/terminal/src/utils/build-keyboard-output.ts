@@ -7,7 +7,6 @@ import type {
 const ESC = String.fromCharCode(27);
 const DEL = String.fromCharCode(127);
 const CARRIAGE_RETURN = String.fromCharCode(13);
-const TAB = String.fromCharCode(9);
 
 const isAsciiLetter = (char: string): boolean => /^[a-zA-Z]$/.test(char);
 
@@ -34,20 +33,6 @@ const buildSpecialSequence = (action: SpecialAction): string => {
       return DEL;
     case "enter":
       return CARRIAGE_RETURN;
-    case "tab":
-      return TAB;
-    case "escape":
-      return ESC;
-    case "space":
-      return " ";
-    case "arrowUp":
-      return ESC + "[A";
-    case "arrowDown":
-      return ESC + "[B";
-    case "arrowRight":
-      return ESC + "[C";
-    case "arrowLeft":
-      return ESC + "[D";
     default:
       return "";
   }

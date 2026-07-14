@@ -571,23 +571,35 @@ export const Terminal = () => {
   const isTouchDevice = useMemo(() => isCoarsePointer(), []);
   const isAppleWebKit = useMemo(detectIsAppleWebKit, []);
   const deviceTier = useDeviceTier();
-  const [isOnScreenKeyboardOpen, setOnScreenKeyboardOpen] = useState(
-    () => deviceTier !== "desktop",
-  );
+  const [isOnScreenKeyboardOpen, setOnScreenKeyboardOpen] = useState(false);
   const [onScreenKeyboardHeight, setOnScreenKeyboardHeight] = useState(0);
   const onScreenKeyboardOpenRef = useRef(false);
   const sendInputRef = useRef<((data: string) => void) | null>(null);
-  const focusForInputRef = useRef<(() => void) | null>(null);
-  const systemKeyboardActiveRef = useRef(false);
   useEffect(() => {
     onScreenKeyboardOpenRef.current = isOnScreenKeyboardOpen;
   }, [isOnScreenKeyboardOpen]);
 
-  const handleSwitchToSystemKeyboard = useCallback(() => {
-    systemKeyboardActiveRef.current = true;
-    setOnScreenKeyboardOpen(false);
-    focusForInputRef.current?.();
-  }, []);
+  // Focus the terminal cursor whenever the on-screen keyboard opens — inputMode
+  // stays "none" so the system keyboard stays suppressed — and re-focus after
+  // each keystroke so the cursor block stays solid while typing through the OSK.
+  useEffect(() => {
+    if (!isOnScreenKeyboardOpen) return;
+    refocusTerminalRef.current?.();
+  }, [isOnScreenKeyboardOpen]);
+
+  // Hardware back / iOS edge-swipe dismisses the on-screen keyboard instead of
+  // navigating: push a history entry on open and pop it on close so a back
+  // gesture closes the keyboard.
+  useEffect(() => {
+    if (!isOnScreenKeyboardOpen) return;
+    window.history.pushState({ localtermOsk: true }, "");
+    const onPopState = () => setOnScreenKeyboardOpen(false);
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      if (window.history.state?.localtermOsk) window.history.back();
+    };
+  }, [isOnScreenKeyboardOpen]);
   // Apple WebKit ignores `interactive-widget=resizes-content` (set in
   // index.html) — its keyboard overlays the layout viewport, where Chromium
   // shrinks it above the keyboard in one browser-driven pass. Only WebKit
@@ -1013,21 +1025,11 @@ export const Terminal = () => {
     let tapStartClientX = 0;
     let tapStartClientY = 0;
     let tapMovedBeyondThreshold = false;
-    const focusTerminalForInput = () => {
-      if (terminal.textarea) terminal.textarea.inputMode = "";
-      terminal.focus();
-    };
     // Programmatic refocus after an overlay closes (settings/keep-awake menu,
     // search, command palette, diff viewer): route keystrokes back to the
-    // terminal without popping the virtual keyboard on touch. While an overlay
-    // was open the textarea blurred and the blur guard kept it
-    // `inputMode="none"` (keyboard suppressed); calling focusTerminalForInput
-    // here would un-guard it and pop the keyboard for a dismiss tap that never
-    // intended to type. On touch the guard stays in place — only a genuine tap
-    // on the terminal (handleTerminalTouchEnd) un-guards. Desktop has no virtual
-    // keyboard, so a plain focus is all that's needed.
+    // terminal. inputMode "none" keeps the system keyboard suppressed on touch
+    // while still focusing the textarea so xterm's cursor block stays solid.
     const refocusTerminalQuietly = () => {
-      if (onScreenKeyboardOpenRef.current) return;
       if (isTouchDevice && terminal.textarea) terminal.textarea.inputMode = "none";
       terminal.focus();
     };
@@ -1059,12 +1061,6 @@ export const Terminal = () => {
         return;
       }
       if (onScreenKeyboardOpenRef.current) return;
-      if (systemKeyboardActiveRef.current) {
-        focusTerminalForInput();
-        return;
-      }
-      systemKeyboardActiveRef.current = false;
-      terminal.textarea?.blur();
       setOnScreenKeyboardOpen(true);
     };
     const tapListenerAbort = new AbortController();
@@ -1503,7 +1499,6 @@ export const Terminal = () => {
     };
 
     refocusTerminalRef.current = refocusTerminalQuietly;
-    focusForInputRef.current = focusTerminalForInput;
     // Routes through the normal paste pipeline (bracketed paste when the
     // foreground app enables it), so multi-line text lands in the prompt
     // without executing.
@@ -3110,15 +3105,7 @@ export const Terminal = () => {
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      onClick={() => {
-                        if (!isOnScreenKeyboardOpen) {
-                          systemKeyboardActiveRef.current = false;
-                          terminalRef.current?.textarea?.blur();
-                          setOnScreenKeyboardOpen(true);
-                        } else {
-                          setOnScreenKeyboardOpen(false);
-                        }
-                      }}
+                      onClick={() => setOnScreenKeyboardOpen((open) => !open)}
                       aria-label="toggle on-screen keyboard"
                       className={cn(
                         "hover:text-foreground",
@@ -3442,10 +3429,11 @@ export const Terminal = () => {
       </AlertDialog>
       {deviceTier !== "desktop" && isOnScreenKeyboardOpen ? (
         <OnScreenKeyboard
-          onInput={(data) => sendInputRef.current?.(data)}
-          onClose={() => setOnScreenKeyboardOpen(false)}
+          onInput={(data) => {
+            sendInputRef.current?.(data);
+            refocusTerminalRef.current?.();
+          }}
           onHeightChange={setOnScreenKeyboardHeight}
-          onSwitchToSystemKeyboard={handleSwitchToSystemKeyboard}
           deviceTier={deviceTier}
         />
       ) : null}

@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { CornerDownLeft, Delete, Globe, KeyboardOff, type LucideIcon } from "lucide-react";
+import { CornerDownLeft, Delete, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DeviceTier } from "@/utils/detect-device-tier";
 import { buildCharOutput, buildSpecialOutput } from "@/utils/build-keyboard-output";
@@ -25,6 +25,7 @@ import {
   type SpecialKey,
 } from "./keyboard-layout";
 import {
+  HAPTIC_TAP_MS,
   KEYBOARD_ALTERNATE_FONT_SIZE_PX,
   KEYBOARD_BOTTOM_KEY_HEIGHT_PX,
   KEYBOARD_BOTTOM_PADDING_PX,
@@ -41,9 +42,7 @@ import {
 
 interface OnScreenKeyboardProps {
   readonly onInput: (data: string) => void;
-  readonly onClose: () => void;
   readonly onHeightChange: (height: number) => void;
-  readonly onSwitchToSystemKeyboard: () => void;
   readonly deviceTier: DeviceTier;
 }
 
@@ -79,8 +78,6 @@ const consumeOneShot = (state: ModifierState): ModifierState => ({
 const SPECIAL_ICONS: Partial<Record<SpecialAction, LucideIcon>> = {
   backspace: Delete,
   enter: CornerDownLeft,
-  systemKeyboard: Globe,
-  dismiss: KeyboardOff,
 };
 
 const SLIDE_CORNER_STYLE: Record<SlideDirection, CSSProperties> = {
@@ -96,9 +93,7 @@ const SLIDE_CORNER_STYLE: Record<SlideDirection, CSSProperties> = {
 
 export const OnScreenKeyboard = ({
   onInput,
-  onClose,
   onHeightChange,
-  onSwitchToSystemKeyboard,
   deviceTier,
 }: OnScreenKeyboardProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -126,19 +121,20 @@ export const OnScreenKeyboard = ({
     setModifiers(next);
   }, []);
 
+  const vibrate = useCallback(() => {
+    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+      navigator.vibrate(HAPTIC_TAP_MS);
+    }
+  }, []);
+
   const syncGestures = useCallback(() => {
     setGestures([...gesturesRef.current.values()]);
   }, []);
 
   const handleSpecialTap = useCallback(
     (cell: SpecialKey) => {
+      vibrate();
       switch (cell.action) {
-        case "dismiss":
-          onClose();
-          return;
-        case "systemKeyboard":
-          onSwitchToSystemKeyboard();
-          return;
         case "shift":
           applyModifiers({
             ...modifiersRef.current,
@@ -164,20 +160,14 @@ export const OnScreenKeyboard = ({
         }
       }
     },
-    [applyModifiers, onClose, onInput, onSwitchToSystemKeyboard],
+    [applyModifiers, onInput, vibrate],
   );
 
   const handlePointerDown = useCallback(
     (cell: KeyboardCell, keyId: string, event: ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
-      const containerRect = containerRef.current?.getBoundingClientRect();
       const keyRect = event.currentTarget.getBoundingClientRect();
-      const rect = {
-        left: keyRect.left - (containerRect?.left ?? 0),
-        top: keyRect.top - (containerRect?.top ?? 0),
-        width: keyRect.width,
-        height: keyRect.height,
-      };
       gesturesRef.current.set(event.pointerId, {
         pointerId: event.pointerId,
         keyId,
@@ -185,7 +175,12 @@ export const OnScreenKeyboard = ({
         startX: event.clientX,
         startY: event.clientY,
         selected: cell.type === "char" ? cell.center : null,
-        rect,
+        rect: {
+          left: keyRect.left,
+          top: keyRect.top,
+          width: keyRect.width,
+          height: keyRect.height,
+        },
       });
       syncGestures();
     },
@@ -237,10 +232,11 @@ export const OnScreenKeyboard = ({
         : null;
       const selected = target ? target.glyph : gesture.cell.center;
       const current = modifiersRef.current;
+      vibrate();
       onInput(buildCharOutput(selected, current));
       applyModifiers(consumeOneShot(current));
     },
-    [applyModifiers, handleSpecialTap, onInput, syncGestures],
+    [applyModifiers, handleSpecialTap, onInput, syncGestures, vibrate],
   );
 
   const handlePointerCancel = useCallback(
@@ -302,7 +298,9 @@ export const OnScreenKeyboard = ({
       );
     } else {
       const Icon = SPECIAL_ICONS[cell.action];
-      content = Icon ? (
+      content = cell.symbol ? (
+        <span className="leading-none">{cell.symbol}</span>
+      ) : Icon ? (
         <Icon size={KEYBOARD_ICON_SIZE_PX} />
       ) : (
         <span className="leading-none">{centerLabel}</span>
@@ -337,38 +335,49 @@ export const OnScreenKeyboard = ({
 
   if (typeof document === "undefined") return null;
   return createPortal(
-    <div
-      ref={containerRef}
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 backdrop-blur-sm"
-      style={{
-        paddingBottom: "calc(" + KEYBOARD_BOTTOM_PADDING_PX + "px + env(safe-area-inset-bottom))",
-      }}
-    >
+    <>
       <div
-        className="flex flex-col"
+        ref={containerRef}
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 backdrop-blur-sm"
         style={{
-          gap: KEYBOARD_ROW_GAP_PX,
-          padding: KEYBOARD_ROW_GAP_PX + "px " + KEYBOARD_HORIZONTAL_PADDING_PX + "px 0",
+          paddingBottom: "calc(" + KEYBOARD_BOTTOM_PADDING_PX + "px + env(safe-area-inset-bottom))",
         }}
       >
-        {qwertyLayout.rows.map((row, rowIndex) => (
-          <div key={rowIndex} className="flex" style={{ gap: KEYBOARD_GAP_PX }}>
-            {row.cells.map((cell, cellIndex) =>
-              renderCell(cell, rowIndex + "-" + cellIndex, rowIndex),
-            )}
-          </div>
-        ))}
+        <div
+          className="flex flex-col"
+          style={{
+            gap: KEYBOARD_ROW_GAP_PX,
+            padding: KEYBOARD_ROW_GAP_PX + "px " + KEYBOARD_HORIZONTAL_PADDING_PX + "px 0",
+          }}
+        >
+          {qwertyLayout.rows.map((row, rowIndex) => (
+            <div key={rowIndex} className="flex" style={{ gap: KEYBOARD_GAP_PX }}>
+              {row.cells.map((cell, cellIndex) =>
+                renderCell(cell, rowIndex + "-" + cellIndex, rowIndex),
+              )}
+            </div>
+          ))}
+        </div>
       </div>
-      <div className="pointer-events-none absolute inset-0 overflow-visible">
+      <div className="pointer-events-none fixed inset-0 overflow-visible">
         {gestures.map((gesture) => {
           const rect = gesture.rect;
           const calloutWidth = rect.width + 24;
           const calloutHeight = rect.height + 24;
-          const left = rect.left + rect.width / 2 - calloutWidth / 2;
-          const top = rect.top - calloutHeight - 6;
+          const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
+          const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
+          const left = Math.max(
+            0,
+            Math.min(rect.left + rect.width / 2 - calloutWidth / 2, viewportWidth - calloutWidth),
+          );
+          const top = Math.max(
+            0,
+            Math.min(rect.top - calloutHeight - 6, viewportHeight - calloutHeight),
+          );
           const label =
             gesture.cell.type === "char"
-              ? (gesture.selected ?? gesture.cell.center).label
+              ? ((gesture.selected ?? gesture.cell.center).name ??
+                (gesture.selected ?? gesture.cell.center).label)
               : gesture.cell.label;
           return (
             <div
@@ -388,7 +397,7 @@ export const OnScreenKeyboard = ({
           );
         })}
       </div>
-    </div>,
+    </>,
     document.body,
   );
 };

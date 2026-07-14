@@ -11,6 +11,7 @@ export type SlideDirection =
 export interface KeyGlyph {
   readonly label: string;
   readonly output: string;
+  readonly name?: string;
 }
 
 export interface CharKey {
@@ -20,26 +21,13 @@ export interface CharKey {
   readonly grow?: number;
 }
 
-export type SpecialAction =
-  | "backspace"
-  | "enter"
-  | "tab"
-  | "escape"
-  | "space"
-  | "arrowUp"
-  | "arrowDown"
-  | "arrowLeft"
-  | "arrowRight"
-  | "shift"
-  | "control"
-  | "alternate"
-  | "systemKeyboard"
-  | "dismiss";
+export type SpecialAction = "backspace" | "enter" | "shift" | "control" | "alternate";
 
 export interface SpecialKey {
   readonly type: "special";
   readonly action: SpecialAction;
   readonly label: string;
+  readonly symbol?: string;
   readonly grow?: number;
 }
 
@@ -76,21 +64,23 @@ const BACKSLASH = String.fromCharCode(92);
 const SINGLE_QUOTE = String.fromCharCode(39);
 const DOUBLE_QUOTE = String.fromCharCode(34);
 const ESC = String.fromCharCode(27);
+const TAB = String.fromCharCode(9);
 
 const buildAlternates = (
-  entries: Partial<Record<SlideDirection, string>>,
+  entries: Partial<Record<SlideDirection, string | KeyGlyph>>,
 ): Partial<Record<SlideDirection, KeyGlyph>> => {
   const result: Partial<Record<SlideDirection, KeyGlyph>> = {};
   for (const direction of ALL_SLIDE_DIRECTIONS) {
-    const label = entries[direction];
-    if (label != null) result[direction] = { label, output: label };
+    const entry = entries[direction];
+    if (entry == null) continue;
+    result[direction] = typeof entry === "string" ? { label: entry, output: entry } : entry;
   }
   return result;
 };
 
 const char = (
   label: string,
-  alternates?: Partial<Record<SlideDirection, string>>,
+  alternates?: Partial<Record<SlideDirection, string | KeyGlyph>>,
   grow?: number,
 ): CharKey => ({
   type: "char",
@@ -99,10 +89,16 @@ const char = (
   grow,
 });
 
-const special = (action: SpecialAction, label: string, grow?: number): SpecialKey => ({
+const special = (
+  action: SpecialAction,
+  label: string,
+  grow?: number,
+  symbol?: string,
+): SpecialKey => ({
   type: "special",
   action,
   label,
+  symbol,
   grow,
 });
 
@@ -142,7 +138,7 @@ export const qwertyLayout: KeyboardLayout = {
     },
     {
       cells: [
-        char("q", { southEast: "?" }),
+        char("q", { northWest: { label: "⎋", output: ESC, name: "esc" }, southEast: "?" }),
         char("w", { southEast: "!" }),
         char("e", { southEast: "-" }),
         char("r", { southEast: "_" }),
@@ -156,7 +152,7 @@ export const qwertyLayout: KeyboardLayout = {
     },
     {
       cells: [
-        char("a", { southEast: ";" }),
+        char("a", { northWest: { label: "⇥", output: TAB, name: "tab" }, southEast: ";" }),
         char("s", { southEast: ":" }),
         char("d", { southEast: SINGLE_QUOTE }),
         char("f", { southEast: DOUBLE_QUOTE }),
@@ -169,7 +165,7 @@ export const qwertyLayout: KeyboardLayout = {
     },
     {
       cells: [
-        special("shift", "shift", 1.5),
+        special("shift", "shift", 1.5, "⇧"),
         char("z", { southEast: "[" }),
         char("x", { southEast: "{" }),
         char("c", { southEast: "}" }),
@@ -182,14 +178,10 @@ export const qwertyLayout: KeyboardLayout = {
     },
     {
       cells: [
-        special("control", "ctrl", 1.3),
-        special("alternate", "alt", 1.3),
-        special("escape", "esc", 1),
-        special("tab", "tab", 1),
-        special("systemKeyboard", "system", 1),
-        special("dismiss", "dismiss", 1),
+        special("control", "ctrl", 1),
+        special("alternate", "alt", 1),
         SPACE_KEY,
-        special("enter", "return", 1.5),
+        special("enter", "return", 2),
       ],
     },
   ],
