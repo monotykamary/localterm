@@ -1,6 +1,7 @@
 import {
   useCallback,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -29,6 +30,8 @@ import {
   KEYBOARD_ALTERNATE_FONT_SIZE_PX,
   KEYBOARD_BOTTOM_KEY_HEIGHT_PX,
   KEYBOARD_BOTTOM_PADDING_PX,
+  KEYBOARD_CALLOUT_CHAR_WIDTH_FACTOR,
+  KEYBOARD_CALLOUT_FONT_SIZE_PX,
   KEYBOARD_FONT_SIZE_PX,
   KEYBOARD_GAP_PX,
   KEYBOARD_HORIZONTAL_PADDING_PX,
@@ -38,6 +41,7 @@ import {
   KEYBOARD_KEY_REPEAT_INITIAL_DELAY_MS,
   KEYBOARD_KEY_REPEAT_INTERVAL_MS,
   KEYBOARD_ROW_GAP_PX,
+  KEYBOARD_SHIFT_LONG_PRESS_MS,
   KEYBOARD_SLIDE_THRESHOLD_PX,
   KEYBOARD_SPECIAL_FONT_SIZE_PX,
 } from "@/lib/constants";
@@ -52,10 +56,17 @@ interface ActiveGesture {
   readonly pointerId: number;
   readonly keyId: string;
   readonly cell: KeyboardCell;
+  readonly rect: {
+    readonly left: number;
+    readonly top: number;
+    readonly width: number;
+    readonly height: number;
+  };
   readonly startX: number;
   readonly startY: number;
   readonly selected: KeyGlyph | null;
-  readonly rect: {
+  readonly activeCell: KeyboardCell;
+  readonly activeRect: {
     readonly left: number;
     readonly top: number;
     readonly width: number;
@@ -107,11 +118,96 @@ export const OnScreenKeyboard = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gesturesRef = useRef<Map<number, ActiveGesture>>(new Map());
   const repeatStateRef = useRef<Map<number, RepeatState>>(new Map());
+  const shiftHoldRef = useRef<{
+    timeout: ReturnType<typeof setTimeout> | undefined;
+    fired: boolean;
+  }>({
+    timeout: undefined,
+    fired: false,
+  });
   const modifiersRef = useRef<ModifierState>(INITIAL_MODIFIERS);
   const [gestures, setGestures] = useState<readonly ActiveGesture[]>([]);
   const [modifiers, setModifiers] = useState<ModifierState>(INITIAL_MODIFIERS);
   const charFontSize = deviceTier === "tablet" ? KEYBOARD_FONT_SIZE_PX + 2 : KEYBOARD_FONT_SIZE_PX;
   const shiftActive = modifiers.shift !== "off";
+
+  const keyCellMap = useMemo(() => {
+    const map = new Map<string, KeyboardCell>();
+    qwertyLayout.rows.forEach((row, rowIndex) =>
+      row.cells.forEach((cell, cellIndex) => map.set(rowIndex + "-" + cellIndex, cell)),
+    );
+    return map;
+  }, []);
+
+  const keyHitRef = useRef<
+    Map<
+      string,
+      {
+        cell: KeyboardCell;
+        rect: { left: number; top: number; width: number; height: number };
+      }
+    >
+  >(new Map());
+
+  const buildKeyHit = useCallback(() => {
+    const map = keyHitRef.current;
+    map.clear();
+    const elements = containerRef.current?.querySelectorAll("[data-key-id]");
+    if (!elements) return;
+    for (const element of elements) {
+      if (!(element instanceof HTMLElement)) continue;
+      const keyId = element.getAttribute("data-key-id");
+      if (!keyId) continue;
+      const cell = keyCellMap.get(keyId);
+      if (!cell) continue;
+      const r = element.getBoundingClientRect();
+      map.set(keyId, {
+        cell,
+        rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      });
+    }
+  }, [keyCellMap]);
+
+  const findNearestKey = useCallback((clientX: number, clientY: number) => {
+    type Hit = {
+      keyId: string;
+      cell: KeyboardCell;
+      rect: { left: number; top: number; width: number; height: number };
+    };
+    let best: Hit | null = null;
+    let bestDist = Infinity;
+    for (const [keyId, entry] of keyHitRef.current) {
+      const expandX = KEYBOARD_GAP_PX / 2;
+      const expandY = KEYBOARD_ROW_GAP_PX / 2;
+      if (
+        clientX < entry.rect.left - expandX ||
+        clientX > entry.rect.left + entry.rect.width + expandX ||
+        clientY < entry.rect.top - expandY ||
+        clientY > entry.rect.top + entry.rect.height + expandY
+      )
+        continue;
+      const cx = entry.rect.left + entry.rect.width / 2;
+      const cy = entry.rect.top + entry.rect.height / 2;
+      const dist = (clientX - cx) ** 2 + (clientY - cy) ** 2;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { keyId, cell: entry.cell, rect: entry.rect };
+      }
+    }
+    if (best) return best;
+    let fallback: Hit | null = null;
+    let fallbackDist = Infinity;
+    for (const [keyId, entry] of keyHitRef.current) {
+      const cx = entry.rect.left + entry.rect.width / 2;
+      const cy = entry.rect.top + entry.rect.height / 2;
+      const dist = (clientX - cx) ** 2 + (clientY - cy) ** 2;
+      if (dist < fallbackDist) {
+        fallbackDist = dist;
+        fallback = { keyId, cell: entry.cell, rect: entry.rect };
+      }
+    }
+    return fallback;
+  }, []);
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -183,7 +279,7 @@ export const OnScreenKeyboard = ({
         case "shift":
           applyModifiers({
             ...modifiersRef.current,
-            shift: cycleModifier(modifiersRef.current.shift),
+            shift: modifiersRef.current.shift === "off" ? "oneShot" : "off",
           });
           return;
         case "control":
@@ -209,55 +305,102 @@ export const OnScreenKeyboard = ({
   );
 
   const handlePointerDown = useCallback(
-    (cell: KeyboardCell, keyId: string, event: ReactPointerEvent<HTMLDivElement>) => {
+    (
+      cell: KeyboardCell,
+      keyId: string,
+      rect: { left: number; top: number; width: number; height: number },
+      event: ReactPointerEvent<HTMLDivElement>,
+    ) => {
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
-      const keyRect = event.currentTarget.getBoundingClientRect();
       gesturesRef.current.set(event.pointerId, {
         pointerId: event.pointerId,
         keyId,
         cell,
+        rect,
         startX: event.clientX,
         startY: event.clientY,
         selected: cell.type === "char" ? cell.center : null,
-        rect: {
-          left: keyRect.left,
-          top: keyRect.top,
-          width: keyRect.width,
-          height: keyRect.height,
-        },
+        activeCell: cell,
+        activeRect: rect,
       });
       const isModifierKey =
         cell.type === "special" &&
         (cell.action === "shift" || cell.action === "control" || cell.action === "alternate");
       if (!isModifierKey) startRepeat(event.pointerId);
+      if (cell.type === "special" && cell.action === "shift") {
+        shiftHoldRef.current.fired = false;
+        shiftHoldRef.current.timeout = setTimeout(() => {
+          shiftHoldRef.current.fired = true;
+          applyModifiers({ ...modifiersRef.current, shift: "locked" });
+          vibrate();
+        }, KEYBOARD_SHIFT_LONG_PRESS_MS);
+      }
       syncGestures();
     },
-    [startRepeat, syncGestures],
+    [applyModifiers, startRepeat, syncGestures, vibrate],
   );
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const gesture = gesturesRef.current.get(event.pointerId);
-      if (!gesture || gesture.cell.type !== "char") return;
-      const alternates = gesture.cell.alternates;
-      if (!alternates) return;
+      if (!gesture) return;
       const deltaX = event.clientX - gesture.startX;
       const deltaY = event.clientY - gesture.startY;
-      const target = computeKeyboardSlideTarget(
-        deltaX,
-        deltaY,
-        KEYBOARD_SLIDE_THRESHOLD_PX,
-        alternates,
-      );
-      const nextSelected = target ? target.glyph : gesture.cell.center;
-      if (gesture.selected === nextSelected) return;
-      gesturesRef.current.set(event.pointerId, { ...gesture, selected: nextSelected });
+      if (Math.hypot(deltaX, deltaY) < KEYBOARD_SLIDE_THRESHOLD_PX) return;
+      if (shiftHoldRef.current.timeout) {
+        clearTimeout(shiftHoldRef.current.timeout);
+        shiftHoldRef.current = { timeout: undefined, fired: false };
+      }
+      const pressed = gesture.cell;
+      let nextSelected: KeyGlyph | null = gesture.selected;
+      let nextActiveCell: KeyboardCell = gesture.activeCell;
+      let nextActiveRect = gesture.activeRect;
+      let resolved = false;
+      if (pressed.type === "char" && pressed.alternates) {
+        const target = computeKeyboardSlideTarget(
+          deltaX,
+          deltaY,
+          KEYBOARD_SLIDE_THRESHOLD_PX,
+          pressed.alternates,
+        );
+        if (target) {
+          nextSelected = target.glyph;
+          nextActiveCell = pressed;
+          nextActiveRect = gesture.rect;
+          resolved = true;
+        }
+      }
+      if (!resolved) {
+        const hit = findNearestKey(event.clientX, event.clientY);
+        if (hit && hit.keyId !== gesture.keyId) {
+          nextSelected = hit.cell.type === "char" ? hit.cell.center : null;
+          nextActiveCell = hit.cell;
+          nextActiveRect = hit.rect;
+        } else {
+          nextSelected = pressed.type === "char" ? pressed.center : null;
+          nextActiveCell = pressed;
+          nextActiveRect = gesture.rect;
+        }
+      }
+      if (nextSelected === gesture.selected && nextActiveCell === gesture.activeCell) return;
+      gesturesRef.current.set(event.pointerId, {
+        ...gesture,
+        selected: nextSelected,
+        activeCell: nextActiveCell,
+        activeRect: nextActiveRect,
+      });
       clearRepeat(event.pointerId);
-      startRepeat(event.pointerId);
+      const repeatable = !(
+        nextActiveCell.type === "special" &&
+        (nextActiveCell.action === "shift" ||
+          nextActiveCell.action === "control" ||
+          nextActiveCell.action === "alternate")
+      );
+      if (repeatable) startRepeat(event.pointerId);
       syncGestures();
     },
-    [clearRepeat, startRepeat, syncGestures],
+    [clearRepeat, findNearestKey, startRepeat, syncGestures],
   );
 
   const handlePointerUp = useCallback(
@@ -274,23 +417,22 @@ export const OnScreenKeyboard = ({
       }
       const moved = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
       const isTap = moved < KEYBOARD_SLIDE_THRESHOLD_PX;
-      if (gesture.cell.type === "special") {
-        if (isTap) handleSpecialTap(gesture.cell);
+      const active = gesture.activeCell;
+      const isDragCorrect = active !== gesture.cell;
+      if (active.type === "special") {
+        if (active.action === "shift") {
+          if (shiftHoldRef.current.timeout) clearTimeout(shiftHoldRef.current.timeout);
+          const shiftHeld = shiftHoldRef.current.fired;
+          shiftHoldRef.current = { timeout: undefined, fired: false };
+          if (isDragCorrect || (isTap && !shiftHeld)) handleSpecialTap(active);
+        } else if (isDragCorrect || isTap) {
+          handleSpecialTap(active);
+        }
         return;
       }
-      const alternates = gesture.cell.alternates;
-      const target = alternates
-        ? computeKeyboardSlideTarget(
-            event.clientX - gesture.startX,
-            event.clientY - gesture.startY,
-            KEYBOARD_SLIDE_THRESHOLD_PX,
-            alternates,
-          )
-        : null;
-      const selected = target ? target.glyph : gesture.cell.center;
       const current = modifiersRef.current;
       vibrate();
-      onInput(buildCharOutput(selected, current));
+      onInput(buildCharOutput(gesture.selected ?? active.center, current));
       applyModifiers(consumeOneShot(current));
     },
     [applyModifiers, clearRepeat, handleSpecialTap, onInput, syncGestures, vibrate],
@@ -299,6 +441,8 @@ export const OnScreenKeyboard = ({
   const handlePointerCancel = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       clearRepeat(event.pointerId);
+      if (shiftHoldRef.current.timeout) clearTimeout(shiftHoldRef.current.timeout);
+      shiftHoldRef.current = { timeout: undefined, fired: false };
       gesturesRef.current.delete(event.pointerId);
       syncGestures();
     },
@@ -308,7 +452,7 @@ export const OnScreenKeyboard = ({
   const renderCell = (cell: KeyboardCell, keyId: string, rowIndex: number) => {
     const isBottomRow = rowIndex === qwertyLayout.rows.length - 1;
     const height = isBottomRow ? KEYBOARD_BOTTOM_KEY_HEIGHT_PX : KEYBOARD_KEY_HEIGHT_PX;
-    const gesture = gestures.find((item) => item.keyId === keyId) ?? null;
+    const gesture = gestures.find((item) => item.activeCell === cell) ?? null;
     const armed = gesture !== null;
     const centerLabel = cell.type === "char" ? cell.center.label : cell.label;
     const faceLabel =
@@ -376,7 +520,8 @@ export const OnScreenKeyboard = ({
     return (
       <div
         key={keyId}
-        role="button"
+        data-key-id={keyId}
+        role="img"
         aria-label={faceLabel}
         className={cn(
           background,
@@ -390,10 +535,6 @@ export const OnScreenKeyboard = ({
           fontSize,
           touchAction: "none",
         }}
-        onPointerDown={(event) => handlePointerDown(cell, keyId, event)}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerCancel}
       >
         {content}
       </div>
@@ -408,7 +549,16 @@ export const OnScreenKeyboard = ({
         className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 backdrop-blur-sm"
         style={{
           paddingBottom: "calc(" + KEYBOARD_BOTTOM_PADDING_PX + "px + env(safe-area-inset-bottom))",
+          touchAction: "none",
         }}
+        onPointerDown={(event) => {
+          buildKeyHit();
+          const hit = findNearestKey(event.clientX, event.clientY);
+          if (hit) handlePointerDown(hit.cell, hit.keyId, hit.rect, event);
+        }}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
       >
         <div
           className="flex flex-col"
@@ -428,8 +578,30 @@ export const OnScreenKeyboard = ({
       </div>
       <div className="pointer-events-none fixed inset-0 z-50 overflow-visible">
         {gestures.map((gesture) => {
-          const rect = gesture.rect;
-          const calloutWidth = rect.width + 24;
+          const rect = gesture.activeRect;
+          let label: string;
+          if (gesture.activeCell.type === "char") {
+            const glyph = gesture.selected ?? gesture.activeCell.center;
+            label =
+              shiftActive &&
+              gesture.selected === gesture.activeCell.center &&
+              /^[a-z]$/.test(glyph.label)
+                ? glyph.label.toUpperCase()
+                : (glyph.name ?? glyph.label);
+          } else if (gesture.activeCell.action === "shift") {
+            label = shiftHoldRef.current.fired
+              ? "caps lock"
+              : modifiers.shift === "off"
+                ? "shift"
+                : "off";
+          } else {
+            label = gesture.activeCell.label;
+          }
+          const minLabelWidth =
+            Math.ceil(
+              label.length * KEYBOARD_CALLOUT_FONT_SIZE_PX * KEYBOARD_CALLOUT_CHAR_WIDTH_FACTOR,
+            ) + 24;
+          const calloutWidth = Math.max(rect.width + 24, minLabelWidth);
           const calloutHeight = rect.height + 24;
           const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
           const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
@@ -441,16 +613,6 @@ export const OnScreenKeyboard = ({
             0,
             Math.min(rect.top - calloutHeight - 6, viewportHeight - calloutHeight),
           );
-          let label: string;
-          if (gesture.cell.type === "char") {
-            const glyph = gesture.selected ?? gesture.cell.center;
-            label =
-              shiftActive && gesture.selected === gesture.cell.center && /^[a-z]$/.test(glyph.label)
-                ? glyph.label.toUpperCase()
-                : (glyph.name ?? glyph.label);
-          } else {
-            label = gesture.cell.label;
-          }
           return (
             <div
               key={gesture.pointerId}
@@ -461,7 +623,8 @@ export const OnScreenKeyboard = ({
                 top,
                 width: calloutWidth,
                 height: calloutHeight,
-                fontSize: 28,
+                fontSize: KEYBOARD_CALLOUT_FONT_SIZE_PX,
+                whiteSpace: "nowrap",
               }}
             >
               {label}

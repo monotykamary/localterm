@@ -380,6 +380,14 @@ export const KEYBOARD_SLIDE_THRESHOLD_PX = 18;
 // interval, tuned for smooth arrow movement.
 export const KEYBOARD_KEY_REPEAT_INITIAL_DELAY_MS = 350;
 export const KEYBOARD_KEY_REPEAT_INTERVAL_MS = 60;
+// Press popup (the magnified key preview shown while a key is held). Width is
+// sized to fit the label so multi-char popups like "delete" or "caps lock"
+// don't clip; the char-width factor is a generous sans estimate for clamping.
+export const KEYBOARD_CALLOUT_FONT_SIZE_PX = 28;
+export const KEYBOARD_CALLOUT_CHAR_WIDTH_FACTOR = 0.6;
+// Holding shift past this delay engages caps lock (stays on until tapped off);
+// a quick tap just toggles shift on/off.
+export const KEYBOARD_SHIFT_LONG_PRESS_MS = 400;
 // A touch-primary device with no fine pointer or hover is a phone or tablet;
 // anything else (desktop, laptop, touch-laptop, iPad+trackpad) is desktop-class
 // and never renders the on-screen keyboard. iPadOS 13+ ships a Mac UA, so UA
