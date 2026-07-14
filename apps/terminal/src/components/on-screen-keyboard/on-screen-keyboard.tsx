@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronUp, CornerDownLeft, Delete, ImageIcon, type LucideIcon } from "lucide-react";
+import { ChevronUp, CornerDownLeft, Delete, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DeviceTier } from "@/utils/detect-device-tier";
 import { buildCharOutput, buildSpecialOutput } from "@/utils/build-keyboard-output";
@@ -107,7 +107,6 @@ const SPECIAL_ICONS: Partial<Record<SpecialAction, LucideIcon>> = {
   backspace: Delete,
   enter: CornerDownLeft,
   control: ChevronUp,
-  "attach-image": ImageIcon,
 };
 
 const MODIFIER_POPUP_LABEL: Partial<Record<SpecialAction, string>> = {
@@ -441,8 +440,7 @@ export const OnScreenKeyboard = ({
         nextActiveCell.type === "special" &&
         (nextActiveCell.action === "shift" ||
           nextActiveCell.action === "control" ||
-          nextActiveCell.action === "alternate" ||
-          nextActiveCell.action === "attach-image")
+          nextActiveCell.action === "alternate")
       );
       if (repeatable) startRepeat(event.pointerId);
       syncGestures();
@@ -474,7 +472,12 @@ export const OnScreenKeyboard = ({
           if (isDragCorrect || (isTap && !shiftHeld)) handleSpecialTap(active);
         } else {
           const selected = gesture.selected;
-          if (selected && (selected.name === "command" || selected.name === "function")) {
+          if (
+            selected &&
+            (selected.name === "command" ||
+              selected.name === "function" ||
+              selected.name === "attach-image")
+          ) {
             handleSpecialTap({
               type: "special",
               action: selected.name,

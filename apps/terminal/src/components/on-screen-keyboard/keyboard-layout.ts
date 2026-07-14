@@ -202,9 +202,9 @@ export const qwertyLayout: KeyboardLayout = {
     },
     {
       cells: [
-        special("attach-image", "image", 1),
         special("control", "ctrl", 1, undefined, {
           northEast: { label: "fn", output: "", name: "function" },
+          southWest: { label: "🖼", output: "", name: "attach-image" },
         }),
         special("alternate", "alt", 1, "⌥", {
           northEast: { label: "⌘", output: "", name: "command" },
