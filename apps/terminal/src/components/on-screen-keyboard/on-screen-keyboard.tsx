@@ -35,6 +35,8 @@ import {
   KEYBOARD_ICON_SIZE_PX,
   KEYBOARD_KEY_HEIGHT_PX,
   KEYBOARD_KEY_RADIUS_PX,
+  KEYBOARD_KEY_REPEAT_INITIAL_DELAY_MS,
+  KEYBOARD_KEY_REPEAT_INTERVAL_MS,
   KEYBOARD_ROW_GAP_PX,
   KEYBOARD_SLIDE_THRESHOLD_PX,
   KEYBOARD_SPECIAL_FONT_SIZE_PX,
@@ -59,6 +61,12 @@ interface ActiveGesture {
     readonly width: number;
     readonly height: number;
   };
+}
+
+interface RepeatState {
+  timeout: ReturnType<typeof setTimeout> | undefined;
+  interval: ReturnType<typeof setInterval> | undefined;
+  fired: boolean;
 }
 
 const INITIAL_MODIFIERS: ModifierState = { shift: "off", control: "off", alternate: "off" };
@@ -98,10 +106,12 @@ export const OnScreenKeyboard = ({
 }: OnScreenKeyboardProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gesturesRef = useRef<Map<number, ActiveGesture>>(new Map());
+  const repeatStateRef = useRef<Map<number, RepeatState>>(new Map());
   const modifiersRef = useRef<ModifierState>(INITIAL_MODIFIERS);
   const [gestures, setGestures] = useState<readonly ActiveGesture[]>([]);
   const [modifiers, setModifiers] = useState<ModifierState>(INITIAL_MODIFIERS);
   const charFontSize = deviceTier === "tablet" ? KEYBOARD_FONT_SIZE_PX + 2 : KEYBOARD_FONT_SIZE_PX;
+  const shiftActive = modifiers.shift !== "off";
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -130,6 +140,41 @@ export const OnScreenKeyboard = ({
   const syncGestures = useCallback(() => {
     setGestures([...gesturesRef.current.values()]);
   }, []);
+
+  const fireRepeat = useCallback(
+    (pointerId: number) => {
+      const gesture = gesturesRef.current.get(pointerId);
+      if (!gesture) return;
+      if (gesture.cell.type === "char") {
+        onInput(buildCharOutput(gesture.selected ?? gesture.cell.center, modifiersRef.current));
+      } else {
+        onInput(buildSpecialOutput(gesture.cell.action));
+      }
+    },
+    [onInput],
+  );
+
+  const clearRepeat = useCallback((pointerId: number) => {
+    const state = repeatStateRef.current.get(pointerId);
+    if (!state) return;
+    if (state.timeout) clearTimeout(state.timeout);
+    if (state.interval) clearInterval(state.interval);
+    repeatStateRef.current.delete(pointerId);
+  }, []);
+
+  const startRepeat = useCallback(
+    (pointerId: number) => {
+      const state: RepeatState = { timeout: undefined, interval: undefined, fired: false };
+      state.timeout = setTimeout(() => {
+        state.fired = true;
+        vibrate();
+        fireRepeat(pointerId);
+        state.interval = setInterval(() => fireRepeat(pointerId), KEYBOARD_KEY_REPEAT_INTERVAL_MS);
+      }, KEYBOARD_KEY_REPEAT_INITIAL_DELAY_MS);
+      repeatStateRef.current.set(pointerId, state);
+    },
+    [fireRepeat, vibrate],
+  );
 
   const handleSpecialTap = useCallback(
     (cell: SpecialKey) => {
@@ -182,9 +227,13 @@ export const OnScreenKeyboard = ({
           height: keyRect.height,
         },
       });
+      const isModifierKey =
+        cell.type === "special" &&
+        (cell.action === "shift" || cell.action === "control" || cell.action === "alternate");
+      if (!isModifierKey) startRepeat(event.pointerId);
       syncGestures();
     },
-    [syncGestures],
+    [startRepeat, syncGestures],
   );
 
   const handlePointerMove = useCallback(
@@ -204,17 +253,25 @@ export const OnScreenKeyboard = ({
       const nextSelected = target ? target.glyph : gesture.cell.center;
       if (gesture.selected === nextSelected) return;
       gesturesRef.current.set(event.pointerId, { ...gesture, selected: nextSelected });
+      clearRepeat(event.pointerId);
+      startRepeat(event.pointerId);
       syncGestures();
     },
-    [syncGestures],
+    [clearRepeat, startRepeat, syncGestures],
   );
 
   const handlePointerUp = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const gesture = gesturesRef.current.get(event.pointerId);
+      const didRepeat = repeatStateRef.current.get(event.pointerId)?.fired ?? false;
+      clearRepeat(event.pointerId);
       gesturesRef.current.delete(event.pointerId);
       syncGestures();
       if (!gesture) return;
+      if (didRepeat) {
+        applyModifiers(consumeOneShot(modifiersRef.current));
+        return;
+      }
       const moved = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
       const isTap = moved < KEYBOARD_SLIDE_THRESHOLD_PX;
       if (gesture.cell.type === "special") {
@@ -236,15 +293,16 @@ export const OnScreenKeyboard = ({
       onInput(buildCharOutput(selected, current));
       applyModifiers(consumeOneShot(current));
     },
-    [applyModifiers, handleSpecialTap, onInput, syncGestures, vibrate],
+    [applyModifiers, clearRepeat, handleSpecialTap, onInput, syncGestures, vibrate],
   );
 
   const handlePointerCancel = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      clearRepeat(event.pointerId);
       gesturesRef.current.delete(event.pointerId);
       syncGestures();
     },
-    [syncGestures],
+    [clearRepeat, syncGestures],
   );
 
   const renderCell = (cell: KeyboardCell, keyId: string, rowIndex: number) => {
@@ -253,6 +311,10 @@ export const OnScreenKeyboard = ({
     const gesture = gestures.find((item) => item.keyId === keyId) ?? null;
     const armed = gesture !== null;
     const centerLabel = cell.type === "char" ? cell.center.label : cell.label;
+    const faceLabel =
+      cell.type === "char" && shiftActive && /^[a-z]$/.test(centerLabel)
+        ? centerLabel.toUpperCase()
+        : centerLabel;
     const alternates = cell.type === "char" ? cell.alternates : undefined;
     let modifierActive = false;
     if (cell.type === "special") {
@@ -269,9 +331,14 @@ export const OnScreenKeyboard = ({
         : "bg-muted text-foreground";
     let content: ReactNode;
     if (cell.type === "char") {
+      const Icon = cell.icon;
       content = (
         <>
-          <span className="leading-none">{centerLabel}</span>
+          {Icon ? (
+            <Icon size={KEYBOARD_ICON_SIZE_PX} />
+          ) : (
+            <span className="leading-none">{faceLabel}</span>
+          )}
           {ALL_SLIDE_DIRECTIONS.map((direction) => {
             const glyph = alternates?.[direction];
             if (glyph == null) return null;
@@ -303,14 +370,14 @@ export const OnScreenKeyboard = ({
       ) : Icon ? (
         <Icon size={KEYBOARD_ICON_SIZE_PX} />
       ) : (
-        <span className="leading-none">{centerLabel}</span>
+        <span className="leading-none">{faceLabel}</span>
       );
     }
     return (
       <div
         key={keyId}
         role="button"
-        aria-label={centerLabel}
+        aria-label={faceLabel}
         className={cn(
           background,
           "relative flex select-none items-center justify-center rounded-md transition-colors",
@@ -359,7 +426,7 @@ export const OnScreenKeyboard = ({
           ))}
         </div>
       </div>
-      <div className="pointer-events-none fixed inset-0 overflow-visible">
+      <div className="pointer-events-none fixed inset-0 z-50 overflow-visible">
         {gestures.map((gesture) => {
           const rect = gesture.rect;
           const calloutWidth = rect.width + 24;
@@ -374,11 +441,16 @@ export const OnScreenKeyboard = ({
             0,
             Math.min(rect.top - calloutHeight - 6, viewportHeight - calloutHeight),
           );
-          const label =
-            gesture.cell.type === "char"
-              ? ((gesture.selected ?? gesture.cell.center).name ??
-                (gesture.selected ?? gesture.cell.center).label)
-              : gesture.cell.label;
+          let label: string;
+          if (gesture.cell.type === "char") {
+            const glyph = gesture.selected ?? gesture.cell.center;
+            label =
+              shiftActive && gesture.selected === gesture.cell.center && /^[a-z]$/.test(glyph.label)
+                ? glyph.label.toUpperCase()
+                : (glyph.name ?? glyph.label);
+          } else {
+            label = gesture.cell.label;
+          }
           return (
             <div
               key={gesture.pointerId}

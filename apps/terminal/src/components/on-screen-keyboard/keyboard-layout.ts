@@ -1,3 +1,5 @@
+import { Space, type LucideIcon } from "lucide-react";
+
 export type SlideDirection =
   | "north"
   | "northEast"
@@ -16,6 +18,7 @@ export interface KeyGlyph {
 
 export interface CharKey {
   readonly type: "char";
+  readonly icon?: LucideIcon;
   readonly center: KeyGlyph;
   readonly alternates?: Partial<Record<SlideDirection, KeyGlyph>>;
   readonly grow?: number;
@@ -104,6 +107,7 @@ const special = (
 
 const SPACE_KEY: CharKey = {
   type: "char",
+  icon: Space,
   center: { label: "space", output: " " },
   alternates: {
     west: { label: "←", output: ESC + "[D" },

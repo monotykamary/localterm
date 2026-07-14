@@ -1031,7 +1031,7 @@ export const Terminal = () => {
     // while still focusing the textarea so xterm's cursor block stays solid.
     const refocusTerminalQuietly = () => {
       if (isTouchDevice && terminal.textarea) terminal.textarea.inputMode = "none";
-      terminal.focus();
+      if (terminal.textarea !== document.activeElement) terminal.focus();
     };
     const handleTerminalTouchStart = (event: TouchEvent) => {
       if (event.touches.length !== 1) {

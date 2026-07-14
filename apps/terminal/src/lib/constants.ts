@@ -375,6 +375,11 @@ export const KEYBOARD_ICON_SIZE_PX = 20;
 // Below it the center char stays (filters jitter and grazing touches, the iOS
 // touch slop); past it the nearest defined alternate by angle wins.
 export const KEYBOARD_SLIDE_THRESHOLD_PX = 18;
+// Press-and-hold auto-repeats the key (hardware key-repeat feel), so holding an
+// arrow corner moves the cursor continuously. Initial delay then a steady
+// interval, tuned for smooth arrow movement.
+export const KEYBOARD_KEY_REPEAT_INITIAL_DELAY_MS = 350;
+export const KEYBOARD_KEY_REPEAT_INTERVAL_MS = 60;
 // A touch-primary device with no fine pointer or hover is a phone or tablet;
 // anything else (desktop, laptop, touch-laptop, iPad+trackpad) is desktop-class
 // and never renders the on-screen keyboard. iPadOS 13+ ships a Mac UA, so UA
