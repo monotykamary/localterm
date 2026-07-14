@@ -151,6 +151,7 @@ import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anchor";
 import { outputBatcher } from "@/utils/write-terminal-output";
 import { shouldBlockTerminalScrollbackPurge } from "@/utils/should-block-terminal-scrollback-purge";
+import { shouldSuppressSessionNotification } from "@/utils/should-suppress-session-notification";
 import { suppressTerminalSystemKeyboard } from "@/utils/suppress-terminal-system-keyboard";
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { detectLikelyKeepAwakeSupported } from "@/utils/detect-likely-keep-awake-supported";
@@ -2086,14 +2087,20 @@ export const Terminal = () => {
             // user's other tabs into one OS notification. Falls back to a
             // page-owned Notification when no SW is active (dev / not controlling).
             const sid = message.sessionId;
-            // Only the tab viewing this session shows the notification, so the
-            // click is handled by the same profile's SW (which can focus that
-            // tab and raise its window — a profile-isolated SW can't reach
-            // another profile's tab). A session with no viewer anywhere still
-            // pings from every tab and reopens on click; one viewed in another
-            // profile is left to that profile, avoiding a second client.
             const isViewer = sid === liveSessionIdRef.current;
-            if (!isViewer && message.hasViewers) return;
+            // The foreground viewer tab can already see the result on screen, so
+            // it skips the OS notification — see shouldSuppressSessionNotification
+            // for the cross-tab + foreground suppression rules.
+            if (
+              shouldSuppressSessionNotification({
+                isViewer,
+                hasViewers: message.hasViewers,
+                documentVisible: document.visibilityState === "visible",
+                documentFocused: document.hasFocus(),
+              })
+            ) {
+              return;
+            }
             const sw = navigator.serviceWorker;
             if (sw?.controller) {
               void sw.ready.then((reg) =>
