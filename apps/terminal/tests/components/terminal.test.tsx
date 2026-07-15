@@ -13,6 +13,8 @@ import {
   TERMINAL_LINE_HEIGHT_STORAGE_KEY,
   TERMINAL_SCROLL_ON_USER_INPUT_STORAGE_KEY,
   TERMINAL_SCROLLBACK_STORAGE_KEY,
+  TERMINAL_TAB_SEQUENCE,
+  TERMINAL_BACK_TAB_SEQUENCE,
   LIGATURES_ENABLED_STORAGE_KEY,
   DEFAULT_CWD_STORAGE_KEY,
 } from "../../src/lib/constants";
@@ -57,6 +59,18 @@ interface FakeSearchAddonHandle {
   findPrevious: ReturnType<typeof vi.fn>;
   clearDecorations: ReturnType<typeof vi.fn>;
   fireResults: (results: { resultIndex: number; resultCount: number }) => void;
+}
+
+interface KeyboardModifiers {
+  shiftKey?: boolean;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  metaKey?: boolean;
+}
+
+interface DispatchedKeyResult {
+  preventDefaultCalls: number;
+  handlerResult: boolean;
 }
 
 const fakeWebSockets: FakeWebSocketHandle[] = [];
@@ -735,10 +749,72 @@ describe("Terminal overlay input routing", () => {
   });
 });
 
+const dispatchTabKey = (
+  handle: FakeXtermHandle | undefined,
+  modifiers: KeyboardModifiers = {},
+): DispatchedKeyResult | undefined => {
+  if (!handle?.customKeyEventHandler) return undefined;
+  const event = new KeyboardEvent("keydown", { key: "Tab", ...modifiers });
+  let preventDefaultCalls = 0;
+  Object.defineProperty(event, "preventDefault", { value: () => preventDefaultCalls++ });
+  const handlerResult = handle.customKeyEventHandler(event);
+  return { preventDefaultCalls, handlerResult };
+};
+
+describe("Terminal modified Tab routing", () => {
+  it("leaves Ctrl+Tab to the browser while the shell is idle", () => {
+    render(<Terminal />);
+    act(() => fakeWebSockets[0]?.fireOpen());
+    fakeWebSockets[0]?.send.mockClear();
+
+    const result = dispatchTabKey(fakeXterms[0], { ctrlKey: true });
+
+    expect(result).toEqual({ handlerResult: false, preventDefaultCalls: 0 });
+    expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
+  });
+
+  it("normalizes held Ctrl+Tab and Ctrl+Shift+Tab for a foreground terminal app", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({ type: "foreground", process: "herdr" });
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    const nextResult = dispatchTabKey(fakeXterms[0], { ctrlKey: true });
+    const previousResult = dispatchTabKey(fakeXterms[0], { ctrlKey: true, shiftKey: true });
+
+    expect(nextResult).toEqual({ handlerResult: false, preventDefaultCalls: 1 });
+    expect(previousResult).toEqual({ handlerResult: false, preventDefaultCalls: 1 });
+    expect(fakeWebSockets[0]?.send).toHaveBeenNthCalledWith(
+      1,
+      JSON.stringify({ type: "input", data: TERMINAL_TAB_SEQUENCE }),
+    );
+    expect(fakeWebSockets[0]?.send).toHaveBeenNthCalledWith(
+      2,
+      JSON.stringify({ type: "input", data: TERMINAL_BACK_TAB_SEQUENCE }),
+    );
+  });
+
+  it("leaves Cmd+Tab to the operating system while a terminal app is foregrounded", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({ type: "foreground", process: "herdr" });
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    const result = dispatchTabKey(fakeXterms[0], { metaKey: true });
+
+    expect(result).toEqual({ handlerResult: false, preventDefaultCalls: 0 });
+    expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
+  });
+});
+
 const dispatchEnterKey = (
   handle: FakeXtermHandle | undefined,
-  modifiers: { shiftKey?: boolean; ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean } = {},
-): { preventDefaultCalls: number; handlerResult: boolean } | undefined => {
+  modifiers: KeyboardModifiers = {},
+): DispatchedKeyResult | undefined => {
   if (!handle?.customKeyEventHandler) return undefined;
   const event = new KeyboardEvent("keydown", { key: "Enter", ...modifiers });
   let preventDefaultCalls = 0;

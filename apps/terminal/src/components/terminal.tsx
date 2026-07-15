@@ -87,6 +87,8 @@ import {
   DEFAULT_DOCUMENT_TITLE,
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
   TERMINAL_TAP_MOVEMENT_THRESHOLD_PX,
+  TERMINAL_TAB_SEQUENCE,
+  TERMINAL_BACK_TAB_SEQUENCE,
   TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX,
   TERMINAL_VIEWPORT_WIDTH_STABLE_PX,
   ENTER_KEY_CODE,
@@ -1483,6 +1485,22 @@ export const Terminal = () => {
     });
 
     terminal.attachCustomKeyEventHandler((event) => {
+      const isForegroundControlTab =
+        event.key === "Tab" &&
+        event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        hasForegroundProcess;
+      if (isForegroundControlTab) {
+        event.preventDefault();
+        if (event.type === "keydown") {
+          send({
+            type: "input",
+            data: event.shiftKey ? TERMINAL_BACK_TAB_SEQUENCE : TERMINAL_TAB_SEQUENCE,
+          });
+        }
+        return false;
+      }
       if (event.key === "Tab" && (event.metaKey || event.ctrlKey)) return false;
       if (isNewTabShortcut(event, isMac)) {
         if (event.type === "keydown") {
