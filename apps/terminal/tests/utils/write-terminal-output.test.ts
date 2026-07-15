@@ -4,12 +4,14 @@ import {
   INTERACTIVE_OUTPUT_RENDER_MAX_BYTES,
   OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES,
   OUTPUT_KEEP_WARM_MS,
+  SYNCHRONIZED_OUTPUT_END_SEQUENCE,
 } from "../../src/lib/constants";
 import { OutputBatcher } from "../../src/utils/write-terminal-output";
 
 interface FakeTerminalOptions {
   pendingRenderFrameId?: number;
   onRenderFlush?: () => void;
+  deferredWriteCallbacks?: Array<() => void>;
 }
 
 // Minimal xterm stub: record every write and expose the render debouncer used
@@ -30,7 +32,11 @@ const createFakeTerminal = (
     },
     write: (data: Uint8Array, callback?: () => void) => {
       writes.push(data);
-      callback?.();
+      if (callback && options.deferredWriteCallbacks) {
+        options.deferredWriteCallbacks.push(callback);
+      } else {
+        callback?.();
+      }
     },
   }) as unknown as XtermTerminal;
 
@@ -40,6 +46,9 @@ const createFakeTerminal = (
 // parse-yield budget).
 const LARGE_BYTES = OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES + 4096;
 const PENDING_RENDER_FRAME_ID = 73;
+const textEncoder = new TextEncoder();
+const synchronizedFrame = (content: string): Uint8Array =>
+  textEncoder.encode(`\x1b[?2026h${content}${SYNCHRONIZED_OUTPUT_END_SEQUENCE}`);
 
 interface RenderFlushHarness {
   batcher: OutputBatcher;
@@ -232,6 +241,96 @@ describe("OutputBatcher raw in/out (flush on arrival)", () => {
     expect(writes).toHaveLength(2);
     expect(writes[1].byteLength).toBe(3);
     expect(Array.from(writes[1])).toEqual([65, 66, 67]);
+    batcher.detach();
+  });
+});
+
+describe("OutputBatcher synchronized-output pacing", () => {
+  it("holds the next frame until xterm parses and presents the completed frame", () => {
+    const writes: Uint8Array[] = [];
+    const deferredWriteCallbacks: Array<() => void> = [];
+    const batcher = new OutputBatcher();
+    batcher.attach(createFakeTerminal(writes, { deferredWriteCallbacks }));
+
+    batcher.pushBytes(synchronizedFrame("first"));
+    batcher.pushBytes(synchronizedFrame("second"));
+
+    expect(writes).toHaveLength(1);
+    expect(deferredWriteCallbacks).toHaveLength(1);
+
+    deferredWriteCallbacks.shift()?.();
+    const releaseFrame = pendingCb;
+    expect(releaseFrame).toBeTruthy();
+    expect(writes).toHaveLength(1);
+
+    releaseFrame!(performance.now());
+
+    expect(writes).toHaveLength(2);
+    expect(Array.from(writes[1])).toEqual(Array.from(synchronizedFrame("second")));
+    batcher.detach();
+  });
+
+  it("detects a synchronized-output end split across incoming writes", () => {
+    const writes: Uint8Array[] = [];
+    const deferredWriteCallbacks: Array<() => void> = [];
+    const batcher = new OutputBatcher();
+    batcher.attach(createFakeTerminal(writes, { deferredWriteCallbacks }));
+    const firstFrame = synchronizedFrame("split");
+    const splitOffset = firstFrame.byteLength - 3;
+
+    batcher.pushBytes(firstFrame.subarray(0, splitOffset));
+    batcher.pushBytes(firstFrame.subarray(splitOffset));
+    batcher.pushBytes(synchronizedFrame("next"));
+
+    expect(writes).toHaveLength(2);
+    expect(deferredWriteCallbacks).toHaveLength(1);
+
+    deferredWriteCallbacks.shift()?.();
+    const releaseFrame = pendingCb;
+    expect(releaseFrame).toBeTruthy();
+    releaseFrame!(performance.now());
+
+    expect(writes).toHaveLength(3);
+    expect(Array.from(writes[0])).toEqual(Array.from(firstFrame.subarray(0, splitOffset)));
+    expect(Array.from(writes[1])).toEqual(Array.from(firstFrame.subarray(splitOffset)));
+    expect(Array.from(writes[2])).toEqual(Array.from(synchronizedFrame("next")));
+    batcher.detach();
+  });
+
+  it("bypasses a pending frame wait when the user sends input", () => {
+    const writes: Uint8Array[] = [];
+    const deferredWriteCallbacks: Array<() => void> = [];
+    const batcher = new OutputBatcher();
+    batcher.attach(createFakeTerminal(writes, { deferredWriteCallbacks }));
+
+    batcher.pushBytes(synchronizedFrame("first"));
+    batcher.pushBytes(synchronizedFrame("second"));
+    expect(writes).toHaveLength(1);
+
+    batcher.noteUserInput();
+    batcher.pushBytes(new Uint8Array([65]));
+
+    expect(writes).toHaveLength(3);
+    expect(Array.from(writes[1])).toEqual(Array.from(synchronizedFrame("second")));
+    expect(Array.from(writes[2])).toEqual([65]);
+    batcher.detach();
+  });
+
+  it("does not pace synchronized frames in a hidden document", () => {
+    const writes: Uint8Array[] = [];
+    const batcher = new OutputBatcher();
+    batcher.attach(createFakeTerminal(writes));
+    vi.stubGlobal("document", { hidden: true });
+
+    try {
+      batcher.pushBytes(synchronizedFrame("first"));
+      batcher.pushBytes(synchronizedFrame("second"));
+
+      expect(writes).toHaveLength(2);
+      expect(rafCount).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
     batcher.detach();
   });
 });

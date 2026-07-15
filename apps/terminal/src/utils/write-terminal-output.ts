@@ -3,6 +3,7 @@ import {
   INTERACTIVE_OUTPUT_RENDER_WINDOW_MS,
   OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES,
   OUTPUT_KEEP_WARM_MS,
+  SYNCHRONIZED_OUTPUT_END_SEQUENCE,
 } from "@/lib/constants";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 
@@ -21,6 +22,11 @@ interface XtermCore {
 
 interface XtermTerminalWithCore extends XtermTerminal {
   _core?: XtermCore;
+}
+
+interface PendingTerminalWrite {
+  bytes: Uint8Array;
+  endsSynchronizedOutput: boolean;
 }
 
 const performanceNow = () => performance.now();
@@ -45,6 +51,12 @@ class OutputBatcher {
   private terminal: XtermTerminal | null = null;
   private buffer = new Uint8Array(OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES);
   private byteLength = 0;
+  private pendingWrites: PendingTerminalWrite[] = [];
+  private synchronizedOutputEndMatchLength = 0;
+  private awaitingSynchronizedFrameRender = false;
+  private synchronizedFrameGeneration = 0;
+  private synchronizedFrameReleaseId: number | null = null;
+  private synchronizedFramePacingBypassAtMs = Number.NEGATIVE_INFINITY;
   // No-op vsync commit that keeps Chrome's compositor frame loop warm across
   // the gaps between animation frames. Carries no parse work — the flush is
   // synchronous in pushBytes — so it can't starve xterm's render rAF.
@@ -61,6 +73,12 @@ class OutputBatcher {
 
   attach = (terminal: XtermTerminal) => {
     this.terminal = terminal;
+    this.pendingWrites = [];
+    this.synchronizedOutputEndMatchLength = 0;
+    this.awaitingSynchronizedFrameRender = false;
+    this.synchronizedFrameGeneration += 1;
+    this.synchronizedFrameReleaseId = null;
+    this.synchronizedFramePacingBypassAtMs = Number.NEGATIVE_INFINITY;
     this.lastUserInputAtMs = Number.NEGATIVE_INFINITY;
     this.interactiveRenderingEnabled = false;
   };
@@ -70,10 +88,13 @@ class OutputBatcher {
   };
 
   noteUserInput = () => {
-    this.lastUserInputAtMs = performanceNow();
+    const inputAtMs = performanceNow();
+    this.lastUserInputAtMs = inputAtMs;
+    this.synchronizedFramePacingBypassAtMs = inputAtMs;
     // Chromium can defer inbound WebSocket delivery to the next vsync while
     // the no-op frame loop is armed. Autonomous output re-arms it later.
     this.cancelKeepWarm();
+    this.cancelSynchronizedFrameWait();
   };
 
   setAfterFlush = (callback: (() => void) | null) => {
@@ -82,9 +103,13 @@ class OutputBatcher {
 
   detach = () => {
     this.cancelKeepWarm();
+    this.cancelSynchronizedFrameWait();
     this.lastUserInputAtMs = Number.NEGATIVE_INFINITY;
     this.interactiveRenderingEnabled = false;
-    this.flushPending();
+    this.flushPending(true);
+    this.pendingWrites = [];
+    this.synchronizedOutputEndMatchLength = 0;
+    this.synchronizedFramePacingBypassAtMs = Number.NEGATIVE_INFINITY;
     this.terminal = null;
     this.afterFlush = null;
   };
@@ -93,18 +118,20 @@ class OutputBatcher {
   // staging path is a straight memcpy into the backing buffer — no string
   // roundtrip, no TextEncoder. xterm parses UTF-8 natively.
   pushBytes = (bytes: Uint8Array) => {
-    this.appendBytes(bytes);
+    this.enqueueBytes(bytes);
     this.lastOutputAtMs = performanceNow();
-    // Raw in/out: flush on arrival. The server coalesces one logical TUI frame
-    // per WebSocket message and caps a message at OUTPUT_BATCH_FLUSH_BYTES
-    // (under xterm's 12ms parse-yield budget), so the client does NOT coalesce
-    // — each message is one terminal.write in this WS message task (a
-    // macrotask, not a requestAnimationFrame), so xterm's parse never runs
-    // inside a vsync and can't starve the render rAF. xterm's own render rAF is
-    // the single vsync gate for normal output. A bounded response immediately
-    // following PTY input consumes that pending WebGL render in the write
-    // callback, letting it make the current compositor frame without changing
-    // the parse or batching path for autonomous output. Flushing on arrival
+    // Raw in/out: flush on arrival. The server coalesces ordinary TUI bursts
+    // and caps each message at OUTPUT_BATCH_FLUSH_BYTES (under xterm's 12ms
+    // parse-yield budget). Larger DEC 2026 frames span multiple messages; the
+    // completed-frame gate below preserves those message boundaries and only
+    // holds the following frame until xterm presents the completed one. The
+    // client does NOT coalesce — each message is one terminal.write in this WS
+    // message task (a macrotask, not a requestAnimationFrame), so xterm's parse
+    // never runs inside a vsync and can't starve the render rAF. xterm's own
+    // render rAF is the single vsync gate for normal output. A bounded response
+    // immediately following PTY input consumes that pending WebGL render in the
+    // write callback, letting it make the current compositor frame without
+    // changing the parse or batching path for autonomous output. Flushing on arrival
     // gives every other frame the earliest possible render rAF: no latency
     // window to shift a frame past a vsync boundary and skip it (the visible
     // jank on a 60fps TUI animation such as the opentui golden-star demo). A
@@ -134,6 +161,41 @@ class OutputBatcher {
     this.ensureCapacity(bytes.byteLength);
     this.buffer.set(bytes, this.byteLength);
     this.byteLength += bytes.byteLength;
+  };
+
+  private enqueueBytes = (bytes: Uint8Array) => {
+    let segmentStart = 0;
+    for (let byteIndex = 0; byteIndex < bytes.byteLength; byteIndex += 1) {
+      const byte = bytes[byteIndex];
+      const expectedByte = SYNCHRONIZED_OUTPUT_END_SEQUENCE.charCodeAt(
+        this.synchronizedOutputEndMatchLength,
+      );
+      if (byte === expectedByte) {
+        this.synchronizedOutputEndMatchLength += 1;
+      } else {
+        this.synchronizedOutputEndMatchLength =
+          byte === SYNCHRONIZED_OUTPUT_END_SEQUENCE.charCodeAt(0) ? 1 : 0;
+      }
+      if (this.synchronizedOutputEndMatchLength !== SYNCHRONIZED_OUTPUT_END_SEQUENCE.length) {
+        continue;
+      }
+      this.synchronizedOutputEndMatchLength = 0;
+      this.enqueueWrite(bytes.subarray(segmentStart, byteIndex + 1), true);
+      segmentStart = byteIndex + 1;
+    }
+    if (segmentStart < bytes.byteLength) {
+      this.enqueueWrite(bytes.subarray(segmentStart), false);
+    }
+  };
+
+  private enqueueWrite = (bytes: Uint8Array, endsSynchronizedOutput: boolean) => {
+    if (bytes.byteLength === 0) return;
+    this.appendBytes(bytes);
+    this.pendingWrites.push({
+      bytes: this.buffer.subarray(0, this.byteLength).slice(),
+      endsSynchronizedOutput,
+    });
+    this.byteLength = 0;
   };
 
   // Re-arm a no-op vsync commit after a flush so a run of frames keeps the
@@ -174,6 +236,56 @@ class OutputBatcher {
     }
   };
 
+  // xterm mutates its live buffer while DEC 2026 suppresses rendering. If its
+  // 12ms parser slice enters the next frame before the prior render rAF runs,
+  // that completed frame becomes unpresentable. Release queued bytes only after
+  // the end-containing write parses and that already-scheduled render rAF runs.
+  private cancelSynchronizedFrameWait = () => {
+    this.synchronizedFrameGeneration += 1;
+    this.awaitingSynchronizedFrameRender = false;
+    if (this.synchronizedFrameReleaseId === null) return;
+    cancelAnimationFrame(this.synchronizedFrameReleaseId);
+    this.synchronizedFrameReleaseId = null;
+  };
+
+  private waitForSynchronizedFrameRender = (terminal: XtermTerminal, generation: number) => {
+    if (
+      this.terminal !== terminal ||
+      this.synchronizedFrameGeneration !== generation ||
+      !this.awaitingSynchronizedFrameRender
+    ) {
+      return;
+    }
+    if (isDocumentHidden()) {
+      this.releaseSynchronizedFrame(terminal, generation);
+      return;
+    }
+    this.synchronizedFrameReleaseId = requestAnimationFrame(() => {
+      this.releaseSynchronizedFrame(terminal, generation);
+    });
+  };
+
+  private releaseSynchronizedFrame = (terminal: XtermTerminal, generation: number) => {
+    if (
+      this.terminal !== terminal ||
+      this.synchronizedFrameGeneration !== generation ||
+      !this.awaitingSynchronizedFrameRender
+    ) {
+      return;
+    }
+    this.synchronizedFrameReleaseId = null;
+    this.awaitingSynchronizedFrameRender = false;
+    const didRenderImmediately = this.flushPending();
+    if (!isDocumentHidden() && !didRenderImmediately) this.armKeepWarm();
+  };
+
+  private consumeSynchronizedFramePacingBypass = (endsSynchronizedOutput: boolean): boolean => {
+    if (!endsSynchronizedOutput) return false;
+    const elapsedSinceInputMs = performanceNow() - this.synchronizedFramePacingBypassAtMs;
+    this.synchronizedFramePacingBypassAtMs = Number.NEGATIVE_INFINITY;
+    return elapsedSinceInputMs >= 0 && elapsedSinceInputMs <= INTERACTIVE_OUTPUT_RENDER_WINDOW_MS;
+  };
+
   private consumeInteractiveRender = (byteLength: number): boolean => {
     if (this.lastUserInputAtMs === Number.NEGATIVE_INFINITY) return false;
     const elapsedSinceInputMs = performanceNow() - this.lastUserInputAtMs;
@@ -192,18 +304,52 @@ class OutputBatcher {
     flushPendingInteractiveRender(terminal);
   };
 
-  private flushPending = (): boolean => {
+  private flushPending = (bypassSynchronizedFramePacing = false): boolean => {
     const terminal = this.terminal;
-    const byteLength = this.byteLength;
-    this.byteLength = 0;
-    if (!terminal || byteLength === 0) return false;
-    const shouldRenderImmediately = this.consumeInteractiveRender(byteLength);
-    terminal.write(
-      this.buffer.subarray(0, byteLength).slice(),
-      shouldRenderImmediately ? () => this.flushInteractiveRender(terminal) : undefined,
-    );
-    this.afterFlush?.();
-    return shouldRenderImmediately;
+    if (
+      !terminal ||
+      this.pendingWrites.length === 0 ||
+      (this.awaitingSynchronizedFrameRender && !bypassSynchronizedFramePacing)
+    ) {
+      return false;
+    }
+
+    let didRenderImmediately = false;
+    while (
+      this.pendingWrites.length > 0 &&
+      (!this.awaitingSynchronizedFrameRender || bypassSynchronizedFramePacing)
+    ) {
+      const pendingWrite = this.pendingWrites.shift();
+      if (!pendingWrite) break;
+      const shouldRenderImmediately = this.consumeInteractiveRender(pendingWrite.bytes.byteLength);
+      const shouldBypassSynchronizedFramePacing = this.consumeSynchronizedFramePacingBypass(
+        pendingWrite.endsSynchronizedOutput,
+      );
+      const shouldPaceNextSynchronizedFrame =
+        pendingWrite.endsSynchronizedOutput &&
+        !bypassSynchronizedFramePacing &&
+        !isDocumentHidden() &&
+        !shouldRenderImmediately &&
+        !shouldBypassSynchronizedFramePacing;
+      let synchronizedFrameGeneration = 0;
+      if (shouldPaceNextSynchronizedFrame) {
+        this.awaitingSynchronizedFrameRender = true;
+        synchronizedFrameGeneration = ++this.synchronizedFrameGeneration;
+      }
+      const afterWrite =
+        shouldRenderImmediately || shouldPaceNextSynchronizedFrame
+          ? () => {
+              if (shouldRenderImmediately) this.flushInteractiveRender(terminal);
+              if (shouldPaceNextSynchronizedFrame) {
+                this.waitForSynchronizedFrameRender(terminal, synchronizedFrameGeneration);
+              }
+            }
+          : undefined;
+      terminal.write(pendingWrite.bytes, afterWrite);
+      this.afterFlush?.();
+      didRenderImmediately ||= shouldRenderImmediately;
+    }
+    return didRenderImmediately;
   };
 }
 

@@ -324,6 +324,7 @@ export const FONT_LOAD_PROBE_PX = 16;
 // need to grow on the first frame of an ASCII animation; subsequent bursts
 // double-capacity on demand until they fit into the reused backing store.
 export const OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES = 8 * 1024;
+export const SYNCHRONIZED_OUTPUT_END_SEQUENCE = "\x1b[?2026l";
 
 // A response immediately following PTY input can consume xterm's pending WebGL
 // render in the parser callback instead of waiting for its render rAF. Keep the
@@ -335,15 +336,14 @@ export const INTERACTIVE_OUTPUT_RENDER_MAX_BYTES = 8 * 1024;
 // not inherit a stale input's immediate-render treatment.
 export const INTERACTIVE_OUTPUT_RENDER_WINDOW_MS = 500;
 
-// Raw in/out: the client flushes every output write synchronously on arrival
-// (one terminal.write per WebSocket message, in the WS message task — a
-// macrotask, not a requestAnimationFrame) and does not coalesce. The server
-// coalesces one logical TUI frame per message and caps a message at
-// OUTPUT_BATCH_FLUSH_BYTES (under xterm's 12ms parse-yield budget, so a single
-// write never spills to xterm's async drain — no partial paint), so the client
-// has nothing to coalesce: flushing on arrival gives each frame the earliest
-// possible render rAF (no latency window to shift a frame past a vsync
-// boundary and skip it — the visible jank on a 60fps TUI animation), keeps
+// Raw in/out: the client flushes every ordinary output write synchronously on
+// arrival (one terminal.write per WebSocket message, in the WS message task —
+// a macrotask, not a requestAnimationFrame). The server coalesces ordinary TUI
+// bursts and caps each message at OUTPUT_BATCH_FLUSH_BYTES (under xterm's 12ms
+// parse-yield budget, so a single write never spills to xterm's async drain).
+// Large DEC 2026 frames can span messages; the client preserves those message
+// boundaries but holds the following frame until xterm presents the completed
+// one. This gives each frame the earliest safe render rAF, keeps
 // xterm's parse out of a vsync so it can't starve the render rAF (the
 // "smooth fps but visual stutter" same-deadline clash the old rAF coalescer had),
 // and lets xterm answer a terminal query in the same task before the probing
