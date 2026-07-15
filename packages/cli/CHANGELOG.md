@@ -1,5 +1,13 @@
 # localterm
 
+## 2.65.1
+
+### Patch Changes
+
+- 013f74d: Prevent Chromium's compositor keep-warm loop from delaying interactive WebSocket responses by one display interval. Localterm now pauses the no-op animation frame across bounded interactive WebGL responses while autonomous output, large output, and fallback rendering retain the existing keep-warm behavior.
+- 1aac454: Keep completed DEC 2026 frames presentable while xterm parses continuous synchronized output, eliminating multi-frame animation stalls without delaying input-caused redraws.
+  - @monotykamary/localterm-server@2.65.1
+
 ## 2.65.0
 
 ### Minor Changes
