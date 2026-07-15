@@ -3193,6 +3193,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           if (!parsed.success) return;
           if (parsed.data.type === "input") {
             registry.writeInput(ws, parsed.data.data);
+          } else if (parsed.data.type === "terminal-response") {
+            registry.writeTerminalResponse(ws, parsed.data.data);
           } else if (parsed.data.type === "resize") {
             registry.resize(
               ws,

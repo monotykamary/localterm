@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -328,7 +328,7 @@ describe("SessionManager pending promote", { tags: ["integration"] }, () => {
   });
 });
 
-describe("SessionManager peer-attached", { tags: ["integration"] }, () => {
+describe("SessionManager multi-viewer coordination", { tags: ["integration"] }, () => {
   const noopHooks = {
     onOutputActivity: () => {},
     onSessionEvent: () => {},
@@ -367,6 +367,35 @@ describe("SessionManager peer-attached", { tags: ["integration"] }, () => {
     expect(peerAttached).toHaveLength(1);
     expect(peerAttached[0].ws).toBe(first);
     expect(peerAttached[0].payload).toEqual({ type: "peer-attached" });
+  });
+
+  it("accepts user input from every viewer but only one generated response", () => {
+    manager = new SessionManager({ sendControl: () => {}, hooks: noopHooks });
+    const desktop = createFakeSocket();
+    const phone = createFakeSocket();
+    const spawned = manager.spawnAndAttach(desktop, shellInput);
+    expect(spawned).not.toBeNull();
+    if (!spawned) return;
+    manager.attach(phone, spawned.id);
+    void manager.promote(desktop, false);
+    void manager.promote(phone, false);
+    const write = vi.spyOn(spawned.session, "write").mockImplementation(() => {});
+
+    manager.writeTerminalResponse(phone, "dropped-phone-response");
+    manager.writeTerminalResponse(desktop, "desktop-response");
+    manager.writeInput(phone, "phone-user-input");
+    manager.writeTerminalResponse(desktop, "dropped-desktop-response");
+    manager.writeTerminalResponse(phone, "phone-response");
+    expect(write.mock.calls).toEqual([
+      ["desktop-response"],
+      ["phone-user-input"],
+      ["phone-response"],
+    ]);
+
+    manager.detach(phone);
+    manager.writeTerminalResponse(desktop, "promoted-desktop-response");
+    expect(write).toHaveBeenCalledTimes(4);
+    expect(write).toHaveBeenLastCalledWith("promoted-desktop-response");
   });
 });
 

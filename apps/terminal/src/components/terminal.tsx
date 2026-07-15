@@ -155,6 +155,7 @@ import { outputBatcher } from "@/utils/write-terminal-output";
 import { shouldBlockTerminalScrollbackPurge } from "@/utils/should-block-terminal-scrollback-purge";
 import { shouldSuppressSessionNotification } from "@/utils/should-suppress-session-notification";
 import { suppressTerminalSystemKeyboard } from "@/utils/suppress-terminal-system-keyboard";
+import { subscribeTerminalUserInput } from "@/utils/subscribe-terminal-user-input";
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { detectLikelyKeepAwakeSupported } from "@/utils/detect-likely-keep-awake-supported";
 import { formatDiffCount } from "@/utils/format-diff-count";
@@ -176,6 +177,10 @@ import {
   INITIAL_COMMAND_QUERY_PARAM,
   removeInitialCommandQueryParam,
 } from "@/utils/remove-initial-command-query-param";
+import {
+  FRESH_SESSION_QUERY_PARAM,
+  removeFreshSessionQueryParam,
+} from "@/utils/fresh-session-query-param";
 import { removeRunQueryParam, RUN_QUERY_PARAM } from "@/utils/remove-run-query-param";
 import {
   SESSION_ID_QUERY_PARAM,
@@ -413,6 +418,8 @@ const buildNewTabUrl = (cwd: string | null, command?: string): string => {
   const savedShell = loadStoredDefaultShell();
   if (savedShell) url.searchParams.set(SHELL_QUERY_PARAM, savedShell);
   if (command) url.searchParams.set(INITIAL_COMMAND_QUERY_PARAM, command);
+  // Prevent mobile's bare-launch resume from replacing this explicit spawn.
+  url.searchParams.set(FRESH_SESSION_QUERY_PARAM, "1");
   return url.toString();
 };
 
@@ -1701,7 +1708,13 @@ export const Terminal = () => {
     localEcho.setEnabled(activeLocalEchoRef.current);
     localEchoRef.current = localEcho;
 
-    terminal.onData((data) => {
+    let nextTerminalDataIsUserInput = false;
+    const terminalUserInputDisposable = subscribeTerminalUserInput(terminal, () => {
+      nextTerminalDataIsUserInput = true;
+    });
+    const terminalDataDisposable = terminal.onData((data) => {
+      const isUserInput = terminalUserInputDisposable === null || nextTerminalDataIsUserInput;
+      nextTerminalDataIsUserInput = false;
       // During a scrollback replay xterm re-emits responses to the stale query
       // requests in the ring buffer; dropping them here (instead of forwarding
       // to the live PTY) is the bounded fix for the switch-time leak. User
@@ -1710,7 +1723,8 @@ export const Terminal = () => {
       // the user is not typing in the moment after a switch.
       if (suppressOutput) return;
       for (const chunk of chunkInputByCodeUnits(data, MAX_INPUT_BYTES)) {
-        localEcho.handleInput(chunk);
+        if (isUserInput) localEcho.handleInput(chunk);
+        else send({ type: "terminal-response", data: chunk });
       }
     });
     terminal.onResize(({ cols, rows }) => {
@@ -1952,6 +1966,7 @@ export const Terminal = () => {
             liveSessionIdRef.current = message.id;
             syncSessionIdQueryParam(message.id);
           }
+          removeFreshSessionQueryParam();
           // A switch (or a missed reattach that spawned a fresh shell): the
           // new PTY is a different one than the tab was just viewing, so reset
           // the terminal and ask the server to replay its scrollback before
@@ -2297,7 +2312,8 @@ export const Terminal = () => {
     // run" path). Resolved once before the first connect; a transient
     // reconnect or a picker switch reuses the existing liveSessionId /
     // nextConnectSid. Skipped when the URL carries an explicit intent (?sid=
-    // attach, ?run= automation) or the opt-out setting is off. A slow fetch
+    // attach, ?run= automation, ?fresh= new shell) or the opt-out
+    // setting is off. A slow fetch
     // or no live session falls back to a fresh spawn. The desktop + opt-out
     // + explicit-intent paths short-circuit synchronously so the first WS
     // opens on the same tick as before (the component tests assert this) —
@@ -2307,7 +2323,11 @@ export const Terminal = () => {
       loadStoredMobileResume() &&
       (() => {
         const params = new URLSearchParams(window.location.search);
-        return !params.get(SESSION_ID_QUERY_PARAM) && !params.get(RUN_QUERY_PARAM);
+        return (
+          !params.has(FRESH_SESSION_QUERY_PARAM) &&
+          !params.get(SESSION_ID_QUERY_PARAM) &&
+          !params.get(RUN_QUERY_PARAM)
+        );
       })();
     if (shouldAttemptMobileResume) {
       void (async () => {
@@ -2342,6 +2362,8 @@ export const Terminal = () => {
       kittySetDisposable.dispose();
       scrollbackPurgeDisposable.dispose();
       selectiveScrollbackPurgeDisposable.dispose();
+      terminalDataDisposable.dispose();
+      terminalUserInputDisposable?.dispose();
       const w = window as unknown as Record<string, unknown>;
       delete w[LOCALTERM_PANE_TEXT_PROPERTY];
       delete w[LOCALTERM_MOUSE_CELLS_PROPERTY];

@@ -183,6 +183,7 @@ interface ManagedClient {
   coordinator: GitMetadataCoordinator | null;
   compressMode: CompressMode;
   brotliEncoder: BrotliEncoder | null;
+  terminalResponder: boolean;
 }
 
 export interface ManagedSession {
@@ -620,6 +621,7 @@ export class SessionManager {
       coordinator,
       compressMode: null,
       brotliEncoder: null,
+      terminalResponder: false,
     };
     coordinator.add(ws);
     managed.clients.add(client);
@@ -682,6 +684,7 @@ export class SessionManager {
       client.pendingTimer = null;
     }
     client.compressMode = compress;
+    this.ensureTerminalResponder(entry.session, client);
     // Reset the persistent Brotli encoder: a new promote is a fresh attach (a
     // PTY switch or reconnect), so the prior screen's LZ77 context is stale.
     // The first frame of the new stream has no prior context (the per-frame
@@ -726,7 +729,33 @@ export class SessionManager {
     // The localterm client sends {type:"ready"} before any input, so this is a
     // no-op for it. Promote flushes any buffered output before the input echoes.
     if (entry.client.pending) void this.promote(ws, false);
+    // Query replies follow the viewer that most recently drove the PTY.
+    this.assignTerminalResponder(entry.session, entry.client);
     entry.session.session.write(data);
+  }
+
+  writeTerminalResponse(ws: ClientSocket, data: string): void {
+    const entry = this.wsToClient.get(ws);
+    if (!entry?.client.terminalResponder) return;
+    this.writeInput(ws, data);
+  }
+
+  private ensureTerminalResponder(
+    managed: ManagedSession,
+    preferredClient?: ManagedClient,
+  ): void {
+    for (const client of managed.clients) {
+      if (client.terminalResponder) return;
+    }
+    const nextClient =
+      preferredClient ??
+      Array.from(managed.clients).find((client) => !client.pending) ??
+      managed.clients.values().next().value;
+    if (nextClient) this.assignTerminalResponder(managed, nextClient);
+  }
+
+  private assignTerminalResponder(managed: ManagedSession, responder: ManagedClient): void {
+    for (const client of managed.clients) client.terminalResponder = client === responder;
   }
 
   resize(
@@ -769,6 +798,7 @@ export class SessionManager {
       this.releaseCoordinator(client.coordinator);
     }
     managed.clients.delete(client);
+    if (client.terminalResponder) this.ensureTerminalResponder(managed);
     this.recomputeResize(managed);
     if (managed.clients.size === 0 && !managed.session.isExited) this.startGrace(managed);
     this.hooks.onSessionActivity();

@@ -437,6 +437,13 @@ const inputMessageSchema = z
   })
   .strict();
 
+const terminalResponseMessageSchema = z
+  .object({
+    type: z.literal("terminal-response"),
+    data: z.string().max(MAX_INPUT_BYTES),
+  })
+  .strict();
+
 const resizeMessageSchema = z
   .object({
     type: z.literal("resize"),
@@ -551,6 +558,7 @@ const readyMessageSchema = z
 
 export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   inputMessageSchema,
+  terminalResponseMessageSchema,
   resizeMessageSchema,
   caffeinateModeInputMessageSchema,
   caffeinateCommandsInputMessageSchema,

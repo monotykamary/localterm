@@ -21,6 +21,7 @@ import {
 import { DEFAULT_TERMINAL_CURSOR_STYLE } from "../../src/lib/terminal-cursor";
 import { DEFAULT_TERMINAL_SCROLLBACK_LINES } from "../../src/lib/terminal-scrollback";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
+import { FRESH_SESSION_QUERY_PARAM } from "@/utils/fresh-session-query-param";
 
 interface FakeWebSocketHandle {
   url: string;
@@ -43,6 +44,7 @@ interface FakeXtermHandle {
   customWheelEventHandler: ((event: WheelEvent) => boolean) | null;
   fireTitleChange: (title: string) => void;
   fireData: (data: string) => void;
+  fireTerminalResponse: (data: string) => void;
   getOptions: () => Record<string, unknown>;
   setBufferState: (state: { baseY: number; viewportY: number }) => void;
   scrollLines: ReturnType<typeof vi.fn>;
@@ -159,6 +161,7 @@ vi.mock("@xterm/xterm", () => {
     deregisterCharacterJoiner = vi.fn((_joinerId: number) => {});
     private titleListeners = new Set<(title: string) => void>();
     private dataListeners = new Set<(data: string) => void>();
+    private userInputListeners = new Set<() => void>();
     private csiHandlers: FakeCsiHandlerEntry[] = [];
     private handle: FakeXtermHandle;
 
@@ -187,6 +190,10 @@ vi.mock("@xterm/xterm", () => {
           for (const listener of this.titleListeners) listener(title);
         },
         fireData: (data: string) => {
+          for (const listener of this.userInputListeners) listener();
+          for (const listener of this.dataListeners) listener(data);
+        },
+        fireTerminalResponse: (data: string) => {
           for (const listener of this.dataListeners) listener(data);
         },
         getOptions: () => this.options,
@@ -221,6 +228,12 @@ vi.mock("@xterm/xterm", () => {
           version: "15-graphemes",
           wcwidth: (_codepoint: number): 0 | 1 | 2 => 1,
           charProperties: (_codepoint: number, _preceding: number) => 0,
+        },
+      },
+      coreService: {
+        onUserInput: (listener: () => void) => {
+          this.userInputListeners.add(listener);
+          return { dispose: () => this.userInputListeners.delete(listener) };
         },
       },
     };
@@ -1079,6 +1092,27 @@ const installFakeLocalStorage = (initial: Record<string, string> = {}) => {
 };
 
 describe("Terminal scrollback replay suppression", () => {
+  it("tags generated terminal responses separately from user input", () => {
+    render(<Terminal />);
+    act(() => fakeWebSockets[0]?.fireOpen());
+    fakeWebSockets[0]?.send.mockClear();
+
+    act(() => {
+      fakeXterms[0]?.fireTerminalResponse("\x1b]11;rgb:1a1a/1b1b/2626\x1b\\");
+      fakeXterms[0]?.fireData("typed-input");
+    });
+
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        type: "terminal-response",
+        data: "\x1b]11;rgb:1a1a/1b1b/2626\x1b\\",
+      }),
+    );
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "input", data: "typed-input" }),
+    );
+  });
+
   it("drops xterm's responses to replayed query requests so they never reach the PTY", async () => {
     render(<Terminal />);
     act(() => {
@@ -1111,7 +1145,7 @@ describe("Terminal scrollback replay suppression", () => {
     // server-side stripping: any response, any sequence, is dropped.
     fakeWebSockets[0]?.send.mockClear();
     act(() => {
-      fakeXterms[0]?.fireData("62;4;9;22c");
+      fakeXterms[0]?.fireTerminalResponse("62;4;9;22c");
     });
     expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
 
@@ -1651,6 +1685,25 @@ describe("Terminal refresh reattach", () => {
 
   afterEach(() => {
     window.history.replaceState(null, "", "/");
+  });
+
+  it("bypasses mobile resume for an explicitly requested fresh shell", () => {
+    installFakeLocalStorage();
+    installTouchMatchMedia();
+    window.history.replaceState(null, "", "/?fresh=1");
+
+    render(<Terminal />);
+
+    expect(fakeWebSockets).toHaveLength(1);
+    const freshShellLink = document.getElementById("new-shell-link");
+    expect(freshShellLink).toBeInstanceOf(HTMLAnchorElement);
+    if (!(freshShellLink instanceof HTMLAnchorElement)) return;
+    expect(new URL(freshShellLink.href).searchParams.get(FRESH_SESSION_QUERY_PARAM)).toBe("1");
+
+    act(() => {
+      fireSessionFrame(fakeWebSockets[0], TEST_SID);
+    });
+    expect(new URL(window.location.href).searchParams.has(FRESH_SESSION_QUERY_PARAM)).toBe(false);
   });
 
   it("persists the session id to ?sid= and reattaches to it after a remount", () => {

@@ -13,6 +13,14 @@ describe("clientToServerMessageSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts a terminal-response frame", () => {
+    const result = clientToServerMessageSchema.safeParse({
+      type: "terminal-response",
+      data: "response",
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("accepts a resize frame", () => {
     const result = clientToServerMessageSchema.safeParse({
       type: "resize",
@@ -25,6 +33,15 @@ describe("clientToServerMessageSchema", () => {
   it("rejects oversized input", () => {
     const oversized = "a".repeat(MAX_INPUT_BYTES + 1);
     const result = clientToServerMessageSchema.safeParse({ type: "input", data: oversized });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an oversized terminal-response frame", () => {
+    const oversized = "a".repeat(MAX_INPUT_BYTES + 1);
+    const result = clientToServerMessageSchema.safeParse({
+      type: "terminal-response",
+      data: oversized,
+    });
     expect(result.success).toBe(false);
   });
 
