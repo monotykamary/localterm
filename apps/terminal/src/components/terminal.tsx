@@ -368,7 +368,17 @@ const makeCtxDecoder = () => {
 const CWD_QUERY_PARAM = "cwd";
 const SHELL_QUERY_PARAM = "shell";
 
-const buildWebSocketUrl = (cwdOverride?: string | null, sid?: string | null): string => {
+interface BuildWebSocketUrlOptions {
+  cwdOverride?: string | null;
+  sid?: string | null;
+  omitAddressBarSessionId?: boolean;
+}
+
+const buildWebSocketUrl = ({
+  cwdOverride,
+  sid,
+  omitAddressBarSessionId = false,
+}: BuildWebSocketUrlOptions = {}): string => {
   const url = new URL("/ws", window.location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   const params = new URLSearchParams(window.location.search);
@@ -388,8 +398,10 @@ const buildWebSocketUrl = (cwdOverride?: string | null, sid?: string | null): st
   if (runId) url.searchParams.set(RUN_QUERY_PARAM, runId);
   // Fall back to the address bar's ?sid= (written by syncSessionIdQueryParam)
   // when no explicit id is passed, so a full page refresh reattaches to the
-  // same live PTY instead of spawning a fresh shell.
-  const resolvedSid = sid ?? params.get(SESSION_ID_QUERY_PARAM);
+  // same live PTY instead of spawning a fresh shell. An in-place fresh switch
+  // explicitly suppresses this fallback while preserving the address bar until
+  // the replacement session lands.
+  const resolvedSid = sid ?? (omitAddressBarSessionId ? null : params.get(SESSION_ID_QUERY_PARAM));
   if (resolvedSid) url.searchParams.set(SESSION_ID_QUERY_PARAM, resolvedSid);
   // The per-browser-profile handle so the daemon can group this tab with the
   // others of the same profile in the session picker's peer display. Minted
@@ -473,6 +485,8 @@ export const Terminal = () => {
   const [terminalReady, setTerminalReady] = useState(false);
   const manualReconnectRef = useRef<(() => void) | null>(null);
   const switchSessionRef = useRef<((sid: string) => void) | null>(null);
+  const spawnFreshSessionRef = useRef<(() => void) | null>(null);
+  const openNewShellRef = useRef<(() => void) | null>(null);
   const liveSessionIdRef = useRef<string | null>(null);
   // The session this tab was viewing immediately before the current one — the
   // "last switched" shell. Recorded on every switch so the session picker can
@@ -907,8 +921,12 @@ export const Terminal = () => {
     // WebSocket opens against the picked PTY instead of the current one. The
     // session-frame handler leaves liveSessionId alone until the new frame
     // lands, so the new id compares unequal to the old one and the handler
-    // treats it as a switch (reset + scrollback replay).
+    // treats it as a switch (reset + scrollback replay). A fresh in-place
+    // switch keeps liveSessionId for the same comparison but omits it from every
+    // retry until the replacement session frame lands.
     let nextConnectSid: string | null = null;
+    let shouldSpawnFreshSession = false;
+    let initialMobileResumePending = false;
     // Silent-reattach state: on a WS close while we still have a liveSessionId,
     // we skip the connection-lost modal and try one quiet reconnect — the
     // daemon keeps the PTY alive across transient drops (portless teardown on
@@ -1525,8 +1543,7 @@ export const Terminal = () => {
       if (isNewTabShortcut(event, isMac)) {
         if (event.type === "keydown") {
           event.preventDefault();
-          const newShellLink = document.getElementById("new-shell-link");
-          if (newShellLink instanceof HTMLAnchorElement) newShellLink.click();
+          openNewShellRef.current?.();
         }
         return false;
       }
@@ -1802,9 +1819,14 @@ export const Terminal = () => {
     const connect = () => {
       if (disposed) return;
       const connectSid = nextConnectSid;
+      const shouldSpawnFresh = shouldSpawnFreshSession;
       nextConnectSid = null;
       const nextSocket = new WebSocket(
-        buildWebSocketUrl(liveCwdRef.current, connectSid ?? liveSessionId),
+        buildWebSocketUrl({
+          cwdOverride: liveCwdRef.current,
+          sid: shouldSpawnFresh ? null : (connectSid ?? liveSessionId),
+          omitAddressBarSessionId: shouldSpawnFresh,
+        }),
       );
       socket = nextSocket;
 
@@ -1927,6 +1949,8 @@ export const Terminal = () => {
         } else if (message.type === "session") {
           ptyGeneration += 1;
           const priorSessionId = liveSessionId;
+          const didSpawnFreshSession = shouldSpawnFreshSession;
+          shouldSpawnFreshSession = false;
           // A new session frame is a fresh attach: reset the negotiated compress
           // mode (the server sends a new {compress} frame on promote) and release
           // the prior PTY's persistent Brotli decompressor (its LZ77 context is
@@ -1973,7 +1997,8 @@ export const Terminal = () => {
           // live fan-out begins. The replay lands as one binary frame right
           // after this, so the screen shows the PTY's recent output instead
           // of the prior PTY's stale content.
-          const isSwitch = priorSessionId !== null && message.id !== priorSessionId;
+          const isSwitch =
+            didSpawnFreshSession || (priorSessionId !== null && message.id !== priorSessionId);
           if (isSwitch) {
             terminal.reset();
             // xterm's reset() (RIS) does not clear coreService.isCursorHidden —
@@ -2264,6 +2289,7 @@ export const Terminal = () => {
 
     manualReconnectRef.current = () => {
       if (disposed) return;
+      initialMobileResumePending = false;
       // Reset the per-session "we're done" flags so a Reconnect after a shell
       // exit *or* a transport-level connection loss actually opens a fresh WS.
       // The server always spawns a new PTY on connect; the alternative ("must
@@ -2303,6 +2329,15 @@ export const Terminal = () => {
       if (disposed) return;
       if (sid === liveSessionId) return;
       nextConnectSid = sid;
+      shouldSpawnFreshSession = false;
+      triggerHapticFeedback(HAPTIC_TAP_MS);
+      manualReconnectRef.current?.();
+    };
+
+    spawnFreshSessionRef.current = () => {
+      if (disposed) return;
+      nextConnectSid = null;
+      shouldSpawnFreshSession = true;
       triggerHapticFeedback(HAPTIC_TAP_MS);
       manualReconnectRef.current?.();
     };
@@ -2330,9 +2365,11 @@ export const Terminal = () => {
         );
       })();
     if (shouldAttemptMobileResume) {
+      initialMobileResumePending = true;
       void (async () => {
         const sessions = await fetchSessions();
-        if (disposed) return;
+        if (disposed || !initialMobileResumePending) return;
+        initialMobileResumePending = false;
         const resumeSid = sessions === null ? null : resolveResumeSession(sessions);
         if (resumeSid) nextConnectSid = resumeSid;
         connect();
@@ -2978,7 +3015,15 @@ export const Terminal = () => {
     }
   }, [liveCwd]);
 
-  const newTabUrl = buildNewTabUrl(liveCwd);
+  const newShellUrl = buildNewTabUrl(liveCwd);
+  const openNewShell = useCallback(() => {
+    if (deviceTier !== "desktop") {
+      spawnFreshSessionRef.current?.();
+      return;
+    }
+    window.open(newShellUrl, "_blank", "noopener,noreferrer");
+  }, [deviceTier, newShellUrl]);
+  openNewShellRef.current = openNewShell;
 
   const isSessionOver = exitInfo !== null;
   const isDisconnected =
@@ -3110,10 +3155,7 @@ export const Terminal = () => {
         category: "Actions",
         shortcut: "Alt+T",
         icon: <Plus className="size-3.5" />,
-        action: () => {
-          const link = document.getElementById("new-shell-link");
-          if (link instanceof HTMLAnchorElement) link.click();
-        },
+        action: openNewShell,
       },
       {
         id: "font-size-up",
@@ -3219,6 +3261,7 @@ export const Terminal = () => {
     caffeinateSupported,
     caffeinateMode,
     handleCaffeinateModeChange,
+    openNewShell,
   ]);
 
   const handleCommandPaletteHighlight = useCallback((item: CommandItem | null) => {
@@ -3507,15 +3550,6 @@ export const Terminal = () => {
                       onClose={refocusTerminalRef.current ?? undefined}
                     />
                   ) : null}
-                  <a
-                    id="new-shell-link"
-                    href={newTabUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    tabIndex={-1}
-                    aria-hidden="true"
-                    className="sr-only"
-                  />
                   <QrButton onOpen={() => handleQrOpenChange(true)} />
                 </div>
               </div>
@@ -3687,7 +3721,7 @@ export const Terminal = () => {
         previousSessionIdRef={previousSessionIdRef}
         switchSessionRef={switchSessionRef}
         isTouchDevice={isTouchDevice}
-        onOpenNewShell={() => window.open(newTabUrl, "_blank", "noopener,noreferrer")}
+        onOpenNewShell={openNewShell}
         onClose={() => handleSessionsOpenChange(false)}
       />
 
@@ -3721,11 +3755,7 @@ export const Terminal = () => {
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogAction
-                    onClick={() => window.open(newTabUrl, "_blank", "noopener,noreferrer")}
-                  >
-                    New shell
-                  </AlertDialogAction>
+                  <AlertDialogAction onClick={openNewShell}>New shell</AlertDialogAction>
                 </AlertDialogFooter>
               </>
             ) : (

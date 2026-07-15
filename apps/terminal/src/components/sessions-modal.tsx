@@ -625,7 +625,7 @@ export const SessionsModal = ({
                   <>No sessions match “{query}”.</>
                 ) : (
                   <>
-                    No live shells. Open a new tab to start one.
+                    No live shells. Open a new shell to start one.
                     <span className="mt-1 block text-[11px] text-muted-foreground/60">
                       A closed tab's shell waits here for ~30s before it's reaped.
                     </span>

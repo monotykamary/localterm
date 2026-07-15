@@ -740,10 +740,7 @@ export class SessionManager {
     this.writeInput(ws, data);
   }
 
-  private ensureTerminalResponder(
-    managed: ManagedSession,
-    preferredClient?: ManagedClient,
-  ): void {
+  private ensureTerminalResponder(managed: ManagedSession, preferredClient?: ManagedClient): void {
     for (const client of managed.clients) {
       if (client.terminalResponder) return;
     }

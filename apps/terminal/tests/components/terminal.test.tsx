@@ -1667,7 +1667,7 @@ describe("Terminal shell info", () => {
   });
 });
 
-describe("Terminal refresh reattach", () => {
+describe("Terminal session attachment", () => {
   const TEST_SID = "550e8400-e29b-41d4-a716-446655440000";
   const fireSessionFrame = (ws: FakeWebSocketHandle | undefined, id: string) => {
     ws?.fireOpen();
@@ -1695,15 +1695,75 @@ describe("Terminal refresh reattach", () => {
     render(<Terminal />);
 
     expect(fakeWebSockets).toHaveLength(1);
-    const freshShellLink = document.getElementById("new-shell-link");
-    expect(freshShellLink).toBeInstanceOf(HTMLAnchorElement);
-    if (!(freshShellLink instanceof HTMLAnchorElement)) return;
-    expect(new URL(freshShellLink.href).searchParams.get(FRESH_SESSION_QUERY_PARAM)).toBe("1");
-
     act(() => {
       fireSessionFrame(fakeWebSockets[0], TEST_SID);
     });
     expect(new URL(window.location.href).searchParams.has(FRESH_SESSION_QUERY_PARAM)).toBe(false);
+  });
+
+  it("switches the current mobile tab to a fresh shell", () => {
+    const nextSessionId = "650e8400-e29b-41d4-a716-446655440000";
+    installFakeLocalStorage();
+    installTouchMatchMedia();
+    window.history.replaceState(null, "", "/?fresh=1");
+    render(<Terminal />);
+    act(() => {
+      fireSessionFrame(fakeWebSockets[0], TEST_SID);
+    });
+    vi.mocked(window.open).mockClear();
+
+    fireEvent.click(screen.getByLabelText("sessions"));
+    fireEvent.click(screen.getByRole("button", { name: /^new shell$/i }));
+
+    expect(window.open).not.toHaveBeenCalled();
+    expect(fakeWebSockets[0]?.close).toHaveBeenCalledOnce();
+    expect(fakeWebSockets).toHaveLength(2);
+    const freshSocketUrl = new URL(fakeWebSockets[1]?.url ?? "http://localhost/ws");
+    expect(freshSocketUrl.searchParams.has("sid")).toBe(false);
+    expect(freshSocketUrl.searchParams.get("cwd")).toBe("/tmp");
+
+    act(() => {
+      fireSessionFrame(fakeWebSockets[1], nextSessionId);
+    });
+    expect(new URL(window.location.href).searchParams.get("sid")).toBe(nextSessionId);
+  });
+
+  it("does not let a pending mobile resume override an explicit fresh switch", async () => {
+    installFakeLocalStorage();
+    installTouchMatchMedia();
+    window.history.replaceState(null, "", "/");
+    render(<Terminal />);
+    expect(fakeWebSockets).toHaveLength(0);
+
+    fireEvent.click(screen.getByLabelText("sessions"));
+    fireEvent.click(screen.getByRole("button", { name: /^new shell$/i }));
+    expect(fakeWebSockets).toHaveLength(1);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fakeWebSockets).toHaveLength(1);
+    expect(new URL(fakeWebSockets[0]?.url ?? "http://localhost/ws").searchParams.has("sid")).toBe(
+      false,
+    );
+  });
+
+  it("keeps opening a separate tab for a fresh shell on desktop", () => {
+    installFakeLocalStorage();
+    window.history.replaceState(null, "", "/");
+    render(<Terminal />);
+    act(() => {
+      fireSessionFrame(fakeWebSockets[0], TEST_SID);
+    });
+    vi.mocked(window.open).mockClear();
+
+    fireEvent.click(screen.getByLabelText("sessions"));
+    fireEvent.click(screen.getByRole("button", { name: /^new shell$/i }));
+
+    expect(fakeWebSockets).toHaveLength(1);
+    expect(window.open).toHaveBeenCalledOnce();
+    const openedUrl = String(vi.mocked(window.open).mock.calls[0]?.[0]);
+    expect(new URL(openedUrl).searchParams.get(FRESH_SESSION_QUERY_PARAM)).toBe("1");
   });
 
   it("persists the session id to ?sid= and reattaches to it after a remount", () => {
