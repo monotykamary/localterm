@@ -71,6 +71,9 @@ class OutputBatcher {
 
   noteUserInput = () => {
     this.lastUserInputAtMs = performanceNow();
+    // Chromium can defer inbound WebSocket delivery to the next vsync while
+    // the no-op frame loop is armed. Autonomous output re-arms it later.
+    this.cancelKeepWarm();
   };
 
   setAfterFlush = (callback: (() => void) | null) => {
@@ -112,8 +115,10 @@ class OutputBatcher {
     // shell as typed text, e.g. `62;4;9;22c` on switching tabs back), and
     // never spilling to xterm's async drain (no partial paint). There is no
     // paint cost while hidden.
-    this.flushPending();
-    if (!isDocumentHidden()) this.armKeepWarm();
+    const didRenderImmediately = this.flushPending();
+    // The bounded WebGL fast path already draws in this task. Re-arming the
+    // no-op frame loop here makes Chromium defer the next response to vsync.
+    if (!isDocumentHidden() && !didRenderImmediately) this.armKeepWarm();
   };
 
   private ensureCapacity = (additionalBytes: number) => {
@@ -187,17 +192,18 @@ class OutputBatcher {
     flushPendingInteractiveRender(terminal);
   };
 
-  private flushPending = () => {
+  private flushPending = (): boolean => {
     const terminal = this.terminal;
     const byteLength = this.byteLength;
     this.byteLength = 0;
-    if (!terminal || byteLength === 0) return;
+    if (!terminal || byteLength === 0) return false;
     const shouldRenderImmediately = this.consumeInteractiveRender(byteLength);
     terminal.write(
       this.buffer.subarray(0, byteLength).slice(),
       shouldRenderImmediately ? () => this.flushInteractiveRender(terminal) : undefined,
     );
     this.afterFlush?.();
+    return shouldRenderImmediately;
   };
 }
 

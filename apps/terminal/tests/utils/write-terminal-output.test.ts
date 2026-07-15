@@ -237,6 +237,30 @@ describe("OutputBatcher raw in/out (flush on arrival)", () => {
 });
 
 describe("OutputBatcher keep-warm rAF cadence", () => {
+  it("pauses keep-warm through an immediate response and re-arms for autonomous output", () => {
+    const { batcher, writes, readRenderFlushCount } = createRenderFlushHarness();
+    batcher.setInteractiveRenderingEnabled(true);
+
+    batcher.pushBytes(new Uint8Array([65]));
+    const initialKeepWarmFrameId = rafCount;
+
+    batcher.noteUserInput();
+
+    expect(canceledFrameIds).toContain(initialKeepWarmFrameId);
+    const frameCountBeforeResponse = rafCount;
+
+    batcher.pushBytes(new Uint8Array([66]));
+
+    expect(writes).toHaveLength(2);
+    expect(readRenderFlushCount()).toBe(1);
+    expect(rafCount).toBe(frameCountBeforeResponse);
+
+    batcher.pushBytes(new Uint8Array([67]));
+
+    expect(rafCount).toBeGreaterThan(frameCountBeforeResponse);
+    batcher.detach();
+  });
+
   it("re-arms the rAF within OUTPUT_KEEP_WARM_MS of the last output", () => {
     const writes: Uint8Array[] = [];
     const batcher = new OutputBatcher();
