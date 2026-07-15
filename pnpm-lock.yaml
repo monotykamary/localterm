@@ -7,6 +7,7 @@ settings:
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@^0.2.2
   '@voidzero-dev/vite-plus-core': ^0.2.4
+  '@fontsource/geist-mono': 5.2.7
 
 patchedDependencies:
   '@xterm/addon-webgl@0.20.0-beta.286': 176ad19ef34cce4ba25d4695a5e2c0fdbb7f16afb289aebbf1995ba622bfdcab
@@ -66,8 +67,8 @@ importers:
         specifier: ^5.2.7
         version: 5.2.7
       '@fontsource/geist-mono':
-        specifier: 5.2.8
-        version: 5.2.8
+        specifier: 5.2.7
+        version: 5.2.7
       '@fontsource/ibm-plex-mono':
         specifier: ^5.2.7
         version: 5.2.7
@@ -208,7 +209,7 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
       vite:
-        specifier: npm:@voidzero-dev/vite-plus-core@^0.2.4
+        specifier: npm:@voidzero-dev/vite-plus-core@^0.2.2
         version: '@voidzero-dev/vite-plus-core@0.2.4(@types/node@26.1.1)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.0)'
       vite-plus:
         specifier: ^0.2.4
@@ -798,8 +799,8 @@ packages:
   '@fontsource/fira-code@5.2.7':
     resolution: {integrity: sha512-tnB9NNund9TwIym8/7DMJe573nlPEQb+fKUV5GL8TBYXjIhDvL0D7mgmNVNQUPhXp+R7RylQeiBdkA4EbOHPGQ==}
 
-  '@fontsource/geist-mono@5.2.8':
-    resolution: {integrity: sha512-YqZUb3X42GjRaHkibUNyE8K4Rk9A6I9Ez81YpJYiuJN4ggmTW2ixoQpa9EWCPfXZtIsCQJTyrDoV9OJOZO/UcA==}
+  '@fontsource/geist-mono@5.2.7':
+    resolution: {integrity: sha512-xVPVFISJg/K0VVd+aQN0Y7X/sw9hUcJPyDWFJ5GpyU3bHELhoRsJkPSRSHXW32mOi0xZCUQDOaPj1sqIFJ1FGg==}
 
   '@fontsource/ibm-plex-mono@5.2.7':
     resolution: {integrity: sha512-MKAb8qV+CaiMQn2B0dIi1OV3565NYzp3WN5b4oT6LTkk+F0jR6j0ZN+5BKJiIhffDC3rtBULsYZE65+0018z9w==}
@@ -5886,7 +5887,7 @@ snapshots:
 
   '@fontsource/fira-code@5.2.7': {}
 
-  '@fontsource/geist-mono@5.2.8': {}
+  '@fontsource/geist-mono@5.2.7': {}
 
   '@fontsource/ibm-plex-mono@5.2.7': {}
 

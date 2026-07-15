@@ -22,6 +22,11 @@ onlyBuiltDependencies:
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@^0.2.2
   "@voidzero-dev/vite-plus-core": "^0.2.4"
+  # Pinned: 5.2.8 bundles Geist 1.7.0, which collapses coding ligatures to a
+  # single cell and breaks xterm rendering. Override locks the workspace to
+  # 5.2.7 (Geist 1.401, multi-cell ligatures) so `pnpm update` cannot drift
+  # it back. Upstream: vercel/geist-font#201.
+  "@fontsource/geist-mono": "5.2.7"
 
 patchedDependencies:
   "@xterm/addon-webgl@0.20.0-beta.286": patches/@xterm__addon-webgl@0.20.0-beta.286.patch
