@@ -237,20 +237,22 @@ export const WS_OUTBOUND_RESUME_LOW_WATER_BYTES = 1 * 1024 * 1024;
 export const WS_OUTBOUND_DRAIN_POLL_MS = 50;
 export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 
-// Output batch early-flush threshold. The OUTPUT_BATCH_WINDOW_MS timer is
-// authoritative for low-throughput streams (keystroke echo, TUI redraws of
-// 3–6KB on a 120×40 terminal): it coalesces the per-chunk data events of one
-// logical frame into a single message, which xterm.js parses atomically —
+// Output batch early-flush threshold. DEC synchronized-output redraws flush at
+// their explicit DECRST 2026 boundary; the OUTPUT_BATCH_WINDOW_MS timer remains
+// authoritative for low-throughput streams without that boundary (keystroke
+// echo and unsynchronized TUI redraws of 3–6KB on a 120×40 terminal). It
+// coalesces the per-chunk data events of one logical frame into a single
+// message, which xterm.js parses atomically —
 // splitting a frame causes the half-erased frame to render and flicker (visible
-// on every keypress in cmd/Claude Code). TUI frames never approach this
-// threshold, so the timer governs them — EXCEPT a full-screen repaint of a
-// large session (a big pi/Claude Code conversation, a wide terminal with heavy
-// SGR styling), which can exceed the old 32KB threshold and split across
-// messages. Over a bandwidth-limited link each split arrives as its own atomic
-// WebSocket message and xterm paints it separately — the visible top-to-bottom
-// crawl. Raising the threshold to 64KB keeps a big single redraw as one message
-// (the browser receives it atomically, one paint) while staying under xterm's
-// 12ms parse-yield budget (a 64KB write parses in ~4–6ms, measured), so a
+// on every keypress in cmd/Claude Code). Unsynchronized TUI frames rarely
+// approach this threshold, so the timer governs them — EXCEPT a full-screen
+// repaint of a large session (a big pi/Claude Code conversation, a wide terminal
+// with heavy SGR styling), which can exceed the old 32KB threshold and split
+// across messages. Over a bandwidth-limited link each split arrives as its own
+// atomic WebSocket message and xterm paints it separately — the visible
+// top-to-bottom crawl. Raising the threshold to 64KB keeps a big single redraw
+// as one message (the browser receives it atomically, one paint) while staying
+// under xterm's 12ms parse-yield budget (a 64KB write parses in ~4–6ms, measured), so a
 // single message never spills to xterm's async drain (no partial paint).
 //
 // This threshold also governs high-throughput output (cat of large files, full
@@ -269,8 +271,9 @@ export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 // the 122ms hibernation stalls.
 export const OUTPUT_BATCH_FLUSH_BYTES = 64 * 1024;
 
-// Output batching window. The kernel PTY delivers child writes in 1024-byte
-// chunks on macOS, and node-pty emits each chunk as a separate data event in
+// Output batching fallback for streams without an explicit synchronized-output
+// end boundary. The kernel PTY delivers child writes in 1024-byte chunks on
+// macOS, and node-pty emits each chunk as a separate data event in
 // its own event loop iteration — a setImmediate scheduled on the first chunk
 // fires before the remaining chunks of the same child write are read. That
 // split a single ink/TUI redraw frame (erase + repaint, ~3KB) across multiple

@@ -318,6 +318,16 @@ export const FONT_LOAD_PROBE_PX = 16;
 // double-capacity on demand until they fit into the reused backing store.
 export const OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES = 8 * 1024;
 
+// A response immediately following PTY input can consume xterm's pending WebGL
+// render in the parser callback instead of waiting for its render rAF. Keep the
+// fast path to normal interactive redraw sizes so a key pressed during a
+// firehose cannot turn a 64KB throughput batch into synchronous render work.
+export const INTERACTIVE_OUTPUT_RENDER_MAX_BYTES = 8 * 1024;
+// Causal window between a successfully-sent PTY input and its response. Long
+// enough for a relayed connection, bounded so unrelated autonomous output does
+// not inherit a stale input's immediate-render treatment.
+export const INTERACTIVE_OUTPUT_RENDER_WINDOW_MS = 500;
+
 // Raw in/out: the client flushes every output write synchronously on arrival
 // (one terminal.write per WebSocket message, in the WS message task — a
 // macrotask, not a requestAnimationFrame) and does not coalesce. The server

@@ -1370,8 +1370,12 @@ export const Terminal = () => {
 
     try {
       const webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => webglAddon.dispose());
+      webglAddon.onContextLoss(() => {
+        outputBatcher.setInteractiveRenderingEnabled(false);
+        webglAddon.dispose();
+      });
       terminal.loadAddon(webglAddon);
+      outputBatcher.setInteractiveRenderingEnabled(true);
     } catch {
       /* webgl unavailable; xterm falls back to dom renderer */
     }
@@ -1442,7 +1446,12 @@ export const Terminal = () => {
     const send = (message: ClientToServerMessage) => {
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
     };
-    sendInputRef.current = (data: string) => send({ type: "input", data });
+    const sendInput = (data: string) => {
+      if (socket?.readyState !== WebSocket.OPEN) return;
+      outputBatcher.noteUserInput();
+      send({ type: "input", data });
+    };
+    sendInputRef.current = sendInput;
 
     setCaffeinateModeRef.current = (mode: CaffeinateMode) =>
       send({ type: "caffeinate-mode", mode });
@@ -1494,10 +1503,7 @@ export const Terminal = () => {
       if (isForegroundControlTab) {
         event.preventDefault();
         if (event.type === "keydown") {
-          send({
-            type: "input",
-            data: event.shiftKey ? TERMINAL_BACK_TAB_SEQUENCE : TERMINAL_TAB_SEQUENCE,
-          });
+          sendInput(event.shiftKey ? TERMINAL_BACK_TAB_SEQUENCE : TERMINAL_TAB_SEQUENCE);
         }
         return false;
       }
@@ -1586,7 +1592,7 @@ export const Terminal = () => {
           if (localEcho) {
             localEcho.handleInput(terminalEditingOutput);
           } else {
-            send({ type: "input", data: terminalEditingOutput });
+            sendInput(terminalEditingOutput);
           }
         }
         return false;
@@ -1610,12 +1616,12 @@ export const Terminal = () => {
           (getKittyFlags() & KITTY_KEYBOARD_DISAMBIGUATE_FLAG) !== 0;
         if (modifierBits !== 0 && isKittyDisambiguateActive) {
           event.preventDefault();
-          send({ type: "input", data: buildKittyKeySequence(ENTER_KEY_CODE, modifierBits) });
+          sendInput(buildKittyKeySequence(ENTER_KEY_CODE, modifierBits));
           return false;
         }
         if (modifierBits === KEYBOARD_MODIFIER_SHIFT_BIT) {
           event.preventDefault();
-          send({ type: "input", data: "\n" });
+          sendInput("\n");
           return false;
         }
       }
@@ -1682,7 +1688,7 @@ export const Terminal = () => {
 
     const localEcho = new LocalEcho({
       terminal,
-      send: (data) => send({ type: "input", data }),
+      send: sendInput,
       isSafeState: () => !hasForegroundProcess && terminal.buffer.active.type === "normal",
     });
     localEcho.setEnabled(activeLocalEchoRef.current);

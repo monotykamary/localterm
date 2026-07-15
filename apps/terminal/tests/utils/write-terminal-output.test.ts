@@ -1,17 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import {
+  INTERACTIVE_OUTPUT_RENDER_MAX_BYTES,
   OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES,
   OUTPUT_KEEP_WARM_MS,
 } from "../../src/lib/constants";
 import { OutputBatcher } from "../../src/utils/write-terminal-output";
 
-// Minimal xterm stub: record every write arg. The batcher only touches
-// terminal.write, so we don't need the real Terminal (which would drag in the
-// DOM and the full parser). The cast is required because OutputBatcher.attach
-// is typed against the full XtermTerminal surface.
-const createFakeTerminal = (writes: Uint8Array[]): XtermTerminal =>
+interface FakeTerminalOptions {
+  pendingRenderFrameId?: number;
+  onRenderFlush?: () => void;
+}
+
+// Minimal xterm stub: record every write and expose the render debouncer used
+// by the interactive fast path. The cast is required because
+// OutputBatcher.attach is typed against the full XtermTerminal surface.
+const createFakeTerminal = (
+  writes: Uint8Array[],
+  options: FakeTerminalOptions = {},
+): XtermTerminal =>
   ({
+    _core: {
+      _renderService: {
+        _renderDebouncer: {
+          _animationFrame: options.pendingRenderFrameId,
+          _innerRefresh: options.onRenderFlush,
+        },
+      },
+    },
     write: (data: Uint8Array, callback?: () => void) => {
       writes.push(data);
       callback?.();
@@ -23,6 +39,32 @@ const createFakeTerminal = (writes: Uint8Array[]): XtermTerminal =>
 // caps a real message at OUTPUT_BATCH_FLUSH_BYTES, well under xterm's 12ms
 // parse-yield budget).
 const LARGE_BYTES = OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES + 4096;
+const PENDING_RENDER_FRAME_ID = 73;
+
+interface RenderFlushHarness {
+  batcher: OutputBatcher;
+  writes: Uint8Array[];
+  readRenderFlushCount: () => number;
+}
+
+const createRenderFlushHarness = (): RenderFlushHarness => {
+  const writes: Uint8Array[] = [];
+  let renderFlushCount = 0;
+  const batcher = new OutputBatcher();
+  batcher.attach(
+    createFakeTerminal(writes, {
+      pendingRenderFrameId: PENDING_RENDER_FRAME_ID,
+      onRenderFlush: () => {
+        renderFlushCount += 1;
+      },
+    }),
+  );
+  return {
+    batcher,
+    writes,
+    readRenderFlushCount: () => renderFlushCount,
+  };
+};
 
 // Recording rAF: registers the callback but never fires it, so onKeepWarm only
 // runs when the test calls pendingCb explicitly. This sidesteps the
@@ -30,16 +72,18 @@ const LARGE_BYTES = OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES + 4096;
 // and lets the test observe whether onKeepWarm re-armed by checking rafCount.
 let rafCount = 0;
 let pendingCb: ((highResTimestamp: number) => void) | null = null;
+let canceledFrameIds: number[] = [];
 
 beforeEach(() => {
   rafCount = 0;
   pendingCb = null;
+  canceledFrameIds = [];
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
     rafCount += 1;
     pendingCb = cb;
     return rafCount;
   });
-  vi.stubGlobal("cancelAnimationFrame", () => {});
+  vi.stubGlobal("cancelAnimationFrame", (frameId: number) => canceledFrameIds.push(frameId));
 });
 
 afterEach(() => {
@@ -66,6 +110,57 @@ describe("OutputBatcher staging buffer growth", () => {
 });
 
 describe("OutputBatcher raw in/out (flush on arrival)", () => {
+  it("consumes the pending WebGL render for a small response after user input", () => {
+    const { batcher, writes, readRenderFlushCount } = createRenderFlushHarness();
+    batcher.setInteractiveRenderingEnabled(true);
+
+    batcher.noteUserInput();
+    batcher.pushBytes(new Uint8Array([65, 66, 67]));
+
+    expect(writes).toHaveLength(1);
+    expect(readRenderFlushCount()).toBe(1);
+    expect(canceledFrameIds).toContain(PENDING_RENDER_FRAME_ID);
+    batcher.detach();
+  });
+
+  it("leaves input responses on the normal rAF when WebGL is unavailable", () => {
+    const { batcher, writes, readRenderFlushCount } = createRenderFlushHarness();
+
+    batcher.noteUserInput();
+    batcher.pushBytes(new Uint8Array([65, 66, 67]));
+
+    expect(writes).toHaveLength(1);
+    expect(readRenderFlushCount()).toBe(0);
+    expect(canceledFrameIds).not.toContain(PENDING_RENDER_FRAME_ID);
+    batcher.detach();
+  });
+
+  it("leaves autonomous output on xterm's normal render rAF", () => {
+    const { batcher, writes, readRenderFlushCount } = createRenderFlushHarness();
+    batcher.setInteractiveRenderingEnabled(true);
+
+    batcher.pushBytes(new Uint8Array([65, 66, 67]));
+
+    expect(writes).toHaveLength(1);
+    expect(readRenderFlushCount()).toBe(0);
+    expect(canceledFrameIds).not.toContain(PENDING_RENDER_FRAME_ID);
+    batcher.detach();
+  });
+
+  it("does not synchronously render a throughput-sized response after input", () => {
+    const { batcher, writes, readRenderFlushCount } = createRenderFlushHarness();
+    batcher.setInteractiveRenderingEnabled(true);
+
+    batcher.noteUserInput();
+    batcher.pushBytes(new Uint8Array(INTERACTIVE_OUTPUT_RENDER_MAX_BYTES + 1));
+    batcher.pushBytes(new Uint8Array([65]));
+
+    expect(writes).toHaveLength(2);
+    expect(readRenderFlushCount()).toBe(0);
+    expect(canceledFrameIds).not.toContain(PENDING_RENDER_FRAME_ID);
+    batcher.detach();
+  });
+
   it("flushes small output synchronously so xterm answers queries in the same task", () => {
     const writes: Uint8Array[] = [];
     const batcher = new OutputBatcher();

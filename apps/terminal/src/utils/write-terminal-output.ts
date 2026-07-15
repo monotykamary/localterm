@@ -1,9 +1,45 @@
-import { OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES, OUTPUT_KEEP_WARM_MS } from "@/lib/constants";
+import {
+  INTERACTIVE_OUTPUT_RENDER_MAX_BYTES,
+  INTERACTIVE_OUTPUT_RENDER_WINDOW_MS,
+  OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES,
+  OUTPUT_KEEP_WARM_MS,
+} from "@/lib/constants";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
+
+interface XtermRenderDebouncer {
+  _animationFrame?: number;
+  _innerRefresh?: () => void;
+}
+
+interface XtermRenderService {
+  _renderDebouncer?: XtermRenderDebouncer;
+}
+
+interface XtermCore {
+  _renderService?: XtermRenderService;
+}
+
+interface XtermTerminalWithCore extends XtermTerminal {
+  _core?: XtermCore;
+}
 
 const performanceNow = () => performance.now();
 
 const isDocumentHidden = (): boolean => typeof document !== "undefined" && document.hidden;
+
+// xterm exposes synchronous redraw internally but not through its public API.
+// Consume the render range its parser already queued instead of requesting a
+// second full render; canceling that range's rAF prevents duplicate GPU work.
+// Missing internals degrade to xterm's normal scheduled render.
+const flushPendingInteractiveRender = (terminal: XtermTerminal): void => {
+  const renderDebouncer = (terminal as XtermTerminalWithCore)._core?._renderService
+    ?._renderDebouncer;
+  if (!renderDebouncer?._innerRefresh) return;
+  if (renderDebouncer._animationFrame !== undefined) {
+    cancelAnimationFrame(renderDebouncer._animationFrame);
+  }
+  renderDebouncer._innerRefresh();
+};
 
 class OutputBatcher {
   private terminal: XtermTerminal | null = null;
@@ -14,6 +50,8 @@ class OutputBatcher {
   // synchronous in pushBytes — so it can't starve xterm's render rAF.
   private keepWarmFrameId: number | null = null;
   private lastOutputAtMs = 0;
+  private lastUserInputAtMs = Number.NEGATIVE_INFINITY;
+  private interactiveRenderingEnabled = false;
   private afterFlush: (() => void) | null = null;
   // Re-entrancy guard for test rAF stubs that fire the callback synchronously
   // inside requestAnimationFrame, which would infinite-recurse via the
@@ -23,6 +61,16 @@ class OutputBatcher {
 
   attach = (terminal: XtermTerminal) => {
     this.terminal = terminal;
+    this.lastUserInputAtMs = Number.NEGATIVE_INFINITY;
+    this.interactiveRenderingEnabled = false;
+  };
+
+  setInteractiveRenderingEnabled = (enabled: boolean) => {
+    this.interactiveRenderingEnabled = enabled;
+  };
+
+  noteUserInput = () => {
+    this.lastUserInputAtMs = performanceNow();
   };
 
   setAfterFlush = (callback: (() => void) | null) => {
@@ -31,6 +79,8 @@ class OutputBatcher {
 
   detach = () => {
     this.cancelKeepWarm();
+    this.lastUserInputAtMs = Number.NEGATIVE_INFINITY;
+    this.interactiveRenderingEnabled = false;
     this.flushPending();
     this.terminal = null;
     this.afterFlush = null;
@@ -48,16 +98,20 @@ class OutputBatcher {
     // — each message is one terminal.write in this WS message task (a
     // macrotask, not a requestAnimationFrame), so xterm's parse never runs
     // inside a vsync and can't starve the render rAF. xterm's own render rAF is
-    // the single vsync gate, and flushing on arrival gives each frame the
-    // earliest possible render rAF: no latency window to shift a frame past a
-    // vsync boundary and skip it (the visible jank on a 60fps TUI animation
-    // such as the opentui golden-star demo). A backgrounded browser tab pauses
-    // rAF and throttles setTimeout to ~1Hz, but flushing synchronously here
-    // lets xterm parse a ≤64KB write within its 12ms budget in the same task
-    // — answering a terminal query before the probing program's read times out
-    // (the response otherwise leaks into the shell as typed text, e.g.
-    // `62;4;9;22c` on switching tabs back), and never spilling to xterm's async
-    // drain (no partial paint). There is no paint cost while hidden.
+    // the single vsync gate for normal output. A bounded response immediately
+    // following PTY input consumes that pending WebGL render in the write
+    // callback, letting it make the current compositor frame without changing
+    // the parse or batching path for autonomous output. Flushing on arrival
+    // gives every other frame the earliest possible render rAF: no latency
+    // window to shift a frame past a vsync boundary and skip it (the visible
+    // jank on a 60fps TUI animation such as the opentui golden-star demo). A
+    // backgrounded browser tab pauses rAF and throttles setTimeout to ~1Hz, but
+    // flushing synchronously here lets xterm parse a ≤64KB write within its
+    // 12ms budget in the same task — answering a terminal query before the
+    // probing program's read times out (the response otherwise leaks into the
+    // shell as typed text, e.g. `62;4;9;22c` on switching tabs back), and
+    // never spilling to xterm's async drain (no partial paint). There is no
+    // paint cost while hidden.
     this.flushPending();
     if (!isDocumentHidden()) this.armKeepWarm();
   };
@@ -115,12 +169,34 @@ class OutputBatcher {
     }
   };
 
+  private consumeInteractiveRender = (byteLength: number): boolean => {
+    if (this.lastUserInputAtMs === Number.NEGATIVE_INFINITY) return false;
+    const elapsedSinceInputMs = performanceNow() - this.lastUserInputAtMs;
+    this.lastUserInputAtMs = Number.NEGATIVE_INFINITY;
+    return (
+      this.interactiveRenderingEnabled &&
+      !isDocumentHidden() &&
+      byteLength <= INTERACTIVE_OUTPUT_RENDER_MAX_BYTES &&
+      elapsedSinceInputMs >= 0 &&
+      elapsedSinceInputMs <= INTERACTIVE_OUTPUT_RENDER_WINDOW_MS
+    );
+  };
+
+  private flushInteractiveRender = (terminal: XtermTerminal) => {
+    if (this.terminal !== terminal || !this.interactiveRenderingEnabled) return;
+    flushPendingInteractiveRender(terminal);
+  };
+
   private flushPending = () => {
     const terminal = this.terminal;
     const byteLength = this.byteLength;
     this.byteLength = 0;
     if (!terminal || byteLength === 0) return;
-    terminal.write(this.buffer.subarray(0, byteLength).slice());
+    const shouldRenderImmediately = this.consumeInteractiveRender(byteLength);
+    terminal.write(
+      this.buffer.subarray(0, byteLength).slice(),
+      shouldRenderImmediately ? () => this.flushInteractiveRender(terminal) : undefined,
+    );
     this.afterFlush?.();
   };
 }

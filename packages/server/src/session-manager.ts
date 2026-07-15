@@ -99,6 +99,10 @@ const makeBrotliEncoder = (level: number): BrotliEncoder => {
   };
   return { flush, release };
 };
+import {
+  createSynchronizedOutputEndDetector,
+  type SynchronizedOutputEndDetector,
+} from "./utils/create-synchronized-output-end-detector.js";
 import { resolveNamedKeys } from "./utils/named-keys.js";
 import { deletePasteImagesForSession } from "./utils/paste-image-store.js";
 import { stripAnsi } from "./utils/strip-ansi.js";
@@ -195,6 +199,7 @@ export interface ManagedSession {
   automationLog: string;
   outputBatch: string;
   outputBatchTimer: NodeJS.Timeout | null;
+  synchronizedOutputEndDetector: SynchronizedOutputEndDetector;
   drainPollTimer: NodeJS.Timeout | null;
   gitWatcher: GitDiffWatcher;
   // Last PTY output time + whether a foreground program is running, the inputs
@@ -478,6 +483,7 @@ export class SessionManager {
       automationLog: "",
       outputBatch: "",
       outputBatchTimer: null,
+      synchronizedOutputEndDetector: createSynchronizedOutputEndDetector(),
       drainPollTimer: null,
       gitWatcher: new GitDiffWatcher(),
       lastOutputAt: Date.now(),
@@ -1254,6 +1260,7 @@ export class SessionManager {
   }
 
   private onSessionOutput(managed: ManagedSession, data: string): void {
+    const didEndSynchronizedOutput = managed.synchronizedOutputEndDetector.push(data);
     managed.outputBatch += data;
     managed.lastOutputAt = Date.now();
     if (managed.automation) this.appendAutomationLog(managed, data);
@@ -1263,7 +1270,10 @@ export class SessionManager {
     // later capture-pane reads current rendered text. Lazily created, so this
     // is a no-op for sessions nobody has captured (the common browser case).
     managed.captureRenderer?.write(data);
-    if (managed.outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
+    // DEC synchronized output supplies the exact safe redraw boundary. Flush
+    // when DECRST 2026 arrives instead of waiting for the idle fallback, while
+    // unsynchronized output keeps the existing anti-flicker window unchanged.
+    if (didEndSynchronizedOutput || managed.outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
       if (managed.outputBatchTimer !== null) {
         clearTimeout(managed.outputBatchTimer);
         managed.outputBatchTimer = null;
@@ -1271,15 +1281,15 @@ export class SessionManager {
       this.flushOutput(managed);
       return;
     }
-    // Reset the coalescing window on every chunk so the flush lands
-    // OUTPUT_BATCH_WINDOW_MS after the LAST chunk of a burst, not a fixed
-    // window after the first. A full-screen TUI redraw of a large session
-    // emits across more than the window (node-pty delivers it as many
-    // 1024-byte data events over successive event-loop turns); a one-shot
-    // window flushed mid-redraw and split the frame across multiple WebSocket
-    // messages. Over a bandwidth-limited link each split arrives as its own
-    // atomic message and xterm paints it separately — the visible
-    // top-to-bottom crawl. A resetting window holds the whole burst until the
+    // Without a synchronized-output boundary, reset the coalescing window on
+    // every chunk so the flush lands OUTPUT_BATCH_WINDOW_MS after the LAST
+    // chunk of a burst, not a fixed window after the first. A full-screen TUI
+    // redraw of a large session emits across more than the window (node-pty
+    // delivers it as many 1024-byte data events over successive event-loop
+    // turns); a one-shot window flushed mid-redraw and split the frame across
+    // multiple WebSocket messages. Over a bandwidth-limited link each split
+    // arrives as its own atomic message and xterm paints it separately — the
+    // visible top-to-bottom crawl. A resetting window holds the whole burst until the
     // PTY goes idle, then sends one message; the browser receives it atomically
     // and xterm renders it in a single paint regardless of link bandwidth.
     // Sustained high-throughput output never idles, so OUTPUT_BATCH_FLUSH_BYTES
