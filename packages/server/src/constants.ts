@@ -440,6 +440,14 @@ export const CDP_HEARTBEAT_TIMEOUT_MS = 60_000;
 // devtools fork) replies in time and is reused, not torn down. Under the
 // interval so a probe never overlaps the next tick.
 export const CDP_HEARTBEAT_GRACE_MS = 15_000;
+// Dia (The Browser Company) is the only Chromium browser that gates the CDP
+// WebSocket open behind an "Allow debugging connection?" prompt (Return =
+// Allow). When auto-allow is on and the WS is still CONNECTING past this delay,
+// the prompt is up: the daemon fires one Return at the Dia process via osascript
+// so its persistent CDP socket connects with no manual click. Measured from
+// WebSocket creation — a live WS opens in ~100ms, so "still CONNECTING at
+// 600ms" reliably means the prompt is blocking it.
+export const CDP_AUTO_ALLOW_DELAY_MS = 600;
 // Foreground value reported when a TUI is on the alternate screen but no shell
 // hook named the program. Shells without a preexec hook (sh/dash) have no
 // foreground-start signal, so the alt-screen enter/exit is the only marker

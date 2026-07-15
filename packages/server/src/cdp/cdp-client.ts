@@ -17,7 +17,9 @@
 
 import { randomUUID } from "node:crypto";
 import { detectChromiumBrowsers, type DetectedBrowser } from "./detect-chromium.js";
+import { dismissDiaAllowPrompt } from "../utils/dismiss-dia-allow-prompt.js";
 import {
+  CDP_AUTO_ALLOW_DELAY_MS,
   CDP_HEARTBEAT_GRACE_MS,
   CDP_HEARTBEAT_INTERVAL_MS,
   CDP_HEARTBEAT_TIMEOUT_MS,
@@ -26,6 +28,7 @@ import {
 } from "../constants.js";
 
 const WS_OPEN = 1; // WebSocket.OPEN
+const WS_CONNECTING = 0; // WebSocket.CONNECTING
 
 // Cheap browser-level CDP round-trip used as a transport liveness probe by the
 // keepalive: no session, no side effects, minimal reply.
@@ -61,6 +64,23 @@ export type CdpClientOptions = {
   heartbeatTimeoutMs?: number;
   /** Reply-wait for the keepalive's liveness probe before it declares the socket stale. */
   heartbeatGraceMs?: number;
+  /** Opt out of auto-dismissing Dia's "Allow debugging connection?" prompt
+   *  (macOS, Dia only). On by default: when the WS-open stalls past
+   *  `autoAllowDelayMs` the daemon fires a Return at the Dia process via
+   *  osascript so its persistent CDP socket connects with no manual click — a
+   *  no-op for every other browser and off macOS. Kept on the client so every
+   *  connect/reconnect inherits it. Needs macOS Accessibility for the node
+   *  binary; without it the keystroke is dropped and connect waits on its
+   *  timeout (no regression vs. the feature being off). */
+  autoAllow?: boolean;
+  /** ms after the WS-open attempt before auto-dismissing Dia's prompt. Default
+   *  600 — a live WS opens in ~100ms, so "still CONNECTING at 600ms" means the
+   *  prompt is up. Measured from WebSocket creation. */
+  autoAllowDelayMs?: number;
+  /** Override the Dia-prompt dismiss (tests). Defaults to the osascript helper. */
+  dismissDiaAllowPrompt?: () => void;
+  /** Override the host platform (tests). The Dia auto-allow gate is macOS-only. */
+  platform?: NodeJS.Platform;
   /**
    * Predicate over a candidate target's URL. Only page-type targets that pass
    * get an ambient token injected; everything else the user has open in their
@@ -82,6 +102,10 @@ export class CdpClient {
   private readonly heartbeatIntervalMs: number;
   private readonly heartbeatTimeoutMs: number;
   private readonly heartbeatGraceMs: number;
+  private readonly autoAllow: boolean;
+  private readonly autoAllowDelayMs: number;
+  private readonly dismissDiaAllowPrompt: () => void;
+  private readonly platform: NodeJS.Platform;
   /** Timestamp of the last inbound CDP frame (reply or event). */
   private lastReplyAt = 0;
   /** Background keepalive timer; unref'd so it never blocks daemon shutdown. */
@@ -113,6 +137,10 @@ export class CdpClient {
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? CDP_HEARTBEAT_INTERVAL_MS;
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? CDP_HEARTBEAT_TIMEOUT_MS;
     this.heartbeatGraceMs = options.heartbeatGraceMs ?? CDP_HEARTBEAT_GRACE_MS;
+    this.autoAllow = options.autoAllow ?? true;
+    this.autoAllowDelayMs = options.autoAllowDelayMs ?? CDP_AUTO_ALLOW_DELAY_MS;
+    this.dismissDiaAllowPrompt = options.dismissDiaAllowPrompt ?? dismissDiaAllowPrompt;
+    this.platform = options.platform ?? process.platform;
     this.tabUrlFilter = options.tabUrlFilter;
   }
 
@@ -143,7 +171,7 @@ export class CdpClient {
     const errors: string[] = [];
     for (const browser of browsers) {
       try {
-        await this.openSocket(browser.wsUrl);
+        await this.openSocket(browser.wsUrl, browser.name);
         this.connectedBrowser = browser;
         // Kick off ambient tab observation on the live socket. Fire-and-get:
         // discovery fails soft (closeTab falls back to window.close()), and the
@@ -160,13 +188,30 @@ export class CdpClient {
     throw new Error(`no detected browser accepted a connection (${errors.join("; ")})`);
   }
 
-  private openSocket(wsUrl: string): Promise<void> {
+  private openSocket(wsUrl: string, browserName?: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(wsUrl);
       let settled = false;
+      // Dia (The Browser Company) is the only Chromium browser that gates the
+      // WS-open behind an "Allow debugging connection?" prompt (Return =
+      // Allow). When auto-allow is on and the WS is still CONNECTING past the
+      // delay, the prompt is up: fire one Return at the Dia process via osascript
+      // so connect completes with no manual click. No-op for every other browser
+      // and off macOS; cleared on open so a fast handshake never triggers it.
+      const allowTimer =
+        this.autoAllow && browserName === "Dia" && this.platform === "darwin"
+          ? setTimeout(() => {
+              if (settled || ws.readyState !== WS_CONNECTING) return;
+              this.dismissDiaAllowPrompt();
+            }, this.autoAllowDelayMs)
+          : undefined;
+      const clearAllow = (): void => {
+        if (allowTimer) clearTimeout(allowTimer);
+      };
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
+        clearAllow();
         try {
           ws.close();
         } catch {
@@ -179,6 +224,7 @@ export class CdpClient {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        clearAllow();
         this.ws = ws;
         this.startHeartbeat();
         resolve();
@@ -191,10 +237,12 @@ export class CdpClient {
         }
         settled = true;
         clearTimeout(timer);
+        clearAllow();
         reject(new Error("websocket error (likely 403 or port closed)"));
       });
       ws.addEventListener("close", () => {
         clearTimeout(timer);
+        clearAllow();
         this.failPending(ws, new Error("CDP websocket closed"));
         if (!settled) {
           settled = true;

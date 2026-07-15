@@ -64,6 +64,16 @@ debug-enabled Chromium in a known user-data dir (Chrome, Chromium, Edge, Brave,
 Arc, Vivaldi, Opera, Comet, Dia, **Aside**, Canary) by reading its
 `DevToolsActivePort` file, most-recently-launched first.
 
+**Dia on macOS.** Dia is the only Chromium browser that gates the debugging
+connection behind an `Allow debugging connection?` prompt — Return dismisses
+it. localterm auto-dismisses it: when the daemon's CDP socket is still
+connecting past ~600ms it fires a Return at the Dia process via `osascript`, so
+the socket opens with no manual click (a no-op for every other browser and off
+macOS). It needs **macOS Accessibility** for the `node` binary running the
+daemon — without it the keystroke is dropped and the socket just waits on its
+connect timeout, so grant it once in System Settings → Privacy & Security →
+Accessibility.
+
 To pin a specific port instead (e.g. Aside's `52860` when several browsers are
 running), set **Settings → Automation browser → Remote debugging port**; the
 daemon probes that port first and falls back to auto-detect when it's

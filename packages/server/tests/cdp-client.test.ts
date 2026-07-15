@@ -1,4 +1,4 @@
-import type { AddressInfo } from "node:net";
+import { createServer, type AddressInfo, type Socket } from "node:net";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { type RawData, type WebSocket, WebSocketServer } from "ws";
 import { CdpClient } from "../src/cdp/cdp-client.js";
@@ -214,8 +214,8 @@ const startMockBrowser = async (
   return browser;
 };
 
-const detected = (wsUrl: string, mtimeMs = 0): DetectedBrowser => ({
-  name: "Mock",
+const detected = (wsUrl: string, mtimeMs = 0, name = "Mock"): DetectedBrowser => ({
+  name,
   profileDir: "/tmp/mock",
   port: 0,
   wsPath: "/devtools/browser/mock",
@@ -223,8 +223,11 @@ const detected = (wsUrl: string, mtimeMs = 0): DetectedBrowser => ({
   mtimeMs,
 });
 
+const stallingClosers: Array<() => Promise<void>> = [];
+
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => s.close()));
+  await Promise.all(stallingClosers.splice(0).map((close) => close()));
 });
 
 describe("CdpClient.openBackgroundTab", { tags: ["integration"] }, () => {
@@ -607,6 +610,117 @@ describe("CdpClient.resetConnection", { tags: ["integration"] }, () => {
     const client = new CdpClient({ detect: async () => [] });
     expect(() => client.resetConnection()).not.toThrow();
     expect(client.isConnected()).toBe(false);
+    client.close();
+  });
+});
+
+// A browser endpoint that accepts the WS upgrade's TCP connection but never
+// sends the 101 Switching Protocols response, so the client WebSocket stays
+// CONNECTING indefinitely — modeling Dia gating the WS-open behind its "Allow
+// debugging connection?" prompt. Deterministic: no timer is needed for the
+// stall; the socket is CONNECTING the instant it's created.
+const startStallingBrowser = async (): Promise<{ wsUrl: string }> => {
+  const heldSockets = new Set<Socket>();
+  const server = createServer((socket) => {
+    heldSockets.add(socket);
+    socket.on("close", () => heldSockets.delete(socket));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  stallingClosers.push(
+    () =>
+      new Promise<void>((resolve) => {
+        for (const socket of heldSockets) socket.destroy();
+        server.close(() => resolve());
+      }),
+  );
+  return { wsUrl: `ws://127.0.0.1:${port}/devtools/browser/stall` };
+};
+
+describe("CdpClient Dia auto-allow", { tags: ["integration"] }, () => {
+  it("fires the Dia-prompt dismiss once when the WS-open stalls past the delay (Dia, macOS)", async () => {
+    const stall = await startStallingBrowser();
+    let dismissed = 0;
+    const client = new CdpClient({
+      detect: async () => [detected(stall.wsUrl, 0, "Dia")],
+      platform: "darwin",
+      autoAllowDelayMs: 5,
+      connectTimeoutMs: 30,
+      dismissDiaAllowPrompt: () => {
+        dismissed++;
+      },
+    });
+    await expect(client.connect()).rejects.toThrow(/timed out/);
+    expect(dismissed).toBe(1);
+    client.close();
+  });
+
+  it("does not dismiss for a non-Dia browser even when stalled", async () => {
+    const stall = await startStallingBrowser();
+    let dismissed = 0;
+    const client = new CdpClient({
+      detect: async () => [detected(stall.wsUrl, 0, "Google Chrome")],
+      platform: "darwin",
+      autoAllowDelayMs: 5,
+      connectTimeoutMs: 30,
+      dismissDiaAllowPrompt: () => {
+        dismissed++;
+      },
+    });
+    await expect(client.connect()).rejects.toThrow(/timed out/);
+    expect(dismissed).toBe(0);
+    client.close();
+  });
+
+  it("does not dismiss when autoAllow is false (Dia, macOS)", async () => {
+    const stall = await startStallingBrowser();
+    let dismissed = 0;
+    const client = new CdpClient({
+      detect: async () => [detected(stall.wsUrl, 0, "Dia")],
+      autoAllow: false,
+      platform: "darwin",
+      autoAllowDelayMs: 5,
+      connectTimeoutMs: 30,
+      dismissDiaAllowPrompt: () => {
+        dismissed++;
+      },
+    });
+    await expect(client.connect()).rejects.toThrow(/timed out/);
+    expect(dismissed).toBe(0);
+    client.close();
+  });
+
+  it("does not dismiss off macOS even for Dia", async () => {
+    const stall = await startStallingBrowser();
+    let dismissed = 0;
+    const client = new CdpClient({
+      detect: async () => [detected(stall.wsUrl, 0, "Dia")],
+      platform: "linux",
+      autoAllowDelayMs: 5,
+      connectTimeoutMs: 30,
+      dismissDiaAllowPrompt: () => {
+        dismissed++;
+      },
+    });
+    await expect(client.connect()).rejects.toThrow(/timed out/);
+    expect(dismissed).toBe(0);
+    client.close();
+  });
+
+  it("does not dismiss when the WS opens before the delay (open clears the timer)", async () => {
+    const browser = await startMockBrowser("ok");
+    let dismissed = 0;
+    const client = new CdpClient({
+      detect: async () => [detected(browser.wsUrl, 0, "Dia")],
+      platform: "darwin",
+      autoAllowDelayMs: 5_000,
+      connectTimeoutMs: 2_000,
+      dismissDiaAllowPrompt: () => {
+        dismissed++;
+      },
+    });
+    await client.connect();
+    expect(dismissed).toBe(0);
     client.close();
   });
 });
