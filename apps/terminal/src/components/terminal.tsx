@@ -58,6 +58,7 @@ import {
   InputGroupText,
 } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
+import { ToastProvider, Toaster, useToast } from "@/components/ui/toast";
 import { AutomationsButton } from "@/components/automations-menu";
 import { AutomationsModal } from "@/components/automations-modal";
 import { CommandPalette, type CommandItem } from "@/components/command-palette";
@@ -83,6 +84,7 @@ import { createGitWorktree, type CreateWorktreeOptions } from "@/utils/fetch-git
 import {
   COPY_FEEDBACK_MS,
   PASTED_IMAGE_FEEDBACK_MS,
+  PASTED_IMAGE_TOAST_ID,
   DEAD_SESSION_TITLE_PREFIX,
   DEFAULT_DOCUMENT_TITLE,
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
@@ -2764,30 +2766,23 @@ export const Terminal = () => {
     pasteToTerminalRef.current?.(text);
   }, []);
 
-  const [pastedImageNotice, setPastedImageNotice] = useState<{
-    kind: "uploading" | "done" | "error";
-    message: string;
-  } | null>(null);
-  const pastedImageTimerRef = useRef<number | null>(null);
+  const toastManager = useToast();
   const pasteImageFromBlobRef = useRef<((blob: Blob, filename: string) => Promise<void>) | null>(
     null,
   );
 
   const showPastedImageNotice = useCallback(
-    (notice: { kind: "uploading" | "done" | "error"; message: string } | null) => {
-      if (pastedImageTimerRef.current !== null) {
-        window.clearTimeout(pastedImageTimerRef.current);
-        pastedImageTimerRef.current = null;
-      }
-      setPastedImageNotice(notice);
-      if (notice && notice.kind !== "uploading") {
-        pastedImageTimerRef.current = window.setTimeout(() => {
-          pastedImageTimerRef.current = null;
-          setPastedImageNotice(null);
-        }, PASTED_IMAGE_FEEDBACK_MS);
-      }
+    (notice: { kind: "uploading" | "done" | "error"; message: string }) => {
+      const toastVariant =
+        notice.kind === "done" ? "success" : notice.kind === "error" ? "destructive" : "loading";
+      toastManager.add({
+        id: PASTED_IMAGE_TOAST_ID,
+        title: notice.message,
+        type: toastVariant,
+        timeout: notice.kind === "uploading" ? 0 : PASTED_IMAGE_FEEDBACK_MS,
+      });
     },
-    [],
+    [toastManager],
   );
 
   const pasteImageFromBlob = useCallback(
@@ -2822,14 +2817,6 @@ export const Terminal = () => {
   useEffect(() => {
     pasteImageFromBlobRef.current = pasteImageFromBlob;
   }, [pasteImageFromBlob]);
-
-  useEffect(() => {
-    return () => {
-      if (pastedImageTimerRef.current !== null) {
-        window.clearTimeout(pastedImageTimerRef.current);
-      }
-    };
-  }, []);
 
   // The mobile entry point: open the system photo/file picker. A hidden
   // appended <input type=file> is the cross-platform path (iOS Safari blocks
@@ -3822,23 +3809,9 @@ export const Terminal = () => {
           )}
         </AlertDialogContent>
       </AlertDialog>
-      {pastedImageNotice ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className={cn(
-            "pointer-events-none fixed left-1/2 z-[60] -translate-x-1/2 rounded-md border border-border/60 bg-background/90 px-3 py-1.5 text-xs shadow-md backdrop-blur-md",
-            pastedImageNotice.kind === "error"
-              ? "text-red-400"
-              : pastedImageNotice.kind === "done"
-                ? "text-emerald-400"
-                : "text-muted-foreground",
-          )}
-          style={{ bottom: onScreenKeyboardHeight + 12 }}
-        >
-          {pastedImageNotice.message}
-        </div>
-      ) : null}
+      <ToastProvider>
+        <Toaster />
+      </ToastProvider>
       {deviceTier !== "desktop" && isOnScreenKeyboardOpen ? (
         <OnScreenKeyboard
           onInput={(data) => {

@@ -39,6 +39,9 @@ export const RETRY_BUTTON_FEEDBACK_MS = 800;
 // A pasted/shared image upload can take a few seconds on a slow mobile link;
 // keep the "pasting image…" / outcome toast up briefly once it settles.
 export const PASTED_IMAGE_FEEDBACK_MS = 1800;
+// Stable id for the pasted-image status toast so a follow-up (done/error) upserts
+// the in-flight "Pasting image…" toast in place instead of stacking a new one.
+export const PASTED_IMAGE_TOAST_ID = "pasted-image";
 export const HAPTIC_TAP_MS = 10;
 export const RECONNECT_FAST_POLL_INTERVAL_MS = 250;
 export const RECONNECT_FAST_POLL_DURATION_MS = 5000;
