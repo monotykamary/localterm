@@ -51,6 +51,21 @@ export const CAFFEINATE_AUTO_DEFAULT_COMMANDS: readonly string[] = [
 ];
 export const CAFFEINATE_PREFERENCES_FILE_VERSION = 4;
 export const DAEMON_CONFIG_FILE_VERSION = 1;
+// Persisted workspace manifest (~/.localterm/workspace.json): per owner +
+// per browser-profile windowId, the list of open tabs ({cwd, shell}) so the
+// daemon can reopen them via CDP on the next start. Excludes automation-run
+// tabs (one-shot) and dormant/orphaned shells (no attached viewer).
+export const WORKSPACE_FILENAME = "workspace.json";
+export const WORKSPACE_FILE_VERSION = 1;
+// Quiet window after the first desktop tab pairs with CDP before the daemon
+// reconciles the persisted manifest against reconnected tabs and opens the
+// missing ones — long enough for surviving tabs (a daemon restart with the
+// browser left open) to reattach and be counted, short enough to feel
+// instant on a fresh start (only the bootstrap tab is open).
+export const WORKSPACE_RESTORE_SETTLE_MS = 2_000;
+// Debounce for persisting the live workspace manifest to disk on attach/
+// detach churn, so a flurry of tab opens/closes writes once, not per event.
+export const WORKSPACE_SNAPSHOT_DEBOUNCE_MS = 2_000;
 // Automatic detection is event-driven (no timer): a `ps` snapshot is taken only
 // in response to a foreground change or a session connect/disconnect. This
 // debounce window coalesces a burst of such events into a single snapshot; it

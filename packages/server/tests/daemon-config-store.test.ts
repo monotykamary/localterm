@@ -32,6 +32,7 @@ describe("DaemonConfigStore", () => {
       version: DAEMON_CONFIG_FILE_VERSION,
       cdpPort: 52860,
       graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
+      workspaceRestore: true,
     });
   });
 

@@ -80,6 +80,8 @@ interface SettingsMenuProps {
   defaultShell: string;
   onDefaultShellChange: (defaultShell: string) => void;
   detectedDefaultShell: string;
+  mobileResume: boolean;
+  onMobileResumeChange: (enabled: boolean) => void;
   cursorStyle: TerminalCursorStyle;
   onCursorStyleChange: (style: TerminalCursorStyle) => void;
   onCursorStylePreview?: (style: TerminalCursorStyle | null) => void;
@@ -99,6 +101,8 @@ interface SettingsMenuProps {
   onOpenInspect: () => void;
   graceSeconds: number | null;
   onGraceSecondsChange: (seconds: number | null) => void;
+  workspaceRestore: boolean;
+  onWorkspaceRestoreChange: (enabled: boolean) => void;
   notificationsPermission: NotificationPermission | "unsupported";
   onNotificationsPermissionRequest: () => void;
   sessionInfo?: TerminalSessionInfo | null;
@@ -355,6 +359,8 @@ export const SettingsMenu = ({
   defaultShell,
   onDefaultShellChange,
   detectedDefaultShell,
+  mobileResume,
+  onMobileResumeChange,
   cursorStyle,
   onCursorStyleChange,
   onCursorStylePreview,
@@ -374,6 +380,8 @@ export const SettingsMenu = ({
   onOpenInspect,
   graceSeconds,
   onGraceSecondsChange,
+  workspaceRestore,
+  onWorkspaceRestoreChange,
   notificationsPermission,
   onNotificationsPermissionRequest,
   sessionInfo,
@@ -853,6 +861,29 @@ export const SettingsMenu = ({
                         className="h-7 px-2 font-mono text-xs"
                         onChange={(event) => onDefaultShellChange(event.target.value)}
                       />
+                      <div className="flex items-center justify-between gap-2">
+                        <Tooltip>
+                          <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                            Resume last shell on mobile
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="bottom"
+                            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                            className="max-w-xs"
+                          >
+                            On phones and tablets, opening localterm attaches to your most recently
+                            active shell instead of starting a new one — so you land on the build or
+                            agent run you just started on another device. Off restores the original
+                            spawn-fresh behavior. An explicit attach (a shared session QR) always
+                            wins regardless.
+                          </TooltipContent>
+                        </Tooltip>
+                        <Switch
+                          aria-label="toggle resume last shell on mobile"
+                          checked={mobileResume}
+                          onCheckedChange={onMobileResumeChange}
+                        />
+                      </div>
                     </Field>
 
                     <Separator className="bg-border/40" />
@@ -880,6 +911,30 @@ export const SettingsMenu = ({
                         seconds={graceSeconds}
                         onSecondsChange={onGraceSecondsChange}
                       />
+                      <div className="flex items-center justify-between gap-2">
+                        <Tooltip>
+                          <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                            Reopen tabs on start
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="bottom"
+                            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                            className="max-w-xs"
+                          >
+                            On start, reopen the browser tabs you had open last (in the same
+                            directories and shells) via the automation browser's CDP connection — a
+                            tmux-resurrect-style restore of the workspace layout. The shells
+                            themselves don't survive a stop; only the arrangement comes back.
+                            Automation-run tabs and shells you'd closed are skipped. Needs a
+                            debug-enabled browser so the daemon can drive tab creation.
+                          </TooltipContent>
+                        </Tooltip>
+                        <Switch
+                          aria-label="toggle reopen tabs on start"
+                          checked={workspaceRestore}
+                          onCheckedChange={onWorkspaceRestoreChange}
+                        />
+                      </div>
                     </Field>
 
                     <Separator className="bg-border/40" />

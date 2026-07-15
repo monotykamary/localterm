@@ -293,6 +293,10 @@ export const DEFAULT_CWD_STORAGE_KEY = "localterm:default-cwd";
 // per-tab mirror of the CLI `--shell` flag). Empty = unset, so the server uses
 // its detected login shell (surfaced as the Settings field's placeholder).
 export const DEFAULT_SHELL_STORAGE_KEY = "localterm:default-shell";
+// Whether a touch-device (phone/tablet) bare connect resumes the user's most
+// recently active shell instead of spawning a fresh one. Default on; opt-out
+// from Settings → Launch restores the original spawn-fresh behavior.
+export const MOBILE_RESUME_STORAGE_KEY = "localterm:mobile-resume";
 // The per-browser-profile handle minted on first load and sent on the WS
 // upgrade as `?wid=`. `localStorage` is partitioned per browser profile, so
 // every tab/window of one profile shares this id and a different profile gets

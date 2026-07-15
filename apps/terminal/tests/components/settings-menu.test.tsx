@@ -58,6 +58,10 @@ interface SettingsMenuHarnessProps {
   onOpenInspect?: () => void;
   initialGraceSeconds?: number | null;
   onGraceSecondsChange?: (seconds: number | null) => void;
+  initialWorkspaceRestore?: boolean;
+  onWorkspaceRestoreChange?: (enabled: boolean) => void;
+  initialMobileResume?: boolean;
+  onMobileResumeChange?: (enabled: boolean) => void;
   onPaddingXChange?: (paddingX: number) => void;
   onPaddingYChange?: (paddingY: number) => void;
   onLigaturesEnabledChange?: (enabled: boolean) => void;
@@ -110,6 +114,10 @@ const renderSettingsMenu = ({
   onOpenInspect = () => {},
   initialGraceSeconds = null,
   onGraceSecondsChange = () => {},
+  initialWorkspaceRestore = true,
+  onWorkspaceRestoreChange = () => {},
+  initialMobileResume = true,
+  onMobileResumeChange = () => {},
   onPaddingXChange = () => {},
   onPaddingYChange = () => {},
   onLigaturesEnabledChange = () => {},
@@ -163,6 +171,10 @@ const renderSettingsMenu = ({
         onOpenInspect={onOpenInspect}
         graceSeconds={initialGraceSeconds}
         onGraceSecondsChange={onGraceSecondsChange}
+        workspaceRestore={initialWorkspaceRestore}
+        onWorkspaceRestoreChange={onWorkspaceRestoreChange}
+        mobileResume={initialMobileResume}
+        onMobileResumeChange={onMobileResumeChange}
         paddingX={0}
         onPaddingXChange={onPaddingXChange}
         paddingY={0}

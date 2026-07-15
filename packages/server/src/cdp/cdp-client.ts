@@ -665,6 +665,44 @@ export class CdpClient {
   }
 
   /**
+   * Navigate an existing tab to `url` (used by workspace restore to repoint the
+   * bootstrap `--open` tab into the first restored shell's cwd, so the reopen
+   * lands exactly N tabs in the manifest's cwds rather than N−1 + one stray in
+   * the default directory). Attaches once, fires `Page.navigate`, detaches.
+   * Best-effort and never throws — a missing browser/target is a no-op. Does
+   * not serialize on `closeQueue`: restore runs once at startup with no
+   * concurrent closes to interleave with.
+   */
+  async navigateTab(targetId: string, url: string): Promise<void> {
+    try {
+      await this.connect();
+    } catch {
+      return;
+    }
+    let sessionId: string | undefined;
+    try {
+      const attached = (await this.call("Target.attachToTarget", {
+        targetId,
+        flatten: true,
+      })) as { sessionId?: string };
+      sessionId = attached?.sessionId;
+    } catch {
+      return;
+    }
+    if (!sessionId) return;
+    try {
+      await this.call("Page.navigate", { url }, sessionId);
+    } catch {
+      /* tab may be navigating/closing — best-effort */
+    }
+    try {
+      await this.call("Target.detachFromTarget", { sessionId });
+    } catch {
+      /* detach is best-effort; the browser tears it down on navigation anyway */
+    }
+  }
+
+  /**
    * Close a tab. Mirrors browser-harness-js: drive the browser's own close
    * path via `window.close()` (reliable on forks like Dia/Arc that ignore a
    * bare `Target.closeTarget`), then tear down the CDP target. Best-effort

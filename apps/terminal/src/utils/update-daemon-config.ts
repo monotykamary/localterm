@@ -6,7 +6,7 @@ const CONFIG_ENDPOINT = "/api/config";
 // resolved (clamped) config, or null on any failure so the caller can roll
 // back its optimistic state.
 export const updateDaemonConfig = async (
-  patch: Partial<Pick<DaemonConfig, "cdpPort" | "graceSeconds">>,
+  patch: Partial<Pick<DaemonConfig, "cdpPort" | "graceSeconds" | "workspaceRestore">>,
 ): Promise<DaemonConfig | null> => {
   try {
     const response = await fetch(new URL(CONFIG_ENDPOINT, window.location.href), {

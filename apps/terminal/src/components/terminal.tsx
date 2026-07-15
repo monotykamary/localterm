@@ -187,6 +187,10 @@ import { detectIsAppleWebKit } from "@/utils/detect-is-apple-webkit";
 import { loadStoredDefaultCwd } from "@/utils/stored-default-cwd";
 import { loadStoredDefaultShell } from "@/utils/stored-default-shell";
 import { WINDOW_ID_QUERY_PARAM, loadWindowId } from "@/utils/window-id";
+import { detectDeviceTier } from "@/utils/detect-device-tier";
+import { fetchSessions } from "@/utils/fetch-sessions";
+import { loadStoredMobileResume } from "@/utils/stored-mobile-resume";
+import { resolveResumeSession } from "@/utils/resolve-resume-session";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
 import { fetchDaemonConfig } from "@/utils/fetch-daemon-config";
@@ -496,6 +500,7 @@ export const Terminal = () => {
     activeCursorStyle,
     activeCursorBlink,
     activeLocalEcho,
+    activeMobileResume,
     activeScrollback,
     activeScrollOnUserInput,
     activePaddingX,
@@ -517,6 +522,7 @@ export const Terminal = () => {
     handleCursorStyleChange,
     handleCursorBlinkChange,
     handleLocalEchoChange,
+    handleMobileResumeChange,
     handleScrollbackChange,
     handleScrollOnUserInputChange,
     handlePaddingXChange,
@@ -550,6 +556,7 @@ export const Terminal = () => {
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [cdpPort, setCdpPort] = useState<number | null>(null);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
+  const [workspaceRestore, setWorkspaceRestore] = useState(true);
   // The daemon's detected default shell (from `GET /api/config`), shown as the
   // Settings → Launch shell field's placeholder so the user knows what an
   // empty field falls back to. Lazily fetched when the Settings panel opens
@@ -2285,7 +2292,34 @@ export const Terminal = () => {
       manualReconnectRef.current?.();
     };
 
-    connect();
+    // Touch-device bare connect: resume the user's most recently active shell
+    // instead of spawning a fresh one (the "open my phone, land on my active
+    // run" path). Resolved once before the first connect; a transient
+    // reconnect or a picker switch reuses the existing liveSessionId /
+    // nextConnectSid. Skipped when the URL carries an explicit intent (?sid=
+    // attach, ?run= automation) or the opt-out setting is off. A slow fetch
+    // or no live session falls back to a fresh spawn. The desktop + opt-out
+    // + explicit-intent paths short-circuit synchronously so the first WS
+    // opens on the same tick as before (the component tests assert this) —
+    // only an actual touch-device resume defers connect() by one round-trip.
+    const shouldAttemptMobileResume =
+      detectDeviceTier() !== "desktop" &&
+      loadStoredMobileResume() &&
+      (() => {
+        const params = new URLSearchParams(window.location.search);
+        return !params.get(SESSION_ID_QUERY_PARAM) && !params.get(RUN_QUERY_PARAM);
+      })();
+    if (shouldAttemptMobileResume) {
+      void (async () => {
+        const sessions = await fetchSessions();
+        if (disposed) return;
+        const resumeSid = sessions === null ? null : resolveResumeSession(sessions);
+        if (resumeSid) nextConnectSid = resumeSid;
+        connect();
+      })();
+    } else {
+      connect();
+    }
     setTerminalReady(true);
 
     return () => {
@@ -2490,6 +2524,16 @@ export const Terminal = () => {
     });
   }, []);
 
+  // The workspace-restore toggle lives on the daemon; PUT the new value and
+  // adopt the confirmation. Takes effect on the next daemon start (restore
+  // runs once at startup, not live-reactively).
+  const handleWorkspaceRestoreChange = useCallback((next: boolean) => {
+    setWorkspaceRestore(next);
+    void updateDaemonConfig({ workspaceRestore: next }).then((confirmed) => {
+      if (confirmed) setWorkspaceRestore(confirmed.workspaceRestore);
+    });
+  }, []);
+
   // Explicit "Connect now": await the daemon's connect and fold the result
   // (including any error) into cdpStatus, so the field shows why a connection
   // failed rather than silently staying "Not connected".
@@ -2522,6 +2566,7 @@ export const Terminal = () => {
           if (config) {
             setCdpPort(config.cdpPort);
             setGraceSeconds(config.graceSeconds);
+            setWorkspaceRestore(config.workspaceRestore);
             setDetectedDefaultShell(config.defaultShell);
           }
         });
@@ -3330,6 +3375,8 @@ export const Terminal = () => {
                     onCursorBlinkChange={handleCursorBlinkChange}
                     localEcho={activeLocalEcho}
                     onLocalEchoChange={handleLocalEchoChange}
+                    mobileResume={activeMobileResume}
+                    onMobileResumeChange={handleMobileResumeChange}
                     scrollback={activeScrollback}
                     onScrollbackChange={handleScrollbackChange}
                     scrollOnUserInput={activeScrollOnUserInput}
@@ -3342,6 +3389,8 @@ export const Terminal = () => {
                     onOpenInspect={handleOpenInspect}
                     graceSeconds={graceSeconds}
                     onGraceSecondsChange={handleGraceSecondsChange}
+                    workspaceRestore={workspaceRestore}
+                    onWorkspaceRestoreChange={handleWorkspaceRestoreChange}
                     paddingX={activePaddingX}
                     onPaddingXChange={handlePaddingXChange}
                     paddingY={activePaddingY}

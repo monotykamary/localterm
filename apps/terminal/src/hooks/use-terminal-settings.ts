@@ -58,6 +58,11 @@ import {
   subscribeStoredLocalEcho,
 } from "@/utils/stored-local-echo-enabled";
 import {
+  loadStoredMobileResume,
+  storeMobileResume,
+  subscribeStoredMobileResume,
+} from "@/utils/stored-mobile-resume";
+import {
   loadStoredNerdFontEnabled,
   storeNerdFontEnabled,
   subscribeStoredNerdFontEnabled,
@@ -145,6 +150,7 @@ export const useTerminalSettings = ({
   const initialCursorBlinkRef = useRef<boolean>(loadStoredTerminalCursorBlink());
   const initialLocalEchoRef = useRef<boolean>(loadStoredLocalEcho());
   const activeLocalEchoRef = useRef<boolean>(initialLocalEchoRef.current);
+  const initialMobileResumeRef = useRef<boolean>(loadStoredMobileResume());
   const initialScrollbackRef = useRef<number>(loadStoredTerminalScrollback());
   const initialScrollOnUserInputRef = useRef<boolean>(loadStoredTerminalScrollOnUserInput());
   const initialPaddingXRef = useRef<number>(loadStoredTerminalPaddingX());
@@ -211,6 +217,9 @@ export const useTerminalSettings = ({
     initialCursorBlinkRef.current,
   );
   const [activeLocalEcho, setActiveLocalEcho] = useState<boolean>(initialLocalEchoRef.current);
+  const [activeMobileResume, setActiveMobileResume] = useState<boolean>(
+    initialMobileResumeRef.current,
+  );
   const [activeScrollback, setActiveScrollback] = useState<number>(initialScrollbackRef.current);
   const [activeScrollOnUserInput, setActiveScrollOnUserInput] = useState<boolean>(
     initialScrollOnUserInputRef.current,
@@ -521,6 +530,11 @@ export const useTerminalSettings = ({
     storeStoredLocalEcho(nextLocalEcho);
   }, []);
 
+  const handleMobileResumeChange = useCallback((nextMobileResume: boolean) => {
+    setActiveMobileResume(nextMobileResume);
+    storeMobileResume(nextMobileResume);
+  }, []);
+
   const handleCursorBlinkChange = useCallback((nextCursorBlink: boolean) => {
     setActiveCursorBlink(nextCursorBlink);
     storeTerminalCursorBlink(nextCursorBlink);
@@ -616,6 +630,7 @@ export const useTerminalSettings = ({
       subscribeStoredTerminalCursorStyle(setActiveCursorStyle),
       subscribeStoredTerminalCursorBlink(setActiveCursorBlink),
       subscribeStoredLocalEcho(setActiveLocalEcho),
+      subscribeStoredMobileResume(setActiveMobileResume),
       subscribeStoredTerminalScrollback(setActiveScrollback),
       subscribeStoredTerminalScrollOnUserInput(setActiveScrollOnUserInput),
       subscribeStoredTerminalPaddingX(setActivePaddingX),
@@ -650,6 +665,7 @@ export const useTerminalSettings = ({
     activeCursorStyle,
     activeCursorBlink,
     activeLocalEcho,
+    activeMobileResume,
     activeScrollback,
     activeScrollOnUserInput,
     activePaddingX,
@@ -671,6 +687,7 @@ export const useTerminalSettings = ({
     handleCursorStyleChange,
     handleCursorBlinkChange,
     handleLocalEchoChange,
+    handleMobileResumeChange,
     handleScrollbackChange,
     handleScrollOnUserInputChange,
     handlePaddingXChange,
