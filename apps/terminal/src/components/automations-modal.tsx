@@ -450,7 +450,7 @@ const RunLogView = ({
         <Button variant="ghost" size="icon-sm" aria-label="back to automations" onClick={onBack}>
           <ChevronLeft />
         </Button>
-        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{automation.name}</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-foreground">{automation.name}</span>
         <span className={cn("shrink-0 text-[10px] tabular-nums", badge.className)}>
           {badge.label}
         </span>
@@ -1532,7 +1532,7 @@ const AutomationDetail = ({
     <div className="flex flex-col gap-3 p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="truncate text-sm font-medium text-foreground">{automation.name}</h3>
+          <h3 className="truncate text-xs font-medium text-foreground">{automation.name}</h3>
           <p className="truncate font-mono text-[11px] text-muted-foreground">
             {runnerTypeLabel(automation.runner)}: {runnerSummary(automation.runner)}
           </p>
