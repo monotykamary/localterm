@@ -48,8 +48,13 @@ const createFakeTerminal = (
 const LARGE_BYTES = OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES + 4096;
 const PENDING_RENDER_FRAME_ID = 73;
 const textEncoder = new TextEncoder();
+const synchronizedOutputEndByteLength = textEncoder.encode(
+  SYNCHRONIZED_OUTPUT_END_SEQUENCE,
+).byteLength;
 const synchronizedFrame = (content: string): Uint8Array =>
   textEncoder.encode(`\x1b[?2026h${content}${SYNCHRONIZED_OUTPUT_END_SEQUENCE}`);
+const withoutSynchronizedOutputEnd = (frame: Uint8Array): Uint8Array =>
+  frame.subarray(0, frame.byteLength - synchronizedOutputEndByteLength);
 
 interface RenderFlushHarness {
   batcher: OutputBatcher;
@@ -247,14 +252,15 @@ describe("OutputBatcher raw in/out (flush on arrival)", () => {
 });
 
 describe("OutputBatcher synchronized-output pacing", () => {
-  it("holds the next frame until xterm parses and presents the completed frame", () => {
+  it("holds an incomplete next frame until xterm presents the completed frame", () => {
     const writes: Uint8Array[] = [];
     const deferredWriteCallbacks: Array<() => void> = [];
     const batcher = new OutputBatcher();
     batcher.attach(createFakeTerminal(writes, { deferredWriteCallbacks }));
+    const incompleteSecondFrame = withoutSynchronizedOutputEnd(synchronizedFrame("second"));
 
     batcher.pushBytes(synchronizedFrame("first"));
-    batcher.pushBytes(synchronizedFrame("second"));
+    batcher.pushBytes(incompleteSecondFrame);
 
     expect(writes).toHaveLength(1);
     expect(deferredWriteCallbacks).toHaveLength(1);
@@ -267,24 +273,55 @@ describe("OutputBatcher synchronized-output pacing", () => {
     releaseFrame!(performance.now());
 
     expect(writes).toHaveLength(2);
-    expect(Array.from(writes[1])).toEqual(Array.from(synchronizedFrame("second")));
+    expect(Array.from(writes[1])).toEqual(Array.from(incompleteSecondFrame));
+    batcher.detach();
+  });
+
+  it("preempts a pending render wait only after multiple newer frames complete", () => {
+    const writes: Uint8Array[] = [];
+    const deferredWriteCallbacks: Array<() => void> = [];
+    const batcher = new OutputBatcher();
+    batcher.attach(createFakeTerminal(writes, { deferredWriteCallbacks }));
+    const secondFrame = synchronizedFrame("second");
+    const thirdFrame = synchronizedFrame("third");
+    const completedBacklog = new Uint8Array(secondFrame.byteLength + thirdFrame.byteLength);
+    completedBacklog.set(secondFrame);
+    completedBacklog.set(thirdFrame, secondFrame.byteLength);
+
+    batcher.pushBytes(synchronizedFrame("first"));
+    deferredWriteCallbacks.shift()?.();
+    const staleReleaseFrame = pendingCb;
+    const staleReleaseFrameId = rafCount;
+
+    batcher.pushBytes(secondFrame);
+
+    expect(writes).toHaveLength(1);
+    expect(canceledFrameIds).not.toContain(staleReleaseFrameId);
+
+    batcher.pushBytes(thirdFrame);
+
+    expect(canceledFrameIds).toContain(staleReleaseFrameId);
+    expect(writes).toHaveLength(2);
+    expect(Array.from(writes[1])).toEqual(Array.from(completedBacklog));
+    expect(deferredWriteCallbacks).toHaveLength(1);
+
+    staleReleaseFrame?.(performance.now());
+    expect(writes).toHaveLength(2);
     batcher.detach();
   });
 
   it("detects a synchronized-output end across every incoming-write boundary", () => {
     const firstFrame = synchronizedFrame("split");
-    const endSequenceByteLength = textEncoder.encode(SYNCHRONIZED_OUTPUT_END_SEQUENCE).byteLength;
 
-    for (let splitIndex = 1; splitIndex < endSequenceByteLength; splitIndex += 1) {
+    for (let splitIndex = 1; splitIndex < synchronizedOutputEndByteLength; splitIndex += 1) {
       const writes: Uint8Array[] = [];
       const deferredWriteCallbacks: Array<() => void> = [];
       const batcher = new OutputBatcher();
       batcher.attach(createFakeTerminal(writes, { deferredWriteCallbacks }));
-      const splitOffset = firstFrame.byteLength - endSequenceByteLength + splitIndex;
+      const splitOffset = firstFrame.byteLength - synchronizedOutputEndByteLength + splitIndex;
 
       batcher.pushBytes(firstFrame.subarray(0, splitOffset));
       batcher.pushBytes(firstFrame.subarray(splitOffset));
-      batcher.pushBytes(synchronizedFrame("next"));
 
       expect(writes).toHaveLength(2);
       expect(deferredWriteCallbacks).toHaveLength(1);
@@ -294,10 +331,13 @@ describe("OutputBatcher synchronized-output pacing", () => {
       expect(releaseFrame).toBeTruthy();
       releaseFrame!(performance.now());
 
+      const nextFrame = synchronizedFrame("next");
+      batcher.pushBytes(nextFrame);
+
       expect(writes).toHaveLength(3);
       expect(Array.from(writes[0])).toEqual(Array.from(firstFrame.subarray(0, splitOffset)));
       expect(Array.from(writes[1])).toEqual(Array.from(firstFrame.subarray(splitOffset)));
-      expect(Array.from(writes[2])).toEqual(Array.from(synchronizedFrame("next")));
+      expect(Array.from(writes[2])).toEqual(Array.from(nextFrame));
       batcher.detach();
     }
   });
@@ -325,7 +365,7 @@ describe("OutputBatcher synchronized-output pacing", () => {
     batcher.detach();
   });
 
-  it("catches up to the newest completed frame when a local burst queues", () => {
+  it("coalesces a completed local burst behind the current frame", () => {
     const writes: Uint8Array[] = [];
     const deferredWriteCallbacks: Array<() => void> = [];
     const batcher = new OutputBatcher();
@@ -333,21 +373,25 @@ describe("OutputBatcher synchronized-output pacing", () => {
     const firstFrame = synchronizedFrame("first");
     const secondFrame = synchronizedFrame("second");
     const thirdFrame = synchronizedFrame("third");
+    const completedBacklog = new Uint8Array(secondFrame.byteLength + thirdFrame.byteLength);
+    completedBacklog.set(secondFrame);
+    completedBacklog.set(thirdFrame, secondFrame.byteLength);
 
     batcher.pushBytes(firstFrame);
     batcher.pushBytes(secondFrame);
     batcher.pushBytes(thirdFrame);
 
-    expect(writes).toHaveLength(1);
-    deferredWriteCallbacks.shift()?.();
-    const releaseFrame = pendingCb;
-    expect(releaseFrame).toBeTruthy();
-    releaseFrame!(performance.now());
+    expect(writes).toHaveLength(2);
+    expect(Array.from(writes[0])).toEqual(Array.from(firstFrame));
+    expect(Array.from(writes[1])).toEqual(Array.from(completedBacklog));
+    expect(deferredWriteCallbacks).toHaveLength(2);
 
-    expect(writes).toHaveLength(3);
-    expect(Array.from(writes[1])).toEqual(Array.from(secondFrame));
-    expect(Array.from(writes[2])).toEqual(Array.from(thirdFrame));
-    expect(deferredWriteCallbacks).toHaveLength(1);
+    const frameCountBeforeParseCallbacks = rafCount;
+    deferredWriteCallbacks.shift()?.();
+    expect(rafCount).toBe(frameCountBeforeParseCallbacks);
+
+    deferredWriteCallbacks.shift()?.();
+    expect(rafCount).toBe(frameCountBeforeParseCallbacks + 1);
     batcher.detach();
   });
 
@@ -364,19 +408,25 @@ describe("OutputBatcher synchronized-output pacing", () => {
     for (let writeIndex = 0; writeIndex < backlogLength; writeIndex += 1) {
       batcher.pushBytes(new Uint8Array([65]));
     }
+    const penultimateFrame = synchronizedFrame("penultimate");
     const finalFrame = synchronizedFrame("final");
+    batcher.pushBytes(penultimateFrame);
     batcher.pushBytes(finalFrame);
 
-    expect(writes).toHaveLength(1);
-    deferredWriteCallbacks.shift()?.();
-    const releaseFrame = pendingCb;
-    expect(releaseFrame).toBeTruthy();
-    releaseFrame!(performance.now());
-
-    expect(writes).toHaveLength(backlogLength + 2);
-    expect(Array.from(writes[1])).toEqual([65]);
-    expect(Array.from(writes[backlogLength])).toEqual([65]);
-    expect(Array.from(writes[backlogLength + 1])).toEqual(Array.from(finalFrame));
+    expect(writes).toHaveLength(2);
+    expect(writes[1].byteLength).toBe(
+      backlogLength + penultimateFrame.byteLength + finalFrame.byteLength,
+    );
+    expect(Array.from(writes[1].subarray(0, backlogLength))).toEqual(
+      new Array(backlogLength).fill(65),
+    );
+    expect(
+      Array.from(writes[1].subarray(backlogLength, backlogLength + penultimateFrame.byteLength)),
+    ).toEqual(Array.from(penultimateFrame));
+    expect(Array.from(writes[1].subarray(backlogLength + penultimateFrame.byteLength))).toEqual(
+      Array.from(finalFrame),
+    );
+    expect(deferredWriteCallbacks).toHaveLength(2);
     batcher.detach();
   });
 
@@ -387,17 +437,17 @@ describe("OutputBatcher synchronized-output pacing", () => {
     batcher.attach(createFakeTerminal(writes, { deferredWriteCallbacks }));
 
     const firstFrame = synchronizedFrame("first");
-    const secondFrame = synchronizedFrame("second");
+    const incompleteSecondFrame = withoutSynchronizedOutputEnd(synchronizedFrame("second"));
     const inputResponseFrame = synchronizedFrame("input-response");
     batcher.pushBytes(firstFrame);
-    batcher.pushBytes(secondFrame);
+    batcher.pushBytes(incompleteSecondFrame);
     expect(writes).toHaveLength(1);
 
     batcher.noteUserInput();
     batcher.pushBytes(inputResponseFrame);
 
     expect(writes).toHaveLength(3);
-    expect(Array.from(writes[1])).toEqual(Array.from(secondFrame));
+    expect(Array.from(writes[1])).toEqual(Array.from(incompleteSecondFrame));
     expect(Array.from(writes[2])).toEqual(Array.from(inputResponseFrame));
     expect(deferredWriteCallbacks).toHaveLength(1);
     batcher.detach();

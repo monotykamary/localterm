@@ -5,6 +5,7 @@ import {
   OUTPUT_KEEP_WARM_MS,
   OUTPUT_PENDING_WRITE_COMPACTION_THRESHOLD_WRITES,
   SYNCHRONIZED_OUTPUT_END_SEQUENCE,
+  SYNCHRONIZED_OUTPUT_PREEMPTION_MINIMUM_COMPLETED_FRAMES,
 } from "@/lib/constants";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 
@@ -144,13 +145,15 @@ class OutputBatcher {
     // Raw in/out: flush on arrival. The server coalesces ordinary TUI bursts
     // and caps each message at OUTPUT_BATCH_FLUSH_BYTES (under xterm's 12ms
     // parse-yield budget). Larger DEC 2026 frames span multiple messages; the
-    // completed-frame gate below preserves those message boundaries and only
-    // holds the following frame until xterm presents the completed one. If a
-    // low-latency burst queues several complete frames, stale frames still parse
-    // in order but only the newest waits for presentation, preventing a local
-    // producer from building visible input lag. The client does NOT coalesce —
-    // each message is one terminal.write in this WS
-    // message task (a macrotask, not a requestAnimationFrame), so xterm's parse
+    // completed-frame gate below preserves those message boundaries and holds
+    // the next complete frame until xterm presents the current one. Multiple
+    // newer completions prove a real backlog rather than a normal vsync phase
+    // overlap; only then does the backlog preempt the stale wait and collapse to
+    // its newest state, preventing an upstream scheduler from phase-locking
+    // behind the browser's render cadence. Ordinary messages remain one
+    // terminal.write in their WS message task; only a backlog ending in a proven
+    // completion is copied into one parse transaction, so xterm cannot yield
+    // between its pieces with synchronized mode still active. xterm's parse
     // never runs inside a vsync and can't starve the render rAF. xterm's own
     // render rAF is the single vsync gate for normal output. A bounded response
     // immediately following PTY input consumes that pending WebGL render in the
@@ -166,7 +169,9 @@ class OutputBatcher {
     // shell as typed text, e.g. `62;4;9;22c` on switching tabs back), and
     // never spilling to xterm's async drain (no partial paint). There is no
     // paint cost while hidden.
-    const didRenderImmediately = this.flushPending();
+    const shouldCoalesceCompletedFrameBacklog =
+      this.preemptSynchronizedFrameWaitForCompletedBacklog();
+    const didRenderImmediately = this.flushPending(false, shouldCoalesceCompletedFrameBacklog);
     // The bounded WebGL fast path already draws in this task. Re-arming the
     // no-op frame loop here makes Chromium defer the next response to vsync.
     if (!isDocumentHidden() && !didRenderImmediately) this.armKeepWarm();
@@ -314,6 +319,33 @@ class OutputBatcher {
     return pendingWrite ?? null;
   };
 
+  private dequeuePendingWritesThroughNewestSynchronizedFrame = (): PendingTerminalWrite | null => {
+    const completedFrameWrites: PendingTerminalWrite[] = [];
+    let completedFrameByteLength = 0;
+    while (this.hasPendingWrites()) {
+      const pendingWrite = this.dequeuePendingWrite();
+      if (!pendingWrite) break;
+      completedFrameWrites.push(pendingWrite);
+      completedFrameByteLength += pendingWrite.bytes.byteLength;
+      if (pendingWrite.endsSynchronizedOutput && this.pendingSynchronizedFrameCount === 0) break;
+    }
+    if (completedFrameWrites.length === 0) return null;
+    if (completedFrameWrites.length === 1) return completedFrameWrites[0];
+
+    const completedFrameBytes = new Uint8Array(completedFrameByteLength);
+    let completedFrameByteOffset = 0;
+    for (const completedFrameWrite of completedFrameWrites) {
+      completedFrameBytes.set(completedFrameWrite.bytes, completedFrameByteOffset);
+      completedFrameByteOffset += completedFrameWrite.bytes.byteLength;
+    }
+    const newestCompletedFrameWrite = completedFrameWrites[completedFrameWrites.length - 1];
+    if (!newestCompletedFrameWrite) return null;
+    return {
+      bytes: completedFrameBytes,
+      endsSynchronizedOutput: newestCompletedFrameWrite.endsSynchronizedOutput,
+    };
+  };
+
   // Re-arm a no-op vsync commit after a flush so a run of frames keeps the
   // compositor's frame loop warm (a hidden-tab hibernation here would stall
   // the next frame ~100ms). The armed rAF's onKeepWarm finds the buffer empty
@@ -352,12 +384,22 @@ class OutputBatcher {
     }
   };
 
-  // xterm mutates its live buffer while DEC 2026 suppresses rendering. If its
-  // 12ms parser slice enters the next frame before the prior render rAF runs,
-  // that completed frame becomes unpresentable. Normally release queued bytes
-  // only after the end-containing write parses and its render rAF runs. A backlog
-  // deliberately catches up by parsing every frame but presenting only the most
-  // recent complete one, trading stale animation frames for bounded input lag.
+  // xterm mutates its live buffer while DEC 2026 suppresses rendering. Preserve
+  // one completed successor so ordinary producer/browser phase overlap cannot
+  // reintroduce skipped render opportunities. Once multiple completed successors
+  // accumulate, the browser is genuinely behind: preempt the stale wait and hand
+  // xterm every byte through the newest completion as one parse transaction.
+  private preemptSynchronizedFrameWaitForCompletedBacklog = (): boolean => {
+    if (
+      !this.awaitingSynchronizedFrameRender ||
+      this.pendingSynchronizedFrameCount < SYNCHRONIZED_OUTPUT_PREEMPTION_MINIMUM_COMPLETED_FRAMES
+    ) {
+      return false;
+    }
+    this.cancelSynchronizedFrameWait();
+    return true;
+  };
+
   private cancelSynchronizedFrameWait = () => {
     this.synchronizedFrameGeneration += 1;
     this.awaitingSynchronizedFrameRender = false;
@@ -422,7 +464,10 @@ class OutputBatcher {
     flushPendingInteractiveRender(terminal);
   };
 
-  private flushPending = (bypassSynchronizedFramePacing = false): boolean => {
+  private flushPending = (
+    bypassSynchronizedFramePacing = false,
+    shouldCoalesceCompletedFrameBacklog = false,
+  ): boolean => {
     const terminal = this.terminal;
     if (
       !terminal ||
@@ -437,7 +482,10 @@ class OutputBatcher {
       this.hasPendingWrites() &&
       (!this.awaitingSynchronizedFrameRender || bypassSynchronizedFramePacing)
     ) {
-      const pendingWrite = this.dequeuePendingWrite();
+      const pendingWrite = shouldCoalesceCompletedFrameBacklog
+        ? this.dequeuePendingWritesThroughNewestSynchronizedFrame()
+        : this.dequeuePendingWrite();
+      shouldCoalesceCompletedFrameBacklog = false;
       if (!pendingWrite) break;
       const hasNewerCompletedSynchronizedFrame = this.pendingSynchronizedFrameCount > 0;
       const shouldRenderImmediately =

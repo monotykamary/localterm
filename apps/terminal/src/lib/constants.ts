@@ -332,6 +332,7 @@ export const FONT_LOAD_PROBE_PX = 16;
 export const OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES = 8 * 1024;
 export const OUTPUT_PENDING_WRITE_COMPACTION_THRESHOLD_WRITES = 1024;
 export const SYNCHRONIZED_OUTPUT_END_SEQUENCE = "\x1b[?2026l";
+export const SYNCHRONIZED_OUTPUT_PREEMPTION_MINIMUM_COMPLETED_FRAMES = 2;
 
 // A response immediately following PTY input can consume xterm's pending WebGL
 // render in the parser callback instead of waiting for its render rAF. Keep the
@@ -349,11 +350,12 @@ export const INTERACTIVE_OUTPUT_RENDER_WINDOW_MS = 500;
 // bursts and caps each message at OUTPUT_BATCH_FLUSH_BYTES (under xterm's 12ms
 // parse-yield budget, so a single write never spills to xterm's async drain).
 // Large DEC 2026 frames can span messages; the client preserves those message
-// boundaries and normally holds the following frame until xterm presents the
-// completed one. A queued local burst parses every frame in order but paces only
-// the newest complete frame, keeping interaction current instead of replaying a
-// stale visual backlog. This gives each current frame the earliest safe render
-// rAF, keeps xterm's parse out of a vsync so it can't starve the render rAF (the
+// boundaries and preserves one completed successor behind the current frame.
+// Multiple newer completions prove a real backlog rather than ordinary vsync
+// phase overlap; only then are their queued pieces handed to xterm as one ordered
+// parse transaction. This bounds stale latency without reintroducing the skipped
+// render opportunities seen when every one-frame overlap preempted its wait. It
+// also keeps normal parsing out of a vsync so it can't starve the render rAF (the
 // "smooth fps but visual stutter" same-deadline clash the old rAF coalescer had),
 // and lets xterm answer a terminal query in the same task before the probing
 // program's read times out (the response otherwise leaks into the shell as
