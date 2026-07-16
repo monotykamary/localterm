@@ -3807,7 +3807,7 @@ export const Terminal = () => {
             exitInfo.reason === "shell-exited" ? (
               <>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Shell ended</AlertDialogTitle>
+                  <AlertDialogTitle className="text-sm">Shell ended</AlertDialogTitle>
                   <AlertDialogDescription>
                     {exitInfo.exitCode === null || exitInfo.exitCode === 0
                       ? "Open a new shell to keep going, or close this tab."
@@ -3821,7 +3821,7 @@ export const Terminal = () => {
             ) : (
               <>
                 <AlertDialogHeader>
-                  <AlertDialogTitle className="flex items-center gap-2">
+                  <AlertDialogTitle className="flex items-center gap-2 text-sm">
                     <Spinner aria-hidden="true" role="presentation" aria-label={undefined} />
                     Connection lost
                   </AlertDialogTitle>
@@ -3846,7 +3846,7 @@ export const Terminal = () => {
           ) : (
             <>
               <AlertDialogHeader>
-                <AlertDialogTitle className="flex items-center gap-2">
+                <AlertDialogTitle className="flex items-center gap-2 text-sm">
                   <Spinner aria-hidden="true" role="presentation" aria-label={undefined} />
                   Lost connection
                 </AlertDialogTitle>

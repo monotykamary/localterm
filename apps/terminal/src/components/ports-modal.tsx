@@ -76,12 +76,12 @@ const PortOption = ({
     aria-selected={isActive}
     onMouseMove={onSetActive}
     className={cn(
-      "flex w-full items-center gap-2.5 rounded-sm px-2.5 py-2 text-sm outline-none transition-colors",
+      "flex w-full items-center gap-2.5 rounded-sm px-2.5 py-2 text-xs outline-none transition-colors",
       isActive ? "bg-foreground/10 text-foreground" : "text-muted-foreground",
     )}
   >
     <Network className="size-3.5 shrink-0" aria-hidden="true" style={{ color: PORT_ICON_COLOR }} />
-    <span className="shrink-0 font-mono text-sm font-semibold tabular-nums text-foreground">
+    <span className="shrink-0 font-mono text-xs font-semibold tabular-nums text-foreground">
       {port.port}
     </span>
     <span className="min-w-0 flex-1 truncate text-left text-muted-foreground/70">
@@ -310,7 +310,7 @@ export const PortsModal = ({ open, isTouchDevice, onClose }: PortsModalProps) =>
             aria-expanded
             aria-haspopup="listbox"
             role="combobox"
-            className="h-12 w-full bg-transparent px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+            className="h-9 w-full bg-transparent px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/70"
           />
           {ports === null && !hasError ? (
             <Spinner className="size-3.5 shrink-0" aria-label="loading ports" />
@@ -330,14 +330,14 @@ export const PortsModal = ({ open, isTouchDevice, onClose }: PortsModalProps) =>
             style={{ height: listHeightPx }}
           >
             {hasError ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-2.5 text-sm text-muted-foreground/70">
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-2.5 text-xs text-muted-foreground/70">
                 Couldn't load ports from the localterm daemon.
                 <Button variant="outline" size="xs" onClick={() => void refresh()}>
                   Retry
                 </Button>
               </div>
             ) : ports === null ? null : ordered.length === 0 ? (
-              <div className="animate-in fade-in-0 duration-150 ease-snappy absolute inset-0 flex flex-col items-center justify-center px-2.5 text-center text-sm text-muted-foreground/70">
+              <div className="animate-in fade-in-0 duration-150 ease-snappy absolute inset-0 flex flex-col items-center justify-center px-2.5 text-center text-xs text-muted-foreground/70">
                 {query ? (
                   <>No ports match “{query}”.</>
                 ) : (

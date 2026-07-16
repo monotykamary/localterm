@@ -33,7 +33,7 @@ interface CommandPaletteProps {
 }
 
 const COMMAND_ITEM_CLASSES =
-  "flex w-full items-center gap-2.5 rounded-sm px-2.5 py-2 text-sm text-muted-foreground outline-none transition-colors";
+  "flex w-full items-center gap-2.5 rounded-sm px-2.5 py-2 text-xs text-muted-foreground outline-none transition-colors";
 
 // Matches that hit the label directly always rank above matches that only
 // succeed against "category label", whatever their individual scores.
@@ -306,7 +306,7 @@ export const CommandPalette = ({
             aria-expanded
             aria-haspopup="listbox"
             role="combobox"
-            className="h-12 w-full bg-transparent px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+            className="h-9 w-full bg-transparent px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/70"
           />
         </div>
         <div
@@ -315,7 +315,7 @@ export const CommandPalette = ({
           className="flex-1 animate-in fade-in-0 duration-150 ease-snappy overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {filtered.length === 0 ? (
-            <div className="px-2.5 py-6 text-center text-sm text-muted-foreground/70">
+            <div className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
               No commands match “{query}”
             </div>
           ) : query ? (

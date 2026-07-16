@@ -134,8 +134,9 @@ export const WORKTREES_MODAL_MAX_HEIGHT_REM = 40;
 export const WORKTREES_POLL_INTERVAL_MS = 2000;
 
 export const SESSIONS_MODAL_CLOSE_TRANSITION_MS = 150;
-// Each session row is a single-line command-palette-style option (icon + title
-// + right detail), matching COMMAND_ITEM_CLASSES' py-2 text-sm height.
+// Each session row is a single-line option (icon + title + right detail). The
+// 36px is py-2 (16px) + the 20px trailing action slot (Check/kill button), so
+// it holds with text-xs row text.
 export const SESSIONS_LIST_ROW_HEIGHT_PX = 36;
 // Polled while the sessions modal is open so the list reflects attaches,
 // detaches, and grace reaps in near-realtime. Short enough to feel live, long
@@ -186,10 +187,10 @@ export const SESSIONS_PEER_FACE_RADIUS_PCT = "30%";
 // on an idle open while still surfacing a dev server starting/stopping live.
 export const PORTS_MODAL_CLOSE_TRANSITION_MS = 150;
 export const PORTS_POLL_INTERVAL_MS = 2000;
-// Each port row matches the sessions/command-palette single-line option
-// (py-2 text-sm = 36px), so the modal reuses the same per-row height to size
-// its height-reserved list container (no per-row measurement needed — a row's
-// title truncates to one line, so the height is stable).
+// Each port row matches the sessions single-line option (py-2 + the 20px
+// trailing stop slot = 36px), so the modal reuses the same per-row height to
+// size its height-reserved list container (no per-row measurement needed — a
+// row's title truncates to one line, so the height is stable).
 export const PORTS_LIST_ROW_HEIGHT_PX = SESSIONS_LIST_ROW_HEIGHT_PX;
 // Min height reserved for the ports modal's error/empty block (a centered
 // message + Retry button, or a two-line empty hint) so the palette modal body

@@ -1807,7 +1807,7 @@ const AutomationForm = ({
           autoFocus
           placeholder="nightly build"
           aria-label="automation name"
-          className="h-9 px-2.5 text-sm font-medium"
+          className={cn(FORM_INPUT_CLASSES, "font-medium")}
           onChange={(event) => onChange({ ...form, name: event.target.value })}
         />
       </label>
