@@ -337,10 +337,10 @@ const renderLogEntry = (
             <div className="whitespace-pre-wrap break-words italic text-muted-foreground">
               {entry.thinking}
             </div>
-            {entry.text ? <BlankLine /> : null}
+            <BlankLine />
           </>
         ) : null}
-        {entry.text ? (
+        {entry.text.trim() ? (
           <div className="text-foreground/90">
             <Markdown cwd={cwd} onOpenFile={onOpenFile}>
               {entry.text}
@@ -506,7 +506,7 @@ const RunLogView = ({
           ) : displayEntries ? (
             <div className="flex flex-col font-mono text-[11px] leading-normal">
               {displayEntries.map((entry, index) => {
-                const trailsBlank = !(entry.type === "assistant" && entry.text.length === 0);
+                const trailsBlank = !(entry.type === "assistant" && entry.text.trim().length === 0);
                 return (
                   <Fragment key={index}>
                     {renderLogEntry(
