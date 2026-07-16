@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.66.0
+
+### Minor Changes
+
+- bb08471: Add a default-on **Mute emoji colors** toggle under Settings → Font. Turning it off restores native full-color emoji over theme and ANSI cell backgrounds while ordinary text keeps the alpha-mask WebGL path, and the preference persists and synchronizes across browser tabs.
+
 ## 2.65.1
 
 ## 2.65.0
