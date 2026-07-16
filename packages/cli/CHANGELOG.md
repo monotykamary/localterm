@@ -1,5 +1,16 @@
 # localterm
 
+## 2.66.1
+
+### Patch Changes
+
+- 14060e0: Improve large-grid terminal throughput without skipping synchronized frames.
+
+  Loopback viewers now keep PTY output raw instead of serially constructing a decompressor for every server batch, while remote viewers retain Brotli or gzip compression. The terminal scans DEC 2026 boundaries with native byte search and drains paced output through an indexed queue, and the server refreshes its trailing output timer instead of allocating and cancelling one for every PTY chunk.
+
+- Updated dependencies [14060e0]
+  - @monotykamary/localterm-server@2.66.1
+
 ## 2.66.0
 
 ### Minor Changes
