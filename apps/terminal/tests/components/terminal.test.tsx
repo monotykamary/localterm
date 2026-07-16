@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { Terminal } from "../../src/components/terminal";
 import {
+  DEFAULT_MUTE_EMOJI_COLORS,
   DEFAULT_TERMINAL_FONT_SIZE_PX,
   DEFAULT_TERMINAL_LINE_HEIGHT,
   RECONNECT_DELAY_MS,
@@ -16,6 +17,7 @@ import {
   TERMINAL_TAB_SEQUENCE,
   TERMINAL_BACK_TAB_SEQUENCE,
   LIGATURES_ENABLED_STORAGE_KEY,
+  MUTE_EMOJI_COLORS_STORAGE_KEY,
   DEFAULT_CWD_STORAGE_KEY,
 } from "../../src/lib/constants";
 import { DEFAULT_TERMINAL_CURSOR_STYLE } from "../../src/lib/terminal-cursor";
@@ -63,6 +65,15 @@ interface FakeSearchAddonHandle {
   fireResults: (results: { resultIndex: number; resultCount: number }) => void;
 }
 
+interface FakeWebglAddonOptions {
+  muteEmojiColors?: boolean;
+}
+
+interface FakeWebglAddonHandle {
+  muteEmojiColors: boolean | undefined;
+  setEmojiColorsMuted: ReturnType<typeof vi.fn>;
+}
+
 interface KeyboardModifiers {
   shiftKey?: boolean;
   ctrlKey?: boolean;
@@ -78,6 +89,7 @@ interface DispatchedKeyResult {
 const fakeWebSockets: FakeWebSocketHandle[] = [];
 const fakeXterms: FakeXtermHandle[] = [];
 const fakeSearchAddons: FakeSearchAddonHandle[] = [];
+const fakeWebglAddons: FakeWebglAddonHandle[] = [];
 
 const installFakeWebSocket = () => {
   class FakeWebSocket {
@@ -289,8 +301,16 @@ vi.mock("@xterm/addon-web-links", () => {
 
 vi.mock("@xterm/addon-webgl", () => {
   class FakeWebglAddon {
+    setEmojiColorsMuted = vi.fn();
     onContextLoss = () => {};
     dispose = () => {};
+
+    constructor(options?: FakeWebglAddonOptions) {
+      fakeWebglAddons.push({
+        muteEmojiColors: options?.muteEmojiColors,
+        setEmojiColorsMuted: this.setEmojiColorsMuted,
+      });
+    }
   }
   return { WebglAddon: FakeWebglAddon };
 });
@@ -399,6 +419,7 @@ beforeEach(() => {
   fakeWebSockets.length = 0;
   fakeXterms.length = 0;
   fakeSearchAddons.length = 0;
+  fakeWebglAddons.length = 0;
   stubBrowserGlobals();
   installFakeWebSocket();
   Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
@@ -1596,6 +1617,36 @@ describe("Terminal hot-swap", () => {
       fireEvent.click(screen.getByLabelText("toggle cursor blink"));
     });
     expect(fakeXterms[0]?.getOptions().cursorBlink).toBe(false);
+  });
+});
+
+describe("Terminal emoji colors", () => {
+  it("mutes emoji colors by default", () => {
+    installFakeLocalStorage();
+    render(<Terminal />);
+
+    expect(fakeWebglAddons[0]?.muteEmojiColors).toBe(DEFAULT_MUTE_EMOJI_COLORS);
+  });
+
+  it("initializes WebGL with stored emoji colors enabled", () => {
+    installFakeLocalStorage({ [MUTE_EMOJI_COLORS_STORAGE_KEY]: "false" });
+    render(<Terminal />);
+
+    expect(fakeWebglAddons[0]?.muteEmojiColors).toBe(false);
+  });
+
+  it("updates WebGL and persists when emoji muting is toggled", () => {
+    installFakeLocalStorage();
+    render(<Terminal />);
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    act(() => {
+      fireEvent.click(screen.getByLabelText("toggle mute emoji colors"));
+    });
+
+    expect(fakeWebglAddons).toHaveLength(1);
+    expect(fakeWebglAddons[0]?.setEmojiColorsMuted).toHaveBeenLastCalledWith(false);
+    expect(localStorage.getItem(MUTE_EMOJI_COLORS_STORAGE_KEY)).toBe("false");
   });
 });
 

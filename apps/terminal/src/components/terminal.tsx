@@ -503,10 +503,12 @@ export const Terminal = () => {
   const resizeScrollRestoreRef = useRef<ResizeScrollRestoreState | null>(null);
   const localEchoRef = useRef<LocalEcho | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const webglAddonRef = useRef<WebglAddon | null>(null);
   const {
     initialThemeIdRef,
     initialFontIdRef,
     initialNerdFontEnabledRef,
+    initialMuteEmojiColorsRef,
     initialFontSizeRef,
     initialLineHeightRef,
     initialCursorStyleRef,
@@ -518,6 +520,7 @@ export const Terminal = () => {
     activeFontId,
     activeNerdFontEnabled,
     activeLigaturesEnabled,
+    activeMuteEmojiColors,
     activeFontSize,
     activeLineHeight,
     activeCursorStyle,
@@ -540,6 +543,7 @@ export const Terminal = () => {
     handleFontChange,
     handleNerdFontEnabledChange,
     handleLigaturesEnabledChange,
+    handleMuteEmojiColorsChange,
     handleFontSizeChange,
     handleLineHeightChange,
     handleCursorStyleChange,
@@ -557,7 +561,13 @@ export const Terminal = () => {
     handleDeleteCustomTheme,
     applyThemesState,
     applyFontsState,
-  } = useTerminalSettings({ terminalRef, fitAddonRef, terminalReady, localEchoRef });
+  } = useTerminalSettings({
+    terminalRef,
+    fitAddonRef,
+    webglAddonRef,
+    terminalReady,
+    localEchoRef,
+  });
   const openSearchOverlayRef = useRef<(() => void) | null>(null);
   const openDiffViewerRef = useRef<(() => void) | null>(null);
   const scrollbarTrackRef = useRef<HTMLDivElement | null>(null);
@@ -1403,12 +1413,16 @@ export const Terminal = () => {
     }
 
     try {
-      const webglAddon = new WebglAddon();
+      const webglAddon = new WebglAddon({
+        muteEmojiColors: initialMuteEmojiColorsRef.current,
+      });
       webglAddon.onContextLoss(() => {
+        if (webglAddonRef.current === webglAddon) webglAddonRef.current = null;
         outputBatcher.setInteractiveRenderingEnabled(false);
         webglAddon.dispose();
       });
       terminal.loadAddon(webglAddon);
+      webglAddonRef.current = webglAddon;
       outputBatcher.setInteractiveRenderingEnabled(true);
     } catch {
       /* webgl unavailable; xterm falls back to dom renderer */
@@ -2422,6 +2436,7 @@ export const Terminal = () => {
       localEcho.dispose();
       localEchoRef.current = null;
       outputBatcher.detach();
+      webglAddonRef.current = null;
       terminal.dispose();
       document.title = DEFAULT_DOCUMENT_TITLE;
     };
@@ -3416,6 +3431,8 @@ export const Terminal = () => {
                     onNerdFontEnabledChange={handleNerdFontEnabledChange}
                     ligaturesEnabled={activeLigaturesEnabled}
                     onLigaturesEnabledChange={handleLigaturesEnabledChange}
+                    muteEmojiColors={activeMuteEmojiColors}
+                    onMuteEmojiColorsChange={handleMuteEmojiColorsChange}
                     fontSize={activeFontSize}
                     onFontSizeChange={handleFontSizeChange}
                     lineHeight={activeLineHeight}

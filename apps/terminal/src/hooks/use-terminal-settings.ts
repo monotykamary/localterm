@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
+import type { WebglAddon } from "@xterm/addon-webgl";
 import {
   familyForFont,
   findTerminalFontById,
@@ -52,6 +53,11 @@ import {
   storeLigaturesEnabled,
   subscribeStoredLigaturesEnabled,
 } from "@/utils/stored-ligatures-enabled";
+import {
+  loadStoredMuteEmojiColors,
+  storeMuteEmojiColors,
+  subscribeStoredMuteEmojiColors,
+} from "@/utils/stored-mute-emoji-colors";
 import {
   loadStoredLocalEcho,
   storeStoredLocalEcho,
@@ -126,6 +132,7 @@ import {
 interface UseTerminalSettingsParams {
   terminalRef: { readonly current: XtermTerminal | null };
   fitAddonRef: { readonly current: FitAddon | null };
+  webglAddonRef: { readonly current: WebglAddon | null };
   terminalReady: boolean;
   localEchoRef: { readonly current: LocalEcho | null };
 }
@@ -139,6 +146,7 @@ interface UseTerminalSettingsParams {
 export const useTerminalSettings = ({
   terminalRef,
   fitAddonRef,
+  webglAddonRef,
   terminalReady,
   localEchoRef,
 }: UseTerminalSettingsParams) => {
@@ -157,6 +165,7 @@ export const useTerminalSettings = ({
   const initialPaddingYRef = useRef<number>(loadStoredTerminalPaddingY());
   const initialNerdFontEnabledRef = useRef<boolean>(loadStoredNerdFontEnabled());
   const initialLigaturesEnabledRef = useRef<boolean>(loadStoredLigaturesEnabled());
+  const initialMuteEmojiColorsRef = useRef<boolean>(loadStoredMuteEmojiColors());
   const initialDefaultCwdRef = useRef<string>(loadStoredDefaultCwd());
   const initialDefaultShellRef = useRef<string>(loadStoredDefaultShell());
   const initialCustomFontFamilyRef = useRef<string>(loadStoredCustomFontFamily());
@@ -204,6 +213,9 @@ export const useTerminalSettings = ({
   );
   const [activeLigaturesEnabled, setActiveLigaturesEnabled] = useState<boolean>(
     initialLigaturesEnabledRef.current,
+  );
+  const [activeMuteEmojiColors, setActiveMuteEmojiColors] = useState<boolean>(
+    initialMuteEmojiColorsRef.current,
   );
   const ligatureJoinerIdRef = useRef<number | null>(null);
   const [activeFontSize, setActiveFontSize] = useState<number>(initialFontSizeRef.current);
@@ -452,6 +464,15 @@ export const useTerminalSettings = ({
     void updateFonts({ ligaturesEnabled: nextEnabled });
   }, []);
 
+  const handleMuteEmojiColorsChange = useCallback((nextMuted: boolean) => {
+    setActiveMuteEmojiColors(nextMuted);
+    storeMuteEmojiColors(nextMuted);
+  }, []);
+
+  useEffect(() => {
+    webglAddonRef.current?.setEmojiColorsMuted(activeMuteEmojiColors);
+  }, [activeMuteEmojiColors, webglAddonRef]);
+
   // registerCharacterJoiner/deregisterCharacterJoiner each refresh the whole
   // viewport in xterm core, so toggling re-rasters joined spans without an
   // explicit refresh. The id guards keep the register/deregister idempotent
@@ -625,6 +646,7 @@ export const useTerminalSettings = ({
       subscribeStoredTerminalFontId(setActiveFontId),
       subscribeStoredNerdFontEnabled(setActiveNerdFontEnabled),
       subscribeStoredLigaturesEnabled(setActiveLigaturesEnabled),
+      subscribeStoredMuteEmojiColors(setActiveMuteEmojiColors),
       subscribeStoredTerminalFontSize(setActiveFontSize),
       subscribeStoredTerminalLineHeight(setActiveLineHeight),
       subscribeStoredTerminalCursorStyle(setActiveCursorStyle),
@@ -649,6 +671,7 @@ export const useTerminalSettings = ({
     initialThemeIdRef,
     initialFontIdRef,
     initialNerdFontEnabledRef,
+    initialMuteEmojiColorsRef,
     initialFontSizeRef,
     initialLineHeightRef,
     initialCursorStyleRef,
@@ -660,6 +683,7 @@ export const useTerminalSettings = ({
     activeFontId,
     activeNerdFontEnabled,
     activeLigaturesEnabled,
+    activeMuteEmojiColors,
     activeFontSize,
     activeLineHeight,
     activeCursorStyle,
@@ -682,6 +706,7 @@ export const useTerminalSettings = ({
     handleFontChange,
     handleNerdFontEnabledChange,
     handleLigaturesEnabledChange,
+    handleMuteEmojiColorsChange,
     handleFontSizeChange,
     handleLineHeightChange,
     handleCursorStyleChange,

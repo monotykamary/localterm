@@ -45,6 +45,8 @@ vi.mock("@tanstack/react-virtual", () => {
   };
 });
 
+const SESSION_TIMESTAMP_MS = Date.now();
+
 const buildSession = (overrides: Partial<SessionListItem> = {}): SessionListItem => ({
   id: "00000000-0000-0000-0000-000000000001",
   pid: 4242,
@@ -52,8 +54,8 @@ const buildSession = (overrides: Partial<SessionListItem> = {}): SessionListItem
   shellName: "zsh",
   cwd: "/home/me/my-app",
   title: "my-app",
-  createdAt: Date.now(),
-  lastOutputAt: Date.now(),
+  createdAt: SESSION_TIMESTAMP_MS,
+  lastOutputAt: SESSION_TIMESTAMP_MS,
   clients: 1,
   state: "running",
   pinned: false,

@@ -10,7 +10,7 @@ overrides:
   '@fontsource/geist-mono': 5.2.7
 
 patchedDependencies:
-  '@xterm/addon-webgl@0.20.0-beta.286': 176ad19ef34cce4ba25d4695a5e2c0fdbb7f16afb289aebbf1995ba622bfdcab
+  '@xterm/addon-webgl@0.20.0-beta.286': a3a986be4c6d8e6a51420719548fcf73aec170bb613d724759fc9705c8817a89
   node-pty@1.1.0: 055369749ed898a53d1d3c2b69c380d70a244e8d869a1df14bf514e4ae000556
 
 importers:
@@ -131,7 +131,7 @@ importers:
         version: 0.13.0-beta.287(@xterm/xterm@6.1.0-beta.287)
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.286
-        version: 0.20.0-beta.286(patch_hash=176ad19ef34cce4ba25d4695a5e2c0fdbb7f16afb289aebbf1995ba622bfdcab)(@xterm/xterm@6.1.0-beta.287)
+        version: 0.20.0-beta.286(patch_hash=a3a986be4c6d8e6a51420719548fcf73aec170bb613d724759fc9705c8817a89)(@xterm/xterm@6.1.0-beta.287)
       '@xterm/xterm':
         specifier: 6.1.0-beta.287
         version: 6.1.0-beta.287
@@ -7371,7 +7371,7 @@ snapshots:
     dependencies:
       '@xterm/xterm': 6.1.0-beta.287
 
-  '@xterm/addon-webgl@0.20.0-beta.286(patch_hash=176ad19ef34cce4ba25d4695a5e2c0fdbb7f16afb289aebbf1995ba622bfdcab)(@xterm/xterm@6.1.0-beta.287)':
+  '@xterm/addon-webgl@0.20.0-beta.286(patch_hash=a3a986be4c6d8e6a51420719548fcf73aec170bb613d724759fc9705c8817a89)(@xterm/xterm@6.1.0-beta.287)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.287
 

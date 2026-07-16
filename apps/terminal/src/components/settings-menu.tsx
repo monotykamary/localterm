@@ -67,6 +67,8 @@ interface SettingsMenuProps {
   onNerdFontEnabledChange: (enabled: boolean) => void;
   ligaturesEnabled: boolean;
   onLigaturesEnabledChange: (enabled: boolean) => void;
+  muteEmojiColors: boolean;
+  onMuteEmojiColorsChange: (muted: boolean) => void;
   fontSize: number;
   onFontSizeChange: (size: number) => void;
   lineHeight: number;
@@ -346,6 +348,8 @@ export const SettingsMenu = ({
   onNerdFontEnabledChange,
   ligaturesEnabled,
   onLigaturesEnabledChange,
+  muteEmojiColors,
+  onMuteEmojiColorsChange,
   fontSize,
   onFontSizeChange,
   lineHeight,
@@ -772,6 +776,26 @@ export const SettingsMenu = ({
                           aria-label="toggle ligatures"
                           checked={ligaturesEnabled}
                           onCheckedChange={onLigaturesEnabledChange}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <Tooltip>
+                          <TooltipTrigger render={<span className={ROW_LABEL_CLASSES} />}>
+                            Mute emoji colors
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="bottom"
+                            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
+                            className="max-w-xs"
+                          >
+                            Tints emoji with the surrounding terminal text color so they are less
+                            visually distracting. Turn this off to show their native colors.
+                          </TooltipContent>
+                        </Tooltip>
+                        <Switch
+                          aria-label="toggle mute emoji colors"
+                          checked={muteEmojiColors}
+                          onCheckedChange={onMuteEmojiColorsChange}
                         />
                       </div>
                     </Field>

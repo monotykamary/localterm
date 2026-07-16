@@ -6,6 +6,7 @@ import type { TerminalSessionInfo } from "../../src/lib/terminal-session-info";
 import type { TerminalTheme } from "../../src/lib/terminal-themes";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import {
+  DEFAULT_MUTE_EMOJI_COLORS,
   DEFAULT_TERMINAL_CURSOR_BLINK,
   DEFAULT_TERMINAL_LOCAL_ECHO,
   DEFAULT_TERMINAL_LINE_HEIGHT,
@@ -32,6 +33,7 @@ interface SettingsMenuHarnessProps {
   initialThemeId?: string;
   initialFontId?: string;
   initialLigaturesEnabled?: boolean;
+  initialMuteEmojiColors?: boolean;
   initialDefaultCwd?: string;
   onThemeChange?: (id: string) => void;
   onThemePreview?: (id: string | null) => void;
@@ -65,6 +67,7 @@ interface SettingsMenuHarnessProps {
   onPaddingXChange?: (paddingX: number) => void;
   onPaddingYChange?: (paddingY: number) => void;
   onLigaturesEnabledChange?: (enabled: boolean) => void;
+  onMuteEmojiColorsChange?: (muted: boolean) => void;
   onDefaultCwdChange?: (cwd: string) => void;
   onDefaultShellChange?: (shell: string) => void;
   detectedDefaultShell?: string;
@@ -87,6 +90,7 @@ const renderSettingsMenu = ({
   initialThemeId = "vesper",
   initialFontId = "geist-mono",
   initialLigaturesEnabled = false,
+  initialMuteEmojiColors = DEFAULT_MUTE_EMOJI_COLORS,
   initialDefaultCwd = "",
   initialDefaultShell = "",
   onThemeChange = () => {},
@@ -121,6 +125,7 @@ const renderSettingsMenu = ({
   onPaddingXChange = () => {},
   onPaddingYChange = () => {},
   onLigaturesEnabledChange = () => {},
+  onMuteEmojiColorsChange = () => {},
   onDefaultCwdChange = () => {},
   onDefaultShellChange = () => {},
   detectedDefaultShell = "",
@@ -148,6 +153,8 @@ const renderSettingsMenu = ({
         onNerdFontEnabledChange={() => {}}
         ligaturesEnabled={initialLigaturesEnabled}
         onLigaturesEnabledChange={onLigaturesEnabledChange}
+        muteEmojiColors={initialMuteEmojiColors}
+        onMuteEmojiColorsChange={onMuteEmojiColorsChange}
         fontSize={initialFontSize}
         onFontSizeChange={onFontSizeChange}
         lineHeight={initialLineHeight}
@@ -395,6 +402,19 @@ describe("SettingsMenu ligatures switch", () => {
 
     expect(onLigaturesEnabledChange).toHaveBeenCalledTimes(1);
     expect(onLigaturesEnabledChange.mock.calls[0]?.[0]).toBe(true);
+  });
+});
+
+describe("SettingsMenu mute emoji colors switch", () => {
+  it("calls onMuteEmojiColorsChange with the toggled value", () => {
+    const onMuteEmojiColorsChange = vi.fn();
+    renderSettingsMenu({ initialMuteEmojiColors: true, onMuteEmojiColorsChange });
+
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    fireEvent.click(screen.getByLabelText("toggle mute emoji colors"));
+
+    expect(onMuteEmojiColorsChange).toHaveBeenCalledTimes(1);
+    expect(onMuteEmojiColorsChange.mock.calls[0]?.[0]).toBe(false);
   });
 });
 

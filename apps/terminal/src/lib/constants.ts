@@ -22,6 +22,7 @@ export const TERMINAL_PADDING_MIN_PX = 0;
 export const TERMINAL_PADDING_MAX_PX = 48;
 export const TERMINAL_PADDING_STEP_PX = 1;
 export const DEFAULT_TERMINAL_CURSOR_BLINK = true;
+export const DEFAULT_MUTE_EMOJI_COLORS = true;
 export const DEFAULT_TERMINAL_LOCAL_ECHO = true;
 export const DEFAULT_TERMINAL_SCROLL_ON_USER_INPUT = true;
 export const FALLBACK_TERMINAL_BACKGROUND_HEX = "#101010";
@@ -317,6 +318,7 @@ export const CUSTOM_FONT_FAMILY_STORAGE_KEY = "localterm:custom-font-family";
 export const CUSTOM_THEMES_STORAGE_KEY = "localterm:custom-themes";
 export const NERD_FONT_ENABLED_STORAGE_KEY = "localterm:nerd-font-enabled";
 export const LIGATURES_ENABLED_STORAGE_KEY = "localterm:ligatures-enabled";
+export const MUTE_EMOJI_COLORS_STORAGE_KEY = "localterm:mute-emoji-colors";
 export const FONT_LOAD_PROBE_PX = 16;
 
 // Initial byte capacity of the OutputBatcher staging buffer. Picked above the
