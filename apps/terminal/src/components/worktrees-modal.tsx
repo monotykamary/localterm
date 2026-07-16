@@ -653,7 +653,10 @@ export const WorktreesModal = ({
                 ) : null}
               </div>
             ) : null}
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={listScrollRef}>
+            <div
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-2"
+              ref={listScrollRef}
+            >
               <div
                 className="relative transition-[height] duration-150 ease-snappy"
                 style={{ height: listHeightPx }}
