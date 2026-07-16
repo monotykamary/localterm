@@ -114,7 +114,7 @@ const WorktreeRow = ({
 }: WorktreeRowProps) => (
   <div
     role="listitem"
-    className="group/worktree flex flex-col gap-0.5 px-3 py-2 transition-colors hover:bg-foreground/5"
+    className="group/worktree flex flex-col justify-center gap-0.5 px-3 py-2 transition-colors hover:bg-foreground/5"
     style={{ minHeight: WORKTREES_LIST_ROW_HEIGHT_PX }}
   >
     <div className="flex items-center gap-2">
@@ -653,10 +653,7 @@ export const WorktreesModal = ({
                 ) : null}
               </div>
             ) : null}
-            <div
-              className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-2"
-              ref={listScrollRef}
-            >
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={listScrollRef}>
               <div
                 className="relative transition-[height] duration-150 ease-snappy"
                 style={{ height: listHeightPx }}
