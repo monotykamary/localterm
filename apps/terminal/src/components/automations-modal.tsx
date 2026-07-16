@@ -261,21 +261,23 @@ const ToolLogEntry = ({ entry }: { entry: Extract<AgentSessionEntry, { type: "to
   const visible =
     collapsible && !expanded ? lines.slice(0, TOOL_OUTPUT_PREVIEW_LINES).join("\n") : entry.text;
   return (
-    <div className="rounded-sm border border-emerald-800/40 bg-emerald-950/50 p-2">
+    <div className="rounded-sm border border-border/60 bg-foreground/5 p-2">
       <div className="flex items-baseline gap-1.5">
-        <span className="text-[10px] uppercase tracking-wide text-emerald-300">{entry.name}</span>
+        <span className="text-[10px] uppercase tracking-wide text-[var(--localterm-green)]">
+          {entry.name}
+        </span>
         {entry.input ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-emerald-200/70">
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
             {entry.input}
           </span>
         ) : null}
       </div>
-      <pre className="mt-0.5 whitespace-pre-wrap break-words text-zinc-400">{visible}</pre>
+      <pre className="mt-0.5 whitespace-pre-wrap break-words text-foreground/80">{visible}</pre>
       {collapsible ? (
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="mt-0.5 text-[10px] text-emerald-400/70 transition-colors hover:text-emerald-300"
+          className="mt-0.5 text-[10px] text-[var(--localterm-green)] transition-colors hover:text-foreground"
         >
           {expanded ? "Show less" : `Show all ${lines.length} lines`}
         </button>
@@ -297,15 +299,15 @@ const renderLogEntry = (
 ) => {
   if (entry.type === "compaction") {
     return (
-      <div key={index} className="rounded-sm border border-purple-800/40 bg-purple-950/50 p-2">
-        <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-purple-300">
+      <div key={index} className="rounded-sm border border-border/60 bg-foreground/5 p-2">
+        <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-[var(--localterm-magenta)]">
           <Sparkles className="size-3" aria-hidden="true" />
           compaction
           {typeof entry.tokensBefore === "number"
             ? ` · ${entry.tokensBefore.toLocaleString()} tokens`
             : ""}
         </div>
-        <div className="mt-0.5 text-zinc-400">
+        <div className="mt-0.5 text-foreground/80">
           <Markdown cwd={cwd} onOpenFile={onOpenFile}>
             {entry.summary}
           </Markdown>
@@ -315,22 +317,26 @@ const renderLogEntry = (
   }
   if (entry.type === "user") {
     return (
-      <div key={index} className="rounded-sm bg-zinc-800/60 p-2">
-        <span className="text-[10px] uppercase tracking-wide text-zinc-400">user</span>
-        <div className="mt-0.5 whitespace-pre-wrap break-words text-zinc-200">{entry.text}</div>
+      <div key={index} className="rounded-sm bg-foreground/5 p-2">
+        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">user</span>
+        <div className="mt-0.5 whitespace-pre-wrap break-words text-foreground/90">
+          {entry.text}
+        </div>
       </div>
     );
   }
   if (entry.type === "assistant") {
     return (
       <div key={index} className="px-1">
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">assistant</span>
+        <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+          assistant
+        </span>
         {entry.thinking ? (
-          <div className="mb-2 mt-1 border-l-2 border-zinc-700/60 pl-2 whitespace-pre-wrap break-words italic text-zinc-500">
+          <div className="mb-2 mt-1 border-l-2 border-border/60 pl-2 whitespace-pre-wrap break-words italic text-muted-foreground">
             {entry.thinking}
           </div>
         ) : null}
-        <div className="mt-0.5 text-zinc-200">
+        <div className="mt-0.5 text-foreground/90">
           <Markdown cwd={cwd} onOpenFile={onOpenFile}>
             {entry.text}
           </Markdown>
@@ -1571,7 +1577,7 @@ const AutomationDetail = ({
                 className={cn(
                   "rounded-full",
                   armedClearThread
-                    ? "text-red-400 hover:bg-red-500/10 hover:text-red-400"
+                    ? "text-destructive hover:bg-destructive/10 hover:text-destructive"
                     : "hover:bg-foreground/10 hover:text-foreground",
                 )}
                 onClick={onClearThread}
@@ -1596,7 +1602,7 @@ const AutomationDetail = ({
               }
               className={cn(
                 "rounded-full hover:bg-foreground/10",
-                armedDelete ? "text-red-400 hover:text-red-400" : "hover:text-foreground",
+                armedDelete ? "text-destructive hover:text-destructive" : "hover:text-foreground",
               )}
               onClick={onDelete}
             >
@@ -1692,8 +1698,8 @@ const AutomationDetail = ({
       </div>
 
       {finished ? (
-        <div className="flex items-center justify-between gap-2 rounded-md border border-violet-400/30 bg-violet-400/5 px-3 py-2 text-[11px]">
-          <span className="text-violet-300">
+        <div className="flex items-center justify-between gap-2 rounded-md border border-border/60 bg-foreground/5 px-3 py-2 text-[11px]">
+          <span className="text-foreground/80">
             Finished — reached its run limit. Reset to run it again.
           </span>
           <Button variant="outline" size="xs" onClick={onReset}>
@@ -1732,7 +1738,7 @@ const AutomationDetail = ({
               className={cn(
                 "shrink-0 rounded-md p-1 text-[11px] transition-colors",
                 armedClear
-                  ? "text-red-400 hover:bg-red-500/10"
+                  ? "text-destructive hover:bg-destructive/10"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
               )}
               onClick={onClearHistory}
@@ -2091,7 +2097,7 @@ const AutomationForm = ({
                 className={
                   closeOnFinishSupported
                     ? "text-[10px] text-muted-foreground/60"
-                    : "text-[10px] text-amber-400"
+                    : "text-[10px] text-[var(--localterm-yellow)]"
                 }
               >
                 {closeOnFinishSupported
@@ -2131,7 +2137,7 @@ const AutomationForm = ({
       </FormSection>
 
       {saveError ? (
-        <p className="text-[10px] text-red-400">
+        <p className="text-[10px] text-destructive">
           Couldn't save — check the schedule and that the directory exists.
         </p>
       ) : null}
@@ -2389,7 +2395,7 @@ const RecentRunsView = ({
             className={cn(
               "rounded-sm px-2 py-0.5 text-[11px] transition-colors",
               armedClear
-                ? "text-red-400 hover:bg-red-500/10"
+                ? "text-destructive hover:bg-destructive/10"
                 : "text-muted-foreground hover:text-foreground",
               hasUnread ? "ml-1" : "ml-auto",
             )}

@@ -30,8 +30,8 @@ body {
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: var(--localterm-font-family);
+  --font-mono: var(--localterm-font-family);
   /* Snappy product easing from animation-best-practices: sharp start, subtle deceleration. */
   --ease-snappy: cubic-bezier(0.32, 0.72, 0, 1);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -117,6 +117,7 @@ body {
 }
 
 :root {
+  --localterm-font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -183,6 +184,44 @@ body {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+html[data-terminal-appearance] {
+  --background: var(--localterm-background);
+  --foreground: var(--localterm-foreground);
+  --card: color-mix(in oklab, var(--localterm-foreground) 7%, var(--localterm-background));
+  --card-foreground: var(--localterm-foreground);
+  --popover: color-mix(in oklab, var(--localterm-foreground) 7%, var(--localterm-background));
+  --popover-foreground: var(--localterm-foreground);
+  --primary: var(--localterm-accent);
+  --primary-foreground: var(--localterm-accent-foreground);
+  --secondary: color-mix(in oklab, var(--localterm-foreground) 12%, var(--localterm-background));
+  --secondary-foreground: var(--localterm-foreground);
+  --muted: color-mix(in oklab, var(--localterm-foreground) 12%, var(--localterm-background));
+  --muted-foreground: color-mix(
+    in oklab,
+    var(--localterm-muted-foreground) 60%,
+    var(--localterm-foreground)
+  );
+  --accent: color-mix(in oklab, var(--localterm-accent) 18%, var(--localterm-background));
+  --accent-foreground: var(--localterm-foreground);
+  --destructive: var(--localterm-red);
+  --border: color-mix(in oklab, var(--localterm-foreground) 18%, transparent);
+  --input: color-mix(in oklab, var(--localterm-foreground) 24%, transparent);
+  --ring: var(--localterm-accent);
+  --chart-1: var(--localterm-green);
+  --chart-2: var(--localterm-blue);
+  --chart-3: var(--localterm-yellow);
+  --chart-4: var(--localterm-magenta);
+  --chart-5: var(--localterm-cyan);
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--localterm-foreground);
+  --sidebar-primary: var(--localterm-accent);
+  --sidebar-primary-foreground: var(--localterm-accent-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--localterm-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--localterm-accent);
 }
 
 @layer base {
@@ -255,14 +294,14 @@ body {
   min-height: 24px;
   pointer-events: auto;
   cursor: default;
-  background: rgba(255, 255, 255, 0.18);
+  background: color-mix(in oklab, var(--foreground) 18%, transparent);
   border-radius: 4px;
 }
 
 .xterm-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: color-mix(in oklab, var(--foreground) 30%, transparent);
 }
 
 .xterm-scrollbar-thumb:active {
-  background: rgba(255, 255, 255, 0.4);
+  background: color-mix(in oklab, var(--foreground) 40%, transparent);
 }

@@ -55,6 +55,7 @@ export const buildCustomTerminalFont = (familyName: string): TerminalFont => {
 
 export const findTerminalFontById = (id: string | null | undefined): TerminalFont => {
   if (!id) return GEIST_MONO;
+  if (id === CUSTOM_FONT_ID) return buildCustomTerminalFont("");
   return TERMINAL_FONTS.find((font) => font.id === id) ?? GEIST_MONO;
 };
 

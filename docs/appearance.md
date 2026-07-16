@@ -2,7 +2,13 @@
 
 localterm ships 19 built-in themes (16 dark + 3 light) and 11 bundled fonts,
 all of which work fully offline. You can also import your own theme (JSON or an
-iTerm `.itermcolors` file) and use any system-installed font family.
+iTerm `.itermcolors` file) and use any system-installed font family. The active
+theme and font style LocalTerm overlays and modals as well as the xterm surface,
+so browser chrome does not introduce a second visual theme over terminal apps.
+Light/dark mode is derived from the selected theme's actual background color,
+including imported themes; that mode also selects the diff viewer's syntax
+palette, while automation statuses and agent transcript Markdown use the
+active semantic and ANSI colors.
 
 ## Themes
 

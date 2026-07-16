@@ -8,7 +8,7 @@ import type {
   GitDiffSummary,
 } from "@monotykamary/localterm-server/protocol";
 import { isImagePath } from "@monotykamary/localterm-server/protocol";
-import type { SyntaxLine } from "@/utils/syntax-highlight";
+import type { SyntaxHighlightColorScheme, SyntaxLine } from "@/utils/syntax-highlight";
 import {
   ChevronDown,
   ExternalLink,
@@ -103,6 +103,7 @@ import {
 interface DiffViewerProps {
   open: boolean;
   cwd: string | null;
+  syntaxHighlightColorScheme?: SyntaxHighlightColorScheme;
   // Ambient branch/PR metadata leased from the parent (fetched once per cwd), so
   // the viewer opens straight into branch mode when a PR exists — no gh wait.
   // Null while the lease is still loading or unavailable.
@@ -195,15 +196,15 @@ const deriveDiffSummary = (
 };
 
 const STATUS_LABELS: Record<GitDiffFileMeta["status"], { letter: string; className: string }> = {
-  modified: { letter: "M", className: "text-amber-400" },
-  added: { letter: "A", className: "text-emerald-400" },
-  deleted: { letter: "D", className: "text-red-400" },
-  renamed: { letter: "R", className: "text-sky-400" },
-  untracked: { letter: "U", className: "text-emerald-400" },
+  modified: { letter: "M", className: "text-[var(--localterm-yellow)]" },
+  added: { letter: "A", className: "text-[var(--localterm-green)]" },
+  deleted: { letter: "D", className: "text-destructive" },
+  renamed: { letter: "R", className: "text-[var(--localterm-blue)]" },
+  untracked: { letter: "U", className: "text-[var(--localterm-green)]" },
 };
 
-const ADDITIONS_CLASSES = "text-emerald-400";
-const DELETIONS_CLASSES = "text-red-400";
+const ADDITIONS_CLASSES = "text-[var(--localterm-green)]";
+const DELETIONS_CLASSES = "text-destructive";
 
 const LINE_NUMBER_CELL_CLASSES =
   "w-12 shrink-0 select-none px-2 text-right text-muted-foreground/50 tabular-nums";
@@ -751,6 +752,7 @@ interface FileDiffPaneProps {
   file: GitDiffFileMeta;
   cwd: string | null;
   payload: PatchEntry;
+  syntaxHighlightColorScheme: SyntaxHighlightColorScheme;
   viewMode: DiffViewMode;
   annotations: Record<string, DiffAnnotation>;
   editingKey: string | null;
@@ -772,6 +774,7 @@ const FileDiffPane = ({
   file,
   cwd,
   payload,
+  syntaxHighlightColorScheme,
   viewMode,
   annotations,
   editingKey,
@@ -799,7 +802,7 @@ const FileDiffPane = ({
     if (!langId || initialHunks.length === 0) return null;
     const allLines = initialHunks.flatMap((hunk) => hunk.lines);
     const texts = allLines.map((line) => line.text);
-    return getCachedTokens(file.path, texts);
+    return getCachedTokens(file.path, texts, syntaxHighlightColorScheme);
   });
 
   const highlightingPending = syntaxResult === undefined;
@@ -826,20 +829,21 @@ const FileDiffPane = ({
       return;
     }
     const texts = allLines.map((line) => line.text);
-    const cached = getCachedTokens(file.path, texts);
+    const cached = getCachedTokens(file.path, texts, syntaxHighlightColorScheme);
     if (cached !== undefined) {
       setSyntaxResult(cached);
       return;
     }
+    setSyntaxResult(undefined);
     let cancelled = false;
-    tokenizeDiffLines(file.path, texts, langId).then((result) => {
+    tokenizeDiffLines(file.path, texts, langId, syntaxHighlightColorScheme).then((result) => {
       if (cancelled) return;
       startTransition(() => setSyntaxResult(result));
     });
     return () => {
       cancelled = true;
     };
-  }, [file.path, hunks]);
+  }, [file.path, hunks, syntaxHighlightColorScheme]);
 
   useEffect(() => {
     if (viewMode !== "split") return;
@@ -1128,6 +1132,7 @@ const PrBadge = ({
 export const DiffViewer = ({
   open,
   cwd,
+  syntaxHighlightColorScheme = "dark",
   branchInfo,
   gitDirtyVersion,
   onClose,
@@ -1205,6 +1210,8 @@ export const DiffViewer = ({
   // Latest cache, read by loadPatch without making it depend on patchCache.
   const patchCacheRef = useRef(patchCache);
   patchCacheRef.current = patchCache;
+  const syntaxHighlightColorSchemeRef = useRef(syntaxHighlightColorScheme);
+  syntaxHighlightColorSchemeRef.current = syntaxHighlightColorScheme;
   const onDiffSummaryUpdateRef = useRef(onDiffSummaryUpdate);
   onDiffSummaryUpdateRef.current = onDiffSummaryUpdate;
 
@@ -1421,6 +1428,7 @@ export const DiffViewer = ({
                   path,
                   allLines.map((line) => line.text),
                   langId,
+                  syntaxHighlightColorSchemeRef.current,
                 );
               }
             }
@@ -2028,6 +2036,7 @@ export const DiffViewer = ({
                       file={selectedFile}
                       cwd={cwd}
                       payload={patchCache[selectedFile.path] ?? { state: "loading" }}
+                      syntaxHighlightColorScheme={syntaxHighlightColorScheme}
                       viewMode={viewMode}
                       annotations={annotations}
                       editingKey={editingKey}

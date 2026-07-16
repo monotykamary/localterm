@@ -134,7 +134,13 @@ import {
   type AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
 import { TERMINAL_CURSOR_STYLES, isTerminalCursorStyle } from "@/lib/terminal-cursor";
-import { TERMINAL_FONTS, familyForFont, findTerminalFontById } from "@/lib/terminal-fonts";
+import {
+  CUSTOM_FONT_ID,
+  TERMINAL_FONTS,
+  buildCustomTerminalFont,
+  familyForFont,
+  findTerminalFontById,
+} from "@/lib/terminal-fonts";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
 import { TERMINAL_THEMES, findTerminalThemeById } from "@/lib/terminal-themes";
 import { generateExtendedPalette } from "@/utils/generate-extended-palette";
@@ -208,6 +214,10 @@ import { openInspectPage } from "@/utils/open-inspect-page";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
 import { computePtyViewportOverlay } from "@/utils/compute-pty-viewport-overlay";
 import { detectOutputCompressMode } from "@/utils/detect-output-compress-mode";
+import { isHerdrProcess } from "@/utils/is-herdr-process";
+import { isLightTerminalTheme } from "@/utils/is-light-terminal-theme";
+import { isTerminalCursorTap } from "@/utils/is-terminal-cursor-tap";
+import { dispatchTerminalMouseTap } from "@/utils/dispatch-terminal-mouse-tap";
 
 import {
   MAX_IMAGE_UPLOAD_BYTES,
@@ -229,11 +239,15 @@ const SEARCH_DECORATION_OPTIONS = {
   activeMatchColorOverviewRuler: SEARCH_ACTIVE_MATCH_BORDER_HEX,
 };
 
+const ON_SCREEN_KEYBOARD_TOGGLE_SELECTOR = [
+  "[data-on-screen-keyboard-toggle]",
+  "[data-on-screen-keyboard-actions-toggle]",
+].join(", ");
 const ON_SCREEN_KEYBOARD_CONTROL_SELECTOR = [
   "[data-on-screen-keyboard]",
   "[data-on-screen-keyboard-settings]",
-  "[data-on-screen-keyboard-toggle]",
-  "[data-on-screen-keyboard-actions-toggle]",
+  ON_SCREEN_KEYBOARD_TOGGLE_SELECTOR,
+  "[data-terminal-actions-toolbar]",
 ].join(", ");
 
 // Server-side output compression: remote surfaces advertise the best browser
@@ -489,7 +503,9 @@ export const Terminal = () => {
   const webglAddonRef = useRef<WebglAddon | null>(null);
   const {
     initialThemeIdRef,
+    initialCustomThemesRef,
     initialFontIdRef,
+    initialCustomFontFamilyRef,
     initialNerdFontEnabledRef,
     initialMuteEmojiColorsRef,
     initialFontSizeRef,
@@ -800,6 +816,7 @@ export const Terminal = () => {
     NotificationPermission | "unsupported"
   >("Notification" in window ? Notification.permission : "unsupported");
   const [liveCwd, setLiveCwd] = useState<string | null>(null);
+  const [foregroundProcess, setForegroundProcess] = useState<string | null>(null);
   const liveCwdRef = useRef<string | null>(null);
   const wsConnectedRef = useRef(false);
   const isMac = useMemo(detectIsMacPlatform, []);
@@ -849,10 +866,12 @@ export const Terminal = () => {
   // Indicators keep the desktop toolbar peeking. Touch leaves the entire
   // ambient overlay absent while the keyboard is down so an underlying mobile
   // app keeps its top-right controls; opening the keyboard restores our actions.
-  const hasToolbarIndicator = hasDiff || branchPrDisplayState !== null;
+  const isHerdrForeground = isHerdrProcess(foregroundProcess);
+  const hasToolbarIndicator = !isHerdrForeground && (hasDiff || branchPrDisplayState !== null);
   const shouldShowAmbientToolbar = isTouchDevice
     ? isOnScreenKeyboardOpen || isToolbarVisible
     : isToolbarVisible || hasToolbarIndicator;
+  const shouldShowGitMetadata = !isHerdrForeground || shouldShowAmbientToolbar;
   const shouldEnableAmbientToolbarPointerEvents = shouldShowAmbientToolbar || isSearchOpen;
   const shouldShowToolbarHandle =
     !isTouchDevice && !isToolbarVisible && !isSearchOpen && !hasToolbarIndicator;
@@ -1035,7 +1054,14 @@ export const Terminal = () => {
       hadForegroundThisCycle = false;
     };
 
-    const initialFont = findTerminalFontById(initialFontIdRef.current);
+    const initialFont =
+      initialFontIdRef.current === CUSTOM_FONT_ID
+        ? buildCustomTerminalFont(initialCustomFontFamilyRef.current)
+        : findTerminalFontById(initialFontIdRef.current);
+    const initialTheme = findTerminalThemeById(
+      initialThemeIdRef.current,
+      initialCustomThemesRef.current,
+    );
     void awaitFontReady(initialFont).then(() => {
       if (disposed) return;
       const liveTerminal = terminalRef.current;
@@ -1056,10 +1082,8 @@ export const Terminal = () => {
       lineHeight: initialLineHeightRef.current,
       scrollback: initialScrollbackRef.current,
       theme: {
-        ...findTerminalThemeById(initialThemeIdRef.current).colors,
-        extendedAnsi: generateExtendedPalette(
-          findTerminalThemeById(initialThemeIdRef.current).colors,
-        ),
+        ...initialTheme.colors,
+        extendedAnsi: generateExtendedPalette(initialTheme.colors),
       },
       macOptionIsMeta: true,
       scrollOnUserInput: initialScrollOnUserInputRef.current,
@@ -1189,7 +1213,36 @@ export const Terminal = () => {
         event.preventDefault();
         return;
       }
+      const endingTouch = event.changedTouches[0];
+      const tapClientX = endingTouch?.clientX ?? tapStartClientX;
+      const tapClientY = endingTouch?.clientY ?? tapStartClientY;
+      if (terminal.modes.mouseTrackingMode !== "none") {
+        const screen = container.querySelector(".xterm-screen");
+        if (!(screen instanceof HTMLElement)) return;
+        const screenRect = screen.getBoundingClientRect();
+        const didTapTerminalCursor = isTerminalCursorTap({
+          isCursorVisible: terminal.modes.showCursor,
+          tapClientX,
+          tapClientY,
+          screenLeft: screenRect.left,
+          screenTop: screenRect.top,
+          screenWidth: screenRect.width,
+          screenHeight: screenRect.height,
+          columns: terminal.cols,
+          rows: terminal.rows,
+          cursorColumn: terminal.buffer.active.cursorX,
+          cursorRow: terminal.buffer.active.cursorY,
+        });
+        event.preventDefault();
+        if (didTapTerminalCursor && !onScreenKeyboardOpenRef.current) {
+          openOnScreenKeyboard();
+          return;
+        }
+        dispatchTerminalMouseTap(screen, { clientX: tapClientX, clientY: tapClientY });
+        return;
+      }
       if (onScreenKeyboardOpenRef.current) return;
+      event.preventDefault();
       openOnScreenKeyboard();
     };
     const tapListenerAbort = new AbortController();
@@ -1766,6 +1819,7 @@ export const Terminal = () => {
     const showDeadSessionMask = (exitCode: number | null) => {
       if (disposed) return;
       resetFavicon();
+      setForegroundProcess(null);
       setTabFaviconState("dead");
       terminal.write(formatShellExitMarker(exitCode));
       document.title = titleForDeadSession(lastTitle);
@@ -1813,6 +1867,7 @@ export const Terminal = () => {
       document.title = titleForDeadSession(lastTitle);
       setExitInfo({ reason: "connection-lost", closeCode, closeReason, wasClean });
       setSessionInfo(null);
+      setForegroundProcess(null);
     };
 
     const connect = () => {
@@ -2022,6 +2077,7 @@ export const Terminal = () => {
           // drives that, and checkReadyAfterOutput picks up the re-synced
           // hasForegroundProcess when output goes quiet.
           hasForegroundProcess = message.foreground !== null;
+          setForegroundProcess(message.foreground);
           hadForegroundThisCycle = hasForegroundProcess;
           if (isSwitch) {
             if (faviconRunningTimer !== null) {
@@ -2163,6 +2219,7 @@ export const Terminal = () => {
             setTabFaviconState("ready", faviconBadge);
           }
           hasForegroundProcess = nowHasProcess;
+          setForegroundProcess(message.process);
         } else if (message.type === "notification") {
           if ("Notification" in window && Notification.permission === "granted") {
             // Show via the SW so the click fires the SW's notificationclick,
@@ -2302,6 +2359,7 @@ export const Terminal = () => {
       wsConnectedRef.current = false;
       setExitInfo(null);
       setSessionInfo(null);
+      setForegroundProcess(null);
       setConsecutiveFailures(0);
       setTabFaviconState("ready");
       if (reconnectTimer !== null) {
@@ -3064,6 +3122,7 @@ export const Terminal = () => {
       : `${searchResults.resultIndex + 1}/${searchResults.resultCount}`;
 
   const pageBackground = effectiveTheme.colors.background ?? FALLBACK_TERMINAL_BACKGROUND_HEX;
+  const syntaxHighlightColorScheme = isLightTerminalTheme(effectiveTheme) ? "light" : "dark";
 
   const commandPaletteCommands = useMemo<CommandItem[]>(() => {
     const togglePrefix = isMac ? "⌘" : "Ctrl+";
@@ -3344,11 +3403,12 @@ export const Terminal = () => {
               ref={toolbarRef}
               role="toolbar"
               aria-label="terminal actions"
+              data-terminal-actions-toolbar
               className={cn(
                 "mt-1 flex max-w-[calc(100dvw-1.5rem)] items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md",
                 "transition-[opacity,transform] duration-200 ease-snappy",
                 isTouchDevice &&
-                  "overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+                  "touch-pan-x overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                 shouldShowAmbientToolbar
                   ? "translate-y-0 opacity-100"
                   : "pointer-events-none -translate-y-1 opacity-0",
@@ -3359,6 +3419,16 @@ export const Terminal = () => {
               // inputs become unfocusable and typing gets yanked to the terminal.
               onMouseDown={(event) => {
                 if (event.currentTarget.contains(event.target as Node)) event.preventDefault();
+              }}
+              onClickCapture={(event) => {
+                if (!isTouchDevice || !isOnScreenKeyboardOpen) return;
+                if (
+                  event.target instanceof Element &&
+                  event.target.closest(ON_SCREEN_KEYBOARD_TOGGLE_SELECTOR)
+                ) {
+                  return;
+                }
+                closeOnScreenKeyboard();
               }}
               onKeyDown={(event) => {
                 if (event.currentTarget.contains(event.target as Node)) {
@@ -3540,9 +3610,11 @@ export const Terminal = () => {
                   <QrButton onOpen={() => handleQrOpenChange(true)} />
                 </div>
               </div>
-              {isTouchDevice || (hasDiff && diffSummary !== null) || branchPrDisplayState ? (
+              {isTouchDevice ||
+              (shouldShowGitMetadata &&
+                ((hasDiff && diffSummary !== null) || branchPrDisplayState)) ? (
                 <div className="flex shrink-0 items-center">
-                  {hasDiff && diffSummary !== null ? (
+                  {shouldShowGitMetadata && hasDiff && diffSummary !== null ? (
                     <button
                       type="button"
                       onClick={openDiffViewer}
@@ -3550,10 +3622,10 @@ export const Terminal = () => {
                       title={`${isMac ? "⌘" : "Ctrl+"}G`}
                       className="flex h-8 items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 font-mono text-xs tabular-nums outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                     >
-                      <span className="text-emerald-400">
+                      <span className="text-[var(--localterm-green)]">
                         +{formatDiffCount(diffSummary.additions)}
                       </span>
-                      <span className="text-red-400">
+                      <span className="text-[var(--localterm-red)]">
                         −{formatDiffCount(diffSummary.deletions)}
                       </span>
                       {diffSummary.binaries > 0 ? (
@@ -3564,7 +3636,7 @@ export const Terminal = () => {
                       ) : null}
                     </button>
                   ) : null}
-                  {branchPr && branchPrDisplayState && BranchPrIcon ? (
+                  {shouldShowGitMetadata && branchPr && branchPrDisplayState && BranchPrIcon ? (
                     <button
                       type="button"
                       onClick={openDiffViewer}
@@ -3666,6 +3738,7 @@ export const Terminal = () => {
       <DiffViewer
         open={isDiffViewerOpen}
         cwd={liveCwd}
+        syntaxHighlightColorScheme={syntaxHighlightColorScheme}
         branchInfo={branchInfo}
         gitDirtyVersion={gitDirtyVersion}
         onClose={closeDiffViewer}

@@ -62,6 +62,7 @@ class OutputBatcher {
   private byteLength = 0;
   private pendingWrites: Array<PendingTerminalWrite | undefined> = [];
   private pendingWriteIndex = 0;
+  private pendingSynchronizedFrameCount = 0;
   private synchronizedOutputTrailingBytes = new Uint8Array(
     SYNCHRONIZED_OUTPUT_TRAILING_BYTE_CAPACITY,
   );
@@ -91,6 +92,7 @@ class OutputBatcher {
     this.terminal = terminal;
     this.pendingWrites = [];
     this.pendingWriteIndex = 0;
+    this.pendingSynchronizedFrameCount = 0;
     this.synchronizedOutputTrailingByteLength = 0;
     this.awaitingSynchronizedFrameRender = false;
     this.synchronizedFrameGeneration += 1;
@@ -126,6 +128,7 @@ class OutputBatcher {
     this.flushPending(true);
     this.pendingWrites = [];
     this.pendingWriteIndex = 0;
+    this.pendingSynchronizedFrameCount = 0;
     this.synchronizedOutputTrailingByteLength = 0;
     this.synchronizedFramePacingBypassAtMs = Number.NEGATIVE_INFINITY;
     this.terminal = null;
@@ -142,8 +145,11 @@ class OutputBatcher {
     // and caps each message at OUTPUT_BATCH_FLUSH_BYTES (under xterm's 12ms
     // parse-yield budget). Larger DEC 2026 frames span multiple messages; the
     // completed-frame gate below preserves those message boundaries and only
-    // holds the following frame until xterm presents the completed one. The
-    // client does NOT coalesce — each message is one terminal.write in this WS
+    // holds the following frame until xterm presents the completed one. If a
+    // low-latency burst queues several complete frames, stale frames still parse
+    // in order but only the newest waits for presentation, preventing a local
+    // producer from building visible input lag. The client does NOT coalesce —
+    // each message is one terminal.write in this WS
     // message task (a macrotask, not a requestAnimationFrame), so xterm's parse
     // never runs inside a vsync and can't starve the render rAF. xterm's own
     // render rAF is the single vsync gate for normal output. A bounded response
@@ -281,6 +287,7 @@ class OutputBatcher {
       bytes: this.buffer.subarray(0, this.byteLength).slice(),
       endsSynchronizedOutput,
     });
+    if (endsSynchronizedOutput) this.pendingSynchronizedFrameCount += 1;
     this.byteLength = 0;
   };
 
@@ -291,6 +298,7 @@ class OutputBatcher {
     const pendingWrite = this.pendingWrites[this.pendingWriteIndex];
     this.pendingWrites[this.pendingWriteIndex] = undefined;
     this.pendingWriteIndex += 1;
+    if (pendingWrite?.endsSynchronizedOutput) this.pendingSynchronizedFrameCount -= 1;
 
     if (this.pendingWriteIndex === this.pendingWrites.length) {
       this.pendingWrites = [];
@@ -346,8 +354,10 @@ class OutputBatcher {
 
   // xterm mutates its live buffer while DEC 2026 suppresses rendering. If its
   // 12ms parser slice enters the next frame before the prior render rAF runs,
-  // that completed frame becomes unpresentable. Release queued bytes only after
-  // the end-containing write parses and that already-scheduled render rAF runs.
+  // that completed frame becomes unpresentable. Normally release queued bytes
+  // only after the end-containing write parses and its render rAF runs. A backlog
+  // deliberately catches up by parsing every frame but presenting only the most
+  // recent complete one, trading stale animation frames for bounded input lag.
   private cancelSynchronizedFrameWait = () => {
     this.synchronizedFrameGeneration += 1;
     this.awaitingSynchronizedFrameRender = false;
@@ -429,12 +439,16 @@ class OutputBatcher {
     ) {
       const pendingWrite = this.dequeuePendingWrite();
       if (!pendingWrite) break;
-      const shouldRenderImmediately = this.consumeInteractiveRender(pendingWrite.bytes.byteLength);
-      const shouldBypassSynchronizedFramePacing = this.consumeSynchronizedFramePacingBypass(
-        pendingWrite.endsSynchronizedOutput,
-      );
+      const hasNewerCompletedSynchronizedFrame = this.pendingSynchronizedFrameCount > 0;
+      const shouldRenderImmediately =
+        !hasNewerCompletedSynchronizedFrame &&
+        this.consumeInteractiveRender(pendingWrite.bytes.byteLength);
+      const shouldBypassSynchronizedFramePacing =
+        !hasNewerCompletedSynchronizedFrame &&
+        this.consumeSynchronizedFramePacingBypass(pendingWrite.endsSynchronizedOutput);
       const shouldPaceNextSynchronizedFrame =
         pendingWrite.endsSynchronizedOutput &&
+        !hasNewerCompletedSynchronizedFrame &&
         !bypassSynchronizedFramePacing &&
         !isDocumentHidden() &&
         !shouldRenderImmediately &&

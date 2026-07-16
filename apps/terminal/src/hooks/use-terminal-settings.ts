@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { WebglAddon } from "@xterm/addon-webgl";
@@ -38,6 +38,7 @@ import {
   storeCustomThemes,
   subscribeStoredCustomThemes,
 } from "@/utils/stored-custom-themes";
+import { applyTerminalAppearance } from "@/utils/apply-terminal-appearance";
 import {
   loadStoredDefaultCwd,
   storeDefaultCwd,
@@ -169,12 +170,14 @@ export const useTerminalSettings = ({
   const initialDefaultCwdRef = useRef<string>(loadStoredDefaultCwd());
   const initialDefaultShellRef = useRef<string>(loadStoredDefaultShell());
   const initialCustomFontFamilyRef = useRef<string>(loadStoredCustomFontFamily());
+  const initialCustomThemesRef = useRef<TerminalTheme[]>(loadStoredCustomThemes());
 
   const [activeThemeId, setActiveThemeId] = useState<string>(initialThemeIdRef.current);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const effectiveThemeId = previewThemeId ?? activeThemeId;
-  const [activeCustomThemes, setActiveCustomThemes] =
-    useState<TerminalTheme[]>(loadStoredCustomThemes);
+  const [activeCustomThemes, setActiveCustomThemes] = useState<TerminalTheme[]>(
+    initialCustomThemesRef.current,
+  );
   // The daemon is the source of truth for the active theme + the custom library
   // (~/.localterm/themes.json); localStorage is a cache for instant initial
   // render. These refs mirror the state so the stable `applyThemesState` (called
@@ -265,6 +268,15 @@ export const useTerminalSettings = ({
         : findTerminalFontById(effectiveFontId),
     [effectiveFontId, activeCustomFontFamily],
   );
+  const effectiveFontFamily = useMemo(
+    () => familyForFont(effectiveFont, activeNerdFontEnabled),
+    [effectiveFont, activeNerdFontEnabled],
+  );
+
+  useLayoutEffect(
+    () => applyTerminalAppearance(effectiveTheme, effectiveFontFamily),
+    [effectiveTheme, effectiveFontFamily],
+  );
 
   useEffect(() => {
     if (!terminalReady) return;
@@ -282,7 +294,7 @@ export const useTerminalSettings = ({
       if (cancelled) return;
       const liveTerminal = terminalRef.current;
       if (!liveTerminal) return;
-      liveTerminal.options.fontFamily = familyForFont(effectiveFont, activeNerdFontEnabled);
+      liveTerminal.options.fontFamily = effectiveFontFamily;
       liveTerminal.clearTextureAtlas();
       const liveFitAddon = fitAddonRef.current;
       if (liveFitAddon) fitTerminalPreservingScroll(liveTerminal, liveFitAddon);
@@ -290,7 +302,7 @@ export const useTerminalSettings = ({
     return () => {
       cancelled = true;
     };
-  }, [terminalReady, effectiveFont, activeNerdFontEnabled]);
+  }, [terminalReady, effectiveFont, effectiveFontFamily]);
 
   const handleThemeChange = useCallback((nextThemeId: string) => {
     setActiveThemeId(nextThemeId);
@@ -669,7 +681,9 @@ export const useTerminalSettings = ({
 
   return {
     initialThemeIdRef,
+    initialCustomThemesRef,
     initialFontIdRef,
+    initialCustomFontFamilyRef,
     initialNerdFontEnabledRef,
     initialMuteEmojiColorsRef,
     initialFontSizeRef,

@@ -13,20 +13,20 @@ export interface RunBadge {
 export const runStatusBadge = (status: AutomationRunStatus, exitCode: number | null): RunBadge => {
   switch (status) {
     case "launched":
-      return { label: "launching…", className: "text-amber-400" };
+      return { label: "launching…", className: "text-[var(--localterm-yellow)]" };
     case "running":
-      return { label: "running…", className: "text-sky-400" };
+      return { label: "running…", className: "text-[var(--localterm-blue)]" };
     case "completed":
-      return { label: "ok", className: "text-emerald-400" };
+      return { label: "ok", className: "text-[var(--localterm-green)]" };
     case "failed":
       return {
         label: exitCode === null ? "failed" : `exit ${exitCode}`,
-        className: "text-red-400",
+        className: "text-destructive",
       };
     case "missed":
       return { label: "missed", className: "text-muted-foreground" };
     case "skipped":
-      return { label: "skipped", className: "text-amber-400/70" };
+      return { label: "skipped", className: "text-[var(--localterm-yellow)]" };
     default: {
       const exhaustive: never = status;
       return { label: exhaustive, className: "text-muted-foreground" };
@@ -34,7 +34,10 @@ export const runStatusBadge = (status: AutomationRunStatus, exitCode: number | n
   }
 };
 
-const FINISHED_BADGE: RunBadge = { label: "finished", className: "text-violet-400" };
+const FINISHED_BADGE: RunBadge = {
+  label: "finished",
+  className: "text-[var(--localterm-magenta)]",
+};
 
 export const lifecycleBadge = (lifecycle: AutomationLifecycle): RunBadge | null =>
   lifecycle === "finished" ? FINISHED_BADGE : null;

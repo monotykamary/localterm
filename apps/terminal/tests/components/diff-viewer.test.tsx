@@ -7,6 +7,7 @@ import type {
 } from "@monotykamary/localterm-server/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { DiffViewer } from "../../src/components/diff-viewer";
+import type { SyntaxHighlightColorScheme } from "../../src/utils/syntax-highlight";
 
 vi.mock("../../src/utils/fetch-git-diff", () => ({
   fetchGitDiffFiles: vi.fn(),
@@ -150,16 +151,19 @@ const renderDiffViewer = ({
   onOpenInEditor,
   onOpenImage,
   branchInfo = null,
+  syntaxHighlightColorScheme = "dark",
 }: {
   onClose?: () => void;
   onOpenInEditor?: (filePath: string) => void;
   onOpenImage?: (filePath: string) => void;
   branchInfo?: GitBranchInfo | null;
+  syntaxHighlightColorScheme?: SyntaxHighlightColorScheme;
 } = {}) =>
   render(
     <DiffViewer
       open
       cwd="/repo"
+      syntaxHighlightColorScheme={syntaxHighlightColorScheme}
       branchInfo={branchInfo}
       onClose={onClose}
       onOpenInEditor={onOpenInEditor}
@@ -198,6 +202,34 @@ describe("DiffViewer", () => {
     // default. The generous waitFor and test timeout absorb that without
     // masking a real hang (isolation renders in <1s).
   }, 10_000);
+
+  it("retokenizes with a light syntax palette when the color scheme changes", async () => {
+    mockHappyPath();
+    const { rerender } = renderDiffViewer({ syntaxHighlightColorScheme: "dark" });
+
+    await screen.findByText("BETA", {}, { timeout: 5000 });
+    let darkColor = "";
+    await vi.waitFor(() => {
+      darkColor = screen.getByText("BETA").style.color;
+      expect(darkColor).not.toBe("");
+    });
+
+    rerender(
+      <DiffViewer
+        open
+        cwd="/repo"
+        syntaxHighlightColorScheme="light"
+        branchInfo={null}
+        onClose={() => {}}
+      />,
+    );
+
+    await vi.waitFor(() => {
+      const lightColor = screen.getByText("BETA").style.color;
+      expect(lightColor).not.toBe("");
+      expect(lightColor).not.toBe(darkColor);
+    });
+  });
 
   it("shows a binary notice when a non-image binary file is selected", async () => {
     mockHappyPath();

@@ -11,6 +11,8 @@ export interface SyntaxLine {
   tokens: readonly SyntaxToken[];
 }
 
+export type SyntaxHighlightColorScheme = "dark" | "light";
+
 const LANG_LOADERS: Record<string, () => Promise<unknown>> = {
   typescript: () => import("@shikijs/langs/typescript"),
   tsx: () => import("@shikijs/langs/tsx"),
@@ -97,14 +99,28 @@ const FILENAME_TO_LANG: Record<string, string> = {
   Makefile: "make",
 };
 
-const THEME_ID = "dark-plus";
+const SYNTAX_THEME_IDS: Record<SyntaxHighlightColorScheme, string> = {
+  dark: "dark-plus",
+  light: "light-plus",
+};
 
 interface TokenCacheEntry {
   contentKey: string;
   result: readonly SyntaxLine[] | null;
 }
 
-const tokenCache = new Map<string, TokenCacheEntry>();
+const tokenCache = new Map<string, Map<SyntaxHighlightColorScheme, TokenCacheEntry>>();
+
+const storeCachedTokens = (
+  filePath: string,
+  colorScheme: SyntaxHighlightColorScheme,
+  entry: TokenCacheEntry,
+): void => {
+  const fileCache =
+    tokenCache.get(filePath) ?? new Map<SyntaxHighlightColorScheme, TokenCacheEntry>();
+  fileCache.set(colorScheme, entry);
+  tokenCache.set(filePath, fileCache);
+};
 
 export const detectLangId = (filePath: string): string | null => {
   const lastSlash = filePath.lastIndexOf("/");
@@ -126,7 +142,7 @@ const loadedLangIds = new Set<string>();
 const getHighlighter = () => {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighterCore({
-      themes: [import("@shikijs/themes/dark-plus")],
+      themes: [import("@shikijs/themes/dark-plus"), import("@shikijs/themes/light-plus")],
       langs: [],
       engine: createJavaScriptRegexEngine(),
     });
@@ -139,8 +155,9 @@ const contentKey = (lines: readonly string[]): string => lines.join("\n");
 export const getCachedTokens = (
   filePath: string,
   lines: readonly string[],
+  colorScheme: SyntaxHighlightColorScheme,
 ): readonly SyntaxLine[] | null | undefined => {
-  const entry = tokenCache.get(filePath);
+  const entry = tokenCache.get(filePath)?.get(colorScheme);
   if (!entry) return undefined;
   if (entry.contentKey !== contentKey(lines)) return undefined;
   return entry.result;
@@ -150,13 +167,14 @@ export const tokenizeDiffLines = async (
   filePath: string,
   lines: readonly string[],
   langId: string,
+  colorScheme: SyntaxHighlightColorScheme,
 ): Promise<readonly SyntaxLine[] | null> => {
-  const cached = getCachedTokens(filePath, lines);
+  const cached = getCachedTokens(filePath, lines, colorScheme);
   if (cached !== undefined) return cached;
 
   const loader = LANG_LOADERS[langId];
   if (!loader) {
-    tokenCache.set(filePath, { contentKey: contentKey(lines), result: null });
+    storeCachedTokens(filePath, colorScheme, { contentKey: contentKey(lines), result: null });
     return null;
   }
 
@@ -173,7 +191,7 @@ export const tokenizeDiffLines = async (
     const code = lines.join("\n");
     const themedTokens = highlighter.codeToTokens(code, {
       lang: langId,
-      theme: THEME_ID,
+      theme: SYNTAX_THEME_IDS[colorScheme],
     });
 
     const result = themedTokens.tokens.map((line) => ({
@@ -184,10 +202,10 @@ export const tokenizeDiffLines = async (
       })),
     }));
 
-    tokenCache.set(filePath, { contentKey: contentKey(lines), result });
+    storeCachedTokens(filePath, colorScheme, { contentKey: contentKey(lines), result });
     return result;
   } catch {
-    tokenCache.set(filePath, { contentKey: contentKey(lines), result: null });
+    storeCachedTokens(filePath, colorScheme, { contentKey: contentKey(lines), result: null });
     return null;
   }
 };

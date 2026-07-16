@@ -1,4 +1,7 @@
-import type { AutomationWithNextRun } from "@monotykamary/localterm-server/protocol";
+import type {
+  AutomationRunRecord,
+  AutomationWithNextRun,
+} from "@monotykamary/localterm-server/protocol";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { AutomationsModal } from "../../src/components/automations-modal";
@@ -220,6 +223,53 @@ describe("AutomationsModal", () => {
     expect((await screen.findAllByText("When files change matching *.mov")).length).toBeGreaterThan(
       0,
     );
+  });
+
+  it("uses theme-aware colors for agent transcript entries", async () => {
+    const run: AutomationRunRecord = {
+      runId: "agent-run",
+      scheduledFor: 1000,
+      startedAt: 1000,
+      finishedAt: 2000,
+      status: "completed",
+      exitCode: 0,
+      trigger: "manual",
+      countsTowardLimit: true,
+      findings: "review findings",
+      changedFiles: [],
+      unread: false,
+      log: [
+        { type: "user", text: "user request" },
+        {
+          type: "assistant",
+          text: "**assistant response**",
+          thinking: "assistant thinking",
+        },
+        { type: "tool", name: "read", input: "src/app.ts", text: "tool output" },
+      ],
+    };
+    renderModal([
+      automation({
+        runner: {
+          kind: "agent",
+          prompt: "review",
+          sessionMode: "fresh",
+          harness: PI_HARNESS,
+        },
+        runs: [run],
+      }),
+    ]);
+
+    const preview = await screen.findByText("review findings");
+    const runButton = preview.closest<HTMLButtonElement>("button");
+    if (!runButton) throw new Error("run row was not rendered as a button");
+    fireEvent.click(runButton);
+
+    expect((await screen.findByText("user request")).className).toContain("text-foreground/90");
+    expect(screen.getByText("assistant response").className).toContain("text-foreground");
+    expect(screen.getByText("assistant thinking").className).toContain("text-muted-foreground");
+    expect(screen.getByText("read").className).toContain("text-[var(--localterm-green)]");
+    expect(screen.getByText("tool output").className).toContain("text-foreground/80");
   });
 
   it("shows the last run status badge", async () => {

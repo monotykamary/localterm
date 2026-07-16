@@ -302,7 +302,7 @@ describe("OutputBatcher synchronized-output pacing", () => {
     }
   });
 
-  it("paces every synchronized-output end within one incoming write", () => {
+  it("parses a synchronized burst in order and paces only its newest frame", () => {
     const writes: Uint8Array[] = [];
     const deferredWriteCallbacks: Array<() => void> = [];
     const batcher = new OutputBatcher();
@@ -315,16 +315,39 @@ describe("OutputBatcher synchronized-output pacing", () => {
 
     batcher.pushBytes(combinedFrames);
 
-    expect(writes).toHaveLength(1);
+    expect(writes).toHaveLength(2);
     expect(Array.from(writes[0])).toEqual(Array.from(firstFrame));
+    expect(Array.from(writes[1])).toEqual(Array.from(secondFrame));
+    expect(deferredWriteCallbacks).toHaveLength(1);
 
+    deferredWriteCallbacks.shift()?.();
+    expect(pendingCb).toBeTruthy();
+    batcher.detach();
+  });
+
+  it("catches up to the newest completed frame when a local burst queues", () => {
+    const writes: Uint8Array[] = [];
+    const deferredWriteCallbacks: Array<() => void> = [];
+    const batcher = new OutputBatcher();
+    batcher.attach(createFakeTerminal(writes, { deferredWriteCallbacks }));
+    const firstFrame = synchronizedFrame("first");
+    const secondFrame = synchronizedFrame("second");
+    const thirdFrame = synchronizedFrame("third");
+
+    batcher.pushBytes(firstFrame);
+    batcher.pushBytes(secondFrame);
+    batcher.pushBytes(thirdFrame);
+
+    expect(writes).toHaveLength(1);
     deferredWriteCallbacks.shift()?.();
     const releaseFrame = pendingCb;
     expect(releaseFrame).toBeTruthy();
     releaseFrame!(performance.now());
 
-    expect(writes).toHaveLength(2);
+    expect(writes).toHaveLength(3);
     expect(Array.from(writes[1])).toEqual(Array.from(secondFrame));
+    expect(Array.from(writes[2])).toEqual(Array.from(thirdFrame));
+    expect(deferredWriteCallbacks).toHaveLength(1);
     batcher.detach();
   });
 
@@ -363,16 +386,20 @@ describe("OutputBatcher synchronized-output pacing", () => {
     const batcher = new OutputBatcher();
     batcher.attach(createFakeTerminal(writes, { deferredWriteCallbacks }));
 
-    batcher.pushBytes(synchronizedFrame("first"));
-    batcher.pushBytes(synchronizedFrame("second"));
+    const firstFrame = synchronizedFrame("first");
+    const secondFrame = synchronizedFrame("second");
+    const inputResponseFrame = synchronizedFrame("input-response");
+    batcher.pushBytes(firstFrame);
+    batcher.pushBytes(secondFrame);
     expect(writes).toHaveLength(1);
 
     batcher.noteUserInput();
-    batcher.pushBytes(new Uint8Array([65]));
+    batcher.pushBytes(inputResponseFrame);
 
     expect(writes).toHaveLength(3);
-    expect(Array.from(writes[1])).toEqual(Array.from(synchronizedFrame("second")));
-    expect(Array.from(writes[2])).toEqual([65]);
+    expect(Array.from(writes[1])).toEqual(Array.from(secondFrame));
+    expect(Array.from(writes[2])).toEqual(Array.from(inputResponseFrame));
+    expect(deferredWriteCallbacks).toHaveLength(1);
     batcher.detach();
   });
 

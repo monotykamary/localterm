@@ -115,6 +115,7 @@ const WorktreeRow = ({
   <div
     role="listitem"
     className="group/worktree flex flex-col gap-0.5 px-3 py-2 transition-colors hover:bg-foreground/5"
+    style={{ minHeight: WORKTREES_LIST_ROW_HEIGHT_PX }}
   >
     <div className="flex items-center gap-2">
       <GitBranch className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -196,7 +197,7 @@ const WorktreeRow = ({
         </span>
       )}
     </div>
-    <div className="flex items-center gap-2 pl-5.5 opacity-0 transition-opacity group-hover/worktree:opacity-100 group-focus-within/worktree:opacity-100">
+    <div className="flex items-center gap-2 pl-5.5">
       <span className="min-w-0 flex-1 truncate text-left font-mono text-[10px] text-muted-foreground">
         {worktree.displayPath}
       </span>

@@ -9,6 +9,7 @@ export const TERMINAL_FONT_SIZE_MIN_PX = 9;
 export const TERMINAL_FONT_SIZE_MAX_PX = 24;
 export const TERMINAL_FONT_SIZE_STEP_PX = 1;
 export const TERMINAL_TAP_MOVEMENT_THRESHOLD_PX = 10;
+export const TERMINAL_CURSOR_KEYBOARD_TAP_TARGET_PX = 44;
 export const TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX = 150;
 export const TERMINAL_VIEWPORT_WIDTH_STABLE_PX = 20;
 export const DEFAULT_TERMINAL_LINE_HEIGHT = 1.2;
@@ -26,6 +27,8 @@ export const DEFAULT_MUTE_EMOJI_COLORS = true;
 export const DEFAULT_TERMINAL_LOCAL_ECHO = true;
 export const DEFAULT_TERMINAL_SCROLL_ON_USER_INPUT = true;
 export const FALLBACK_TERMINAL_BACKGROUND_HEX = "#101010";
+export const FALLBACK_TERMINAL_FOREGROUND_HEX = "#ffffff";
+export const DARK_TERMINAL_THEME_LIGHTNESS_THRESHOLD_PERCENT = 50;
 export const DEFAULT_DOCUMENT_TITLE = "localterm";
 export const DEAD_SESSION_TITLE_PREFIX = "† ";
 // Title and per-session tag for desktop notifications shown via the service
@@ -345,9 +348,11 @@ export const INTERACTIVE_OUTPUT_RENDER_WINDOW_MS = 500;
 // bursts and caps each message at OUTPUT_BATCH_FLUSH_BYTES (under xterm's 12ms
 // parse-yield budget, so a single write never spills to xterm's async drain).
 // Large DEC 2026 frames can span messages; the client preserves those message
-// boundaries but holds the following frame until xterm presents the completed
-// one. This gives each frame the earliest safe render rAF, keeps
-// xterm's parse out of a vsync so it can't starve the render rAF (the
+// boundaries and normally holds the following frame until xterm presents the
+// completed one. A queued local burst parses every frame in order but paces only
+// the newest complete frame, keeping interaction current instead of replaying a
+// stale visual backlog. This gives each current frame the earliest safe render
+// rAF, keeps xterm's parse out of a vsync so it can't starve the render rAF (the
 // "smooth fps but visual stutter" same-deadline clash the old rAF coalescer had),
 // and lets xterm answer a terminal query in the same task before the probing
 // program's read times out (the response otherwise leaks into the shell as

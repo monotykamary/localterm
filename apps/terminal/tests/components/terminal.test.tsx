@@ -18,10 +18,16 @@ import {
   TERMINAL_BACK_TAB_SEQUENCE,
   LIGATURES_ENABLED_STORAGE_KEY,
   MUTE_EMOJI_COLORS_STORAGE_KEY,
+  MOBILE_RESUME_STORAGE_KEY,
   DEFAULT_CWD_STORAGE_KEY,
+  CUSTOM_FONT_FAMILY_STORAGE_KEY,
+  CUSTOM_THEMES_STORAGE_KEY,
+  TERMINAL_FONT_STORAGE_KEY,
+  TERMINAL_THEME_STORAGE_KEY,
 } from "../../src/lib/constants";
 import { DEFAULT_TERMINAL_CURSOR_STYLE } from "../../src/lib/terminal-cursor";
 import { DEFAULT_TERMINAL_SCROLLBACK_LINES } from "../../src/lib/terminal-scrollback";
+import { CUSTOM_FONT_ID } from "../../src/lib/terminal-fonts";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { FRESH_SESSION_QUERY_PARAM } from "@/utils/fresh-session-query-param";
 
@@ -843,6 +849,51 @@ describe("Terminal modified Tab routing", () => {
     expect(result).toEqual({ handlerResult: false, preventDefaultCalls: 0 });
     expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
   });
+
+  it("restores Git metadata when herdr's slim hover handle is expanded", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({
+        type: "git-diff-summary",
+        summary: {
+          isRepo: true,
+          files: 2,
+          additions: 337,
+          deletions: 20,
+          binaries: 0,
+          branch: "main",
+        },
+      });
+    });
+
+    expect(screen.getByLabelText(/view git diff/i)).not.toBeNull();
+    const toolbar = screen.getByRole("toolbar", { name: "terminal actions" });
+    const toolbarArea = toolbar.parentElement;
+    const toolbarHandle = toolbar.previousElementSibling;
+
+    act(() => {
+      fakeWebSockets[0]?.fireMessage({ type: "foreground", process: "/opt/homebrew/bin/herdr" });
+    });
+
+    expect(screen.queryByLabelText(/view git diff/i)).toBeNull();
+    expect(toolbar.className).toContain("opacity-0");
+    expect(toolbarArea?.className).toContain("pointer-events-none");
+    expect(toolbarHandle?.className).toContain("pointer-events-auto");
+    expect(toolbarHandle?.className).toContain("opacity-100");
+
+    if (toolbarArea) fireEvent.mouseEnter(toolbarArea);
+
+    expect(toolbar.className).toContain("opacity-100");
+    expect(toolbarArea?.className).toContain("pointer-events-auto");
+    expect(screen.getByLabelText(/view git diff/i)).not.toBeNull();
+
+    act(() => {
+      fakeWebSockets[0]?.fireMessage({ type: "foreground", process: null });
+    });
+
+    expect(screen.getByLabelText(/view git diff/i)).not.toBeNull();
+  });
 });
 
 const dispatchEnterKey = (
@@ -881,10 +932,12 @@ describe("Terminal on-screen keyboard arbitration", () => {
     expect(toolbar.className).toContain("opacity-0");
     expect(toolbar.parentElement?.className).toContain("pointer-events-none");
 
-    openOnScreenKeyboard();
+    const keyboard = openOnScreenKeyboard();
 
     expect(toolbar.className).toContain("opacity-100");
+    expect(toolbar.className).toContain("touch-pan-x");
     expect(toolbar.parentElement?.className).toContain("pointer-events-auto");
+    expect(keyboard.className).not.toContain("border-t");
 
     const actionsToggle = screen.getByLabelText("Show terminal actions");
     fireEvent.pointerDown(actionsToggle);
@@ -892,10 +945,44 @@ describe("Terminal on-screen keyboard arbitration", () => {
     expect(queryOnScreenKeyboard()).not.toBeNull();
     expect(screen.getByLabelText("Hide terminal actions")).not.toBeNull();
 
+    fireEvent.pointerDown(screen.getByLabelText("find in terminal"));
+
+    expect(queryOnScreenKeyboard()).not.toBeNull();
+    expect(screen.getByLabelText("Hide terminal actions")).not.toBeNull();
+
     fireEvent.click(screen.getByLabelText("toggle on-screen keyboard"));
 
     expect(toolbar.className).toContain("opacity-0");
     expect(toolbar.parentElement?.className).toContain("pointer-events-none");
+  });
+
+  it("restores Git metadata when the mobile overlay opens in herdr", () => {
+    installFakeLocalStorage({ [MOBILE_RESUME_STORAGE_KEY]: "false" });
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({ type: "foreground", process: "herdr" });
+    });
+
+    expect(screen.queryByLabelText(/view git diff/i)).toBeNull();
+
+    openOnScreenKeyboard();
+    act(() => {
+      fakeWebSockets[0]?.fireMessage({
+        type: "git-diff-summary",
+        summary: {
+          isRepo: true,
+          files: 2,
+          additions: 337,
+          deletions: 20,
+          binaries: 0,
+          branch: "main",
+        },
+      });
+    });
+
+    expect(screen.getByLabelText(/view git diff/i)).not.toBeNull();
+    expect(screen.getByLabelText("Show terminal actions")).not.toBeNull();
   });
 
   it("dismisses an active system-keyboard input before opening for the terminal", () => {
@@ -912,7 +999,7 @@ describe("Terminal on-screen keyboard arbitration", () => {
     outsideInput.remove();
   });
 
-  it("closes before a pointer outside the terminal can summon the system keyboard", () => {
+  it("keeps toolbar drags open but closes before an action summons the system keyboard", () => {
     render(<Terminal />);
     openOnScreenKeyboard();
 
@@ -920,9 +1007,10 @@ describe("Terminal on-screen keyboard arbitration", () => {
     expect(queryOnScreenKeyboard()).not.toBeNull();
 
     fireEvent.pointerDown(screen.getByLabelText("find in terminal"));
-    expect(queryOnScreenKeyboard()).toBeNull();
+    expect(queryOnScreenKeyboard()).not.toBeNull();
 
     fireEvent.click(screen.getByLabelText("find in terminal"));
+    expect(queryOnScreenKeyboard()).toBeNull();
     expect(document.activeElement).toBe(screen.getByLabelText("find query"));
   });
 
@@ -1225,6 +1313,39 @@ describe("Terminal theme picker", () => {
     });
     const pushedTheme = fakeXterms[0]?.getOptions().theme as { background?: string } | undefined;
     expect(pushedTheme?.background).toBe("#282a36");
+    expect(document.documentElement.style.getPropertyValue("--localterm-background")).toBe(
+      "#282a36",
+    );
+    expect(document.body.style.background).toBe("rgb(40, 42, 54)");
+  });
+
+  it("seeds xterm and LocalTerm chrome from a cached custom theme", () => {
+    const customTheme = {
+      id: "custom-herdr",
+      name: "Herdr",
+      source: "test",
+      colors: {
+        background: "#20242c",
+        foreground: "#d8dee9",
+        cursor: "#88c0d0",
+        red: "#bf616a",
+        green: "#a3be8c",
+      },
+    };
+    installFakeLocalStorage({
+      [TERMINAL_THEME_STORAGE_KEY]: customTheme.id,
+      [CUSTOM_THEMES_STORAGE_KEY]: JSON.stringify([customTheme]),
+    });
+
+    render(<Terminal />);
+
+    const seededTheme = fakeXterms[0]?.getOptions().theme as { background?: string } | undefined;
+    expect(seededTheme?.background).toBe("#20242c");
+    expect(document.documentElement.style.getPropertyValue("--localterm-background")).toBe(
+      "#20242c",
+    );
+    expect(document.documentElement.style.getPropertyValue("--localterm-green")).toBe("#a3be8c");
+    expect(document.body.style.background).toBe("rgb(32, 36, 44)");
   });
 
   it("exposes a single labelled settings trigger in the toolbar", () => {
@@ -1254,6 +1375,20 @@ describe("Terminal font picker", () => {
     render(<Terminal />);
     const fontFamily = fakeXterms[0]?.getOptions().fontFamily;
     expect(fontFamily).toContain("Geist Mono");
+  });
+
+  it("seeds xterm and LocalTerm chrome with the cached custom font", () => {
+    installFakeLocalStorage({
+      [TERMINAL_FONT_STORAGE_KEY]: CUSTOM_FONT_ID,
+      [CUSTOM_FONT_FAMILY_STORAGE_KEY]: "Iosevka Custom",
+    });
+
+    render(<Terminal />);
+
+    expect(fakeXterms[0]?.getOptions().fontFamily).toContain("Iosevka Custom");
+    expect(document.documentElement.style.getPropertyValue("--localterm-font-family")).toContain(
+      "Iosevka Custom",
+    );
   });
 });
 

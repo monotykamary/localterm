@@ -9,7 +9,7 @@ import { isLikelyRelativePath } from "@/utils/is-likely-relative-path";
 // strikethrough, and task lists come from remark-gfm. The font size is
 // inherited from the log container (text-[11px] font-mono).
 
-const HEADING_CLASS = "font-semibold text-zinc-100";
+const HEADING_CLASS = "font-semibold text-foreground";
 
 interface MarkdownProps {
   readonly children: string;
@@ -40,30 +40,36 @@ const useMarkdownComponents = (
       h5: ({ children }) => <div className={HEADING_CLASS}>{children}</div>,
       h6: ({ children }) => <div className={HEADING_CLASS}>{children}</div>,
       p: ({ children }) => <p className="my-0.5 leading-relaxed">{children}</p>,
-      strong: ({ children }) => <strong className="font-semibold text-zinc-50">{children}</strong>,
+      strong: ({ children }) => (
+        <strong className="font-semibold text-foreground">{children}</strong>
+      ),
       em: ({ children }) => <em className="italic">{children}</em>,
-      del: ({ children }) => <del className="text-zinc-500 line-through">{children}</del>,
+      del: ({ children }) => (
+        <del className="text-muted-foreground/70 line-through">{children}</del>
+      ),
       a: ({ href, children }) => (
         <a
           href={href}
           target="_blank"
           rel="noreferrer noopener"
-          className="text-sky-400 underline underline-offset-2"
+          className="text-[var(--localterm-blue)] underline underline-offset-2"
         >
           {children}
         </a>
       ),
       ul: ({ children }) => <ul className="my-0.5 list-disc space-y-0.5 pl-4">{children}</ul>,
       ol: ({ children }) => <ol className="my-0.5 list-decimal space-y-0.5 pl-4">{children}</ol>,
-      li: ({ children }) => <li className="leading-relaxed marker:text-zinc-600">{children}</li>,
+      li: ({ children }) => (
+        <li className="leading-relaxed marker:text-muted-foreground/70">{children}</li>
+      ),
       blockquote: ({ children }) => (
-        <blockquote className="my-0.5 border-l-2 border-zinc-700 pl-2 text-zinc-400">
+        <blockquote className="my-0.5 border-l-2 border-border/60 pl-2 text-muted-foreground">
           {children}
         </blockquote>
       ),
-      hr: () => <hr className="my-1.5 border-zinc-700" />,
+      hr: () => <hr className="my-1.5 border-border/60" />,
       pre: ({ children }) => (
-        <pre className="my-1 overflow-x-auto rounded bg-zinc-900 p-2 font-mono text-[11px] leading-relaxed text-zinc-300">
+        <pre className="my-1 overflow-x-auto rounded bg-foreground/5 p-2 font-mono text-[11px] leading-relaxed text-foreground/80">
           {children}
         </pre>
       ),
@@ -85,14 +91,17 @@ const useMarkdownComponents = (
             <button
               type="button"
               onClick={() => onOpenFile?.(text)}
-              className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-emerald-300 underline-offset-2 transition-colors hover:bg-zinc-700 hover:text-emerald-200 hover:underline"
+              className="rounded bg-foreground/10 px-1 py-0.5 font-mono text-[var(--localterm-green)] underline-offset-2 transition-colors hover:bg-foreground/15 hover:text-foreground hover:underline"
             >
               {text}
             </button>
           );
         }
         return (
-          <code className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-emerald-300" {...rest}>
+          <code
+            className="rounded bg-foreground/10 px-1 py-0.5 font-mono text-[var(--localterm-green)]"
+            {...rest}
+          >
             {children}
           </code>
         );
@@ -102,11 +111,13 @@ const useMarkdownComponents = (
           <table className="border-collapse text-[11px]">{children}</table>
         </div>
       ),
-      thead: ({ children }) => <thead className="text-zinc-400">{children}</thead>,
+      thead: ({ children }) => <thead className="text-muted-foreground">{children}</thead>,
       th: ({ children }) => (
-        <th className="border border-zinc-700 px-1.5 py-0.5 text-left font-semibold">{children}</th>
+        <th className="border border-border/60 px-1.5 py-0.5 text-left font-semibold">
+          {children}
+        </th>
       ),
-      td: ({ children }) => <td className="border border-zinc-700 px-1.5 py-0.5">{children}</td>,
+      td: ({ children }) => <td className="border border-border/60 px-1.5 py-0.5">{children}</td>,
     };
   }, [cwd, onOpenFile]);
 
