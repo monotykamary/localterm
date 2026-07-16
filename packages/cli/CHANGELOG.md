@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.3
+
+### Patch Changes
+
+- 7eea51d: Coalesce genuine multi-frame DEC 2026 backlogs ahead of stale browser presentation waits, reducing nested TUI scheduler latency while preserving normal one-frame pacing and atomic rendering.
+  - @monotykamary/localterm-server@2.66.3
+
 ## 2.66.2
 
 ### Patch Changes
