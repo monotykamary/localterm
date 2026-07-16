@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.4
+
+### Patch Changes
+
+- de0671f: Render the automations agent thread preview with pi-like blank-line spacing: drop the per-entry CSS margins in favor of trailing (bottom) new lines around user prompts, thinking traces, assistant responses, and tool calls, and separate assistant Markdown blocks by a blank line so responses no longer feel squished.
+  - @monotykamary/localterm-server@2.66.4
+
 ## 2.66.3
 
 ### Patch Changes
