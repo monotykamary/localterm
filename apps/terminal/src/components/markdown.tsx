@@ -6,8 +6,10 @@ import { isLikelyRelativePath } from "@/utils/is-likely-relative-path";
 
 // Markdown renderer for the agent log. Headings stay pi-like: bold, same size
 // (no `text-lg` etc.), so the transcript reads as a flat log. GFM tables,
-// strikethrough, and task lists come from remark-gfm. The font size is
-// inherited from the log container (text-[11px] font-mono).
+// strikethrough, and task lists come from remark-gfm. The font size and line
+// height are inherited from the log container. Blocks use a one-line-height
+// flex gap (a blank line between them, like pi); `min-w-0` lets flex items
+// shrink so long words wrap and code scrolls instead of overflowing.
 
 const HEADING_CLASS = "font-semibold text-foreground";
 
@@ -39,7 +41,7 @@ const useMarkdownComponents = (
       h4: ({ children }) => <div className={HEADING_CLASS}>{children}</div>,
       h5: ({ children }) => <div className={HEADING_CLASS}>{children}</div>,
       h6: ({ children }) => <div className={HEADING_CLASS}>{children}</div>,
-      p: ({ children }) => <p className="my-0.5 leading-relaxed">{children}</p>,
+      p: ({ children }) => <p>{children}</p>,
       strong: ({ children }) => (
         <strong className="font-semibold text-foreground">{children}</strong>
       ),
@@ -57,19 +59,17 @@ const useMarkdownComponents = (
           {children}
         </a>
       ),
-      ul: ({ children }) => <ul className="my-0.5 list-disc space-y-0.5 pl-4">{children}</ul>,
-      ol: ({ children }) => <ol className="my-0.5 list-decimal space-y-0.5 pl-4">{children}</ol>,
-      li: ({ children }) => (
-        <li className="leading-relaxed marker:text-muted-foreground/70">{children}</li>
-      ),
+      ul: ({ children }) => <ul className="list-disc pl-4">{children}</ul>,
+      ol: ({ children }) => <ol className="list-decimal pl-4">{children}</ol>,
+      li: ({ children }) => <li className="marker:text-muted-foreground/70">{children}</li>,
       blockquote: ({ children }) => (
-        <blockquote className="my-0.5 border-l-2 border-border/60 pl-2 text-muted-foreground">
+        <blockquote className="border-l-2 border-border/60 pl-2 text-muted-foreground">
           {children}
         </blockquote>
       ),
-      hr: () => <hr className="my-1.5 border-border/60" />,
+      hr: () => <hr className="border-border/60" />,
       pre: ({ children }) => (
-        <pre className="my-1 overflow-x-auto rounded bg-foreground/5 p-2 font-mono text-[11px] leading-relaxed text-foreground/80">
+        <pre className="overflow-x-auto rounded bg-foreground/5 p-2 font-mono text-[11px] text-foreground/80">
           {children}
         </pre>
       ),
@@ -107,7 +107,7 @@ const useMarkdownComponents = (
         );
       },
       table: ({ children }) => (
-        <div className="my-1 overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="border-collapse text-[11px]">{children}</table>
         </div>
       ),
@@ -124,7 +124,7 @@ const useMarkdownComponents = (
 export const Markdown = ({ children, cwd, onOpenFile }: MarkdownProps) => {
   const components = useMarkdownComponents(cwd, onOpenFile);
   return (
-    <div className="whitespace-normal break-words">
+    <div className="flex flex-col gap-[1lh] [&>*]:min-w-0 whitespace-normal break-words">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {children}
       </ReactMarkdown>

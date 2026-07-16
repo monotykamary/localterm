@@ -30,6 +30,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -272,12 +273,12 @@ const ToolLogEntry = ({ entry }: { entry: Extract<AgentSessionEntry, { type: "to
           </span>
         ) : null}
       </div>
-      <pre className="mt-0.5 whitespace-pre-wrap break-words text-foreground/80">{visible}</pre>
+      <pre className="whitespace-pre-wrap break-words text-foreground/80">{visible}</pre>
       {collapsible ? (
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="mt-0.5 text-[10px] text-[var(--localterm-green)] transition-colors hover:text-foreground"
+          className="text-[10px] text-[var(--localterm-green)] transition-colors hover:text-foreground"
         >
           {expanded ? "Show less" : `Show all ${lines.length} lines`}
         </button>
@@ -285,6 +286,8 @@ const ToolLogEntry = ({ entry }: { entry: Extract<AgentSessionEntry, { type: "to
     </div>
   );
 };
+
+const BlankLine = () => <div aria-hidden="true">&nbsp;</div>;
 
 // A full-pane log page for a single run: a back chevron + the automation name
 // and run metadata, then the full log (or findings) in a scrollable block. Long
@@ -307,7 +310,7 @@ const renderLogEntry = (
             ? ` · ${entry.tokensBefore.toLocaleString()} tokens`
             : ""}
         </div>
-        <div className="mt-0.5 text-foreground/80">
+        <div className="text-foreground/80">
           <Markdown cwd={cwd} onOpenFile={onOpenFile}>
             {entry.summary}
           </Markdown>
@@ -319,9 +322,7 @@ const renderLogEntry = (
     return (
       <div key={index} className="rounded-sm bg-foreground/5 p-2">
         <span className="text-[10px] uppercase tracking-wide text-muted-foreground">user</span>
-        <div className="mt-0.5 whitespace-pre-wrap break-words text-foreground/90">
-          {entry.text}
-        </div>
+        <div className="whitespace-pre-wrap break-words text-foreground/90">{entry.text}</div>
       </div>
     );
   }
@@ -332,11 +333,14 @@ const renderLogEntry = (
           assistant
         </span>
         {entry.thinking ? (
-          <div className="mb-2 mt-1 border-l-2 border-border/60 pl-2 whitespace-pre-wrap break-words italic text-muted-foreground">
-            {entry.thinking}
-          </div>
+          <>
+            <div className="whitespace-pre-wrap break-words italic text-muted-foreground">
+              {entry.thinking}
+            </div>
+            <BlankLine />
+          </>
         ) : null}
-        <div className="mt-0.5 text-foreground/90">
+        <div className="text-foreground/90">
           <Markdown cwd={cwd} onOpenFile={onOpenFile}>
             {entry.text}
           </Markdown>
@@ -498,18 +502,21 @@ const RunLogView = ({
               {isThread ? "No session history yet." : "No log recorded for this run."}
             </p>
           ) : displayEntries ? (
-            <div className="flex flex-col gap-2 font-mono text-[11px] leading-relaxed">
-              {displayEntries.map((entry, index) =>
-                renderLogEntry(
-                  entry,
-                  index,
-                  automation.cwd,
-                  automation.cwd ? handleOpenFile : undefined,
-                ),
-              )}
+            <div className="flex flex-col font-mono text-[11px] leading-normal">
+              {displayEntries.map((entry, index) => (
+                <Fragment key={index}>
+                  {renderLogEntry(
+                    entry,
+                    index,
+                    automation.cwd,
+                    automation.cwd ? handleOpenFile : undefined,
+                  )}
+                  <BlankLine />
+                </Fragment>
+              ))}
             </div>
           ) : textLog ? (
-            <pre className="whitespace-pre-wrap break-words rounded-sm bg-foreground/5 p-3 font-mono text-[11px] leading-relaxed text-foreground/80">
+            <pre className="whitespace-pre-wrap break-words rounded-sm bg-foreground/5 p-3 font-mono text-[11px] leading-normal text-foreground/80">
               {textLog}
             </pre>
           ) : (
