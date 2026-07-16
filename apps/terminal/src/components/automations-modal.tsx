@@ -337,14 +337,16 @@ const renderLogEntry = (
             <div className="whitespace-pre-wrap break-words italic text-muted-foreground">
               {entry.thinking}
             </div>
-            <BlankLine />
+            {entry.text ? <BlankLine /> : null}
           </>
         ) : null}
-        <div className="text-foreground/90">
-          <Markdown cwd={cwd} onOpenFile={onOpenFile}>
-            {entry.text}
-          </Markdown>
-        </div>
+        {entry.text ? (
+          <div className="text-foreground/90">
+            <Markdown cwd={cwd} onOpenFile={onOpenFile}>
+              {entry.text}
+            </Markdown>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -503,17 +505,20 @@ const RunLogView = ({
             </p>
           ) : displayEntries ? (
             <div className="flex flex-col font-mono text-[11px] leading-normal">
-              {displayEntries.map((entry, index) => (
-                <Fragment key={index}>
-                  {renderLogEntry(
-                    entry,
-                    index,
-                    automation.cwd,
-                    automation.cwd ? handleOpenFile : undefined,
-                  )}
-                  <BlankLine />
-                </Fragment>
-              ))}
+              {displayEntries.map((entry, index) => {
+                const trailsBlank = !(entry.type === "assistant" && entry.text.length === 0);
+                return (
+                  <Fragment key={index}>
+                    {renderLogEntry(
+                      entry,
+                      index,
+                      automation.cwd,
+                      automation.cwd ? handleOpenFile : undefined,
+                    )}
+                    {trailsBlank ? <BlankLine /> : null}
+                  </Fragment>
+                );
+              })}
             </div>
           ) : textLog ? (
             <pre className="whitespace-pre-wrap break-words rounded-sm bg-foreground/5 p-3 font-mono text-[11px] leading-normal text-foreground/80">
