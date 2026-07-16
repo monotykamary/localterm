@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.5
+
+### Patch Changes
+
+- 0a1075f: Drop the trailing blank line after a thinking-only assistant entry (no text response) so the thinking flows directly into the following tool call without an extra blank line, and stop rendering the empty response block.
+  - @monotykamary/localterm-server@2.66.5
+
 ## 2.66.4
 
 ### Patch Changes
