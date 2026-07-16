@@ -207,6 +207,7 @@ import { connectCdp } from "@/utils/connect-cdp";
 import { openInspectPage } from "@/utils/open-inspect-page";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
 import { computePtyViewportOverlay } from "@/utils/compute-pty-viewport-overlay";
+import { detectOutputCompressMode } from "@/utils/detect-output-compress-mode";
 
 import {
   MAX_IMAGE_UPLOAD_BYTES,
@@ -235,31 +236,13 @@ const ON_SCREEN_KEYBOARD_CONTROL_SELECTOR = [
   "[data-on-screen-keyboard-actions-toggle]",
 ].join(", ");
 
-// Server-side output compression: the server compresses each binary output
-// frame (brotli if the browser can decode it, else gzip) with a 1-byte header
-// (0x00 raw / 0x01 gzip / 0x02 brotli). Feature-detect the decompressor at
-// module load; null means no DecompressionStream (raw passthrough, also the
-// back-compat path for an old server). Browsers never negotiate
-// permessage-deflate, so this is application-level. The TS DOM lib's
-// CompressionFormat omits "br" (runtime-supported in Chrome 105+/Safari 16.4+),
-// so the format string is cast.
-const detectCompressMode = (): "br-ctx" | "gzip" | null => {
-  const tryFormat = (format: string): boolean => {
-    try {
-      new DecompressionStream(format as CompressionFormat);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  // "br-ctx" advertises the context-takeover (a persistent DecompressionStream
-  // per PTY): the same DecompressionStream("br") support as per-frame brotli,
-  // but the server compresses each frame against the prior screen (the delta).
-  if (tryFormat("br")) return "br-ctx";
-  if (tryFormat("gzip")) return "gzip";
-  return null;
-};
-const COMPRESS_MODE = detectCompressMode();
+// Server-side output compression: remote surfaces advertise the best browser
+// decompressor and the server tags each compressed binary frame with its mode.
+// Loopback surfaces stay raw: their bandwidth is effectively free, while a
+// large synchronized redraw spans several batches and serially constructing a
+// DecompressionStream for each batch can dominate frame time. Browsers never
+// negotiate permessage-deflate, so this remains application-level.
+const COMPRESS_MODE = detectOutputCompressMode(window.location.hostname);
 
 const decompressFrame = async (
   format: string,

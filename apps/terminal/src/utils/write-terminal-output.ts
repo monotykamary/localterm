@@ -3,6 +3,7 @@ import {
   INTERACTIVE_OUTPUT_RENDER_WINDOW_MS,
   OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES,
   OUTPUT_KEEP_WARM_MS,
+  OUTPUT_PENDING_WRITE_COMPACTION_THRESHOLD_WRITES,
   SYNCHRONIZED_OUTPUT_END_SEQUENCE,
 } from "@/lib/constants";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
@@ -29,6 +30,14 @@ interface PendingTerminalWrite {
   endsSynchronizedOutput: boolean;
 }
 
+const SYNCHRONIZED_OUTPUT_END_BYTES = Uint8Array.from(
+  SYNCHRONIZED_OUTPUT_END_SEQUENCE,
+  (character) => character.charCodeAt(0),
+);
+const SYNCHRONIZED_OUTPUT_END_FINAL_BYTE =
+  SYNCHRONIZED_OUTPUT_END_BYTES[SYNCHRONIZED_OUTPUT_END_BYTES.length - 1];
+const SYNCHRONIZED_OUTPUT_TRAILING_BYTE_CAPACITY = SYNCHRONIZED_OUTPUT_END_BYTES.length - 1;
+
 const performanceNow = () => performance.now();
 
 const isDocumentHidden = (): boolean => typeof document !== "undefined" && document.hidden;
@@ -51,8 +60,15 @@ class OutputBatcher {
   private terminal: XtermTerminal | null = null;
   private buffer = new Uint8Array(OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES);
   private byteLength = 0;
-  private pendingWrites: PendingTerminalWrite[] = [];
-  private synchronizedOutputEndMatchLength = 0;
+  private pendingWrites: Array<PendingTerminalWrite | undefined> = [];
+  private pendingWriteIndex = 0;
+  private synchronizedOutputTrailingBytes = new Uint8Array(
+    SYNCHRONIZED_OUTPUT_TRAILING_BYTE_CAPACITY,
+  );
+  private synchronizedOutputTrailingByteLength = 0;
+  private synchronizedOutputBoundaryCandidate = new Uint8Array(
+    SYNCHRONIZED_OUTPUT_TRAILING_BYTE_CAPACITY + SYNCHRONIZED_OUTPUT_TRAILING_BYTE_CAPACITY,
+  );
   private awaitingSynchronizedFrameRender = false;
   private synchronizedFrameGeneration = 0;
   private synchronizedFrameReleaseId: number | null = null;
@@ -74,7 +90,8 @@ class OutputBatcher {
   attach = (terminal: XtermTerminal) => {
     this.terminal = terminal;
     this.pendingWrites = [];
-    this.synchronizedOutputEndMatchLength = 0;
+    this.pendingWriteIndex = 0;
+    this.synchronizedOutputTrailingByteLength = 0;
     this.awaitingSynchronizedFrameRender = false;
     this.synchronizedFrameGeneration += 1;
     this.synchronizedFrameReleaseId = null;
@@ -108,7 +125,8 @@ class OutputBatcher {
     this.interactiveRenderingEnabled = false;
     this.flushPending(true);
     this.pendingWrites = [];
-    this.synchronizedOutputEndMatchLength = 0;
+    this.pendingWriteIndex = 0;
+    this.synchronizedOutputTrailingByteLength = 0;
     this.synchronizedFramePacingBypassAtMs = Number.NEGATIVE_INFINITY;
     this.terminal = null;
     this.afterFlush = null;
@@ -165,27 +183,95 @@ class OutputBatcher {
 
   private enqueueBytes = (bytes: Uint8Array) => {
     let segmentStart = 0;
-    for (let byteIndex = 0; byteIndex < bytes.byteLength; byteIndex += 1) {
-      const byte = bytes[byteIndex];
-      const expectedByte = SYNCHRONIZED_OUTPUT_END_SEQUENCE.charCodeAt(
-        this.synchronizedOutputEndMatchLength,
-      );
-      if (byte === expectedByte) {
-        this.synchronizedOutputEndMatchLength += 1;
-      } else {
-        this.synchronizedOutputEndMatchLength =
-          byte === SYNCHRONIZED_OUTPUT_END_SEQUENCE.charCodeAt(0) ? 1 : 0;
-      }
-      if (this.synchronizedOutputEndMatchLength !== SYNCHRONIZED_OUTPUT_END_SEQUENCE.length) {
-        continue;
-      }
-      this.synchronizedOutputEndMatchLength = 0;
-      this.enqueueWrite(bytes.subarray(segmentStart, byteIndex + 1), true);
-      segmentStart = byteIndex + 1;
+    const crossingSequenceEnd = this.findCrossingSynchronizedOutputEnd(bytes);
+    if (crossingSequenceEnd !== -1) {
+      this.enqueueWrite(bytes.subarray(0, crossingSequenceEnd), true);
+      segmentStart = crossingSequenceEnd;
     }
+
+    let sequenceEndIndex = bytes.indexOf(
+      SYNCHRONIZED_OUTPUT_END_FINAL_BYTE,
+      Math.max(
+        SYNCHRONIZED_OUTPUT_END_BYTES.length - 1,
+        segmentStart + SYNCHRONIZED_OUTPUT_END_BYTES.length - 1,
+      ),
+    );
+    while (sequenceEndIndex !== -1) {
+      const sequenceStartIndex = sequenceEndIndex - SYNCHRONIZED_OUTPUT_END_BYTES.length + 1;
+      if (
+        sequenceStartIndex >= segmentStart &&
+        this.matchesSynchronizedOutputEnd(bytes, sequenceStartIndex)
+      ) {
+        const sequenceEndOffset = sequenceEndIndex + 1;
+        this.enqueueWrite(bytes.subarray(segmentStart, sequenceEndOffset), true);
+        segmentStart = sequenceEndOffset;
+      }
+      sequenceEndIndex = bytes.indexOf(SYNCHRONIZED_OUTPUT_END_FINAL_BYTE, sequenceEndIndex + 1);
+    }
+
     if (segmentStart < bytes.byteLength) {
       this.enqueueWrite(bytes.subarray(segmentStart), false);
     }
+    this.updateSynchronizedOutputTrailingBytes(bytes);
+  };
+
+  private findCrossingSynchronizedOutputEnd = (bytes: Uint8Array): number => {
+    const prefixLength = Math.min(SYNCHRONIZED_OUTPUT_TRAILING_BYTE_CAPACITY, bytes.byteLength);
+    if (this.synchronizedOutputTrailingByteLength === 0 || prefixLength === 0) return -1;
+
+    const trailingLength = this.synchronizedOutputTrailingByteLength;
+    const candidate = this.synchronizedOutputBoundaryCandidate;
+    candidate.set(this.synchronizedOutputTrailingBytes.subarray(0, trailingLength), 0);
+    candidate.set(bytes.subarray(0, prefixLength), trailingLength);
+    const candidateLength = trailingLength + prefixLength;
+    const firstStartIndex = Math.max(0, trailingLength - SYNCHRONIZED_OUTPUT_END_BYTES.length + 1);
+    const lastStartIndex = Math.min(
+      trailingLength - 1,
+      candidateLength - SYNCHRONIZED_OUTPUT_END_BYTES.length,
+    );
+    for (let startIndex = firstStartIndex; startIndex <= lastStartIndex; startIndex += 1) {
+      if (this.matchesSynchronizedOutputEnd(candidate, startIndex)) {
+        return startIndex + SYNCHRONIZED_OUTPUT_END_BYTES.length - trailingLength;
+      }
+    }
+    return -1;
+  };
+
+  private matchesSynchronizedOutputEnd = (bytes: Uint8Array, startIndex: number): boolean => {
+    for (
+      let sequenceIndex = 0;
+      sequenceIndex < SYNCHRONIZED_OUTPUT_END_BYTES.length;
+      sequenceIndex += 1
+    ) {
+      if (bytes[startIndex + sequenceIndex] !== SYNCHRONIZED_OUTPUT_END_BYTES[sequenceIndex]) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  private updateSynchronizedOutputTrailingBytes = (bytes: Uint8Array) => {
+    if (bytes.byteLength >= SYNCHRONIZED_OUTPUT_TRAILING_BYTE_CAPACITY) {
+      this.synchronizedOutputTrailingBytes.set(
+        bytes.subarray(bytes.byteLength - SYNCHRONIZED_OUTPUT_TRAILING_BYTE_CAPACITY),
+      );
+      this.synchronizedOutputTrailingByteLength = SYNCHRONIZED_OUTPUT_TRAILING_BYTE_CAPACITY;
+      return;
+    }
+
+    const retainedLength = Math.min(
+      this.synchronizedOutputTrailingByteLength,
+      SYNCHRONIZED_OUTPUT_TRAILING_BYTE_CAPACITY - bytes.byteLength,
+    );
+    if (retainedLength > 0) {
+      this.synchronizedOutputTrailingBytes.copyWithin(
+        0,
+        this.synchronizedOutputTrailingByteLength - retainedLength,
+        this.synchronizedOutputTrailingByteLength,
+      );
+    }
+    this.synchronizedOutputTrailingBytes.set(bytes, retainedLength);
+    this.synchronizedOutputTrailingByteLength = retainedLength + bytes.byteLength;
   };
 
   private enqueueWrite = (bytes: Uint8Array, endsSynchronizedOutput: boolean) => {
@@ -196,6 +282,28 @@ class OutputBatcher {
       endsSynchronizedOutput,
     });
     this.byteLength = 0;
+  };
+
+  private hasPendingWrites = (): boolean => this.pendingWriteIndex < this.pendingWrites.length;
+
+  private dequeuePendingWrite = (): PendingTerminalWrite | null => {
+    if (!this.hasPendingWrites()) return null;
+    const pendingWrite = this.pendingWrites[this.pendingWriteIndex];
+    this.pendingWrites[this.pendingWriteIndex] = undefined;
+    this.pendingWriteIndex += 1;
+
+    if (this.pendingWriteIndex === this.pendingWrites.length) {
+      this.pendingWrites = [];
+      this.pendingWriteIndex = 0;
+    } else if (
+      this.pendingWriteIndex >= OUTPUT_PENDING_WRITE_COMPACTION_THRESHOLD_WRITES &&
+      this.pendingWriteIndex >= this.pendingWrites.length - this.pendingWriteIndex
+    ) {
+      this.pendingWrites = this.pendingWrites.slice(this.pendingWriteIndex);
+      this.pendingWriteIndex = 0;
+    }
+
+    return pendingWrite ?? null;
   };
 
   // Re-arm a no-op vsync commit after a flush so a run of frames keeps the
@@ -308,7 +416,7 @@ class OutputBatcher {
     const terminal = this.terminal;
     if (
       !terminal ||
-      this.pendingWrites.length === 0 ||
+      !this.hasPendingWrites() ||
       (this.awaitingSynchronizedFrameRender && !bypassSynchronizedFramePacing)
     ) {
       return false;
@@ -316,10 +424,10 @@ class OutputBatcher {
 
     let didRenderImmediately = false;
     while (
-      this.pendingWrites.length > 0 &&
+      this.hasPendingWrites() &&
       (!this.awaitingSynchronizedFrameRender || bypassSynchronizedFramePacing)
     ) {
-      const pendingWrite = this.pendingWrites.shift();
+      const pendingWrite = this.dequeuePendingWrite();
       if (!pendingWrite) break;
       const shouldRenderImmediately = this.consumeInteractiveRender(pendingWrite.bytes.byteLength);
       const shouldBypassSynchronizedFramePacing = this.consumeSynchronizedFramePacingBypass(

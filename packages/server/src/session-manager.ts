@@ -1377,7 +1377,10 @@ export class SessionManager {
     // and xterm renders it in a single paint regardless of link bandwidth.
     // Sustained high-throughput output never idles, so OUTPUT_BATCH_FLUSH_BYTES
     // still gates the message rate there (unchanged).
-    if (managed.outputBatchTimer !== null) clearTimeout(managed.outputBatchTimer);
+    if (managed.outputBatchTimer !== null) {
+      managed.outputBatchTimer.refresh();
+      return;
+    }
     managed.outputBatchTimer = setTimeout(() => {
       managed.outputBatchTimer = null;
       this.flushOutput(managed);

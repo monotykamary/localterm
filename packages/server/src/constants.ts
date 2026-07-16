@@ -294,8 +294,8 @@ export const OUTPUT_BATCH_FLUSH_BYTES = 64 * 1024;
 // split a single ink/TUI redraw frame (erase + repaint, ~3KB) across multiple
 // WebSocket messages, and xterm.js rendering between them flashed the
 // half-erased frame (visible flicker in cmd/Claude Code on every keypress).
-// The window RESETS on every chunk (onSessionOutput clears and re-arms the
-// timer per data event), so it flushes OUTPUT_BATCH_WINDOW_MS after the LAST
+// The window RESETS on every chunk (onSessionOutput refreshes the existing
+// timer), so it flushes OUTPUT_BATCH_WINDOW_MS after the LAST
 // chunk of a burst — not a fixed window after the first. A full-screen
 // repaint of a large session emits over more than the window; a one-shot
 // window split it mid-redraw, and over a bandwidth-limited link each split

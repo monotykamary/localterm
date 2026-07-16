@@ -326,6 +326,7 @@ export const FONT_LOAD_PROBE_PX = 16;
 // need to grow on the first frame of an ASCII animation; subsequent bursts
 // double-capacity on demand until they fit into the reused backing store.
 export const OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES = 8 * 1024;
+export const OUTPUT_PENDING_WRITE_COMPACTION_THRESHOLD_WRITES = 1024;
 export const SYNCHRONIZED_OUTPUT_END_SEQUENCE = "\x1b[?2026l";
 
 // A response immediately following PTY input can consume xterm's pending WebGL
