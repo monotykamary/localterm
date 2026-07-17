@@ -5,18 +5,6 @@ import {WebglAddon} from "@xterm/addon-webgl";
 import {Terminal as XtermTerminal} from "@xterm/xterm";
 
 import {
-  CalendarClock,
-  Coffee,
-  FileDiff,
-  FolderGit2,
-  Key,
-  MonitorCog,
-  Network,
-  Plus,
-  Search,
-  SquareTerminal,
-} from "lucide-react";
-import {
   useCallback,
   useEffect,
   useMemo,
@@ -30,15 +18,16 @@ import {PR_STATE_ICONS, resolvePrDisplayState} from "@/lib/pr-state";
 import {Badge} from "@/components/ui/badge";
 import {ToastProvider, Toaster} from "@/components/ui/toast";
 import {AmbientActionSearchToolbar} from "@/components/ambient-action-search-toolbar";
-import {type CommandItem} from "@/components/command-palette";
 import {ConnectionStatusDialog} from "@/components/connection-status-dialog";
 import {type CaffeinateMode} from "@/components/keep-awake-menu";
 import {TerminalOverlays} from "@/components/terminal-overlays";
 import {useGitBranchInfo} from "@/hooks/use-git-branch-info";
 import {useGitDiffSummary} from "@/hooks/use-git-diff-summary";
 import {useScreenWakeLock} from "@/hooks/use-screen-wake-lock";
+import {useTerminalCommandPalette} from "@/hooks/use-terminal-command-palette";
 import {useTerminalImagePaste} from "@/hooks/use-terminal-image-paste";
 import {useTerminalOnScreenKeyboard} from "@/hooks/use-terminal-on-screen-keyboard";
+import {useTerminalOverlayControls} from "@/hooks/use-terminal-overlay-controls";
 import {useTerminalRuntime, type TerminalExitInfo} from "@/hooks/use-terminal-runtime";
 import {useTerminalSearch} from "@/hooks/use-terminal-search";
 import {useTerminalSettings} from "@/hooks/use-terminal-settings";
@@ -48,21 +37,15 @@ import {
   COPY_FEEDBACK_MS,
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
   FALLBACK_TERMINAL_BACKGROUND_HEX,
-  TERMINAL_FONT_SIZE_STEP_PX,
   HAPTIC_TAP_MS,
   RECONNECT_FAST_POLL_DURATION_MS,
   RECONNECT_FAST_POLL_INTERVAL_MS,
   RECONNECT_POLL_INTERVAL_MS,
   RESTART_COMMAND,
   RETRY_BUTTON_FEEDBACK_MS,
-  TOOLBAR_HIDE_DELAY_MS,
-  TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS,
 } from "@/lib/constants";
 import {type AutomationWithNextRun} from "@monotykamary/localterm-server/protocol";
-import {TERMINAL_CURSOR_STYLES, isTerminalCursorStyle} from "@/lib/terminal-cursor";
-import {TERMINAL_FONTS} from "@/lib/terminal-fonts";
 import type {TerminalSessionInfo} from "@/lib/terminal-session-info";
-import {TERMINAL_THEMES} from "@/lib/terminal-themes";
 
 import {triggerHapticFeedback} from "@/utils/haptic-feedback";
 
@@ -539,138 +522,51 @@ export const Terminal = () => {
     setCaffeinateBatteryThresholdRef.current?.(percent);
   }, []);
 
-  const handleKeepAwakePopoverOpenChange = useCallback((open: boolean) => {
-    setIsKeepAwakePopoverOpen(open);
-    if (!open) setIsActionsMenuOpen(false);
-  }, []);
-
-  const handleOverlayOpenChange = useCallback(
-    (setOpen: (open: boolean) => void, open: boolean): void => {
-      setOpen(open);
-      if (open) {
-        setIsActionsMenuOpen(false);
-        setIsCommandPaletteOpen(false);
-        return;
-      }
-      if (toolbarHoverTimeoutRef.current !== null) {
-        window.clearTimeout(toolbarHoverTimeoutRef.current);
-      }
-      toolbarHoverTimeoutRef.current = window.setTimeout(() => {
-        toolbarHoverTimeoutRef.current = null;
-        setIsToolbarHovered(false);
-      }, TOOLBAR_HIDE_DELAY_MS);
-      refocusTerminalRef.current?.();
-    },
-    [],
-  );
-
-  const handleSessionsOpenChange = useCallback(
-    (open: boolean) => handleOverlayOpenChange(setIsSessionsOpen, open),
-    [handleOverlayOpenChange],
-  );
-
-  const handlePortsOpenChange = useCallback(
-    (open: boolean) => handleOverlayOpenChange(setIsPortsOpen, open),
-    [handleOverlayOpenChange],
-  );
-
-  const handleSecretsOpenChange = useCallback(
-    (open: boolean) => handleOverlayOpenChange(setIsSecretsOpen, open),
-    [handleOverlayOpenChange],
-  );
-
-  const handleQrOpenChange = useCallback(
-    (open: boolean) => handleOverlayOpenChange(setIsQrOpen, open),
-    [handleOverlayOpenChange],
-  );
-
-  const handleToolbarAreaEnter = useCallback(() => {
-    if (toolbarHoverTimeoutRef.current !== null) {
-      window.clearTimeout(toolbarHoverTimeoutRef.current);
-      toolbarHoverTimeoutRef.current = null;
-    }
-    setIsToolbarHovered(true);
-  }, []);
-
-  const handleToolbarAreaLeave = useCallback(
-    (event: React.MouseEvent) => {
-      const leftThroughViewportEdge = event.clientY <= 0 || event.clientX >= window.innerWidth - 1;
-      const delay = leftThroughViewportEdge
-        ? TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS
-        : TOOLBAR_HIDE_DELAY_MS;
-      toolbarHoverTimeoutRef.current = window.setTimeout(() => {
-        toolbarHoverTimeoutRef.current = null;
-        if (!isSettingsOpen && !isAutomationsOpen) {
-          setIsToolbarHovered(false);
-        }
-      }, delay);
-    },
-    [isSettingsOpen, isAutomationsOpen],
-  );
-
-  const handleSettingsOpenChange = useCallback(
-    (open: boolean) => {
-      setIsSettingsOpen(open);
-      if (open) {
-        loadDaemonSettings();
-      } else {
-        setIsActionsMenuOpen(false);
-        if (toolbarHoverTimeoutRef.current !== null) {
-          window.clearTimeout(toolbarHoverTimeoutRef.current);
-        }
-        toolbarHoverTimeoutRef.current = window.setTimeout(() => {
-          toolbarHoverTimeoutRef.current = null;
-          setIsToolbarHovered(false);
-        }, TOOLBAR_HIDE_DELAY_MS);
-      }
-    },
-    [loadDaemonSettings],
-  );
-
-  const handleAutomationsOpenChange = useCallback(
-    (open: boolean) => handleOverlayOpenChange(setIsAutomationsOpen, open),
-    [handleOverlayOpenChange],
-  );
-
-  const toggleAutomations = useCallback(() => {
-    handleAutomationsOpenChange(!isAutomationsOpen);
-  }, [handleAutomationsOpenChange, isAutomationsOpen]);
+  const {
+    handleAutomationsOpenChange,
+    handleKeepAwakePopoverOpenChange,
+    handlePortsOpenChange,
+    handleQrOpenChange,
+    handleSecretsOpenChange,
+    handleSessionsOpenChange,
+    handleSettingsOpenChange,
+    handleToolbarAreaEnter,
+    handleToolbarAreaLeave,
+    handleWorktreesOpenChange,
+    openWorktrees,
+    toggleAutomations,
+    togglePorts,
+    toggleSecrets,
+    toggleSessions,
+    toggleWorktrees,
+  } = useTerminalOverlayControls({
+    isAutomationsOpen,
+    isPortsOpen,
+    isSecretsOpen,
+    isSessionsOpen,
+    isSettingsOpen,
+    isWorktreesOpen,
+    loadDaemonSettings,
+    refocusTerminalRef,
+    setIsActionsMenuOpen,
+    setIsAutomationsOpen,
+    setIsCommandPaletteOpen,
+    setIsKeepAwakePopoverOpen,
+    setIsPortsOpen,
+    setIsQrOpen,
+    setIsSecretsOpen,
+    setIsSessionsOpen,
+    setIsSettingsOpen,
+    setIsToolbarHovered,
+    setIsWorktreesOpen,
+    setWorktreeCreateError,
+    toolbarHoverTimeoutRef,
+  });
   toggleAutomationsRef.current = toggleAutomations;
-
-  const handleWorktreesOpenChange = useCallback(
-    (open: boolean) => {
-      if (open) {
-        setWorktreeCreateError(null);
-      }
-      handleOverlayOpenChange(setIsWorktreesOpen, open);
-    },
-    [handleOverlayOpenChange],
-  );
-
-  const openWorktrees = useCallback(() => {
-    setIsWorktreesOpen(true);
-    setIsCommandPaletteOpen(false);
-  }, []);
   openWorktreesRef.current = openWorktrees;
-
-  const toggleWorktrees = useCallback(() => {
-    handleWorktreesOpenChange(!isWorktreesOpen);
-  }, [handleWorktreesOpenChange, isWorktreesOpen]);
   toggleWorktreesRef.current = toggleWorktrees;
-
-  const toggleSessions = useCallback(() => {
-    handleSessionsOpenChange(!isSessionsOpen);
-  }, [handleSessionsOpenChange, isSessionsOpen]);
   toggleSessionsRef.current = toggleSessions;
-
-  const togglePorts = useCallback(() => {
-    handlePortsOpenChange(!isPortsOpen);
-  }, [handlePortsOpenChange, isPortsOpen]);
   togglePortsRef.current = togglePorts;
-
-  const toggleSecrets = useCallback(() => {
-    handleSecretsOpenChange(!isSecretsOpen);
-  }, [handleSecretsOpenChange, isSecretsOpen]);
   toggleSecretsRef.current = toggleSecrets;
 
   const openShellAt = useCallback((shellCwd: string, command?: string) => {
@@ -893,197 +789,38 @@ export const Terminal = () => {
   const pageBackground = effectiveTheme.colors.background ?? FALLBACK_TERMINAL_BACKGROUND_HEX;
   const syntaxHighlightColorScheme = isLightTerminalTheme(effectiveTheme) ? "light" : "dark";
 
-  const commandPaletteCommands = useMemo<CommandItem[]>(() => {
-    const togglePrefix = isMac ? "⌘" : "Ctrl+";
-    return [
-      {
-        id: "find",
-        label: "Find in terminal",
-        category: "Actions",
-        shortcut: `${togglePrefix}F`,
-        icon: <Search className="size-3.5" />,
-        action: openSearchOverlay,
-      },
-      {
-        id: "git-diff",
-        label: "View git diff",
-        category: "Actions",
-        shortcut: `${togglePrefix}G`,
-        icon: <FileDiff className="size-3.5" />,
-        action: openDiffViewer,
-      },
-      {
-        id: "automations",
-        label: "Automations",
-        category: "Actions",
-        shortcut: `${togglePrefix}J`,
-        icon: <CalendarClock className="size-3.5" />,
-        action: () => handleAutomationsOpenChange(true),
-      },
-      {
-        id: "worktrees",
-        label: "Git worktrees",
-        category: "Actions",
-        shortcut: `${togglePrefix}B`,
-        icon: <FolderGit2 className="size-3.5" />,
-        action: () => handleWorktreesOpenChange(true),
-      },
-      {
-        id: "sessions",
-        label: "Sessions",
-        category: "Actions",
-        shortcut: `${togglePrefix}I`,
-        icon: <SquareTerminal className="size-3.5" />,
-        action: () => handleSessionsOpenChange(true),
-      },
-      {
-        id: "ports",
-        label: "Dev ports",
-        category: "Actions",
-        shortcut: `${togglePrefix}Shift+D`,
-        icon: <Network className="size-3.5" />,
-        action: () => handlePortsOpenChange(true),
-      },
-      {
-        id: "secrets",
-        label: "Secrets",
-        category: "Actions",
-        shortcut: `${togglePrefix}Shift+S`,
-        icon: <Key className="size-3.5" />,
-        action: () => handleSecretsOpenChange(true),
-      },
-      {
-        id: "worktrees-create",
-        label: "Create git worktree",
-        category: "Actions",
-        shortcut: `${togglePrefix}Shift+B`,
-        icon: <Plus className="size-3.5" />,
-        action: () => {
-          void createWorktree({}, true);
-        },
-      },
-      {
-        id: "new-shell",
-        label: "Open new shell",
-        category: "Actions",
-        shortcut: "Alt+T",
-        icon: <Plus className="size-3.5" />,
-        action: openNewShell,
-      },
-      {
-        id: "font-size-up",
-        label: "Increase font size",
-        category: "Settings",
-        shortcut: `${togglePrefix}+`,
-        icon: <MonitorCog className="size-3.5" />,
-        action: () => handleFontSizeChange(activeFontSize + TERMINAL_FONT_SIZE_STEP_PX),
-      },
-      {
-        id: "font-size-down",
-        label: "Decrease font size",
-        category: "Settings",
-        shortcut: `${togglePrefix}-`,
-        icon: <MonitorCog className="size-3.5" />,
-        action: () => handleFontSizeChange(activeFontSize - TERMINAL_FONT_SIZE_STEP_PX),
-      },
-      {
-        id: "cursor-blink",
-        label: "Cursor blink",
-        category: "Settings",
-        checked: activeCursorBlink,
-        action: () => handleCursorBlinkChange(!activeCursorBlink),
-      },
-      {
-        id: "local-echo",
-        label: "Predictive typing",
-        category: "Settings",
-        checked: activeLocalEcho,
-        action: () => handleLocalEchoChange(!activeLocalEcho),
-      },
-      {
-        id: "scroll-on-input",
-        label: "Pin to bottom on input",
-        category: "Settings",
-        checked: activeScrollOnUserInput,
-        action: () => handleScrollOnUserInputChange(!activeScrollOnUserInput),
-      },
-      // Keep-awake mode mirrors the coffee dropdown; only offered where
-      // caffeinate exists (macOS), matching the toolbar control's gating.
-      // Custom automatic commands stay in the popover — they need text input.
-      ...(caffeinateSupported
-        ? (
-            [
-              { mode: "off", label: "Keep awake: off" },
-              { mode: "on", label: "Keep awake: on" },
-              { mode: "automatic", label: "Keep awake: automatic" },
-            ] as const
-          ).map(({ mode, label }) => ({
-            id: `keep-awake:${mode}`,
-            label,
-            category: "Keep awake",
-            icon: <Coffee className="size-3.5" />,
-            checked: caffeinateMode === mode,
-            action: () => handleCaffeinateModeChange(mode),
-          }))
-        : []),
-      ...TERMINAL_CURSOR_STYLES.map((option) => ({
-        id: `cursor:${option.id}`,
-        label: option.name,
-        category: "Cursor",
-        checked: option.id === activeCursorStyle,
-        action: () => handleCursorStyleChange(option.id),
-      })),
-      ...TERMINAL_FONTS.map((font) => ({
-        id: `font:${font.id}`,
-        label: font.name,
-        category: "Font",
-        checked: font.id === activeFontId,
-        action: () => handleFontChange(font.id),
-      })),
-      ...TERMINAL_THEMES.map((theme) => ({
-        id: `theme:${theme.id}`,
-        label: theme.name,
-        category: "Theme",
-        checked: theme.id === activeThemeId,
-        action: () => handleThemeChange(theme.id),
-      })),
-    ];
-  }, [
-    isMac,
-    handleThemeChange,
-    handleFontChange,
-    openSearchOverlay,
-    openDiffViewer,
-    handleAutomationsOpenChange,
-    handleWorktreesOpenChange,
-    handleSessionsOpenChange,
-    handlePortsOpenChange,
-    handleSecretsOpenChange,
-    handleCursorStyleChange,
+  const {commandPaletteCommands, handleCommandPaletteHighlight} = useTerminalCommandPalette({
     activeCursorBlink,
-    handleCursorBlinkChange,
-    activeLocalEcho,
-    handleLocalEchoChange,
-    activeFontSize,
-    handleFontSizeChange,
-    activeScrollOnUserInput,
-    handleScrollOnUserInputChange,
-    activeThemeId,
-    activeFontId,
     activeCursorStyle,
-    caffeinateSupported,
+    activeFontId,
+    activeFontSize,
+    activeLocalEcho,
+    activeScrollOnUserInput,
+    activeThemeId,
     caffeinateMode,
+    caffeinateSupported,
+    createWorktree,
+    handleAutomationsOpenChange,
     handleCaffeinateModeChange,
+    handleCursorBlinkChange,
+    handleCursorStyleChange,
+    handleFontChange,
+    handleFontSizeChange,
+    handleLocalEchoChange,
+    handlePortsOpenChange,
+    handleScrollOnUserInputChange,
+    handleSecretsOpenChange,
+    handleSessionsOpenChange,
+    handleThemeChange,
+    handleWorktreesOpenChange,
+    isMac,
+    openDiffViewer,
     openNewShell,
-  ]);
-
-  const handleCommandPaletteHighlight = useCallback((item: CommandItem | null) => {
-    const itemId = item?.id ?? "";
-    setPreviewThemeId(itemId.startsWith("theme:") ? itemId.slice("theme:".length) : null);
-    setPreviewFontId(itemId.startsWith("font:") ? itemId.slice("font:".length) : null);
-    const cursorStyleId = itemId.startsWith("cursor:") ? itemId.slice("cursor:".length) : null;
-    setPreviewCursorStyle(isTerminalCursorStyle(cursorStyleId) ? cursorStyleId : null);
-  }, []);
+    openSearchOverlay,
+    setPreviewCursorStyle,
+    setPreviewFontId,
+    setPreviewThemeId,
+  });
 
   return (
     <div
