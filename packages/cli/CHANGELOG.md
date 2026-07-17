@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.8
+
+### Patch Changes
+
+- 124771e: Preserve trackpad wheel magnitude for mouse-aware terminal applications, making nested TUI scrolling respond at native-like speed without changing ordinary LocalTerm scrollback.
+  - @monotykamary/localterm-server@2.66.8
+
 ## 2.66.7
 
 ### Patch Changes
