@@ -1,7 +1,4 @@
-import {
-  GIT_DIFF_WATCHER_EVENT_NAMES,
-  type GitRefEventName,
-} from "./git-diff-watcher.js";
+import { GIT_DIFF_WATCHER_EVENT_NAMES, type GitRefEventName } from "./git-diff-watcher.js";
 import { SessionClientHub } from "./session-client-hub.js";
 import type { SessionEventName } from "./session-event-manager.js";
 import type { ManagedSession } from "./session-manager.js";

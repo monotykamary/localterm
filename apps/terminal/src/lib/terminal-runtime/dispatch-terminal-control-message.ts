@@ -1,7 +1,4 @@
-import {
-  NOTIFICATION_TAG_PREFIX,
-  NOTIFICATION_TITLE,
-} from "@/lib/constants";
+import { NOTIFICATION_TAG_PREFIX, NOTIFICATION_TITLE } from "@/lib/constants";
 import type { TerminalTheme } from "@/lib/terminal-themes";
 import type { CaffeinateMode } from "@/components/keep-awake-menu";
 import { shouldSuppressSessionNotification } from "@/utils/should-suppress-session-notification";

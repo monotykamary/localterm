@@ -1,7 +1,4 @@
-import {
-  MAX_CONCURRENT_SESSIONS,
-  SESSION_ACTIVITY_WINDOW_MS,
-} from "./constants.js";
+import { MAX_CONCURRENT_SESSIONS, SESSION_ACTIVITY_WINDOW_MS } from "./constants.js";
 import type { ManagedSession, SessionActivityState } from "./session-manager.js";
 
 export class SessionLifecyclePolicy {

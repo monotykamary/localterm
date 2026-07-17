@@ -808,11 +808,7 @@ export const useTerminalRuntime = ({
         if (closeAction.type === "reconnect") {
           reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
         } else if (closeAction.type === "connection-lost") {
-          markConnectionLost(
-            closeAction.closeCode,
-            closeAction.closeReason,
-            closeAction.wasClean,
-          );
+          markConnectionLost(closeAction.closeCode, closeAction.closeReason, closeAction.wasClean);
         } else {
           setConsecutiveFailures((previous) => previous + 1);
           reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);

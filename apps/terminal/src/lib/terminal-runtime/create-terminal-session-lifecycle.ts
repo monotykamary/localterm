@@ -167,8 +167,7 @@ export const createTerminalSessionLifecycle = ({
         syncSessionIdQueryParam(sessionId);
       }
       return {
-        isSwitch:
-          didSpawnFreshSession || (priorSessionId !== null && sessionId !== priorSessionId),
+        isSwitch: didSpawnFreshSession || (priorSessionId !== null && sessionId !== priorSessionId),
         priorSessionId,
       };
     },
