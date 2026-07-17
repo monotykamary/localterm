@@ -184,6 +184,7 @@ export const createTerminalSurface = ({
       }
     },
     dispose: () => {
+      searchResultsDisposable.dispose();
       mouseWheelMagnitudeDisposable?.dispose();
       delete windowProperties[LOCALTERM_PANE_TEXT_PROPERTY];
       delete windowProperties[LOCALTERM_MOUSE_CELLS_PROPERTY];
