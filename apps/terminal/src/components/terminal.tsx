@@ -5,25 +5,16 @@ import {WebglAddon} from "@xterm/addon-webgl";
 import {Terminal as XtermTerminal} from "@xterm/xterm";
 
 import {
-  Binary,
   CalendarClock,
-  Check,
-  ChevronDown,
-  ChevronUp,
   Coffee,
-  Command,
-  Copy,
   FileDiff,
   FolderGit2,
-  ImageIcon,
   Key,
-  Keyboard,
   MonitorCog,
   Network,
   Plus,
   Search,
   SquareTerminal,
-  X,
 } from "lucide-react";
 import {
   useCallback,
@@ -35,49 +26,14 @@ import {
 import {OnScreenKeyboard} from "@/components/on-screen-keyboard/on-screen-keyboard";
 import {useDaemonSettings} from "@/hooks/use-daemon-settings";
 import {useDeviceTier} from "@/hooks/use-device-tier";
-import {
-  PR_DISPLAY_STATE_LABELS,
-  PR_STATE_ICONS,
-  PR_STATE_STYLES,
-  resolvePrDisplayState,
-} from "@/lib/pr-state";
-import {cn} from "@/lib/utils";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import {PR_STATE_ICONS, resolvePrDisplayState} from "@/lib/pr-state";
 import {Badge} from "@/components/ui/badge";
-import {Button} from "@/components/ui/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-  InputGroupText,
-} from "@/components/ui/input-group";
-import {Spinner} from "@/components/ui/spinner";
 import {ToastProvider, Toaster} from "@/components/ui/toast";
-import {AutomationsButton} from "@/components/automations-menu";
-import {AutomationsModal} from "@/components/automations-modal";
-import {CommandPalette, type CommandItem} from "@/components/command-palette";
-import {DiffViewer} from "@/components/diff-viewer";
-import {KeepAwakeMenu, type CaffeinateMode} from "@/components/keep-awake-menu";
-import {PortsButton} from "@/components/ports-menu";
-import {PortsModal} from "@/components/ports-modal";
-import {QrButton} from "@/components/qr-button";
-import {QrModal} from "@/components/qr-modal";
-import {SecretsButton} from "@/components/secrets-menu";
-import {SecretsModal} from "@/components/secrets-modal";
-import {SessionsButton} from "@/components/sessions-menu";
-import {SessionsModal} from "@/components/sessions-modal";
-import {SettingsMenu} from "@/components/settings-menu";
-import {WorktreesButton} from "@/components/worktrees-menu";
-import {WorktreesModal} from "@/components/worktrees-modal";
+import {AmbientActionSearchToolbar} from "@/components/ambient-action-search-toolbar";
+import {type CommandItem} from "@/components/command-palette";
+import {ConnectionStatusDialog} from "@/components/connection-status-dialog";
+import {type CaffeinateMode} from "@/components/keep-awake-menu";
+import {TerminalOverlays} from "@/components/terminal-overlays";
 import {useGitBranchInfo} from "@/hooks/use-git-branch-info";
 import {useGitDiffSummary} from "@/hooks/use-git-diff-summary";
 import {useScreenWakeLock} from "@/hooks/use-screen-wake-lock";
@@ -112,7 +68,6 @@ import {triggerHapticFeedback} from "@/utils/haptic-feedback";
 
 import {detectIsMacPlatform} from "@/utils/detect-is-mac-platform";
 import {detectLikelyKeepAwakeSupported} from "@/utils/detect-likely-keep-awake-supported";
-import {formatDiffCount} from "@/utils/format-diff-count";
 import {shellQuoteArg} from "@/utils/shell-quote-arg";
 import {buildFileUrl} from "@/utils/build-file-url";
 
@@ -128,8 +83,6 @@ import {computePtyViewportOverlay} from "@/utils/compute-pty-viewport-overlay";
 import {isHerdrProcess} from "@/utils/is-herdr-process";
 
 import {isLightTerminalTheme} from "@/utils/is-light-terminal-theme";
-
-import {ON_SCREEN_KEYBOARD_TOGGLE_SELECTOR} from "@/lib/on-screen-keyboard-selectors";
 
 import "@xterm/xterm/css/xterm.css";
 
@@ -1197,507 +1150,225 @@ export const Terminal = () => {
               : `disconnected · code ${exitInfo.closeCode}`}
           </Badge>
         ) : null}
-        <div
-          className={cn(
-            "absolute right-0 top-0 z-10 flex flex-col items-end pr-3 pt-1",
-            shouldEnableAmbientToolbarPointerEvents ? "pointer-events-auto" : "pointer-events-none",
-          )}
-          onMouseEnter={isTouchDevice ? undefined : handleToolbarAreaEnter}
-          onMouseLeave={isTouchDevice ? undefined : handleToolbarAreaLeave}
-        >
-          <div
-            aria-hidden="true"
-            className={cn(
-              "mr-0.5 h-[2px] w-5 rounded-full bg-muted-foreground/25 transition-opacity duration-150",
-              shouldShowToolbarHandle
-                ? "pointer-events-auto opacity-100"
-                : "pointer-events-none opacity-0",
-            )}
-          />
-          {!isSearchOpen && (
-            <div
-              ref={toolbarRef}
-              role="toolbar"
-              aria-label="terminal actions"
-              data-terminal-actions-toolbar
-              className={cn(
-                "mt-1 flex max-w-[calc(100dvw-1.5rem)] items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md",
-                "transition-[opacity,transform] duration-200 ease-snappy",
-                isTouchDevice &&
-                  "touch-pan-x overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-                shouldShowAmbientToolbar
-                  ? "translate-y-0 opacity-100"
-                  : "pointer-events-none -translate-y-1 opacity-0",
-              )}
-              // The settings/automations popovers portal their DOM to <body> but
-              // their React events still bubble here; only swallow focus for
-              // events originating in the toolbar's own DOM subtree, or popover
-              // inputs become unfocusable and typing gets yanked to the terminal.
-              onMouseDown={(event) => {
-                if (event.currentTarget.contains(event.target as Node)) event.preventDefault();
-              }}
-              onClickCapture={(event) => {
-                if (!isTouchDevice || !isOnScreenKeyboardOpen) return;
-                if (
-                  event.target instanceof Element &&
-                  event.target.closest(ON_SCREEN_KEYBOARD_TOGGLE_SELECTOR)
-                ) {
-                  return;
+        <AmbientActionSearchToolbar
+          toolbarRef={toolbarRef}
+          display={{
+            deviceTier,
+            isActionsMenuOpen,
+            isOnScreenKeyboardOpen,
+            isSearchOpen,
+            isTouchDevice,
+            isToolbarVisible,
+            shouldEnablePointerEvents: shouldEnableAmbientToolbarPointerEvents,
+            shouldShowAmbientToolbar,
+            shouldShowGitMetadata,
+            shouldShowToolbarHandle,
+          }}
+          actions={{
+            onAutomationsOpen: () => handleAutomationsOpenChange(true),
+            onCloseOnScreenKeyboard: closeOnScreenKeyboard,
+            onCommandPaletteToggle: () => toggleCommandPaletteRef.current?.(),
+            onMouseEnter: handleToolbarAreaEnter,
+            onMouseLeave: handleToolbarAreaLeave,
+            onPasteImage: pickAndPasteImage,
+            onPortsOpen: () => handlePortsOpenChange(true),
+            onQrOpen: () => handleQrOpenChange(true),
+            onRefocusTerminal: () => refocusTerminalRef.current?.(),
+            onSecretsOpen: () => handleSecretsOpenChange(true),
+            onSessionsOpen: () => handleSessionsOpenChange(true),
+            onToggleActionsMenu: toggleActionsMenu,
+            onToggleOnScreenKeyboard: toggleOnScreenKeyboard,
+            onWorktreesOpen: () => handleWorktreesOpenChange(true),
+          }}
+          gitMetadata={{
+            branchPr,
+            branchPrDisplayState,
+            BranchPrIcon,
+            diffSummary,
+            hasDiff,
+            hasToolbarIndicator,
+            isMac,
+            onOpenDiffViewer: openDiffViewer,
+          }}
+          search={{
+            inputRef: searchInputRef,
+            matchLabel,
+            onClose: closeSearch,
+            onFindNext: findNextMatch,
+            onFindPrevious: findPreviousMatch,
+            onInputChange: handleSearchInputChange,
+            onKeyDown: handleSearchKeyDown,
+            onOpen: openSearchOverlay,
+            query: searchQuery,
+            resultCount: searchResults.resultCount,
+          }}
+          settingsMenu={{
+            themeId: activeThemeId,
+            onThemeChange: handleThemeChange,
+            onThemePreview: setPreviewThemeId,
+            customThemes: activeCustomThemes,
+            onImportTheme: handleImportTheme,
+            onDeleteTheme: handleDeleteCustomTheme,
+            fontId: activeFontId,
+            onFontChange: handleFontChange,
+            onFontPreview: setPreviewFontId,
+            customFontFamily: activeCustomFontFamily,
+            onCustomFontFamilyChange: handleCustomFontFamilyChange,
+            nerdFontEnabled: activeNerdFontEnabled,
+            onNerdFontEnabledChange: handleNerdFontEnabledChange,
+            ligaturesEnabled: activeLigaturesEnabled,
+            onLigaturesEnabledChange: handleLigaturesEnabledChange,
+            muteEmojiColors: activeMuteEmojiColors,
+            onMuteEmojiColorsChange: handleMuteEmojiColorsChange,
+            fontSize: activeFontSize,
+            onFontSizeChange: handleFontSizeChange,
+            lineHeight: activeLineHeight,
+            onLineHeightChange: handleLineHeightChange,
+            cursorStyle: activeCursorStyle,
+            onCursorStyleChange: handleCursorStyleChange,
+            onCursorStylePreview: setPreviewCursorStyle,
+            cursorBlink: activeCursorBlink,
+            onCursorBlinkChange: handleCursorBlinkChange,
+            localEcho: activeLocalEcho,
+            onLocalEchoChange: handleLocalEchoChange,
+            mobileResume: activeMobileResume,
+            onMobileResumeChange: handleMobileResumeChange,
+            scrollback: activeScrollback,
+            onScrollbackChange: handleScrollbackChange,
+            scrollOnUserInput: activeScrollOnUserInput,
+            onScrollOnUserInputChange: handleScrollOnUserInputChange,
+            cdpPort,
+            cdpStatus,
+            cdpConnecting,
+            onCdpPortChange: handleCdpPortChange,
+            onCdpConnect: handleCdpConnect,
+            onOpenInspect: handleOpenInspect,
+            graceSeconds,
+            onGraceSecondsChange: handleGraceSecondsChange,
+            workspaceRestore,
+            onWorkspaceRestoreChange: handleWorkspaceRestoreChange,
+            paddingX: activePaddingX,
+            onPaddingXChange: handlePaddingXChange,
+            paddingY: activePaddingY,
+            onPaddingYChange: handlePaddingYChange,
+            defaultCwd: activeDefaultCwd,
+            onDefaultCwdChange: handleDefaultCwdChange,
+            defaultShell: activeDefaultShell,
+            onDefaultShellChange: handleDefaultShellChange,
+            detectedDefaultShell,
+            notificationsPermission,
+            onNotificationsPermissionRequest: handleNotificationsPermissionRequest,
+            sessionInfo,
+            updateAvailable,
+            latestVersion: latestUpdateVersion,
+            onOpenChange: handleSettingsOpenChange,
+            onClose: refocusTerminalRef.current ?? undefined,
+          }}
+          keepAwakeMenu={
+            caffeinateSupported
+              ? {
+                  mode: caffeinateMode,
+                  active: caffeinateActive,
+                  activityGate: caffeinateActivityGate,
+                  peerKeepAwake: caffeinatePeerKeepAwake,
+                  peerActive: caffeinatePeerActive,
+                  batteryThreshold: caffeinateBatteryThreshold,
+                  defaultCommands: caffeinateDefaultCommands,
+                  commands: caffeinateCommands,
+                  activeTrigger: caffeinateActiveTrigger,
+                  onModeChange: handleCaffeinateModeChange,
+                  onCommandsChange: handleCaffeinateCommandsChange,
+                  onActivityGateChange: handleCaffeinateActivityGateChange,
+                  onPeerKeepAwakeChange: handleCaffeinatePeerKeepAwakeChange,
+                  onBatteryThresholdChange: handleCaffeinateBatteryThresholdChange,
+                  onPopoverOpenChange: handleKeepAwakePopoverOpenChange,
+                  onClose: refocusTerminalRef.current ?? undefined,
                 }
-                closeOnScreenKeyboard();
-              }}
-              onKeyDown={(event) => {
-                if (event.currentTarget.contains(event.target as Node)) {
-                  refocusTerminalRef.current?.();
-                }
-              }}
-            >
-              {/* With an indicator (working changes or a PR) showing, the action
-                  buttons collapse behind the always-visible indicator and expand
-                  on hover via the 0fr -> 1fr grid-column transition. */}
-              <div
-                className={cn(
-                  "grid",
-                  isTouchDevice ? "shrink-0" : "min-w-0",
-                  (hasToolbarIndicator || isTouchDevice) &&
-                    "transition-[grid-template-columns] duration-200 ease-snappy",
-                  isTouchDevice
-                    ? isActionsMenuOpen
-                      ? "grid-cols-[1fr]"
-                      : "grid-cols-[0fr]"
-                    : hasToolbarIndicator && !isToolbarVisible
-                      ? "grid-cols-[0fr]"
-                      : "grid-cols-[1fr]",
-                )}
-              >
-                <div
-                  className={cn(
-                    "flex min-w-0 items-center gap-0.5 overflow-hidden",
-                    (hasToolbarIndicator || isTouchDevice) &&
-                      "transition-opacity duration-200 ease-snappy",
-                    isTouchDevice
-                      ? isActionsMenuOpen
-                        ? "opacity-100"
-                        : "pointer-events-none opacity-0"
-                      : hasToolbarIndicator && !isToolbarVisible
-                        ? "pointer-events-none opacity-0"
-                        : "opacity-100",
-                  )}
-                >
-                  <SettingsMenu
-                    themeId={activeThemeId}
-                    onThemeChange={handleThemeChange}
-                    onThemePreview={setPreviewThemeId}
-                    customThemes={activeCustomThemes}
-                    onImportTheme={handleImportTheme}
-                    onDeleteTheme={handleDeleteCustomTheme}
-                    fontId={activeFontId}
-                    onFontChange={handleFontChange}
-                    onFontPreview={setPreviewFontId}
-                    customFontFamily={activeCustomFontFamily}
-                    onCustomFontFamilyChange={handleCustomFontFamilyChange}
-                    nerdFontEnabled={activeNerdFontEnabled}
-                    onNerdFontEnabledChange={handleNerdFontEnabledChange}
-                    ligaturesEnabled={activeLigaturesEnabled}
-                    onLigaturesEnabledChange={handleLigaturesEnabledChange}
-                    muteEmojiColors={activeMuteEmojiColors}
-                    onMuteEmojiColorsChange={handleMuteEmojiColorsChange}
-                    fontSize={activeFontSize}
-                    onFontSizeChange={handleFontSizeChange}
-                    lineHeight={activeLineHeight}
-                    onLineHeightChange={handleLineHeightChange}
-                    cursorStyle={activeCursorStyle}
-                    onCursorStyleChange={handleCursorStyleChange}
-                    onCursorStylePreview={setPreviewCursorStyle}
-                    cursorBlink={activeCursorBlink}
-                    onCursorBlinkChange={handleCursorBlinkChange}
-                    localEcho={activeLocalEcho}
-                    onLocalEchoChange={handleLocalEchoChange}
-                    mobileResume={activeMobileResume}
-                    onMobileResumeChange={handleMobileResumeChange}
-                    scrollback={activeScrollback}
-                    onScrollbackChange={handleScrollbackChange}
-                    scrollOnUserInput={activeScrollOnUserInput}
-                    onScrollOnUserInputChange={handleScrollOnUserInputChange}
-                    cdpPort={cdpPort}
-                    cdpStatus={cdpStatus}
-                    cdpConnecting={cdpConnecting}
-                    onCdpPortChange={handleCdpPortChange}
-                    onCdpConnect={handleCdpConnect}
-                    onOpenInspect={handleOpenInspect}
-                    graceSeconds={graceSeconds}
-                    onGraceSecondsChange={handleGraceSecondsChange}
-                    workspaceRestore={workspaceRestore}
-                    onWorkspaceRestoreChange={handleWorkspaceRestoreChange}
-                    paddingX={activePaddingX}
-                    onPaddingXChange={handlePaddingXChange}
-                    paddingY={activePaddingY}
-                    onPaddingYChange={handlePaddingYChange}
-                    defaultCwd={activeDefaultCwd}
-                    onDefaultCwdChange={handleDefaultCwdChange}
-                    defaultShell={activeDefaultShell}
-                    onDefaultShellChange={handleDefaultShellChange}
-                    detectedDefaultShell={detectedDefaultShell}
-                    notificationsPermission={notificationsPermission}
-                    onNotificationsPermissionRequest={handleNotificationsPermissionRequest}
-                    sessionInfo={sessionInfo}
-                    updateAvailable={updateAvailable}
-                    latestVersion={latestUpdateVersion}
-                    onOpenChange={handleSettingsOpenChange}
-                    onClose={refocusTerminalRef.current ?? undefined}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={openSearchOverlay}
-                    aria-label="find in terminal"
-                    className="hover:text-foreground"
-                  >
-                    <Search />
-                  </Button>
-                  {deviceTier !== "desktop" ? (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={pickAndPasteImage}
-                      aria-label="paste or pick an image into the terminal"
-                      title="Paste or pick an image into the terminal"
-                      className="hover:text-foreground"
-                    >
-                      <ImageIcon />
-                    </Button>
-                  ) : null}
-                  {isTouchDevice ? (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        toggleCommandPaletteRef.current?.();
-                      }}
-                      aria-label="command palette"
-                      className="hover:text-foreground"
-                    >
-                      <Command />
-                    </Button>
-                  ) : null}
-                  {deviceTier !== "desktop" ? (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      data-on-screen-keyboard-toggle
-                      onClick={toggleOnScreenKeyboard}
-                      aria-label="toggle on-screen keyboard"
-                      className={cn(
-                        "hover:text-foreground",
-                        isOnScreenKeyboardOpen && "text-primary",
-                      )}
-                    >
-                      <Keyboard />
-                    </Button>
-                  ) : null}
-                  <AutomationsButton
-                    onOpen={() => handleAutomationsOpenChange(true)}
-                    isMac={isMac}
-                  />
-                  <WorktreesButton onOpen={() => handleWorktreesOpenChange(true)} isMac={isMac} />
-                  <SessionsButton onOpen={() => handleSessionsOpenChange(true)} isMac={isMac} />
-                  <PortsButton onOpen={() => handlePortsOpenChange(true)} />
-                  <SecretsButton onOpen={() => handleSecretsOpenChange(true)} />
-                  {caffeinateSupported ? (
-                    <KeepAwakeMenu
-                      mode={caffeinateMode}
-                      active={caffeinateActive}
-                      activityGate={caffeinateActivityGate}
-                      peerKeepAwake={caffeinatePeerKeepAwake}
-                      peerActive={caffeinatePeerActive}
-                      batteryThreshold={caffeinateBatteryThreshold}
-                      defaultCommands={caffeinateDefaultCommands}
-                      commands={caffeinateCommands}
-                      activeTrigger={caffeinateActiveTrigger}
-                      onModeChange={handleCaffeinateModeChange}
-                      onCommandsChange={handleCaffeinateCommandsChange}
-                      onActivityGateChange={handleCaffeinateActivityGateChange}
-                      onPeerKeepAwakeChange={handleCaffeinatePeerKeepAwakeChange}
-                      onBatteryThresholdChange={handleCaffeinateBatteryThresholdChange}
-                      onPopoverOpenChange={handleKeepAwakePopoverOpenChange}
-                      onClose={refocusTerminalRef.current ?? undefined}
-                    />
-                  ) : null}
-                  <QrButton onOpen={() => handleQrOpenChange(true)} />
-                </div>
-              </div>
-              {isTouchDevice ||
-              (shouldShowGitMetadata &&
-                ((hasDiff && diffSummary !== null) || branchPrDisplayState)) ? (
-                <div className="flex shrink-0 items-center">
-                  {shouldShowGitMetadata && hasDiff && diffSummary !== null ? (
-                    <button
-                      type="button"
-                      onClick={openDiffViewer}
-                      aria-label={`view git diff: ${diffSummary.additions} additions, ${diffSummary.deletions} deletions${diffSummary.binaries > 0 ? `, ${diffSummary.binaries} binary files changed` : ""}`}
-                      title={`${isMac ? "⌘" : "Ctrl+"}G`}
-                      className="flex h-8 items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 font-mono text-xs tabular-nums outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                    >
-                      <span className="text-[var(--localterm-green)]">
-                        +{formatDiffCount(diffSummary.additions)}
-                      </span>
-                      <span className="text-[var(--localterm-red)]">
-                        −{formatDiffCount(diffSummary.deletions)}
-                      </span>
-                      {diffSummary.binaries > 0 ? (
-                        <span className="flex items-center gap-0.5 text-muted-foreground">
-                          <Binary className="size-3" aria-hidden="true" />
-                          {diffSummary.binaries}
-                        </span>
-                      ) : null}
-                    </button>
-                  ) : null}
-                  {shouldShowGitMetadata && branchPr && branchPrDisplayState && BranchPrIcon ? (
-                    <button
-                      type="button"
-                      onClick={openDiffViewer}
-                      aria-label={`view pull request diff: PR #${branchPr.number} (${PR_DISPLAY_STATE_LABELS[branchPrDisplayState]})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
-                      title={`PR #${branchPr.number} (${PR_DISPLAY_STATE_LABELS[branchPrDisplayState]})${branchPr.title ? ` — ${branchPr.title}` : ""}`}
-                      className={cn(
-                        "flex h-8 items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 font-mono text-xs tabular-nums outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
-                        PR_STATE_STYLES[branchPrDisplayState].text,
-                      )}
-                    >
-                      <BranchPrIcon className="size-3.5" aria-hidden="true" />
-                      <span>#{branchPr.number}</span>
-                    </button>
-                  ) : null}
-                  {isTouchDevice ? (
-                    <button
-                      type="button"
-                      data-on-screen-keyboard-actions-toggle
-                      onClick={toggleActionsMenu}
-                      aria-label={
-                        isActionsMenuOpen ? "Hide terminal actions" : "Show terminal actions"
-                      }
-                      aria-expanded={isActionsMenuOpen}
-                      className="flex h-8 w-8 items-center justify-center rounded-[min(var(--radius-md),10px)] outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                    >
-                      <ChevronDown
-                        className={cn(
-                          "size-4 transition-transform duration-200 ease-snappy",
-                          isActionsMenuOpen ? "rotate-180" : "rotate-0",
-                        )}
-                        aria-hidden="true"
-                      />
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          )}
-          {isSearchOpen && (
-            <InputGroup
-              role="search"
-              aria-label="find in terminal"
-              className="mt-1 w-80 border-border/60 bg-background/70 text-muted-foreground shadow-xs backdrop-blur-md dark:bg-background/70"
-            >
-              <InputGroupInput
-                ref={searchInputRef}
-                type="search"
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                value={searchQuery}
-                onChange={handleSearchInputChange}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="Find"
-                aria-label="find query"
-                className="text-xs"
-              />
-              <InputGroupAddon align="inline-end">
-                <InputGroupText
-                  role="status"
-                  aria-label="match count"
-                  className="text-xs tabular-nums"
-                >
-                  {matchLabel}
-                </InputGroupText>
-                <InputGroupButton
-                  size="icon-xs"
-                  onClick={() => findPreviousMatch(searchQuery)}
-                  disabled={searchResults.resultCount === 0}
-                  aria-label="previous match"
-                >
-                  <ChevronUp />
-                </InputGroupButton>
-                <InputGroupButton
-                  size="icon-xs"
-                  onClick={() => findNextMatch(searchQuery)}
-                  disabled={searchResults.resultCount === 0}
-                  aria-label="next match"
-                >
-                  <ChevronDown />
-                </InputGroupButton>
-                <InputGroupButton size="icon-xs" onClick={closeSearch} aria-label="close find">
-                  <X />
-                </InputGroupButton>
-              </InputGroupAddon>
-            </InputGroup>
-          )}
-        </div>
+              : null
+          }
+        />
       </div>
 
-      <CommandPalette
-        open={isCommandPaletteOpen}
-        onClose={closeCommandPalette}
-        commands={commandPaletteCommands}
-        onActiveItemChange={handleCommandPaletteHighlight}
-      />
-
-      <DiffViewer
-        open={isDiffViewerOpen}
-        cwd={liveCwd}
-        syntaxHighlightColorScheme={syntaxHighlightColorScheme}
-        branchInfo={branchInfo}
-        gitDirtyVersion={gitDirtyVersion}
-        onClose={closeDiffViewer}
-        onSendToTerminal={sendDiffReviewToTerminal}
-        onOpenInEditor={(filePath) => {
-          if (!liveCwd) return;
-          openShellAt(liveCwd, `nvim ${shellQuoteArg(filePath)} && exit`);
+      <TerminalOverlays
+        commandPalette={{
+          open: isCommandPaletteOpen,
+          onClose: closeCommandPalette,
+          commands: commandPaletteCommands,
+          onActiveItemChange: handleCommandPaletteHighlight,
         }}
-        onOpenImage={(filePath) => {
-          if (!liveCwd) return;
-          window.open(buildFileUrl(liveCwd, filePath), "_blank", "noopener,noreferrer");
+        diffViewer={{
+          open: isDiffViewerOpen,
+          cwd: liveCwd,
+          syntaxHighlightColorScheme,
+          branchInfo,
+          gitDirtyVersion,
+          onClose: closeDiffViewer,
+          onSendToTerminal: sendDiffReviewToTerminal,
+          onOpenInEditor: (filePath) => {
+            if (!liveCwd) return;
+            openShellAt(liveCwd, `nvim ${shellQuoteArg(filePath)} && exit`);
+          },
+          onOpenImage: (filePath) => {
+            if (!liveCwd) return;
+            window.open(buildFileUrl(liveCwd, filePath), "_blank", "noopener,noreferrer");
+          },
+          onRefreshBranchInfo: refreshBranchInfo,
+          onDiffSummaryUpdate: setGitDiffSummary,
         }}
-        onRefreshBranchInfo={refreshBranchInfo}
-        onDiffSummaryUpdate={setGitDiffSummary}
+        automationsModal={{
+          open: isAutomationsOpen,
+          onClose: () => handleAutomationsOpenChange(false),
+          automations,
+          onAutomationsLoaded: setAutomations,
+          defaultCwd: liveCwd,
+          isMac,
+        }}
+        worktreesModal={{
+          open: isWorktreesOpen,
+          cwd: liveCwd,
+          isMac,
+          createError: worktreeCreateError,
+          onCreate: createWorktree,
+          onDismissCreateError: () => setWorktreeCreateError(null),
+          onClose: () => handleWorktreesOpenChange(false),
+          onOpenShell: openShellAt,
+        }}
+        sessionsModal={{
+          open: isSessionsOpen,
+          liveSessionIdRef,
+          previousSessionIdRef,
+          switchSessionRef,
+          isTouchDevice,
+          onOpenNewShell: openNewShell,
+          onClose: () => handleSessionsOpenChange(false),
+        }}
+        portsModal={{
+          open: isPortsOpen,
+          isTouchDevice,
+          onClose: () => handlePortsOpenChange(false),
+        }}
+        secretsModal={{
+          open: isSecretsOpen,
+          onClose: () => handleSecretsOpenChange(false),
+        }}
+        qrModal={{
+          open: isQrOpen,
+          liveSessionIdRef,
+          switchSessionRef,
+          peerAttachedRef: qrPeerAttachedRef,
+          onClose: () => handleQrOpenChange(false),
+        }}
       />
 
-      <AutomationsModal
-        open={isAutomationsOpen}
-        onClose={() => handleAutomationsOpenChange(false)}
-        automations={automations}
-        onAutomationsLoaded={setAutomations}
-        defaultCwd={liveCwd}
-        isMac={isMac}
-      />
-
-      <WorktreesModal
-        open={isWorktreesOpen}
-        cwd={liveCwd}
-        isMac={isMac}
-        createError={worktreeCreateError}
-        onCreate={createWorktree}
-        onDismissCreateError={() => setWorktreeCreateError(null)}
-        onClose={() => handleWorktreesOpenChange(false)}
-        onOpenShell={openShellAt}
-      />
-
-      <SessionsModal
-        open={isSessionsOpen}
-        liveSessionIdRef={liveSessionIdRef}
-        previousSessionIdRef={previousSessionIdRef}
-        switchSessionRef={switchSessionRef}
-        isTouchDevice={isTouchDevice}
+      <ConnectionStatusDialog
+        open={isModalOpen}
+        exitInfo={exitInfo}
+        hasCopiedRestartCommand={hasCopiedRestartCommand}
+        isRetryingConnection={isRetryingConnection}
+        onCopyRestartCommand={copyRestartCommand}
         onOpenNewShell={openNewShell}
-        onClose={() => handleSessionsOpenChange(false)}
+        onRetryConnection={triggerManualReconnect}
       />
-
-      <PortsModal
-        open={isPortsOpen}
-        isTouchDevice={isTouchDevice}
-        onClose={() => handlePortsOpenChange(false)}
-      />
-
-      <SecretsModal open={isSecretsOpen} onClose={() => handleSecretsOpenChange(false)} />
-
-      <QrModal
-        open={isQrOpen}
-        liveSessionIdRef={liveSessionIdRef}
-        switchSessionRef={switchSessionRef}
-        peerAttachedRef={qrPeerAttachedRef}
-        onClose={() => handleQrOpenChange(false)}
-      />
-
-      <AlertDialog open={isModalOpen}>
-        <AlertDialogContent>
-          {exitInfo !== null ? (
-            exitInfo.reason === "shell-exited" ? (
-              <>
-                <AlertDialogHeader>
-                  <AlertDialogTitle className="text-sm">Shell ended</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {exitInfo.exitCode === null || exitInfo.exitCode === 0
-                      ? "Open a new shell to keep going, or close this tab."
-                      : `Exit code ${exitInfo.exitCode}. Open a new shell to keep going.`}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogAction onClick={openNewShell}>New shell</AlertDialogAction>
-                </AlertDialogFooter>
-              </>
-            ) : (
-              <>
-                <AlertDialogHeader>
-                  <AlertDialogTitle className="flex items-center gap-2 text-sm">
-                    <Spinner aria-hidden="true" role="presentation" aria-label={undefined} />
-                    Connection lost
-                  </AlertDialogTitle>
-                  <AlertDialogDescription>
-                    The browser lost its connection to the localterm daemon (close code{" "}
-                    {exitInfo.closeCode}
-                    {exitInfo.closeReason ? ` · ${exitInfo.closeReason}` : ""}). Reconnecting spawns
-                    a fresh shell. The previous one can't be reattached.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogAction
-                    onClick={triggerManualReconnect}
-                    disabled={isRetryingConnection}
-                  >
-                    {isRetryingConnection ? <Spinner data-icon="inline-start" /> : null}
-                    Reconnect
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </>
-            )
-          ) : (
-            <>
-              <AlertDialogHeader>
-                <AlertDialogTitle className="flex items-center gap-2 text-sm">
-                  <Spinner aria-hidden="true" role="presentation" aria-label={undefined} />
-                  Lost connection
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  The localterm server isn't responding. Start it again from your terminal, then
-                  retry.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <InputGroup>
-                <InputGroupInput
-                  readOnly
-                  value={RESTART_COMMAND}
-                  aria-label="restart command"
-                  className="font-mono"
-                />
-                <InputGroupAddon align="inline-end">
-                  <InputGroupButton
-                    size="icon-xs"
-                    onClick={copyRestartCommand}
-                    aria-label={hasCopiedRestartCommand ? "Copied" : "Copy restart command"}
-                  >
-                    {hasCopiedRestartCommand ? <Check /> : <Copy />}
-                  </InputGroupButton>
-                </InputGroupAddon>
-              </InputGroup>
-              <AlertDialogFooter>
-                <AlertDialogAction onClick={triggerManualReconnect} disabled={isRetryingConnection}>
-                  {isRetryingConnection ? <Spinner data-icon="inline-start" /> : null}
-                  Retry
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </>
-          )}
-        </AlertDialogContent>
-      </AlertDialog>
       <ToastProvider>
         <Toaster />
       </ToastProvider>
