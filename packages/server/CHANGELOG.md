@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.66.10
+
+### Patch Changes
+
+- 9932455: Improve pull request state contrast in the light-themed diff viewer and terminal toolbar while preserving dark-theme colors.
+
 ## 2.66.9
 
 ### Patch Changes
