@@ -28,29 +28,39 @@ export const PR_STATE_STYLES: Record<
   { text: string; badge: string; hover: string }
 > = {
   open: {
-    text: "text-emerald-400",
-    badge: "border-emerald-400/50 bg-emerald-500/15 text-emerald-300",
-    hover: "hover:bg-emerald-500/25 hover:text-emerald-200",
+    text: "text-emerald-700 dark:text-emerald-400",
+    badge:
+      "border-emerald-600/50 bg-emerald-500/10 text-emerald-700 dark:border-emerald-400/50 dark:bg-emerald-500/15 dark:text-emerald-300",
+    hover:
+      "hover:bg-emerald-500/20 hover:text-emerald-800 dark:hover:bg-emerald-500/25 dark:hover:text-emerald-200",
   },
   draft: {
-    text: "text-slate-400",
-    badge: "border-slate-400/50 bg-slate-500/15 text-slate-300",
-    hover: "hover:bg-slate-500/25 hover:text-slate-200",
+    text: "text-slate-700 dark:text-slate-400",
+    badge:
+      "border-slate-600/50 bg-slate-500/10 text-slate-700 dark:border-slate-400/50 dark:bg-slate-500/15 dark:text-slate-300",
+    hover:
+      "hover:bg-slate-500/20 hover:text-slate-800 dark:hover:bg-slate-500/25 dark:hover:text-slate-200",
   },
   conflicting: {
-    text: "text-amber-400",
-    badge: "border-amber-400/50 bg-amber-500/15 text-amber-300",
-    hover: "hover:bg-amber-500/25 hover:text-amber-200",
+    text: "text-amber-700 dark:text-amber-400",
+    badge:
+      "border-amber-600/50 bg-amber-500/10 text-amber-700 dark:border-amber-400/50 dark:bg-amber-500/15 dark:text-amber-300",
+    hover:
+      "hover:bg-amber-500/20 hover:text-amber-800 dark:hover:bg-amber-500/25 dark:hover:text-amber-200",
   },
   closed: {
-    text: "text-red-400",
-    badge: "border-red-400/50 bg-red-500/15 text-red-300",
-    hover: "hover:bg-red-500/25 hover:text-red-200",
+    text: "text-red-700 dark:text-red-400",
+    badge:
+      "border-red-600/50 bg-red-500/10 text-red-700 dark:border-red-400/50 dark:bg-red-500/15 dark:text-red-300",
+    hover:
+      "hover:bg-red-500/20 hover:text-red-800 dark:hover:bg-red-500/25 dark:hover:text-red-200",
   },
   merged: {
-    text: "text-violet-400",
-    badge: "border-violet-400/50 bg-violet-500/15 text-violet-300",
-    hover: "hover:bg-violet-500/25 hover:text-violet-200",
+    text: "text-violet-700 dark:text-violet-400",
+    badge:
+      "border-violet-600/50 bg-violet-500/10 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/15 dark:text-violet-300",
+    hover:
+      "hover:bg-violet-500/20 hover:text-violet-800 dark:hover:bg-violet-500/25 dark:hover:text-violet-200",
   },
 };
 
