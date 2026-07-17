@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { connectCdp } from "@/utils/connect-cdp";
 import { fetchDaemonConfig } from "@/utils/fetch-daemon-config";
 import { fetchServerHealth } from "@/utils/fetch-server-health";
@@ -23,6 +23,9 @@ export const useDaemonSettings = () => {
   const [detectedDefaultShell, setDetectedDefaultShell] = useState<string>("");
   const [cdpStatus, setCdpStatus] = useState<CdpStatus | null>(null);
   const [cdpConnecting, setCdpConnecting] = useState(false);
+  const cdpPortUpdateVersionRef = useRef(0);
+  const graceSecondsUpdateVersionRef = useRef(0);
+  const workspaceRestoreUpdateVersionRef = useRef(0);
 
   const refreshCdpStatus = useCallback(() => {
     void fetchServerHealth().then((health) => {
@@ -39,18 +42,24 @@ export const useDaemonSettings = () => {
   // port change only updates the value the daemon's next connect reads. The
   // explicit Connect button applies it; the live socket is left untouched.
   const handleCdpPortChange = useCallback((next: number | null) => {
+    const updateVersion = ++cdpPortUpdateVersionRef.current;
     setCdpPort(next);
     void updateDaemonConfig({ cdpPort: next }).then((confirmed) => {
-      if (confirmed) setCdpPort(confirmed.cdpPort);
+      if (confirmed && updateVersion === cdpPortUpdateVersionRef.current) {
+        setCdpPort(confirmed.cdpPort);
+      }
     });
   }, []);
 
   // The grace window lives on the daemon; PUT the new value and adopt the
   // clamped confirmation (the daemon re-arms already-dormant shells).
   const handleGraceSecondsChange = useCallback((next: number | null) => {
+    const updateVersion = ++graceSecondsUpdateVersionRef.current;
     setGraceSeconds(next);
     void updateDaemonConfig({ graceSeconds: next }).then((confirmed) => {
-      if (confirmed) setGraceSeconds(confirmed.graceSeconds);
+      if (confirmed && updateVersion === graceSecondsUpdateVersionRef.current) {
+        setGraceSeconds(confirmed.graceSeconds);
+      }
     });
   }, []);
 
@@ -58,9 +67,12 @@ export const useDaemonSettings = () => {
   // adopt the confirmation. Takes effect on the next daemon start (restore
   // runs once at startup, not live-reactively).
   const handleWorkspaceRestoreChange = useCallback((next: boolean) => {
+    const updateVersion = ++workspaceRestoreUpdateVersionRef.current;
     setWorkspaceRestore(next);
     void updateDaemonConfig({ workspaceRestore: next }).then((confirmed) => {
-      if (confirmed) setWorkspaceRestore(confirmed.workspaceRestore);
+      if (confirmed && updateVersion === workspaceRestoreUpdateVersionRef.current) {
+        setWorkspaceRestore(confirmed.workspaceRestore);
+      }
     });
   }, []);
 
@@ -89,11 +101,20 @@ export const useDaemonSettings = () => {
   }, []);
 
   const loadDaemonSettings = useCallback(() => {
+    const cdpPortUpdateVersion = cdpPortUpdateVersionRef.current;
+    const graceSecondsUpdateVersion = graceSecondsUpdateVersionRef.current;
+    const workspaceRestoreUpdateVersion = workspaceRestoreUpdateVersionRef.current;
     void fetchDaemonConfig().then((config) => {
       if (config) {
-        setCdpPort(config.cdpPort);
-        setGraceSeconds(config.graceSeconds);
-        setWorkspaceRestore(config.workspaceRestore);
+        if (cdpPortUpdateVersion === cdpPortUpdateVersionRef.current) {
+          setCdpPort(config.cdpPort);
+        }
+        if (graceSecondsUpdateVersion === graceSecondsUpdateVersionRef.current) {
+          setGraceSeconds(config.graceSeconds);
+        }
+        if (workspaceRestoreUpdateVersion === workspaceRestoreUpdateVersionRef.current) {
+          setWorkspaceRestore(config.workspaceRestore);
+        }
         setDetectedDefaultShell(config.defaultShell);
       }
     });

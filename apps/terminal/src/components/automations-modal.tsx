@@ -391,6 +391,7 @@ export const AutomationsModal = ({
       form.triggerType === "event" ||
       form.triggerType === "webhook" ||
       isScheduleValid) &&
+    (form.triggerType !== "event" || form.eventNames.length > 0) &&
     (form.limitMode === "forever" ||
       (form.limitMax >= 1 && form.limitMax <= AUTOMATION_RUN_LIMIT_MAX));
 

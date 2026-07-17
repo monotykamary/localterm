@@ -95,11 +95,21 @@ export const useTerminalImagePaste = ({
     input.accept = "image/*";
     input.style.display = "none";
     document.body.appendChild(input);
+    const cleanup = () => {
+      window.removeEventListener("focus", handlePickerClose);
+      input.remove();
+    };
+    const handlePickerClose = () => {
+      window.setTimeout(() => {
+        if (!input.files?.length) cleanup();
+      }, 0);
+    };
     input.onchange = () => {
       const file = input.files?.[0];
-      document.body.removeChild(input);
+      cleanup();
       if (file) void pasteImageFromBlobRef.current?.(file, file.name);
     };
+    window.addEventListener("focus", handlePickerClose, { once: true });
     input.click();
   }, [setIsActionsMenuOpen]);
 
