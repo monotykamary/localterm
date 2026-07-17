@@ -15,43 +15,12 @@
  * resolves null so the caller can fall back to the OS opener.
  */
 
-import { randomUUID } from "node:crypto";
+import { CdpConnection, CdpReplyError } from "./cdp-connection.js";
+import { CDP_CLOSE_SETTLE_MS } from "./constants.js";
 import { detectChromiumBrowsers, type DetectedBrowser } from "./detect-chromium.js";
-import { dismissDiaAllowPrompt } from "../utils/dismiss-dia-allow-prompt.js";
-import {
-  CDP_AUTO_ALLOW_DELAY_MS,
-  CDP_HEARTBEAT_GRACE_MS,
-  CDP_HEARTBEAT_INTERVAL_MS,
-  CDP_HEARTBEAT_TIMEOUT_MS,
-  LOCALTERM_TAB_TOKEN_EVENT,
-  LOCALTERM_TAB_TOKEN_PROPERTY,
-} from "../constants.js";
+import { TargetRegistry } from "./target-registry.js";
 
-const WS_OPEN = 1; // WebSocket.OPEN
-const WS_CONNECTING = 0; // WebSocket.CONNECTING
-
-// Cheap browser-level CDP round-trip used as a transport liveness probe by the
-// keepalive: no session, no side effects, minimal reply.
-const CDP_HEARTBEAT_PROBE_METHOD = "Target.getTargets";
-
-const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
-const DEFAULT_CALL_TIMEOUT_MS = 5_000;
-// Give the browser a beat to process window.close() before tearing down the
-// CDP target — some Chromium forks (Dia, Arc) leave the tab in the strip
-// otherwise (see browser-harness-js closeTab).
-const CLOSE_SETTLE_MS = 100;
-
-type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void };
-
-/** A CDP error *reply* — the browser answered a call with an error result (e.g.
- * "No target with given id found"), as opposed to a transport drop or a call
- * timeout. A reply leaves the persistent socket healthy, so the open/close
- * teardown paths must NOT tear it down on a reply: that would drop the one
- * socket kept for the daemon's lifetime and force a reconnect, which re-fires
- * the browser's remote-debugging consent dialog on every automation run. */
-class CdpReplyError extends Error {}
-
-export type CdpClientOptions = {
+export interface CdpClientOptions {
   /** Override browser detection (tests). Defaults to detectChromiumBrowsers. */
   detect?: () => Promise<DetectedBrowser[]>;
   /** Per-candidate WS-open timeout. */
@@ -89,63 +58,43 @@ export type CdpClientOptions = {
    * later is fine.
    */
   tabUrlFilter?: (candidateUrl: string) => boolean;
-};
+}
 
 export class CdpClient {
-  private ws: WebSocket | undefined;
   private connecting: Promise<void> | undefined;
-  private nextId = 1;
-  private readonly pending = new Map<number, Pending>();
   private readonly detect: () => Promise<DetectedBrowser[]>;
-  private readonly connectTimeoutMs: number;
-  private readonly callTimeoutMs: number;
-  private readonly heartbeatIntervalMs: number;
-  private readonly heartbeatTimeoutMs: number;
-  private readonly heartbeatGraceMs: number;
-  private readonly autoAllow: boolean;
-  private readonly autoAllowDelayMs: number;
-  private readonly dismissDiaAllowPrompt: () => void;
-  private readonly platform: NodeJS.Platform;
-  /** Timestamp of the last inbound CDP frame (reply or event). */
-  private lastReplyAt = 0;
-  /** Background keepalive timer; unref'd so it never blocks daemon shutdown. */
-  private heartbeatTimer: NodeJS.Timeout | undefined;
+  private readonly connection: CdpConnection;
+  private readonly targetRegistry: TargetRegistry;
   /** Serializes closeTab() so concurrent closes don't orphan tabs. */
   private closeQueue: Promise<void> = Promise.resolve();
   /** The browser the live socket is attached to, for diagnostics. */
   connectedBrowser: DetectedBrowser | undefined;
-  private readonly tabUrlFilter?: (candidateUrl: string) => boolean;
-  // Ambient tab provenance. The CDP-injected `token` <-> `targetId` pairs let
-  // the WS server match a localterm WS socket (which echoes the token back in
-  // its `{type:"identify"}` message) to the browser tab it belongs to, so
-  // onExit can drive closeTab on the right target without any open-path
-  // coordination. One entry per page-type target on our origin; cleared
-  // whenever the socket drops (a fresh browser session invalidates every
-  // prior targetId).
-  private readonly tokenToTargetId = new Map<string, string>();
-  private readonly targetIdToToken = new Map<string, string>();
-  // Event routing. CDP delivers events as `{ method, params, sessionId? }`
-  // with no `id`; browser-level events (Target.targetCreated etc.) have no
-  // sessionId, session-scoped events carry theirs. We key by
-  // `${sessionId ?? ""}:${method}` so browser and session events never collide.
-  private readonly eventHandlers = new Map<string, (params: unknown) => void>();
 
   constructor(options: CdpClientOptions = {}) {
     this.detect = options.detect ?? detectChromiumBrowsers;
-    this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
-    this.callTimeoutMs = options.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
-    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? CDP_HEARTBEAT_INTERVAL_MS;
-    this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? CDP_HEARTBEAT_TIMEOUT_MS;
-    this.heartbeatGraceMs = options.heartbeatGraceMs ?? CDP_HEARTBEAT_GRACE_MS;
-    this.autoAllow = options.autoAllow ?? true;
-    this.autoAllowDelayMs = options.autoAllowDelayMs ?? CDP_AUTO_ALLOW_DELAY_MS;
-    this.dismissDiaAllowPrompt = options.dismissDiaAllowPrompt ?? dismissDiaAllowPrompt;
-    this.platform = options.platform ?? process.platform;
-    this.tabUrlFilter = options.tabUrlFilter;
+    this.connection = new CdpConnection({
+      connectTimeoutMs: options.connectTimeoutMs,
+      callTimeoutMs: options.callTimeoutMs,
+      heartbeatIntervalMs: options.heartbeatIntervalMs,
+      heartbeatTimeoutMs: options.heartbeatTimeoutMs,
+      heartbeatGraceMs: options.heartbeatGraceMs,
+      autoAllow: options.autoAllow,
+      autoAllowDelayMs: options.autoAllowDelayMs,
+      dismissDiaAllowPrompt: options.dismissDiaAllowPrompt,
+      platform: options.platform,
+      onDisconnect: () => {
+        this.connectedBrowser = undefined;
+        this.targetRegistry.clear();
+      },
+    });
+    this.targetRegistry = new TargetRegistry({
+      connection: this.connection,
+      tabUrlFilter: options.tabUrlFilter,
+    });
   }
 
   isConnected(): boolean {
-    return this.ws?.readyState === WS_OPEN;
+    return this.connection.isConnected();
   }
 
   /**
@@ -171,13 +120,13 @@ export class CdpClient {
     const errors: string[] = [];
     for (const browser of browsers) {
       try {
-        await this.openSocket(browser.wsUrl, browser.name);
+        await this.connection.open(browser.wsUrl, browser.name);
         this.connectedBrowser = browser;
         // Kick off ambient tab observation on the live socket. Fire-and-get:
         // discovery fails soft (closeTab falls back to window.close()), and the
         // connect() promise should resolve as soon as the socket is usable,
         // not wait on the first Target.setDiscoverTargets round-trip.
-        void this.observeTargets().catch(() => {
+        void this.targetRegistry.observeTargets().catch(() => {
           /* discovery is best-effort; tabs fall back to window.close() */
         });
         return;
@@ -188,250 +137,6 @@ export class CdpClient {
     throw new Error(`no detected browser accepted a connection (${errors.join("; ")})`);
   }
 
-  private openSocket(wsUrl: string, browserName?: string): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(wsUrl);
-      let settled = false;
-      // Dia (The Browser Company) is the only Chromium browser that gates the
-      // WS-open behind an "Allow debugging connection?" prompt (Return =
-      // Allow). When auto-allow is on and the WS is still CONNECTING past the
-      // delay, the prompt is up: fire one Return at the Dia process via osascript
-      // so connect completes with no manual click. No-op for every other browser
-      // and off macOS; cleared on open so a fast handshake never triggers it.
-      const allowTimer =
-        this.autoAllow && browserName === "Dia" && this.platform === "darwin"
-          ? setTimeout(() => {
-              if (settled || ws.readyState !== WS_CONNECTING) return;
-              this.dismissDiaAllowPrompt();
-            }, this.autoAllowDelayMs)
-          : undefined;
-      const clearAllow = (): void => {
-        if (allowTimer) clearTimeout(allowTimer);
-      };
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        clearAllow();
-        try {
-          ws.close();
-        } catch {
-          /* ignore */
-        }
-        reject(new Error(`timed out after ${this.connectTimeoutMs}ms`));
-      }, this.connectTimeoutMs);
-
-      ws.addEventListener("open", () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        clearAllow();
-        this.ws = ws;
-        this.startHeartbeat();
-        resolve();
-      });
-      ws.addEventListener("message", (event: MessageEvent) => this.onMessage(String(event.data)));
-      ws.addEventListener("error", () => {
-        if (settled) {
-          this.failPending(ws, new Error("CDP websocket error"));
-          return;
-        }
-        settled = true;
-        clearTimeout(timer);
-        clearAllow();
-        reject(new Error("websocket error (likely 403 or port closed)"));
-      });
-      ws.addEventListener("close", () => {
-        clearTimeout(timer);
-        clearAllow();
-        this.failPending(ws, new Error("CDP websocket closed"));
-        if (!settled) {
-          settled = true;
-          reject(new Error("websocket closed before open"));
-        }
-      });
-    });
-  }
-
-  /** Reject in-flight calls, drop the socket, and clear ambient state. */
-  private failPending(ws: WebSocket, error: Error): void {
-    if (this.ws !== ws) return;
-    this.stopHeartbeat();
-    this.ws = undefined;
-    this.connectedBrowser = undefined;
-    for (const pending of this.pending.values()) pending.reject(error);
-    this.pending.clear();
-    // Socket dropped → every prior targetId/token is invalid; the browser
-    // session is gone (or different). Reset so the next observeTargets cycle
-    // re-discovers from a clean slate.
-    this.tokenToTargetId.clear();
-    this.targetIdToToken.clear();
-    this.eventHandlers.clear();
-  }
-
-  private onMessage(raw: string): void {
-    let message: {
-      id?: number;
-      method?: string;
-      params?: unknown;
-      sessionId?: string;
-      result?: unknown;
-      error?: { message?: string };
-    };
-    try {
-      message = JSON.parse(raw);
-    } catch {
-      return;
-    }
-    // Any inbound frame — a command reply or an unsolicited Target event —
-    // proves the socket is live; reset the keepalive's quiet-window clock so
-    // an active or chatty connection never gets a redundant probe.
-    this.lastReplyAt = Date.now();
-    if (typeof message.id === "number") {
-      // A command reply: route to the pending call by id.
-      const pending = this.pending.get(message.id);
-      if (!pending) return;
-      this.pending.delete(message.id);
-      if (message.error)
-        pending.reject(new CdpReplyError(`CDP error: ${message.error.message ?? "unknown"}`));
-      else pending.resolve(message.result);
-      return;
-    }
-    // An event (no `id`): route by `sessionId:method`. Browser-level events
-    // like Target.targetCreated carry no sessionId.
-    if (typeof message.method !== "string") return;
-    const handler = this.eventHandlers.get(`${message.sessionId ?? ""}:${message.method}`);
-    if (handler) handler(message.params);
-  }
-
-  /** Install a CDP-event handler keyed by `(sessionId, method)`. Idempotent. */
-  private on(method: string, handler: (params: unknown) => void, sessionId?: string): void {
-    this.eventHandlers.set(`${sessionId ?? ""}:${method}`, handler);
-  }
-
-  private call(
-    method: string,
-    params: Record<string, unknown>,
-    sessionId?: string,
-    timeoutMs?: number,
-  ): Promise<unknown> {
-    const ws = this.ws;
-    if (!ws || ws.readyState !== WS_OPEN) {
-      return Promise.reject(new Error("CDP not connected"));
-    }
-    const id = this.nextId++;
-    const deadline = timeoutMs ?? this.callTimeoutMs;
-    return new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`CDP call timed out after ${deadline}ms`));
-      }, deadline);
-      this.pending.set(id, {
-        resolve: (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        reject: (error) => {
-          clearTimeout(timer);
-          reject(error);
-        },
-      });
-      // flatten:true routes session-scoped replies back over this one socket,
-      // tagged by id, so the pending map matches them with no extra envelope.
-      ws.send(
-        JSON.stringify(sessionId ? { id, method, params, sessionId } : { id, method, params }),
-      );
-    });
-  }
-
-  /**
-   * Begin observing target lifecycle. `Target.setDiscoverTargets` makes the
-   * browser emit `Target.targetCreated` for every existing page-type target
-   * (tabs already open) plus every subsequently-created one; for each on our
-   * origin we inject an ambient token the page echoes over its WS so the
-   * server can pair the socket with the targetId (for closeTab on shell exit).
-   * `Target.targetDestroyed` cleans up our maps. Best-effort and never throws
-   * — discovery is a soft layer on top of the persistent socket.
-   */
-  private async observeTargets(): Promise<void> {
-    if (!this.isConnected()) return;
-    // Idempotent: handlers overwrite in place if establish() runs again after
-    // a socket drop.
-    this.on("Target.targetCreated", (params: unknown) => {
-      const target = (
-        params as { targetInfo?: { type?: string; targetId?: string; url?: string } } | undefined
-      )?.targetInfo;
-      if (!target || target.type !== "page" || typeof target.targetId !== "string") return;
-      if (this.targetIdToToken.has(target.targetId)) return; // already injected
-      if (typeof target.url !== "string" || (this.tabUrlFilter && !this.tabUrlFilter(target.url)))
-        return;
-      void this.injectToken(target.targetId).catch(() => {
-        /* injection is best-effort; never blocks observeTargets */
-      });
-    });
-    this.on("Target.targetDestroyed", (params: unknown) => {
-      const targetId = (params as { targetId?: string } | undefined)?.targetId;
-      if (typeof targetId !== "string") return;
-      const token = this.targetIdToToken.get(targetId);
-      if (token !== undefined) {
-        this.tokenToTargetId.delete(token);
-        this.targetIdToToken.delete(targetId);
-      }
-    });
-    await this.call("Target.setDiscoverTargets", { discover: true });
-  }
-
-  /**
-   * Attach to one target and inject an ambient token the page echoes back over
-   * its WS so the server can pair the socket with this targetId. The robust
-   * hook is `Page.addScriptToEvaluateOnNewDocument`: it re-runs on every
-   * navigation (reload, push to a new document), so the token survives the
-   * page's lifetime without per-event re-injection plumbing. Followed by a
-   * best-effort immediate `Runtime.evaluate` so a page that has already loaded
-   * (the daemon observed an existing tab) gets the token without waiting for a
-   * navigation. Never throws.
-   */
-  private async injectToken(targetId: string): Promise<void> {
-    const token = randomUUID();
-    this.targetIdToToken.set(targetId, token);
-    this.tokenToTargetId.set(token, targetId);
-    // The injected expression assigns the token under a well-known window
-    // property the client reads on WS-open, then dispatches a named event the
-    // client also listens for — covering the case where injection lands after
-    // the WS has already connected with `token:null`.
-    const expression = `window[${JSON.stringify(
-      LOCALTERM_TAB_TOKEN_PROPERTY,
-    )}]=${JSON.stringify(token)};window.dispatchEvent(new Event(${JSON.stringify(
-      LOCALTERM_TAB_TOKEN_EVENT,
-    )}))`;
-    let sessionId: string | undefined;
-    try {
-      const attached = (await this.call("Target.attachToTarget", {
-        targetId,
-        flatten: true,
-      })) as { sessionId?: string };
-      sessionId = attached?.sessionId;
-      if (!sessionId) return;
-      // Page domain must be enabled for addScriptToEvaluateOnNewDocument to
-      // install (and for Runtime.evaluate to land against this tab).
-      await this.call("Page.enable", {}, sessionId);
-      // Fires on every navigation (and reload) — the token survives across
-      // the page's lifetime via this attached session.
-      await this.call("Page.addScriptToEvaluateOnNewDocument", { source: expression }, sessionId);
-      // Best-effort immediate inject for an already-loaded page. Errors when
-      // the document has no execution context yet (still loading) — the
-      // addScript will run on context creation and dispatch the event then.
-      try {
-        await this.call("Runtime.evaluate", { expression }, sessionId);
-      } catch {
-        /* execution context not yet ready; addScript covers it */
-      }
-    } catch {
-      // attach/enable failed (target already closed, fork without attach
-      // support). Leave the maps — targetDestroyed will clean up if/when it
-      // fires; without it the entry is inert (no WS ever sends this token).
-    }
-  }
-
   /**
    * Resolve the CDP targetId an ambient token was injected for, so the WS
    * server can pair a `{type:"identify", token}` message with the right tab
@@ -439,7 +144,7 @@ export class CdpClient {
    * (no CDP reachable, or the page raced its identify in before injection).
    */
   findTargetIdForToken(token: string): string | undefined {
-    return this.tokenToTargetId.get(token);
+    return this.targetRegistry.findTargetIdForToken(token);
   }
 
   /**
@@ -456,7 +161,7 @@ export class CdpClient {
       return null;
     }
     try {
-      const result = (await this.call("Target.getTargets", {})) as {
+      const result = (await this.connection.call("Target.getTargets", {})) as {
         targetInfos?: Array<{ type?: string; targetId?: string; url?: string }>;
       };
       const targets = result?.targetInfos ?? [];
@@ -484,9 +189,10 @@ export class CdpClient {
    */
   async attachSession(targetId: string): Promise<string | null> {
     try {
-      const attached = (await this.call("Target.attachToTarget", { targetId, flatten: true })) as {
-        sessionId?: string;
-      };
+      const attached = (await this.connection.call("Target.attachToTarget", {
+        targetId,
+        flatten: true,
+      })) as { sessionId?: string };
       return attached?.sessionId ?? null;
     } catch {
       return null;
@@ -504,7 +210,7 @@ export class CdpClient {
     timeoutMs?: number,
   ): Promise<unknown> {
     try {
-      const result = (await this.call(
+      const result = (await this.connection.call(
         "Runtime.evaluate",
         { expression, returnByValue: true },
         sessionId,
@@ -526,7 +232,7 @@ export class CdpClient {
     const sessionId = await this.attachSession(targetId);
     if (!sessionId) return null;
     try {
-      await this.call("Page.enable", {}, sessionId, timeoutMs);
+      await this.connection.call("Page.enable", {}, sessionId, timeoutMs);
     } catch {
       /* page domain optional for a plain evaluate */
     }
@@ -547,7 +253,7 @@ export class CdpClient {
     try {
       const params: Record<string, unknown> = { format: "png" };
       if (clip) params.clip = { ...clip, scale: 1 };
-      const result = (await this.call("Page.captureScreenshot", params, sessionId)) as {
+      const result = (await this.connection.call("Page.captureScreenshot", params, sessionId)) as {
         data?: string;
       };
       return result?.data ? Buffer.from(result.data, "base64") : null;
@@ -578,7 +284,7 @@ export class CdpClient {
   ): Promise<void> {
     for (const event of events) {
       try {
-        await this.call("Input.dispatchMouseEvent", event, sessionId);
+        await this.connection.call("Input.dispatchMouseEvent", event, sessionId);
       } catch {
         /* tab closed mid-sequence; the gesture is best-effort */
         return;
@@ -605,7 +311,9 @@ export class CdpClient {
       return false;
     }
     try {
-      const result = (await this.call("Network.setCookie", cookie)) as { success?: boolean };
+      const result = (await this.connection.call("Network.setCookie", cookie)) as {
+        success?: boolean;
+      };
       return result?.success === true;
     } catch {
       return false;
@@ -622,8 +330,8 @@ export class CdpClient {
    */
   async addVirtualAuthenticator(sessionId: string): Promise<string | null> {
     try {
-      await this.call("WebAuthn.enable", {}, sessionId);
-      const result = (await this.call(
+      await this.connection.call("WebAuthn.enable", {}, sessionId);
+      const result = (await this.connection.call(
         "WebAuthn.addVirtualAuthenticator",
         {
           options: {
@@ -647,7 +355,11 @@ export class CdpClient {
   async removeVirtualAuthenticator(sessionId: string, authenticatorId: string): Promise<void> {
     if (!this.isConnected()) return;
     try {
-      await this.call("WebAuthn.removeVirtualAuthenticator", { authenticatorId }, sessionId);
+      await this.connection.call(
+        "WebAuthn.removeVirtualAuthenticator",
+        { authenticatorId },
+        sessionId,
+      );
     } catch {
       /* best-effort */
     }
@@ -665,7 +377,9 @@ export class CdpClient {
       return null;
     }
     try {
-      const result = (await this.call("Target.createTarget", { url })) as { targetId?: unknown };
+      const result = (await this.connection.call("Target.createTarget", { url })) as {
+        targetId?: unknown;
+      };
       return typeof result?.targetId === "string" ? result.targetId : null;
     } catch {
       return null;
@@ -687,9 +401,10 @@ export class CdpClient {
         return null; // no reachable browser — fall back
       }
       try {
-        const result = (await this.call("Target.createTarget", { url, background: true })) as {
-          targetId?: unknown;
-        };
+        const result = (await this.connection.call("Target.createTarget", {
+          url,
+          background: true,
+        })) as { targetId?: unknown };
         return typeof result?.targetId === "string" ? result.targetId : null;
       } catch (error) {
         // A CDP error reply (e.g. createTarget "denied") leaves the socket
@@ -698,15 +413,7 @@ export class CdpClient {
         // Only a transport drop or a call timeout is a stale socket; close it
         // explicitly (failPending doesn't close() on its own) and reset maps.
         if (error instanceof CdpReplyError) return null;
-        const stale = this.ws;
-        if (stale) {
-          try {
-            stale.close();
-          } catch {
-            /* ignore */
-          }
-          this.failPending(stale, new Error("CDP call failed; dropping stale socket"));
-        }
+        this.connection.dropStale("CDP call failed; dropping stale socket");
       }
     }
     return null;
@@ -729,7 +436,7 @@ export class CdpClient {
     }
     let sessionId: string | undefined;
     try {
-      const attached = (await this.call("Target.attachToTarget", {
+      const attached = (await this.connection.call("Target.attachToTarget", {
         targetId,
         flatten: true,
       })) as { sessionId?: string };
@@ -739,12 +446,12 @@ export class CdpClient {
     }
     if (!sessionId) return;
     try {
-      await this.call("Page.navigate", { url }, sessionId);
+      await this.connection.call("Page.navigate", { url }, sessionId);
     } catch {
       /* tab may be navigating/closing — best-effort */
     }
     try {
-      await this.call("Target.detachFromTarget", { sessionId });
+      await this.connection.call("Target.detachFromTarget", { sessionId });
     } catch {
       /* detach is best-effort; the browser tears it down on navigation anyway */
     }
@@ -780,13 +487,13 @@ export class CdpClient {
           return; // no reachable browser — treat as already closed
         }
         try {
-          const attached = (await this.call("Target.attachToTarget", {
+          const attached = (await this.connection.call("Target.attachToTarget", {
             targetId,
             flatten: true,
           })) as { sessionId?: string };
           if (attached?.sessionId) {
             try {
-              await this.call(
+              await this.connection.call(
                 "Runtime.evaluate",
                 { expression: "window.close()" },
                 attached.sessionId,
@@ -794,13 +501,13 @@ export class CdpClient {
             } catch {
               /* tab may already be navigating/closing */
             }
-            await new Promise((resolve) => setTimeout(resolve, CLOSE_SETTLE_MS));
+            await new Promise((resolve) => setTimeout(resolve, CDP_CLOSE_SETTLE_MS));
           }
         } catch {
           /* attach failed (already gone, or fork without attach) — try closeTarget */
         }
         try {
-          await this.call("Target.closeTarget", { targetId });
+          await this.connection.call("Target.closeTarget", { targetId });
           return;
         } catch (error) {
           // A CDP error reply (e.g. "No target with given id found") means the
@@ -810,15 +517,7 @@ export class CdpClient {
           // automation run. Only a transport drop or a call timeout is a stale
           // socket worth tearing down for the retry to reconnect.
           if (error instanceof CdpReplyError) return;
-          const stale = this.ws;
-          if (stale) {
-            try {
-              stale.close();
-            } catch {
-              /* ignore */
-            }
-            this.failPending(stale, new Error("CDP closeTab call failed; dropping stale socket"));
-          }
+          this.connection.dropStale("CDP closeTab call failed; dropping stale socket");
         }
       }
     };
@@ -826,71 +525,6 @@ export class CdpClient {
     // never wedges the chain. Callers get the tail (fine for fire-and-forget).
     this.closeQueue = this.closeQueue.then(doClose, doClose);
     return this.closeQueue;
-  }
-
-  /** Background keepalive for the persistent socket. Its job is to detect a
-   * half-open socket during idle rather than discovering it on the next
-   * automation run: after a quiet window it probes liveness with a cheap
-   * `Target.getTargets` round-trip. The socket often still reads OPEN after a
-   * laptop sleep even though the browser was suspended and dropped the debug
-   * WS, so without the probe the next `Target.createTarget` call stalls
-   * against it for the full call timeout before the open-path catch closes
-   * it. A probe that goes unanswered past that timeout tears the socket down
-   * now, and the next `openBackgroundTab` reconnects cleanly instead of
-   * paying that stall. When the socket genuinely survived the quiet period
-   * (still OPEN and the browser still replies), the probe reuses it and
-   * avoids a needless reopen. One probe at a time is fine — the interval is
-   * larger than the call timeout, so probes never overlap. */
-  private startHeartbeat(): void {
-    this.stopHeartbeat();
-    this.lastReplyAt = Date.now();
-    this.heartbeatTimer = setInterval(() => this.heartbeatTick(), this.heartbeatIntervalMs);
-    this.heartbeatTimer.unref?.();
-  }
-
-  private stopHeartbeat(): void {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = undefined;
-    }
-  }
-
-  private heartbeatTick(): void {
-    if (!this.isConnected()) return;
-    if (Date.now() - this.lastReplyAt < this.heartbeatTimeoutMs) return;
-    // Quiet past the threshold: probe liveness rather than assume death. The
-    // probe gets its own generous reply-wait (heartbeatGraceMs, not the per-call
-    // timeout) so a slow-but-live browser — post-wake scheduling delay, a
-    // momentary main-thread block — replies in time and is reused, not torn
-    // down. One probe at a time is fine: the interval is larger than the grace
-    // window, so probes never overlap.
-    void this.call(CDP_HEARTBEAT_PROBE_METHOD, {}, undefined, this.heartbeatGraceMs)
-      .then(() => {
-        this.lastReplyAt = Date.now();
-      })
-      .catch((error: unknown) => {
-        // A CDP error *reply* means the browser answered on a healthy socket
-        // (onMessage already reset lastReplyAt) — keep it. Same guard as
-        // openBackgroundTab/closeTab: a reply must never drop the one persistent
-        // socket kept for the daemon's lifetime. Only a transport drop or a
-        // probe timeout is a genuinely stale socket worth tearing down.
-        if (error instanceof CdpReplyError) return;
-        this.teardownStale("CDP heartbeat probe failed; dropping socket");
-      });
-  }
-
-  /** Close the (presumed dead) live socket and route teardown through
-   * failPending so maps/handlers reset in one place. Safe against a concurrent
-   * reconnect that already swapped in a fresh socket via the guard there. */
-  private teardownStale(reason: string): void {
-    const dead = this.ws;
-    if (!dead) return;
-    try {
-      dead.close();
-    } catch {
-      /* ignore */
-    }
-    this.failPending(dead, new Error(reason));
   }
 
   /**
@@ -903,20 +537,12 @@ export class CdpClient {
    * `openBackgroundTab` reconnects lazily.
    */
   resetConnection(reason = "cdp connection reset"): void {
-    this.teardownStale(reason);
+    this.connection.dropStale(reason);
   }
 
   close(): void {
-    this.stopHeartbeat();
-    try {
-      this.ws?.close();
-    } catch {
-      /* ignore */
-    }
-    this.ws = undefined;
+    this.connection.close();
     this.connectedBrowser = undefined;
-    this.tokenToTargetId.clear();
-    this.targetIdToToken.clear();
-    this.eventHandlers.clear();
+    this.targetRegistry.clear();
   }
 }
