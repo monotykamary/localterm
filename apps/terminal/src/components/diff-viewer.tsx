@@ -1,48 +1,31 @@
 import type {
   GitBranchInfo,
-  GitBranchPr,
-  GitDiffFileListResponse,
-  GitDiffFileMeta,
-  GitDiffFilePatch,
   GitDiffMode,
   GitDiffSummary,
 } from "@monotykamary/localterm-server/protocol";
-import { isImagePath } from "@monotykamary/localterm-server/protocol";
-import type { SyntaxHighlightColorScheme, SyntaxLine } from "@/utils/syntax-highlight";
+import type { SyntaxHighlightColorScheme } from "@/utils/syntax-highlight";
+import { ChevronDown, ExternalLink, GitBranch, RefreshCw, Send, X } from "lucide-react";
 import {
-  ChevronDown,
-  ExternalLink,
-  FileWarning,
-  GitBranch,
-  MessageSquare,
-  MessageSquarePlus,
-  Pencil,
-  RefreshCw,
-  Search,
-  Send,
-  Trash2,
-  X,
-} from "lucide-react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import type { VirtualItem } from "@tanstack/react-virtual";
-import {
-  Fragment,
-  memo,
-  startTransition,
   useCallback,
   useEffect,
-  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
-  type RefObject,
 } from "react";
+import { FileDiffPane } from "@/components/diff-viewer-file-diff-pane";
+import { FileListPopover, FileListSidebar } from "@/components/diff-viewer-file-picker";
+import {
+  DIFF_ADDITIONS_CLASSES,
+  DIFF_DELETIONS_CLASSES,
+} from "@/components/diff-viewer-file-status";
+import { DiffViewerPrBadge } from "@/components/diff-viewer-pr-badge";
+import type { FileListVirtualizerHandle } from "@/components/diff-viewer-types";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
+import { useDiffReviewAnnotations } from "@/hooks/use-diff-review-annotations";
+import { useDiffViewerData } from "@/hooks/use-diff-viewer-data";
 import {
   COMMAND_PALETTE_BACKDROP_CLASSES,
   COMMAND_PALETTE_PANEL_CLASSES,
@@ -50,50 +33,15 @@ import {
 } from "@/lib/animation-classes";
 import {
   DIFF_VIEWER_CLOSE_TRANSITION_MS,
-  DIFF_VIEWER_INITIAL_LINE_LIMIT,
-  DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS,
-  DIFF_VIEWER_RENDER_CHUNK,
-  PATCH_PREFETCH_CONCURRENCY,
-  PATCH_PREFETCH_NEIGHBOR_RADIUS,
+  DIFF_VIEWER_COMPACT_HEADER_PADDING_PX,
   DIFF_VIEWER_SIDEBAR_WIDTH_PX,
   SIDEBAR_COLLAPSE_WIDTH_PX,
 } from "@/lib/constants";
-import { computeHeaderLayout } from "@/utils/compute-header-layout";
+import { resolvePrDisplayState } from "@/lib/pr-state";
 import { cn } from "@/lib/utils";
-import type { SplitDiffRow } from "@/utils/build-split-diff-rows";
-import { renderSyntaxTokens } from "@/utils/render-syntax-tokens";
-import { detectLangId, getCachedTokens, tokenizeDiffLines } from "@/utils/syntax-highlight";
-import {
-  buildRenderChunks,
-  renderChunkLength,
-  type RenderChunk,
-} from "@/utils/build-render-chunks";
-import {
-  buildDiffLineRangeIndex,
-  coveredTargetKeys,
-  diffLineTargetFor,
-  diffLineTargetKey,
-  resolveDragRange,
-  type DiffLineRange,
-  type DiffLineTarget,
-} from "@/utils/diff-line-ranges";
-import {
-  PR_DISPLAY_STATE_LABELS,
-  PR_STATE_ICONS,
-  PR_STATE_STYLES,
-  resolvePrDisplayState,
-} from "@/lib/pr-state";
-import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "@/utils/fetch-git-diff";
-import { buildFileUrl } from "@/utils/build-file-url";
+import { computeHeaderLayout } from "@/utils/compute-header-layout";
+import { resolveOpenDiffFileAction } from "@/utils/resolve-open-diff-file-action";
 import { splitFilePath } from "@/utils/split-file-path";
-import { PrefetchQueue, type PrefetchQueueItem } from "@/utils/prefetch-queue";
-import {
-  annotationRangeStart,
-  diffAnnotationKey,
-  formatReviewPrompt,
-  type DiffAnnotation,
-} from "@/utils/format-review-prompt";
-import { parseUnifiedDiff, type DiffLine } from "@/utils/parse-unified-diff";
 import {
   loadStoredDiffViewMode,
   storeDiffViewMode,
@@ -130,1004 +78,22 @@ interface DiffViewerProps {
   onDiffSummaryUpdate?: (summary: GitDiffSummary) => void;
 }
 
-// A multiline drag that just ended: the range the open annotation editor will
-// attach to its annotation on save. `end` is the line the editor anchors to.
-interface PendingAnnotationRange extends DiffLineRange {
-  filePath: string;
-}
-
-// Per-file patch fetched lazily when a file is selected.
-interface PatchEntry {
-  state: "loading" | "loaded" | "error";
-  data?: GitDiffFilePatch;
-}
-
-interface LineAnnotationState {
-  key: string;
-  target: DiffLineTarget;
-  saved: DiffAnnotation | undefined;
-  isEditing: boolean;
-  rangeStart: DiffLineTarget | null;
-  save: (comment: string) => void;
-}
-
-interface DragSelection {
-  anchor: DiffLineTarget;
-  focus: DiffLineTarget;
-}
-
-const formatRangeLabel = (start: DiffLineTarget, end: DiffLineTarget): string => {
-  const sideRef = (target: DiffLineTarget) =>
-    `${target.side === "old" ? "old " : ""}L${target.lineNumber}`;
-  return start.side === end.side
-    ? `${start.side === "old" ? "old " : ""}L${start.lineNumber}–L${end.lineNumber}`
-    : `${sideRef(start)} – ${sideRef(end)}`;
-};
-
-// Overlays a line covered by a multiline annotation or an in-progress drag
-// selection. pointer-events-none keeps the line interactive beneath it.
-const RangeHighlight = () => (
-  <span
-    aria-hidden="true"
-    className="pointer-events-none absolute inset-0 z-20 border-l-2 border-primary/60 bg-primary/10"
-  />
-);
-
-const deriveDiffSummary = (
-  fileList: GitDiffFileListResponse,
-  branch: string | null,
-): GitDiffSummary => {
-  let additions = 0;
-  let deletions = 0;
-  let binaries = 0;
-  for (const file of fileList.files) {
-    additions += file.additions;
-    deletions += file.deletions;
-    if (file.binary) binaries += 1;
-  }
-  return {
-    isRepo: fileList.isRepo,
-    files: fileList.files.length,
-    additions,
-    deletions,
-    binaries,
-    branch,
-  };
-};
-
-const STATUS_LABELS: Record<GitDiffFileMeta["status"], { letter: string; className: string }> = {
-  modified: { letter: "M", className: "text-[var(--localterm-yellow)]" },
-  added: { letter: "A", className: "text-[var(--localterm-green)]" },
-  deleted: { letter: "D", className: "text-destructive" },
-  renamed: { letter: "R", className: "text-[var(--localterm-blue)]" },
-  untracked: { letter: "U", className: "text-[var(--localterm-green)]" },
-};
-
-const ADDITIONS_CLASSES = "text-[var(--localterm-green)]";
-const DELETIONS_CLASSES = "text-destructive";
-
-const LINE_NUMBER_CELL_CLASSES =
-  "w-12 shrink-0 select-none px-2 text-right text-muted-foreground/50 tabular-nums";
-
-// Picks the open-file action for the header button: images open in a new tab
-// (the server serves the bytes directly), text files open in neovim, and
-// non-image binaries get no button. Returns null when nothing applies or no
-// handler is wired.
-const resolveOpenFileAction = (
-  file: GitDiffFileMeta,
-  onOpenInEditor: ((filePath: string) => void) | undefined,
-  onOpenImage: ((filePath: string) => void) | undefined,
-): {
-  handler: (filePath: string) => void;
+interface ComparisonOption {
+  mode: GitDiffMode;
   label: string;
-  ariaLabel: (path: string) => string;
-} | null => {
-  const image = isImagePath(file.path);
-  const handler = image ? onOpenImage : onOpenInEditor;
-  if (!handler) return null;
-  if (!image && file.binary) return null;
-  return image
-    ? { handler, label: "open image", ariaLabel: (path) => `open image ${path}` }
-    : { handler, label: "open in neovim", ariaLabel: (path) => `open ${path} in neovim` };
-};
-
-const lineBackgroundClasses = (type: DiffLine["type"]): string => {
-  if (type === "add") return "bg-emerald-500/10";
-  if (type === "del") return "bg-red-500/10";
-  return "";
-};
-
-const lineTextClasses = (type: DiffLine["type"]): string =>
-  type === "context" ? "text-muted-foreground" : "text-foreground/90";
-
-const AnnotateLineButton = ({
-  onClick,
-  onDragStart,
-}: {
-  onClick: () => void;
-  onDragStart: () => void;
-}) => (
-  <button
-    type="button"
-    onClick={onClick}
-    onPointerDown={(event) => {
-      if (event.button !== 0) return;
-      // Keep the browser from starting a text selection under the drag.
-      event.preventDefault();
-      onDragStart();
-    }}
-    aria-label="comment on line — drag to select multiple lines"
-    className="absolute top-1/2 left-1 z-20 hidden size-4 -translate-y-1/2 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-transform group-hover/line:flex hover:scale-110"
-  >
-    <MessageSquarePlus className="size-3" aria-hidden="true" />
-  </button>
-);
-
-interface AnnotationEditorProps {
-  initialComment: string;
-  onSave: (comment: string) => void;
-  onCancel: () => void;
 }
 
-const AnnotationEditor = ({ initialComment, onSave, onCancel }: AnnotationEditorProps) => {
-  const [comment, setComment] = useState(initialComment);
-  const trimmed = comment.trim();
-  const save = () => {
-    if (trimmed) onSave(trimmed);
-  };
-  return (
-    <div className="flex flex-col gap-2">
-      <Textarea
-        autoFocus
-        value={comment}
-        onChange={(event) => setComment(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            onCancel();
-          } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault();
-            save();
-          }
-        }}
-        placeholder="Leave a comment on this line…"
-        aria-label="line comment"
-        className="min-h-12 text-xs"
-      />
-      <div className="flex items-center gap-1.5">
-        <Button size="xs" onClick={save} disabled={!trimmed}>
-          Save comment
-        </Button>
-        <Button size="xs" variant="ghost" onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-    </div>
-  );
-};
+const FULL_COMPARISON_OPTIONS: readonly ComparisonOption[] = [
+  { mode: "working", label: "Working" },
+  { mode: "branch", label: "Branch" },
+];
 
-interface AnnotationBlockProps {
-  annotation: DiffAnnotation | undefined;
-  isEditing: boolean;
-  rangeLabel: string | null;
-  onEdit: () => void;
-  onSave: (comment: string) => void;
-  onCancel: () => void;
-  onDelete: () => void;
-}
+const COMPACT_COMPARISON_OPTIONS: readonly ComparisonOption[] = [
+  { mode: "working", label: "W" },
+  { mode: "branch", label: "B" },
+];
 
-// Rendered as a full-width row right below the annotated diff line. The inner
-// wrapper sticks to the left edge so it stays visible while the unified view
-// scrolls horizontally.
-const AnnotationBlock = ({
-  annotation,
-  isEditing,
-  rangeLabel,
-  onEdit,
-  onSave,
-  onCancel,
-  onDelete,
-}: AnnotationBlockProps) => (
-  <div className="border-y border-border/40 bg-muted/20 py-2 pr-4 pl-3 font-sans">
-    <div className="sticky left-3 max-w-xl">
-      {rangeLabel ? (
-        <div className="mb-1 font-mono text-[10px] tracking-wide text-muted-foreground/80">
-          {rangeLabel}
-        </div>
-      ) : null}
-      {isEditing ? (
-        <AnnotationEditor
-          initialComment={annotation?.comment ?? ""}
-          onSave={onSave}
-          onCancel={onCancel}
-        />
-      ) : annotation ? (
-        <div className="group/comment flex items-start gap-2">
-          <MessageSquare
-            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <p className="min-w-0 flex-1 whitespace-pre-wrap text-foreground/90">
-            {annotation.comment}
-          </p>
-          <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/comment:opacity-100">
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              onClick={onEdit}
-              aria-label="edit comment"
-              className="hover:text-foreground"
-            >
-              <Pencil />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              onClick={onDelete}
-              aria-label="delete comment"
-              className="hover:text-destructive"
-            >
-              <Trash2 />
-            </Button>
-          </span>
-        </div>
-      ) : null}
-    </div>
-  </div>
-);
-
-// Stable per-line callbacks (defined once in FileDiffPane) take the line/key as
-// an argument so the leaf row components below can be memoized: during the
-// progressive grow, an already-mounted line keeps identical props and bails out.
-interface LineCallbacks {
-  onAnnotate?: (key: string) => void;
-  onStartDrag?: (line: DiffLine) => void;
-  onDragEnter?: (line: DiffLine) => void;
-}
-
-const GUTTER_BG_OVERRIDES: Record<string, string> = {
-  add: "linear-gradient(rgb(16 185 129 / 0.1), rgb(16 185 129 / 0.1))",
-  del: "linear-gradient(rgb(239 68 68 / 0.1), rgb(239 68 68 / 0.1))",
-};
-
-const UnifiedDiffLine = memo(
-  ({
-    line,
-    annotateKey,
-    highlighted,
-    syntaxTokens,
-    highlightingPending,
-    onAnnotate,
-    onStartDrag,
-    onDragEnter,
-  }: {
-    line: DiffLine;
-    annotateKey: string | null;
-    highlighted: boolean;
-    syntaxTokens: SyntaxLine | null;
-    highlightingPending: boolean;
-  } & LineCallbacks) => (
-    <div
-      className={cn("group/line relative flex", lineBackgroundClasses(line.type))}
-      onPointerEnter={onDragEnter ? () => onDragEnter(line) : undefined}
-    >
-      {annotateKey !== null && onAnnotate && onStartDrag ? (
-        <AnnotateLineButton
-          onClick={() => onAnnotate(annotateKey)}
-          onDragStart={() => onStartDrag(line)}
-        />
-      ) : null}
-      <div
-        className="sticky left-0 z-10 flex shrink-0 bg-background"
-        style={
-          GUTTER_BG_OVERRIDES[line.type]
-            ? {
-                backgroundImage: GUTTER_BG_OVERRIDES[line.type],
-              }
-            : undefined
-        }
-      >
-        <span className={LINE_NUMBER_CELL_CLASSES}>{line.oldLine ?? ""}</span>
-        <span className={LINE_NUMBER_CELL_CLASSES}>{line.newLine ?? ""}</span>
-        <span
-          className={cn(
-            "w-5 shrink-0 select-none text-center",
-            line.type === "add" && ADDITIONS_CLASSES,
-            line.type === "del" && DELETIONS_CLASSES,
-          )}
-        >
-          {line.type === "add" ? "+" : line.type === "del" ? "-" : ""}
-        </span>
-      </div>
-      <span className="shrink-0 whitespace-pre pr-4">
-        <span
-          className={cn(
-            highlightingPending && !syntaxTokens
-              ? "invisible"
-              : !syntaxTokens && lineTextClasses(line.type),
-          )}
-        >
-          {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
-          {line.noNewline ? (
-            <span
-              className="select-none text-muted-foreground/50"
-              title="No newline at end of file"
-            >
-              {" ⊘"}
-            </span>
-          ) : null}
-        </span>
-      </span>
-      {highlighted ? <RangeHighlight /> : null}
-    </div>
-  ),
-);
-UnifiedDiffLine.displayName = "UnifiedDiffLine";
-
-const SplitDiffCell = ({
-  line,
-  side,
-  syntaxTokens,
-  highlightingPending,
-  onAnnotate,
-  onDragStart,
-}: {
-  line: DiffLine | null;
-  side: "left" | "right";
-  syntaxTokens: SyntaxLine | null;
-  highlightingPending: boolean;
-  onAnnotate?: () => void;
-  onDragStart?: () => void;
-}) => {
-  if (!line) {
-    return (
-      <>
-        <span className={LINE_NUMBER_CELL_CLASSES} />
-        <span className="min-w-0 flex-1 bg-muted/20" />
-      </>
-    );
-  }
-  const effectiveType =
-    line.type === "context" ? "context" : side === "left" ? "del" : ("add" as const);
-  return (
-    <>
-      {onAnnotate && onDragStart ? (
-        <AnnotateLineButton onClick={onAnnotate} onDragStart={onDragStart} />
-      ) : null}
-      <span className={cn(LINE_NUMBER_CELL_CLASSES, lineBackgroundClasses(effectiveType))}>
-        {side === "left" ? (line.oldLine ?? "") : (line.newLine ?? "")}
-      </span>
-      <span className={cn("min-w-0 flex-1 overflow-hidden", lineBackgroundClasses(effectiveType))}>
-        <span
-          data-split-text=""
-          className={cn(
-            "inline-block whitespace-pre pr-2",
-            highlightingPending && !syntaxTokens
-              ? "invisible"
-              : !syntaxTokens && lineTextClasses(line.type),
-          )}
-        >
-          {syntaxTokens ? renderSyntaxTokens(syntaxTokens.tokens) : line.text}
-        </span>
-      </span>
-    </>
-  );
-};
-
-const SplitDiffRowView = memo(
-  ({
-    row,
-    leftKey,
-    leftHighlighted,
-    rightKey,
-    rightHighlighted,
-    tokenMap,
-    highlightingPending,
-    onAnnotate,
-    onStartDrag,
-    onDragEnter,
-  }: {
-    row: SplitDiffRow;
-    leftKey: string | null;
-    leftHighlighted: boolean;
-    rightKey: string | null;
-    rightHighlighted: boolean;
-    tokenMap: Map<DiffLine, SyntaxLine>;
-    highlightingPending: boolean;
-  } & LineCallbacks) => {
-    const left = row.left;
-    const right = row.right;
-    return (
-      <div className="flex">
-        <div
-          className="group/line relative flex w-1/2 min-w-0 border-r border-border/40"
-          onPointerEnter={onDragEnter && left ? () => onDragEnter(left) : undefined}
-        >
-          <SplitDiffCell
-            line={left}
-            side="left"
-            syntaxTokens={left ? (tokenMap.get(left) ?? null) : null}
-            highlightingPending={highlightingPending}
-            onAnnotate={leftKey !== null && onAnnotate ? () => onAnnotate(leftKey) : undefined}
-            onDragStart={left && onStartDrag ? () => onStartDrag(left) : undefined}
-          />
-          {leftHighlighted ? <RangeHighlight /> : null}
-        </div>
-        <div
-          className="group/line relative flex w-1/2 min-w-0"
-          onPointerEnter={onDragEnter && right ? () => onDragEnter(right) : undefined}
-        >
-          <SplitDiffCell
-            line={right}
-            side="right"
-            syntaxTokens={right ? (tokenMap.get(right) ?? null) : null}
-            highlightingPending={highlightingPending}
-            onAnnotate={rightKey !== null && onAnnotate ? () => onAnnotate(rightKey) : undefined}
-            onDragStart={right && onStartDrag ? () => onStartDrag(right) : undefined}
-          />
-          {rightHighlighted ? <RangeHighlight /> : null}
-        </div>
-      </div>
-    );
-  },
-);
-SplitDiffRowView.displayName = "SplitDiffRowView";
-
-const HunkHeader = ({ header }: { header: string }) => (
-  <div className="sticky left-0 select-none bg-muted/30 px-4 py-0.5 text-muted-foreground/60">
-    {header}
-  </div>
-);
-
-interface DiffChunkProps {
-  chunk: RenderChunk;
-  filePath: string;
-  tokenMap: Map<DiffLine, SyntaxLine>;
-  highlightedKeys: ReadonlySet<string>;
-  annotations: Record<string, DiffAnnotation>;
-  editingKey: string | null;
-  pendingRange: PendingAnnotationRange | null;
-  highlightingPending: boolean;
-  onOpenEditor: (key: string, range?: PendingAnnotationRange) => void;
-  onSaveAnnotation: (annotation: DiffAnnotation) => void;
-  onCancelEditor: () => void;
-  onDeleteAnnotation: (key: string) => void;
-  onStartDrag: (line: DiffLine) => void;
-  onDragEnter: (line: DiffLine) => void;
-}
-
-// One rendered slice of the diff. Memoized: during the progressive grow every
-// prop is referentially stable for already-mounted chunks, so only the newly
-// revealed chunk renders (keeps growth O(chunk), not O(total)).
-const DiffChunk = memo((props: DiffChunkProps) => {
-  const {
-    chunk,
-    filePath,
-    tokenMap,
-    highlightedKeys,
-    annotations,
-    editingKey,
-    pendingRange,
-    onOpenEditor,
-    onSaveAnnotation,
-    onCancelEditor,
-    onDeleteAnnotation,
-    onStartDrag,
-    onDragEnter,
-    highlightingPending,
-  } = props;
-
-  const annotationStateFor = (line: DiffLine): LineAnnotationState | null => {
-    const target = diffLineTargetFor(line);
-    if (!target) return null;
-    const key = diffAnnotationKey({ filePath, ...target });
-    const saved = annotations[key];
-    const isEditing = editingKey === key;
-    // A drag that just ended supplies the editor's range; re-editing an existing
-    // multiline annotation keeps its saved range.
-    const rangeStart =
-      isEditing && pendingRange && pendingRange.filePath === filePath
-        ? pendingRange.start
-        : saved
-          ? annotationRangeStart(saved)
-          : null;
-    return {
-      key,
-      target,
-      saved,
-      isEditing,
-      rangeStart,
-      save: (comment: string) =>
-        onSaveAnnotation({
-          filePath,
-          ...target,
-          ...(rangeStart
-            ? { startSide: rangeStart.side, startLineNumber: rangeStart.lineNumber }
-            : {}),
-          comment,
-        }),
-    };
-  };
-
-  const renderAnnotation = (state: LineAnnotationState | null) =>
-    state && (state.saved || state.isEditing) ? (
-      <AnnotationBlock
-        annotation={state.saved}
-        isEditing={state.isEditing}
-        rangeLabel={state.rangeStart ? formatRangeLabel(state.rangeStart, state.target) : null}
-        onEdit={() => onOpenEditor(state.key)}
-        onSave={state.save}
-        onCancel={onCancelEditor}
-        onDelete={() => onDeleteAnnotation(state.key)}
-      />
-    ) : null;
-
-  return (
-    <div>
-      {chunk.header !== null ? <HunkHeader header={chunk.header} /> : null}
-      {chunk.mode === "unified"
-        ? chunk.lines.map((line, lineIndex) => {
-            const state = annotationStateFor(line);
-            return (
-              <Fragment key={lineIndex}>
-                <UnifiedDiffLine
-                  line={line}
-                  annotateKey={state ? state.key : null}
-                  highlighted={
-                    state !== null && highlightedKeys.has(diffLineTargetKey(state.target))
-                  }
-                  syntaxTokens={tokenMap.get(line) ?? null}
-                  highlightingPending={highlightingPending}
-                  onAnnotate={onOpenEditor}
-                  onStartDrag={onStartDrag}
-                  onDragEnter={onDragEnter}
-                />
-                {renderAnnotation(state)}
-              </Fragment>
-            );
-          })
-        : chunk.rows.map((row, rowIndex) => {
-            const left = row.left;
-            const right = row.right;
-
-            const leftState = left ? annotationStateFor(left) : null;
-            const rightState = right ? annotationStateFor(right) : null;
-            const isSharedAnnotation = leftState !== null && leftState.key === rightState?.key;
-            return (
-              <Fragment key={rowIndex}>
-                <SplitDiffRowView
-                  row={row}
-                  leftKey={leftState ? leftState.key : null}
-                  leftHighlighted={
-                    leftState !== null && highlightedKeys.has(diffLineTargetKey(leftState.target))
-                  }
-                  rightKey={rightState ? rightState.key : null}
-                  rightHighlighted={
-                    rightState !== null && highlightedKeys.has(diffLineTargetKey(rightState.target))
-                  }
-                  tokenMap={tokenMap}
-                  highlightingPending={highlightingPending}
-                  onAnnotate={onOpenEditor}
-                  onStartDrag={onStartDrag}
-                  onDragEnter={onDragEnter}
-                />
-                {renderAnnotation(leftState)}
-                {isSharedAnnotation ? null : renderAnnotation(rightState)}
-              </Fragment>
-            );
-          })}
-    </div>
-  );
-});
-DiffChunk.displayName = "DiffChunk";
-
-const DiffPaneNotice = ({ children, icon }: { children: React.ReactNode; icon?: boolean }) => (
-  <div className="flex h-full min-h-32 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-    {icon ? <FileWarning className="size-4" aria-hidden="true" /> : null}
-    {children}
-  </div>
-);
-
-// Inline image preview for binary image files. The bytes come straight from
-// /api/file (not the patch payload), so it paints instantly on selection. A
-// load failure — e.g. a deleted image whose working-tree file is gone — falls
-// back to a notice instead of a lingering broken-image icon.
-const ImagePreview = ({ src, alt }: { src: string; alt: string }) => {
-  const [failed, setFailed] = useState(false);
-  if (failed) return <DiffPaneNotice icon>Couldn't load image preview.</DiffPaneNotice>;
-  return (
-    <div className="flex h-full min-h-32 items-center justify-center p-4">
-      <img
-        src={src}
-        alt={alt}
-        onError={() => setFailed(true)}
-        className="max-h-full max-w-full rounded border border-border/40 object-contain"
-      />
-    </div>
-  );
-};
-
-interface FileDiffPaneProps {
-  file: GitDiffFileMeta;
-  cwd: string | null;
-  payload: PatchEntry;
-  syntaxHighlightColorScheme: SyntaxHighlightColorScheme;
-  viewMode: DiffViewMode;
-  annotations: Record<string, DiffAnnotation>;
-  editingKey: string | null;
-  pendingRange: PendingAnnotationRange | null;
-  // Set while a drag selection is active so the viewer's Escape handler can
-  // cancel the drag instead of closing the dialog.
-  dragCancelRef: RefObject<(() => void) | null>;
-  onOpenEditor: (key: string, range?: PendingAnnotationRange) => void;
-  onSaveAnnotation: (annotation: DiffAnnotation) => void;
-  onCancelEditor: () => void;
-  onDeleteAnnotation: (key: string) => void;
-  onRetry: () => void;
-}
-
-// Mounted with key={file.path} by the parent, so switching files remounts it —
-// renderLimit and any active drag reset cleanly, with no transition straddling
-// two files.
-const FileDiffPane = ({
-  file,
-  cwd,
-  payload,
-  syntaxHighlightColorScheme,
-  viewMode,
-  annotations,
-  editingKey,
-  pendingRange,
-  dragCancelRef,
-  onOpenEditor,
-  onSaveAnnotation,
-  onCancelEditor,
-  onDeleteAnnotation,
-  onRetry,
-}: FileDiffPaneProps) => {
-  const patch = payload.data?.patch ?? null;
-  const [renderLimit, setRenderLimit] = useState(DIFF_VIEWER_INITIAL_LINE_LIMIT);
-  const [drag, setDrag] = useState<DragSelection | null>(null);
-  const scrollXRef = useRef(0);
-  const maxScrollXRef = useRef(0);
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const hunks = useMemo(() => (patch ? parseUnifiedDiff(patch) : []), [patch]);
-  const rangeIndex = useMemo(() => buildDiffLineRangeIndex(hunks), [hunks]);
-
-  const [syntaxResult, setSyntaxResult] = useState<readonly SyntaxLine[] | null | undefined>(() => {
-    if (!patch) return undefined;
-    const initialHunks = parseUnifiedDiff(patch);
-    const langId = detectLangId(file.path);
-    if (!langId || initialHunks.length === 0) return null;
-    const allLines = initialHunks.flatMap((hunk) => hunk.lines);
-    const texts = allLines.map((line) => line.text);
-    return getCachedTokens(file.path, texts, syntaxHighlightColorScheme);
-  });
-
-  const highlightingPending = syntaxResult === undefined;
-
-  const tokenMap = useMemo(() => {
-    if (syntaxResult === undefined || syntaxResult === null) return new Map<DiffLine, SyntaxLine>();
-    const allLines = hunks.flatMap((hunk) => hunk.lines);
-    const map = new Map<DiffLine, SyntaxLine>();
-    for (let index = 0; index < allLines.length; index += 1) {
-      if (syntaxResult[index]) map.set(allLines[index], syntaxResult[index]);
-    }
-    return map;
-  }, [syntaxResult, hunks]);
-
-  useEffect(() => {
-    const langId = detectLangId(file.path);
-    if (!langId || hunks.length === 0) {
-      setSyntaxResult(null);
-      return;
-    }
-    const allLines = hunks.flatMap((hunk) => hunk.lines);
-    if (allLines.length === 0) {
-      setSyntaxResult(null);
-      return;
-    }
-    const texts = allLines.map((line) => line.text);
-    const cached = getCachedTokens(file.path, texts, syntaxHighlightColorScheme);
-    if (cached !== undefined) {
-      setSyntaxResult(cached);
-      return;
-    }
-    setSyntaxResult(undefined);
-    let cancelled = false;
-    tokenizeDiffLines(file.path, texts, langId, syntaxHighlightColorScheme).then((result) => {
-      if (cancelled) return;
-      startTransition(() => setSyntaxResult(result));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [file.path, hunks, syntaxHighlightColorScheme]);
-
-  useEffect(() => {
-    if (viewMode !== "split") return;
-    scrollXRef.current = 0;
-    scrollContainerRef.current?.style.setProperty("--diff-scroll-x", "0px");
-  }, [viewMode]);
-
-  const measureMaxScrollX = useCallback(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    requestAnimationFrame(() => {
-      const currentContainer = scrollContainerRef.current;
-      if (!currentContainer) return;
-      const textElements = currentContainer.querySelectorAll("[data-split-text]");
-      let maxOverflow = 0;
-      textElements.forEach((element) => {
-        const inner = element as HTMLElement;
-        const outer = inner.parentElement;
-        if (!outer) return;
-        maxOverflow = Math.max(maxOverflow, inner.scrollWidth - outer.clientWidth);
-      });
-      maxScrollXRef.current = maxOverflow;
-      if (maxOverflow > 0 && scrollXRef.current > maxOverflow) {
-        scrollXRef.current = maxOverflow;
-        currentContainer.style.setProperty("--diff-scroll-x", `${maxOverflow}px`);
-      }
-    });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (viewMode !== "split") {
-      maxScrollXRef.current = 0;
-      return;
-    }
-    measureMaxScrollX();
-    const observer = new MutationObserver(measureMaxScrollX);
-    if (scrollContainerRef.current) {
-      observer.observe(scrollContainerRef.current, { childList: true, subtree: true });
-    }
-    return () => observer.disconnect();
-  }, [viewMode, measureMaxScrollX]);
-
-  useEffect(() => {
-    if (viewMode !== "split") return;
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    const handleSplitWheel = (event: WheelEvent) => {
-      const hasHorizontal = event.deltaX !== 0;
-      const isShiftVertical = event.shiftKey && event.deltaY !== 0 && event.deltaX === 0;
-      if (!hasHorizontal && !isShiftVertical) return;
-      if (event.deltaY === 0 || isShiftVertical) {
-        event.preventDefault();
-      }
-      const rawDelta = hasHorizontal ? event.deltaX : event.deltaY;
-      const delta =
-        event.deltaMode === 1 ? rawDelta * 20 : event.deltaMode === 2 ? rawDelta * 300 : rawDelta;
-      scrollXRef.current = Math.max(0, Math.min(scrollXRef.current + delta, maxScrollXRef.current));
-      container.style.setProperty("--diff-scroll-x", `${scrollXRef.current}px`);
-    };
-    container.addEventListener("wheel", handleSplitWheel, { passive: false });
-    return () => container.removeEventListener("wheel", handleSplitWheel);
-  }, [viewMode]);
-
-  const renderChunks = useMemo(
-    () => buildRenderChunks(hunks, viewMode, DIFF_VIEWER_RENDER_CHUNK),
-    [hunks, viewMode],
-  );
-  const totalRenderRows = useMemo(
-    () => renderChunks.reduce((total, chunk) => total + renderChunkLength(chunk), 0),
-    [renderChunks],
-  );
-  const visibleChunks = useMemo(
-    () => renderChunks.filter((chunk) => chunk.startIndex < renderLimit),
-    [renderChunks, renderLimit],
-  );
-  const renderedRows = useMemo(
-    () => visibleChunks.reduce((total, chunk) => total + renderChunkLength(chunk), 0),
-    [visibleChunks],
-  );
-
-  const isDragging = drag !== null;
-  const isDraggingRef = useRef(isDragging);
-  isDraggingRef.current = isDragging;
-  const dragRange = drag ? resolveDragRange(rangeIndex, drag.anchor, drag.focus) : null;
-  const dragRangeRef = useRef(dragRange);
-  dragRangeRef.current = dragRange;
-
-  // Stable across renders so memoized rows bail out during the grow; identity is
-  // gated on a ref instead of `isDragging` so starting a drag doesn't churn props.
-  const handleStartDrag = useCallback((line: DiffLine) => {
-    const target = diffLineTargetFor(line);
-    if (target) setDrag({ anchor: target, focus: target });
-  }, []);
-  const handleDragEnter = useCallback((line: DiffLine) => {
-    if (!isDraggingRef.current) return;
-    const target = diffLineTargetFor(line);
-    if (target) setDrag((previous) => (previous ? { ...previous, focus: target } : previous));
-  }, []);
-
-  // Reveal one more chunk per frame until the whole file is rendered. Wrapped in
-  // a transition so streaming the tail never blocks pointer/scroll/keyboard input.
-  useEffect(() => {
-    if (renderLimit >= totalRenderRows) return;
-    const frame = requestAnimationFrame(() => {
-      startTransition(() =>
-        setRenderLimit((limit) => Math.min(totalRenderRows, limit + DIFF_VIEWER_RENDER_CHUNK)),
-      );
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [renderLimit, totalRenderRows]);
-
-  // Releasing the pointer anywhere commits the drag and opens the editor on the
-  // last line of the range; a plain click is just a single-line range.
-  useEffect(() => {
-    if (!isDragging) return;
-    const cancelDrag = () => setDrag(null);
-    dragCancelRef.current = cancelDrag;
-    const commitDrag = () => {
-      setDrag(null);
-      const range = dragRangeRef.current;
-      if (!range) return;
-      const key = diffAnnotationKey({ filePath: file.path, ...range.end });
-      const isMultiline = diffLineTargetKey(range.start) !== diffLineTargetKey(range.end);
-      onOpenEditor(key, isMultiline ? { filePath: file.path, ...range } : undefined);
-    };
-    window.addEventListener("pointerup", commitDrag);
-    window.addEventListener("pointercancel", cancelDrag);
-    return () => {
-      dragCancelRef.current = null;
-      window.removeEventListener("pointerup", commitDrag);
-      window.removeEventListener("pointercancel", cancelDrag);
-    };
-  }, [isDragging, file.path, onOpenEditor, dragCancelRef]);
-
-  // Lines covered by the live drag, the just-committed editor range, or any saved
-  // multiline annotation in this file.
-  const highlightedKeys = useMemo(() => {
-    const keys = new Set<string>();
-    const addRange = (range: DiffLineRange | null) => {
-      if (!range) return;
-      for (const key of coveredTargetKeys(rangeIndex, range)) keys.add(key);
-    };
-    addRange(dragRange);
-    if (pendingRange && pendingRange.filePath === file.path) addRange(pendingRange);
-    for (const annotation of Object.values(annotations)) {
-      if (annotation.filePath !== file.path) continue;
-      const start = annotationRangeStart(annotation);
-      if (start) {
-        addRange({ start, end: { side: annotation.side, lineNumber: annotation.lineNumber } });
-      }
-    }
-    return keys;
-  }, [rangeIndex, dragRange, pendingRange, annotations, file.path]);
-
-  if (file.binary && isImagePath(file.path) && cwd) {
-    return <ImagePreview src={buildFileUrl(cwd, file.path)} alt={file.path} />;
-  }
-
-  if (payload.state === "loading" && !payload.data) {
-    return (
-      <DiffPaneNotice>
-        <Spinner className="size-4" aria-label="loading diff" />
-        Loading diff…
-      </DiffPaneNotice>
-    );
-  }
-  if (payload.state === "error" || !payload.data) {
-    return (
-      <DiffPaneNotice icon>
-        Couldn't load this file's diff.
-        <Button variant="outline" size="xs" onClick={onRetry}>
-          Retry
-        </Button>
-      </DiffPaneNotice>
-    );
-  }
-  if (payload.data.binary) {
-    return <DiffPaneNotice icon>Binary file — no text diff to show.</DiffPaneNotice>;
-  }
-  if (payload.data.patchOmitted) {
-    return <DiffPaneNotice icon>Diff too large to display.</DiffPaneNotice>;
-  }
-  if (hunks.length === 0) {
-    return (
-      <DiffPaneNotice>
-        {file.status === "renamed"
-          ? "Renamed without content changes."
-          : file.status === "untracked" && file.additions === 0
-            ? "Empty file."
-            : "No content changes."}
-      </DiffPaneNotice>
-    );
-  }
-
-  const hiddenRows = totalRenderRows - renderedRows;
-
-  return (
-    <div
-      ref={scrollContainerRef}
-      data-diff-scroll={viewMode === "split" ? "" : undefined}
-      className={cn(
-        "pb-4 font-mono text-xs leading-5",
-        viewMode === "unified" && "min-w-max",
-        isDragging && "select-none",
-      )}
-    >
-      {visibleChunks.map((chunk) => (
-        <DiffChunk
-          key={chunk.key}
-          chunk={chunk}
-          filePath={file.path}
-          tokenMap={tokenMap}
-          highlightedKeys={highlightedKeys}
-          annotations={annotations}
-          editingKey={editingKey}
-          pendingRange={pendingRange}
-          highlightingPending={highlightingPending}
-          onOpenEditor={onOpenEditor}
-          onSaveAnnotation={onSaveAnnotation}
-          onCancelEditor={onCancelEditor}
-          onDeleteAnnotation={onDeleteAnnotation}
-          onStartDrag={handleStartDrag}
-          onDragEnter={handleDragEnter}
-        />
-      ))}
-      {hiddenRows > 0 ? (
-        <div className="flex items-center gap-2 px-4 py-2 text-muted-foreground/70">
-          <Spinner className="size-3" aria-label="rendering diff" />
-          rendering {hiddenRows.toLocaleString()} more lines…
-        </div>
-      ) : null}
-    </div>
-  );
-};
-
-// "This branch has a GitHub PR" chip — color-coded by state and set apart from
-// the add/delete greens and reds so a detected PR is obvious at a glance. Links
-// to the PR when gh gave us a URL.
-const PrBadge = ({
-  pr,
-  currentBranch,
-  hideTitle,
-}: {
-  pr: GitBranchPr;
-  currentBranch: string | null;
-  hideTitle: boolean;
-}) => {
-  const displayState = resolvePrDisplayState(pr, currentBranch);
-  if (!displayState) return null;
-  const PrIcon = PR_STATE_ICONS[displayState];
-  const stateLabel = PR_DISPLAY_STATE_LABELS[displayState];
-  const style = PR_STATE_STYLES[displayState];
-  const className = cn(
-    "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] transition-colors",
-    style.badge,
-  );
-  const label = `PR #${pr.number} (${stateLabel})${pr.title ? ` — ${pr.title}` : ""}`;
-  const content = (
-    <>
-      <PrIcon className="size-3 shrink-0" aria-hidden="true" />
-      <span className="shrink-0">#{pr.number}</span>
-      {displayState !== "open" ? (
-        <span className="shrink-0 uppercase opacity-70">{stateLabel}</span>
-      ) : null}
-      {!hideTitle && pr.title ? <span className="opacity-80">{pr.title}</span> : null}
-    </>
-  );
-  return pr.url ? (
-    <a
-      href={pr.url}
-      target="_blank"
-      rel="noreferrer"
-      title={label}
-      aria-label={`open ${label}`}
-      className={cn(className, style.hover)}
-    >
-      {content}
-    </a>
-  ) : (
-    <span title={label} aria-label={label} className={className}>
-      {content}
-    </span>
-  );
-};
+const DIFF_VIEW_MODES: readonly DiffViewMode[] = ["unified", "split"];
 
 export const DiffViewer = ({
   open,
@@ -1144,15 +110,6 @@ export const DiffViewer = ({
 }: DiffViewerProps) => {
   const [mounted, setMounted] = useState(false);
   const [settled, setSettled] = useState(false);
-  // Per-mode file lists, pre-fetched on cwd change (even while the viewer is
-  // closed) so data is ready instantly on open. No cross-component ref — state
-  // triggers re-renders, so the viewer always reflects the latest fetch.
-  const [workingFiles, setWorkingFiles] = useState<GitDiffFileListResponse | null>(null);
-  const [branchFiles, setBranchFiles] = useState<GitDiffFileListResponse | null>(null);
-  const [hasError, setHasError] = useState(false);
-  const [patchCache, setPatchCache] = useState<Record<string, PatchEntry>>({});
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const selectedPathRef = useRef(selectedPath);
   const [viewMode, setViewMode] = useState<DiffViewMode>(() => loadStoredDiffViewMode());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [headerWidth, setHeaderWidth] = useState(0);
@@ -1167,7 +124,6 @@ export const DiffViewer = ({
   // User-picked base ref for branch mode; null falls back to the server's
   // locally-resolved default branch. Reset per repo.
   const [baseOverride, setBaseOverride] = useState<string | null>(null);
-  const [refreshCount, setRefreshCount] = useState(0);
 
   // Effective PR for this open: the detected branch PR, unless it's a stale
   // merged PR (older than the overlay TTL) — in which case it's treated as no
@@ -1190,34 +146,8 @@ export const DiffViewer = ({
     compareMode === "branch"
       ? (baseOverride ?? pr?.baseRef ?? branchInfo?.defaultBase ?? null)
       : null;
-  // Pending review annotations survive close/reopen until they are sent.
-  const [annotations, setAnnotations] = useState<Record<string, DiffAnnotation>>({});
-  const [editingKey, setEditingKey] = useState<string | null>(null);
-  // Range selected by the drag that opened the current editor, applied to the
-  // annotation on save.
-  const [pendingRange, setPendingRange] = useState<PendingAnnotationRange | null>(null);
-  const dragCancelRef = useRef<(() => void) | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const fileListVirtualizerRef = useRef<FileListVirtualizerHandle | null>(null);
-  // In-flight per-file patch fetches, so they can be aborted on close/refresh.
-  const patchControllersRef = useRef<Map<string, AbortController>>(new Map());
-  // Tracks the last-seen file metadata per path+mode so the patch-loading
-  // effect can detect real changes (additions/deletions/status) vs mere
-  // reference identity changes from re-fetches returning identical data.
-  // Includes compareMode+base so switching modes invalidates stale patches.
-  const prefetchQueueRef = useRef<PrefetchQueue | null>(null);
-  const lastFileMetaRef = useRef<Map<string, string>>(new Map());
-  // Latest cache, read by loadPatch without making it depend on patchCache.
-  const patchCacheRef = useRef(patchCache);
-  patchCacheRef.current = patchCache;
-  const syntaxHighlightColorSchemeRef = useRef(syntaxHighlightColorScheme);
-  syntaxHighlightColorSchemeRef.current = syntaxHighlightColorScheme;
-  const onDiffSummaryUpdateRef = useRef(onDiffSummaryUpdate);
-  onDiffSummaryUpdateRef.current = onDiffSummaryUpdate;
-
-  useEffect(() => {
-    selectedPathRef.current = selectedPath;
-  }, [selectedPath]);
 
   useEffect(() => {
     if (open) {
@@ -1235,288 +165,51 @@ export const DiffViewer = ({
     }
   }, [open]);
 
-  const abortPatchFetches = useCallback(() => {
-    for (const controller of patchControllersRef.current.values()) controller.abort();
-    patchControllersRef.current.clear();
-    prefetchQueueRef.current?.clear();
-  }, []);
-
   // Switching repos resets mode overrides, file-list state, and patches.
   useEffect(() => {
     setBaseOverride(null);
     setUserPickedMode(null);
-    setWorkingFiles(null);
-    setBranchFiles(null);
-    setHasError(false);
-    setPatchCache({});
-    lastFileMetaRef.current.clear();
-    prefetchQueueRef.current = null;
-    abortPatchFetches();
-  }, [cwd, abortPatchFetches]);
-
-  // Pre-fetch both file lists on cwd change, in parallel. Runs while the viewer
-  // is closed so data is ready on open; each list sets state as it resolves, so
-  // whichever mode compareMode lands on once branchInfo resolves paints without
-  // waiting on the other. Parallel is safe: the server caches each (cwd, mode,
-  // base) diff pass, so the two builds are independent git processes and the
-  // patch prefetch that follows reads from cache without spawning more.
-  useEffect(() => {
-    if (!cwd) return;
-    const controller = new AbortController();
-    const signal = controller.signal;
-    void (async () => {
-      const working = await fetchGitDiffFiles(cwd, { mode: "working" }, signal);
-      if (!signal.aborted && working) setWorkingFiles(working);
-    })();
-    void (async () => {
-      const branch = await fetchGitDiffFiles(cwd, { mode: "branch" }, signal);
-      if (!signal.aborted && branch) setBranchFiles(branch);
-    })();
-    return () => controller.abort();
   }, [cwd]);
 
-  const workingFilesRef = useRef(workingFiles);
-  workingFilesRef.current = workingFiles;
-  const branchFilesRef = useRef(branchFiles);
-  branchFilesRef.current = branchFiles;
+  const {
+    displayFileList,
+    files,
+    hasError,
+    loadPatch,
+    patchCache,
+    refreshFiles,
+    selectedPath,
+    setSelectedPath,
+  } = useDiffViewerData({
+    open,
+    cwd,
+    compareMode,
+    baseOverride,
+    gitDirtyVersion,
+    currentBranch: branchInfo?.currentBranch ?? null,
+    syntaxHighlightColorScheme,
+    onDiffSummaryUpdate,
+  });
 
-  // Refetch the current mode's file list and update the right per-mode state.
-  // Returns the fetched list so callers can decide whether to recover from errors
-  // or invalidate cached patch metadata.
-  const refreshCurrentFiles = useCallback(
-    async (signal: AbortSignal): Promise<GitDiffFileListResponse | null> => {
-      if (!cwd) return null;
-      const query = { mode: compareMode, base: baseOverride };
-      const response = await fetchGitDiffFiles(cwd, query, signal);
-      if (signal.aborted || !response) return null;
-      const setter = compareMode === "branch" ? setBranchFiles : setWorkingFiles;
-      setter(response);
-      return response;
-    },
-    [cwd, compareMode, baseOverride],
-  );
-
-  // On-open revalidation: when the viewer opens with data already present, show
-  // it immediately and silently refresh in the background. When data is missing
-  // (first load on a fresh cwd, or explicit refresh), fetch with the center
-  // spinner. Mode switches read from the per-mode state — no spinner.
-  useEffect(() => {
-    if (!open || !cwd) {
-      abortPatchFetches();
-      setPatchCache((prev) => {
-        let changed = false;
-        const next: Record<string, PatchEntry> = {};
-        for (const [path, entry] of Object.entries(prev)) {
-          if (entry.state === "loading") changed = true;
-          else next[path] = entry;
-        }
-        return changed ? next : prev;
-      });
-      return;
-    }
-    const currentData = compareMode === "branch" ? branchFilesRef.current : workingFilesRef.current;
-
-    if (currentData) {
-      const controller = new AbortController();
-      void refreshCurrentFiles(controller.signal);
-      return () => controller.abort();
-    }
-
-    setHasError(false);
-    abortPatchFetches();
-    setPatchCache({});
-    const controller = new AbortController();
-    void (async () => {
-      const response = await refreshCurrentFiles(controller.signal);
-      if (controller.signal.aborted) return;
-      if (!response) setHasError(true);
-    })();
-    return () => controller.abort();
-  }, [open, cwd, refreshCount, compareMode, baseOverride, abortPatchFetches, refreshCurrentFiles]);
-
-  // When the server signals the working tree may have changed, debounce and
-  // re-fetch the current mode's file list so opening lands on current, pre-cached
-  // data — even before the viewer has ever been opened. The gate skips only when
-  // the current mode's list hasn't loaded yet: that first load is owned by the
-  // cwd-change effect, so acting on the startup git-dirty signal (which merely
-  // duplicates it) would run a redundant heavy diff at terminal startup. When
-  // open, we also mark the selected file's cached metadata stale so the prefetch
-  // queue force-reloads its patch, keeping the diff content in sync with the disk.
-  useEffect(() => {
-    if (!cwd || gitDirtyVersion === undefined) return;
-    const currentFilesLoaded = (compareMode === "branch" ? branchFilesRef : workingFilesRef)
-      .current;
-    if (!currentFilesLoaded) return;
-
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        const response = await refreshCurrentFiles(controller.signal);
-        if (controller.signal.aborted || !response) return;
-        setHasError(false);
-        if (open) {
-          const stalePath = selectedPathRef.current;
-          if (stalePath) lastFileMetaRef.current.set(stalePath, "__git-dirty__");
-        }
-      })();
-    }, DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS);
-
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [cwd, gitDirtyVersion, compareMode, baseOverride, open, refreshCurrentFiles]);
-
-  // Push working-tree summaries back to the ambient indicator so it stays in sync
-  // with the viewer's latest fetch instead of waiting on the throttled WebSocket push.
-  useEffect(() => {
-    if (workingFiles && onDiffSummaryUpdateRef.current) {
-      onDiffSummaryUpdateRef.current(
-        deriveDiffSummary(workingFiles, branchInfo?.currentBranch ?? null),
-      );
-    }
-  }, [workingFiles, branchInfo?.currentBranch]);
-
-  // Invalidate cached patches when the comparison mode or base changes —
-  // patches from one mode are wrong for another.
-  useEffect(() => {
-    abortPatchFetches();
-    setPatchCache({});
-    lastFileMetaRef.current.clear();
-    prefetchQueueRef.current = null;
-  }, [compareMode, baseOverride, abortPatchFetches]);
-
-  const displayFileList = compareMode === "branch" ? branchFiles : workingFiles;
-  const files = useMemo(() => displayFileList?.files ?? [], [displayFileList]);
-
-  const loadPatch = useCallback(
-    (path: string | null | undefined, force = false) => {
-      if (!path || !cwd) return;
-      const existing = patchCacheRef.current[path];
-      const inFlight = patchControllersRef.current.has(path);
-      if (
-        !force &&
-        existing &&
-        (existing.state === "loaded" || (existing.state === "loading" && inFlight))
-      )
-        return;
-      if (force && existing?.state === "loading" && inFlight) return;
-      const previousData = existing?.data;
-      setPatchCache((previous) => ({
-        ...previous,
-        [path]: { state: "loading", ...(previousData ? { data: previousData } : {}) },
-      }));
-      patchControllersRef.current.get(path)?.abort();
-      const controller = new AbortController();
-      patchControllersRef.current.set(path, controller);
-      void fetchGitDiffFilePatch(
-        cwd,
-        path,
-        { mode: compareMode, base: baseOverride },
-        controller.signal,
-      )
-        .then(async (data) => {
-          if (controller.signal.aborted) return;
-          patchControllersRef.current.delete(path);
-          if (data?.patch) {
-            const langId = detectLangId(path);
-            if (langId) {
-              const hunks = parseUnifiedDiff(data.patch);
-              const allLines = hunks.flatMap((hunk) => hunk.lines);
-              if (allLines.length > 0) {
-                await tokenizeDiffLines(
-                  path,
-                  allLines.map((line) => line.text),
-                  langId,
-                  syntaxHighlightColorSchemeRef.current,
-                );
-              }
-            }
-          }
-          if (controller.signal.aborted) return;
-          setPatchCache((previous) => ({
-            ...previous,
-            [path]: data ? { state: "loaded", data } : { state: "error" },
-          }));
-        })
-        .catch(() => {
-          if (controller.signal.aborted) return;
-          patchControllersRef.current.delete(path);
-          setPatchCache((previous) => ({
-            ...previous,
-            [path]: { state: "error" },
-          }));
-        });
-    },
-    [cwd, compareMode, baseOverride],
-  );
-
-  const getOrCreatePrefetchQueue = useCallback(() => {
-    if (!prefetchQueueRef.current) {
-      prefetchQueueRef.current = new PrefetchQueue(
-        PATCH_PREFETCH_CONCURRENCY,
-        async (path, force) => {
-          loadPatch(path, force);
-        },
-      );
-    }
-    return prefetchQueueRef.current;
-  }, [loadPatch]);
-
-  // Keep a valid selection: follow the current file across refreshes, fall back
-  // to the first file when it disappears.
-  useEffect(() => {
-    if (!displayFileList) return;
-    if (selectedPath && files.some((file) => file.path === selectedPath)) return;
-    setSelectedPath(files[0]?.path ?? null);
-  }, [displayFileList, files, selectedPath]);
-
-  // Unified prefetch: the selected file (priority 0), its neighbors (priority
-  // 1..N), and remaining uncached files (priority N+1+) all route through a
-  // single concurrency-limited queue. When the selected file's metadata
-  // changes (additions/deletions/status), the force flag invalidates its
-  // cached patch so the queue re-fetches it.
-  useEffect(() => {
-    if (files.length === 0 || !selectedPath) return;
-    const queue = getOrCreatePrefetchQueue();
-    const selectedMeta = files.find((file) => file.path === selectedPath);
-    const modeKey = `${compareMode}:${baseOverride ?? ""}`;
-    const metaKey = selectedMeta
-      ? `${modeKey}:${selectedMeta.additions}:${selectedMeta.deletions}:${selectedMeta.status}:${selectedMeta.binary}`
-      : modeKey;
-    const lastKey = lastFileMetaRef.current.get(selectedPath);
-    const fileChanged = lastKey !== undefined && lastKey !== metaKey;
-    lastFileMetaRef.current.set(selectedPath, metaKey);
-
-    const items: PrefetchQueueItem[] = [];
-    items.push({ path: selectedPath, priority: 0, force: fileChanged });
-
-    const selectedIndex = files.findIndex((file) => file.path === selectedPath);
-    if (selectedIndex >= 0) {
-      for (let offset = 1; offset <= PATCH_PREFETCH_NEIGHBOR_RADIUS; offset++) {
-        const prev = files[selectedIndex - offset]?.path;
-        const next = files[selectedIndex + offset]?.path;
-        if (prev) items.push({ path: prev, priority: offset });
-        if (next) items.push({ path: next, priority: offset });
-      }
-    }
-
-    for (const file of files) {
-      if (items.some((item) => item.path === file.path)) continue;
-      const distance = Math.abs(files.indexOf(file) - (selectedIndex >= 0 ? selectedIndex : 0));
-      items.push({
-        path: file.path,
-        priority: PATCH_PREFETCH_NEIGHBOR_RADIUS + distance,
-      });
-    }
-
-    queue.enqueue(items);
-  }, [selectedPath, displayFileList, files, compareMode, baseOverride, getOrCreatePrefetchQueue]);
+  const {
+    annotationCounts,
+    annotationList,
+    annotations,
+    cancelAnnotationEditor,
+    clearAnnotations,
+    deleteAnnotation,
+    dragCancelRef,
+    editingKey,
+    handleSendToTerminal,
+    openAnnotationEditor,
+    pendingRange,
+    saveAnnotation,
+  } = useDiffReviewAnnotations({ onClose, onSendToTerminal });
 
   const selectedFile = files.find((file) => file.path === selectedPath) ?? null;
   const selectedIndex = selectedFile ? files.indexOf(selectedFile) : -1;
   const openFileAction = selectedFile
-    ? resolveOpenFileAction(selectedFile, onOpenInEditor, onOpenImage)
+    ? resolveOpenDiffFileAction(selectedFile, onOpenInEditor, onOpenImage)
     : null;
   const selectedFileParts = selectedFile
     ? splitFilePath(selectedFile.path)
@@ -1544,7 +237,7 @@ export const DiffViewer = ({
       setSelectedPath(files[nextIndex].path);
       fileListVirtualizerRef.current?.scrollToIndex(nextIndex, { align: "auto" });
     },
-    [files, selectedIndex],
+    [files, selectedIndex, setSelectedPath],
   );
 
   useEffect(() => {
@@ -1583,7 +276,7 @@ export const DiffViewer = ({
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [open, mounted, onClose, moveSelection]);
+  }, [open, mounted, onClose, moveSelection, dragCancelRef]);
 
   useEffect(() => {
     if (open && settled) panelRef.current?.focus();
@@ -1638,41 +331,9 @@ export const DiffViewer = ({
 
   // Refresh both the diff and the leased branch/PR metadata.
   const handleRefresh = useCallback(() => {
-    if (compareMode === "branch") setBranchFiles(null);
-    else setWorkingFiles(null);
-    setHasError(false);
-    setRefreshCount((count) => count + 1);
+    refreshFiles();
     onRefreshBranchInfo?.();
-  }, [compareMode, onRefreshBranchInfo]);
-
-  const openAnnotationEditor = useCallback((key: string, range?: PendingAnnotationRange) => {
-    setEditingKey(key);
-    setPendingRange(range ?? null);
-  }, []);
-
-  const cancelAnnotationEditor = useCallback(() => {
-    setEditingKey(null);
-    setPendingRange(null);
-  }, []);
-
-  const saveAnnotation = useCallback((annotation: DiffAnnotation) => {
-    setAnnotations((previous) => ({ ...previous, [diffAnnotationKey(annotation)]: annotation }));
-    setEditingKey(null);
-    setPendingRange(null);
-  }, []);
-
-  const deleteAnnotation = useCallback((key: string) => {
-    setAnnotations((previous) => {
-      const { [key]: _removed, ...rest } = previous;
-      return rest;
-    });
-    setEditingKey((previous) => (previous === key ? null : previous));
-    setPendingRange((previous) =>
-      previous && diffAnnotationKey({ filePath: previous.filePath, ...previous.end }) === key
-        ? null
-        : previous,
-    );
-  }, []);
+  }, [refreshFiles, onRefreshBranchInfo]);
 
   // Options for the base picker: the candidate refs, plus the active base if it
   // somehow isn't among them (e.g. a detached default), so the select can show it.
@@ -1694,31 +355,6 @@ export const DiffViewer = ({
       : baseOptions.length === 0
         ? "No branches"
         : (displayBase ?? baseOptions[0] ?? "");
-
-  const annotationList = useMemo(() => Object.values(annotations), [annotations]);
-
-  const annotationCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const annotation of annotationList) {
-      counts.set(annotation.filePath, (counts.get(annotation.filePath) ?? 0) + 1);
-    }
-    return counts;
-  }, [annotationList]);
-
-  const clearAnnotations = useCallback(() => {
-    setAnnotations({});
-    setEditingKey(null);
-    setPendingRange(null);
-  }, []);
-
-  const handleSendToTerminal = useCallback(() => {
-    if (!onSendToTerminal || annotationList.length === 0) return;
-    onSendToTerminal(formatReviewPrompt(annotationList));
-    setAnnotations({});
-    setEditingKey(null);
-    setPendingRange(null);
-    onClose();
-  }, [onSendToTerminal, annotationList, onClose]);
 
   const isBranchMode = compareMode === "branch";
   const headerConfigIndexRef = useRef(0);
@@ -1775,7 +411,7 @@ export const DiffViewer = ({
             "flex shrink-0 items-center border-b border-border/40 py-2.5",
             headerLayout.showTitle
               ? "gap-3 px-4"
-              : headerLayout.headerPadding === 24
+              : headerLayout.headerPadding === DIFF_VIEWER_COMPACT_HEADER_PADDING_PX
                 ? "gap-2 px-3"
                 : "gap-3 px-4",
           )}
@@ -1789,15 +425,9 @@ export const DiffViewer = ({
             className="flex shrink-0 items-center rounded-md border border-border/60 p-0.5"
           >
             {(headerLayout.compareLabels === "full"
-              ? ([
-                  ["working", "Working"],
-                  ["branch", "Branch"],
-                ] as const)
-              : ([
-                  ["working", "W"],
-                  ["branch", "B"],
-                ] as const)
-            ).map(([mode, label]) => (
+              ? FULL_COMPARISON_OPTIONS
+              : COMPACT_COMPARISON_OPTIONS
+            ).map(({ mode, label }) => (
               <button
                 key={mode}
                 type="button"
@@ -1842,15 +472,15 @@ export const DiffViewer = ({
             </div>
           ) : null}
           {pr ? (
-            <PrBadge
+            <DiffViewerPrBadge
               pr={pr}
               currentBranch={branchInfo?.currentBranch ?? null}
               hideTitle={!headerLayout.prShowTitle}
             />
           ) : null}
           <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
-            <span className={ADDITIONS_CLASSES}>+{totals.additions.toLocaleString()}</span>{" "}
-            <span className={DELETIONS_CLASSES}>−{totals.deletions.toLocaleString()}</span>
+            <span className={DIFF_ADDITIONS_CLASSES}>+{totals.additions.toLocaleString()}</span>{" "}
+            <span className={DIFF_DELETIONS_CLASSES}>−{totals.deletions.toLocaleString()}</span>
             {totals.binaries > 0 && headerLayout.showBinaryCount ? (
               <span className="text-muted-foreground/70"> · {totals.binaries} binary</span>
             ) : null}
@@ -1864,7 +494,7 @@ export const DiffViewer = ({
               aria-label="diff layout"
               className="flex items-center rounded-md border border-border/60 p-0.5"
             >
-              {(["unified", "split"] as const).map((mode) => (
+              {DIFF_VIEW_MODES.map((mode) => (
                 <button
                   key={mode}
                   type="button"
@@ -2022,8 +652,8 @@ export const DiffViewer = ({
                     ) : null}
                     {!selectedFile.binary ? (
                       <span className="ml-auto shrink-0 tabular-nums">
-                        <span className={ADDITIONS_CLASSES}>+{selectedFile.additions}</span>{" "}
-                        <span className={DELETIONS_CLASSES}>−{selectedFile.deletions}</span>
+                        <span className={DIFF_ADDITIONS_CLASSES}>+{selectedFile.additions}</span>{" "}
+                        <span className={DIFF_DELETIONS_CLASSES}>−{selectedFile.deletions}</span>
                       </span>
                     ) : null}
                   </div>
@@ -2077,247 +707,6 @@ export const DiffViewer = ({
             </div>
           </footer>
         ) : null}
-      </div>
-    </div>
-  );
-};
-
-interface FileListPopoverProps {
-  files: GitDiffFileMeta[];
-  selectedPath: string | null;
-  onSelect: (path: string) => void;
-}
-
-const FileListPopover = ({ files, selectedPath, onSelect }: FileListPopoverProps) => {
-  const [search, setSearch] = useState("");
-  const filteredFiles = useMemo(() => {
-    const lower = search.toLowerCase();
-    return lower ? files.filter((file) => file.path.toLowerCase().includes(lower)) : files;
-  }, [files, search]);
-
-  return (
-    <div className="flex max-h-72 flex-col" data-slot="file-list-popover">
-      <div className="border-b border-border/40 px-2 py-1.5">
-        <input
-          type="text"
-          autoComplete="off"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search files…"
-          autoFocus
-          className="w-full rounded-sm border border-border/50 bg-transparent py-0.5 px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-ring"
-        />
-      </div>
-      <div
-        className="overflow-y-auto overscroll-contain p-1"
-        role="listbox"
-        aria-label="changed files"
-      >
-        {filteredFiles.length === 0 ? (
-          <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-            {files.length === 0 ? "No files changed." : "No files match your search."}
-          </p>
-        ) : (
-          filteredFiles.map((file) => {
-            const status = STATUS_LABELS[file.status];
-            const { directory, basename } = splitFilePath(file.path);
-            const isSelected = file.path === selectedPath;
-            return (
-              <button
-                key={file.path}
-                type="button"
-                role="option"
-                aria-selected={isSelected}
-                onClick={() => onSelect(file.path)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-xs outline-none transition-colors",
-                  isSelected
-                    ? "bg-foreground/10 text-foreground"
-                    : "text-muted-foreground hover:bg-foreground/5",
-                )}
-              >
-                <span
-                  className={cn("w-3 shrink-0 font-mono font-semibold", status.className)}
-                  title={file.status}
-                >
-                  {status.letter}
-                </span>
-                <span className="min-w-0 flex-1 truncate font-mono" dir="rtl">
-                  <bdi>
-                    <span className="text-muted-foreground/60">{directory}</span>
-                    <span className={isSelected ? "text-foreground" : ""}>{basename}</span>
-                  </bdi>
-                </span>
-                {file.binary ? (
-                  <span className="shrink-0 rounded border border-border/40 px-1 font-mono text-[10px] text-muted-foreground/70">
-                    BIN
-                  </span>
-                ) : (
-                  <span className="shrink-0 font-mono tabular-nums">
-                    <span className={ADDITIONS_CLASSES}>+{file.additions}</span>{" "}
-                    <span className={DELETIONS_CLASSES}>−{file.deletions}</span>
-                  </span>
-                )}
-              </button>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-};
-
-interface FileListVirtualizerHandle {
-  scrollToIndex: (
-    index: number,
-    options?: { align?: "start" | "center" | "end" | "auto"; behavior?: ScrollBehavior },
-  ) => void;
-}
-
-const FILE_ROW_HEIGHT = 32;
-
-interface FileListSidebarProps {
-  files: GitDiffFileMeta[];
-  selectedPath: string | null;
-  annotationCounts: Map<string, number>;
-  onSelect: (path: string) => void;
-  virtualizerRef: RefObject<FileListVirtualizerHandle | null>;
-}
-
-const FileListSidebar = ({
-  files,
-  selectedPath,
-  annotationCounts,
-  onSelect,
-  virtualizerRef,
-}: FileListSidebarProps) => {
-  const [search, setSearch] = useState("");
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const filteredFiles = useMemo(() => {
-    const lower = search.toLowerCase();
-    return lower ? files.filter((file) => file.path.toLowerCase().includes(lower)) : files;
-  }, [files, search]);
-  const virtualizer = useVirtualizer({
-    count: filteredFiles.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => FILE_ROW_HEIGHT,
-    overscan: 12,
-    getItemKey: (index) => filteredFiles[index].path,
-  });
-
-  useImperativeHandle(virtualizerRef, () => ({ scrollToIndex: virtualizer.scrollToIndex }), [
-    virtualizer,
-  ]);
-
-  return (
-    <div className="flex h-full flex-col">
-      <div className="relative px-1.5 pt-1.5 pb-0.5">
-        <Search
-          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3 text-muted-foreground"
-          aria-hidden="true"
-        />
-        <input
-          type="text"
-          autoComplete="off"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search files…"
-          className="w-full rounded-sm border border-border/50 bg-transparent py-1 pl-6 pr-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-border"
-        />
-      </div>
-      <div
-        ref={scrollRef}
-        role="listbox"
-        aria-label="changed files"
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 pt-0"
-      >
-        {files.length === 0 ? (
-          <p className="py-4 text-center text-xs text-muted-foreground">No files changed.</p>
-        ) : filteredFiles.length === 0 ? (
-          <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-            No files match your search.
-          </p>
-        ) : (
-          <div
-            style={{
-              height: `${virtualizer.getTotalSize()}px`,
-              width: "100%",
-              position: "relative",
-            }}
-          >
-            {virtualizer.getVirtualItems().map((virtualRow: VirtualItem) => {
-              const file = filteredFiles[virtualRow.index];
-              const status = STATUS_LABELS[file.status];
-              const { directory, basename } = splitFilePath(file.path);
-              const isSelected = file.path === selectedPath;
-              const commentCount = annotationCounts.get(file.path) ?? 0;
-              return (
-                <button
-                  key={file.path}
-                  type="button"
-                  role="option"
-                  aria-selected={isSelected}
-                  onClick={() => onSelect(file.path)}
-                  data-index={virtualRow.index}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs outline-none transition-colors",
-                    isSelected
-                      ? "bg-foreground/10 text-foreground"
-                      : "text-muted-foreground hover:bg-foreground/5",
-                  )}
-                  style={
-                    {
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      height: `${virtualRow.size}px`,
-                      transform: `translateY(${virtualRow.start}px)`,
-                    } satisfies CSSProperties
-                  }
-                >
-                  <span
-                    className={cn("w-3 shrink-0 font-mono font-semibold", status.className)}
-                    title={file.status}
-                  >
-                    {status.letter}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate font-mono" dir="rtl">
-                    <bdi>
-                      <span className="text-muted-foreground/60">{directory}</span>
-                      <span className={isSelected ? "text-foreground" : ""}>{basename}</span>
-                    </bdi>
-                  </span>
-                  {commentCount > 0 ? (
-                    <span
-                      className="flex shrink-0 items-center gap-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
-                      title={`${commentCount} pending comment${commentCount === 1 ? "" : "s"}`}
-                    >
-                      <MessageSquare className="size-2.5" aria-hidden="true" />
-                      {commentCount}
-                    </span>
-                  ) : null}
-                  {file.binary ? (
-                    <span className="shrink-0 rounded border border-border/40 px-1 font-mono text-[10px] text-muted-foreground/70">
-                      BIN
-                    </span>
-                  ) : (
-                    <span className="shrink-0 font-mono tabular-nums">
-                      <span className={ADDITIONS_CLASSES}>+{file.additions}</span>{" "}
-                      <span className={DELETIONS_CLASSES}>−{file.deletions}</span>
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
       </div>
     </div>
   );
