@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.7
+
+### Patch Changes
+
+- b772348: Keep the alpha-mask WebGL fast path while calibrating glyph coverage to each theme's foreground and background, and enforce xterm's 4.5:1 contrast floor for light themes.
+  - @monotykamary/localterm-server@2.66.7
+
 ## 2.66.6
 
 ### Patch Changes
