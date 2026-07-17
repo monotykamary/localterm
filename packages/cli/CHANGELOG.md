@@ -1,5 +1,13 @@
 # localterm
 
+## 2.66.11
+
+### Patch Changes
+
+- dbd8f95: Automatically synchronize compatible Herdr theme selections to Localterm.
+- Updated dependencies [dbd8f95]
+  - @monotykamary/localterm-server@2.66.11
+
 ## 2.66.10
 
 ### Patch Changes
