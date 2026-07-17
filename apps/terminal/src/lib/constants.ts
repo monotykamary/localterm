@@ -108,6 +108,10 @@ export const PATCH_PREFETCH_NEIGHBOR_RADIUS = 5;
 
 export const AUTOMATIONS_SORT_STORAGE_KEY = "localterm:automations-sort";
 export const AUTOMATIONS_SORT_DEFAULT = "last-run" as const;
+export const AUTOMATION_RUN_LIMIT_DEFAULT_COUNT = 20;
+export const AUTOMATION_FINDINGS_PREVIEW_MAX_CHARACTERS = 140;
+export const AUTOMATIONS_LIST_ROW_HEIGHT_PX = 44;
+export const AUTOMATIONS_LIST_OVERSCAN_ROWS = 8;
 export const AUTOMATIONS_RELATIVE_TIME_REFRESH_MS = 30_000;
 // While the modal is open, re-fetch automations on this cadence so a run that
 // finishes flips to its final status even if the WS broadcast was missed (a

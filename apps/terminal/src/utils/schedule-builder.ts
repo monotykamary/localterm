@@ -8,17 +8,20 @@ import type {
 // The friendly-builder frequencies. "weekdays"/"weekends" are the
 // weekdaysPreset variants surfaced as first-class options; "cron" is the
 // advanced escape hatch.
-export type ScheduleFrequency =
-  | "hourly"
-  | "daily"
-  | "timesOfDay"
-  | "weekdays"
-  | "weekends"
-  | "weekly"
-  | "monthly"
-  | "everyNMinutes"
-  | "everyNHours"
-  | "cron";
+export const SCHEDULE_FREQUENCIES = [
+  "hourly",
+  "daily",
+  "timesOfDay",
+  "weekdays",
+  "weekends",
+  "weekly",
+  "monthly",
+  "everyNMinutes",
+  "everyNHours",
+  "cron",
+] as const;
+
+export type ScheduleFrequency = (typeof SCHEDULE_FREQUENCIES)[number];
 
 interface TimeOfDay {
   hour: number;

@@ -1,6 +1,6 @@
 import type { AutomationRunner, RunnerInput } from "@monotykamary/localterm-server/protocol";
 
-type RunnerType = AutomationRunner["kind"];
+export type RunnerType = AutomationRunner["kind"];
 type AgentSessionMode = "fresh" | "thread";
 export type AgentThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type HarnessKind = "pi" | "custom";

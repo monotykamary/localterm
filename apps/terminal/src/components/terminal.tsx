@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OnScreenKeyboard } from "@/components/on-screen-keyboard/on-screen-keyboard";
+import { useDaemonSettings } from "@/hooks/use-daemon-settings";
 import { useDeviceTier } from "@/hooks/use-device-tier";
 import {
   PR_DISPLAY_STATE_LABELS,
@@ -58,7 +59,7 @@ import {
   InputGroupText,
 } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
-import { ToastProvider, Toaster, useToast } from "@/components/ui/toast";
+import { ToastProvider, Toaster } from "@/components/ui/toast";
 import { AutomationsButton } from "@/components/automations-menu";
 import { AutomationsModal } from "@/components/automations-modal";
 import { CommandPalette, type CommandItem } from "@/components/command-palette";
@@ -78,13 +79,14 @@ import { WorktreesModal } from "@/components/worktrees-modal";
 import { useGitBranchInfo } from "@/hooks/use-git-branch-info";
 import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
 import { useScreenWakeLock } from "@/hooks/use-screen-wake-lock";
+import { useTerminalImagePaste } from "@/hooks/use-terminal-image-paste";
+import { useTerminalOnScreenKeyboard } from "@/hooks/use-terminal-on-screen-keyboard";
+import { useTerminalSearch } from "@/hooks/use-terminal-search";
 import { useTerminalSettings } from "@/hooks/use-terminal-settings";
 import { useUpdateStatus } from "@/hooks/use-update-status";
 import { createGitWorktree, type CreateWorktreeOptions } from "@/utils/fetch-git-worktrees";
 import {
   COPY_FEEDBACK_MS,
-  PASTED_IMAGE_FEEDBACK_MS,
-  PASTED_IMAGE_TOAST_ID,
   DEAD_SESSION_TITLE_PREFIX,
   DEFAULT_DOCUMENT_TITLE,
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
@@ -113,9 +115,6 @@ import {
   RESIZE_DEBOUNCE_MS,
   RESTART_COMMAND,
   RETRY_BUTTON_FEEDBACK_MS,
-  SEARCH_ACTIVE_MATCH_BACKGROUND_HEX,
-  SEARCH_ACTIVE_MATCH_BORDER_HEX,
-  SEARCH_MATCH_BACKGROUND_HEX,
   TOOLBAR_HIDE_DELAY_MS,
   TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS,
   WS_OUTPUT_BROTLI,
@@ -156,7 +155,6 @@ import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider"
 import { extractKeyboardModifiers } from "@/utils/extract-keyboard-modifiers";
 import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
 import { formatShellExitMarker } from "@/utils/format-shell-exit-marker";
-import { dismissSystemKeyboard } from "@/utils/dismiss-system-keyboard";
 import { triggerHapticFeedback } from "@/utils/haptic-feedback";
 import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anchor";
@@ -169,7 +167,6 @@ import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
 import { detectLikelyKeepAwakeSupported } from "@/utils/detect-likely-keep-awake-supported";
 import { formatDiffCount } from "@/utils/format-diff-count";
 import { shellQuoteArg } from "@/utils/shell-quote-arg";
-import { uploadPastedImage } from "@/utils/upload-pasted-image";
 import { buildFileUrl } from "@/utils/build-file-url";
 import { isAutomationsShortcut } from "@/utils/is-automations-shortcut";
 import { isBinaryMessageData } from "@/utils/is-binary-message-data";
@@ -182,10 +179,7 @@ import { isSecretsShortcut } from "@/utils/is-secrets-shortcut";
 import { isSessionsShortcut } from "@/utils/is-sessions-shortcut";
 import { isWorktreesCreateShortcut } from "@/utils/is-worktrees-create-shortcut";
 import { isWorktreesShortcut } from "@/utils/is-worktrees-shortcut";
-import {
-  INITIAL_COMMAND_QUERY_PARAM,
-  removeInitialCommandQueryParam,
-} from "@/utils/remove-initial-command-query-param";
+import { removeInitialCommandQueryParam } from "@/utils/remove-initial-command-query-param";
 import {
   FRESH_SESSION_QUERY_PARAM,
   removeFreshSessionQueryParam,
@@ -197,21 +191,19 @@ import {
 } from "@/utils/sync-session-id-query-param";
 import { LocalEcho } from "@/lib/local-echo";
 import { isCoarsePointer } from "@/utils/is-coarse-pointer";
-import { detectIsAppleWebKit } from "@/utils/detect-is-apple-webkit";
-import { loadStoredDefaultCwd } from "@/utils/stored-default-cwd";
-import { loadStoredDefaultShell } from "@/utils/stored-default-shell";
-import { WINDOW_ID_QUERY_PARAM, loadWindowId } from "@/utils/window-id";
+import { buildNewTerminalTabUrl } from "@/utils/build-new-terminal-tab-url";
+import {
+  CWD_QUERY_PARAM,
+  buildTerminalWebSocketUrl,
+} from "@/utils/build-terminal-websocket-url";
+import { createContextDecompressor } from "@/utils/create-context-decompressor";
+import { decompressFrame } from "@/utils/decompress-frame";
 import { detectDeviceTier } from "@/utils/detect-device-tier";
 import { fetchSessions } from "@/utils/fetch-sessions";
 import { loadStoredMobileResume } from "@/utils/stored-mobile-resume";
 import { resolveResumeSession } from "@/utils/resolve-resume-session";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 import { probeServerHealth } from "@/utils/probe-server-health";
-import { fetchDaemonConfig } from "@/utils/fetch-daemon-config";
-import { updateDaemonConfig } from "@/utils/update-daemon-config";
-import { fetchServerHealth } from "@/utils/fetch-server-health";
-import { connectCdp } from "@/utils/connect-cdp";
-import { openInspectPage } from "@/utils/open-inspect-page";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
 import { preserveTerminalMouseWheelMagnitude } from "@/utils/preserve-terminal-mouse-wheel-magnitude";
 import { syncTerminalMouseWheelSensitivity } from "@/utils/sync-terminal-mouse-wheel-sensitivity";
@@ -222,9 +214,9 @@ import { getTerminalMinimumContrastRatio } from "@/utils/get-terminal-minimum-co
 import { isLightTerminalTheme } from "@/utils/is-light-terminal-theme";
 import { isTerminalCursorTap } from "@/utils/is-terminal-cursor-tap";
 import { dispatchTerminalMouseTap } from "@/utils/dispatch-terminal-mouse-tap";
+import { ON_SCREEN_KEYBOARD_TOGGLE_SELECTOR } from "@/lib/on-screen-keyboard-selectors";
 
 import {
-  MAX_IMAGE_UPLOAD_BYTES,
   MAX_INPUT_BYTES,
   type ClientToServerMessage,
   type CompressMode,
@@ -235,25 +227,6 @@ const titleForLiveSession = (raw: string): string => raw || DEFAULT_DOCUMENT_TIT
 const titleForDeadSession = (raw: string): string =>
   `${DEAD_SESSION_TITLE_PREFIX}${raw || DEFAULT_DOCUMENT_TITLE}`;
 
-const SEARCH_DECORATION_OPTIONS = {
-  matchBackground: SEARCH_MATCH_BACKGROUND_HEX,
-  activeMatchBackground: SEARCH_ACTIVE_MATCH_BACKGROUND_HEX,
-  activeMatchBorder: SEARCH_ACTIVE_MATCH_BORDER_HEX,
-  matchOverviewRuler: SEARCH_ACTIVE_MATCH_BACKGROUND_HEX,
-  activeMatchColorOverviewRuler: SEARCH_ACTIVE_MATCH_BORDER_HEX,
-};
-
-const ON_SCREEN_KEYBOARD_TOGGLE_SELECTOR = [
-  "[data-on-screen-keyboard-toggle]",
-  "[data-on-screen-keyboard-actions-toggle]",
-].join(", ");
-const ON_SCREEN_KEYBOARD_CONTROL_SELECTOR = [
-  "[data-on-screen-keyboard]",
-  "[data-on-screen-keyboard-settings]",
-  ON_SCREEN_KEYBOARD_TOGGLE_SELECTOR,
-  "[data-terminal-actions-toolbar]",
-].join(", ");
-
 // Server-side output compression: remote surfaces advertise the best browser
 // decompressor and the server tags each compressed binary frame with its mode.
 // Loopback surfaces stay raw: their bandwidth is effectively free, while a
@@ -261,187 +234,6 @@ const ON_SCREEN_KEYBOARD_CONTROL_SELECTOR = [
 // DecompressionStream for each batch can dominate frame time. Browsers never
 // negotiate permessage-deflate, so this remains application-level.
 const COMPRESS_MODE = detectOutputCompressMode(window.location.hostname);
-
-const decompressFrame = async (
-  format: string,
-  compressed: Uint8Array<ArrayBuffer>,
-): Promise<Uint8Array> => {
-  const stream = new DecompressionStream(format as CompressionFormat);
-  const writer = stream.writable.getWriter();
-  const reader = stream.readable.getReader();
-  const chunks: Uint8Array[] = [];
-  // Read concurrently with the write+close: writer.close() waits for the
-  // readable to drain, so the reader must already be pulling or a large frame
-  // backpressures the transform and deadlocks the close.
-  const drained = (async () => {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) chunks.push(value);
-    }
-  })();
-  await writer.write(compressed);
-  await writer.close();
-  await drained;
-  let length = 0;
-  for (const chunk of chunks) length += chunk.length;
-  const out = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return out;
-};
-
-// Persistent Brotli decompressor for the context-takeover mode ("br-ctx"). One
-// per PTY (created on the {compress} frame, released on {session} or teardown).
-// The DecompressionStream doesn't end per frame, so a concurrent reader runs for
-// the socket's lifetime pushing decoded bytes into a buffer; each decompress()
-// feeds a compressed chunk and waits for `rawSize` bytes (the size-delimited
-// frame boundary — the decoder emits in arbitrary 16KB chunks, so the raw-size
-// bound, not a read() boundary, recovers the frame).
-const makeCtxDecoder = () => {
-  const stream = new DecompressionStream("br" as CompressionFormat);
-  const writer = stream.writable.getWriter();
-  const reader = stream.readable.getReader();
-  const chunks: Uint8Array[] = [];
-  let len = 0;
-  let waitingFor = 0;
-  let resolver: (() => void) | null = null;
-  void (async () => {
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          chunks.push(value);
-          len += value.length;
-        }
-        if (resolver !== null && len >= waitingFor) {
-          const r = resolver!;
-          resolver = null;
-          r();
-        }
-      }
-    } catch {
-      /* the no-finish close error at socket teardown — ignore */
-    }
-  })();
-  const decompress = async (
-    compressed: Uint8Array<ArrayBuffer>,
-    rawSize: number,
-  ): Promise<Uint8Array> => {
-    await writer.write(compressed);
-    if (len < rawSize) {
-      waitingFor = rawSize;
-      await new Promise<void>((r) => {
-        resolver = r;
-      });
-    }
-    const out = new Uint8Array(rawSize);
-    let offset = 0;
-    while (offset < rawSize) {
-      const chunk = chunks[0];
-      const need = rawSize - offset;
-      if (chunk.length <= need) {
-        out.set(chunk, offset);
-        offset += chunk.length;
-        chunks.shift();
-        len -= chunk.length;
-      } else {
-        out.set(chunk.subarray(0, need), offset);
-        chunks[0] = chunk.subarray(need);
-        offset = rawSize;
-        len -= need;
-      }
-    }
-    return out;
-  };
-  const release = async () => {
-    try {
-      await writer.close();
-    } catch {
-      /* the persistent stream has no finish marker — the close errors */
-    }
-  };
-  return { decompress, release };
-};
-
-const CWD_QUERY_PARAM = "cwd";
-const SHELL_QUERY_PARAM = "shell";
-
-interface BuildWebSocketUrlOptions {
-  cwdOverride?: string | null;
-  sid?: string | null;
-  omitAddressBarSessionId?: boolean;
-}
-
-const buildWebSocketUrl = ({
-  cwdOverride,
-  sid,
-  omitAddressBarSessionId = false,
-}: BuildWebSocketUrlOptions = {}): string => {
-  const url = new URL("/ws", window.location.href);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  const params = new URLSearchParams(window.location.search);
-  // The address-bar ?cwd= (or an explicit override like the live cwd on
-  // reconnect) wins; a bare launch with neither falls back to the user's
-  // saved default cwd so the PWA app icon and a fresh tab open somewhere
-  // meaningful instead of always the home directory.
-  const cwd = cwdOverride ?? params.get(CWD_QUERY_PARAM) ?? loadStoredDefaultCwd();
-  if (cwd) url.searchParams.set(CWD_QUERY_PARAM, cwd);
-  // The saved default shell override (Settings → Launch) seeds every fresh
-  // spawn with the user's chosen shell; an address-bar ?shell= wins (a
-  // programmatic launch can target a specific shell). Empty = the daemon's
-  // detected login shell (no param sent).
-  const shell = params.get(SHELL_QUERY_PARAM) ?? loadStoredDefaultShell();
-  if (shell) url.searchParams.set(SHELL_QUERY_PARAM, shell);
-  const runId = params.get(RUN_QUERY_PARAM);
-  if (runId) url.searchParams.set(RUN_QUERY_PARAM, runId);
-  // Fall back to the address bar's ?sid= (written by syncSessionIdQueryParam)
-  // when no explicit id is passed, so a full page refresh reattaches to the
-  // same live PTY instead of spawning a fresh shell. An in-place fresh switch
-  // explicitly suppresses this fallback while preserving the address bar until
-  // the replacement session lands.
-  const resolvedSid = sid ?? (omitAddressBarSessionId ? null : params.get(SESSION_ID_QUERY_PARAM));
-  if (resolvedSid) url.searchParams.set(SESSION_ID_QUERY_PARAM, resolvedSid);
-  // The per-browser-profile handle so the daemon can group this tab with the
-  // others of the same profile in the session picker's peer display. Minted
-  // once into localStorage (partitioned per profile), so every tab of one
-  // profile carries the same id.
-  const windowId = loadWindowId();
-  if (windowId) url.searchParams.set(WINDOW_ID_QUERY_PARAM, windowId);
-  // Forward a transient initial command (a worktree's setup script) so the
-  // server writes it to the PTY as if the user typed it — the install/env-copy
-  // output is visible and the prompt returns when it finishes.
-  const initialCommand = params.get(INITIAL_COMMAND_QUERY_PARAM);
-  if (initialCommand) url.searchParams.set(INITIAL_COMMAND_QUERY_PARAM, initialCommand);
-  return url.toString();
-};
-
-const buildNewTabUrl = (cwd: string | null, command?: string): string => {
-  const url = new URL(window.location.origin);
-  // Inherit the live cwd when available; otherwise seed from the saved default
-  // so a new tab opened before any session connects still lands in the
-  // user's chosen directory rather than the home directory.
-  const resolvedCwd = cwd ?? loadStoredDefaultCwd();
-  if (resolvedCwd) url.searchParams.set(CWD_QUERY_PARAM, resolvedCwd);
-  // Seed the saved default shell so a new tab spawns the user's chosen shell
-  // (the address-bar ?shell= from a programmatic launch is inherited via the
-  // search params below).
-  const savedShell = loadStoredDefaultShell();
-  if (savedShell) url.searchParams.set(SHELL_QUERY_PARAM, savedShell);
-  if (command) url.searchParams.set(INITIAL_COMMAND_QUERY_PARAM, command);
-  // Prevent mobile's bare-launch resume from replacing this explicit spawn.
-  url.searchParams.set(FRESH_SESSION_QUERY_PARAM, "1");
-  return url.toString();
-};
-
-interface SearchResultState {
-  resultIndex: number;
-  resultCount: number;
-}
 
 type ExitInfo =
   | { reason: "shell-exited"; exitCode: number | null }
@@ -495,10 +287,8 @@ export const Terminal = () => {
   // "last switched" shell. Recorded on every switch so the session picker can
   // open with it highlighted for an alt-tab-style Enter quick-switch.
   const previousSessionIdRef = useRef<string | null>(null);
-  const searchAddonRef = useRef<SearchAddon | null>(null);
   const refocusTerminalRef = useRef<(() => void) | null>(null);
   const pasteToTerminalRef = useRef<((text: string) => void) | null>(null);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const retryFeedbackTimerRef = useRef<number | null>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const resizeScrollRestoreRef = useRef<ResizeScrollRestoreState | null>(null);
@@ -579,10 +369,8 @@ export const Terminal = () => {
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);
   const [hasCopiedRestartCommand, setHasCopiedRestartCommand] = useState(false);
   const [isRetryingConnection, setIsRetryingConnection] = useState(false);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const toggleCommandPaletteRef = useRef<(() => void) | null>(null);
-  const [searchOpenAttempt, setSearchOpenAttempt] = useState(0);
   const [isToolbarHovered, setIsToolbarHovered] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -590,21 +378,20 @@ export const Terminal = () => {
   const [isKeepAwakePopoverOpen, setIsKeepAwakePopoverOpen] = useState(false);
   const [isSessionsOpen, setIsSessionsOpen] = useState(false);
   const [isQrOpen, setIsQrOpen] = useState(false);
-  const [cdpPort, setCdpPort] = useState<number | null>(null);
-  const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
-  const [workspaceRestore, setWorkspaceRestore] = useState(true);
-  // The daemon's detected default shell (from `GET /api/config`), shown as the
-  // Settings → Launch shell field's placeholder so the user knows what an
-  // empty field falls back to. Lazily fetched when the Settings panel opens
-  // (alongside cdpPort/graceSeconds) since it's only needed for the hint.
-  const [detectedDefaultShell, setDetectedDefaultShell] = useState<string>("");
-  const [cdpStatus, setCdpStatus] = useState<{
-    connected: boolean;
-    browser?: string;
-    port?: number;
-    error?: string;
-  } | null>(null);
-  const [cdpConnecting, setCdpConnecting] = useState(false);
+  const {
+    cdpPort,
+    graceSeconds,
+    workspaceRestore,
+    detectedDefaultShell,
+    cdpStatus,
+    cdpConnecting,
+    handleCdpPortChange,
+    handleGraceSecondsChange,
+    handleWorkspaceRestoreChange,
+    handleCdpConnect,
+    handleOpenInspect,
+    loadDaemonSettings,
+  } = useDaemonSettings();
   const [automations, setAutomations] = useState<AutomationWithNextRun[] | null>(null);
   const toggleAutomationsRef = useRef<(() => void) | null>(null);
   const [isWorktreesOpen, setIsWorktreesOpen] = useState(false);
@@ -629,148 +416,27 @@ export const Terminal = () => {
   const rootRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const isTouchDevice = useMemo(() => isCoarsePointer(), []);
-  const isAppleWebKit = useMemo(detectIsAppleWebKit, []);
   const deviceTier = useDeviceTier();
-  const [isOnScreenKeyboardOpen, setIsOnScreenKeyboardOpen] = useState(false);
-  const [onScreenKeyboardHeight, setOnScreenKeyboardHeight] = useState(0);
-  const onScreenKeyboardOpenRef = useRef(false);
   const sendInputRef = useRef<((data: string) => void) | null>(null);
-  const refocusTerminal = useCallback(() => refocusTerminalRef.current?.(), []);
-  const closeOnScreenKeyboard = useCallback(() => {
-    onScreenKeyboardOpenRef.current = false;
-    setIsOnScreenKeyboardOpen(false);
-  }, []);
-  const dismissOnScreenKeyboard = useCallback(() => {
-    closeOnScreenKeyboard();
-    setIsActionsMenuOpen(false);
-  }, [closeOnScreenKeyboard]);
-  const openOnScreenKeyboard = useCallback(() => {
-    suppressTerminalSystemKeyboard(terminalRef.current?.textarea);
-    dismissSystemKeyboard();
-    onScreenKeyboardOpenRef.current = true;
-    setIsOnScreenKeyboardOpen(true);
-  }, []);
-  const toggleOnScreenKeyboard = useCallback(() => {
-    if (onScreenKeyboardOpenRef.current) dismissOnScreenKeyboard();
-    else openOnScreenKeyboard();
-  }, [dismissOnScreenKeyboard, openOnScreenKeyboard]);
-
-  useEffect(() => {
-    if (deviceTier === "desktop") dismissOnScreenKeyboard();
-  }, [deviceTier, dismissOnScreenKeyboard]);
-
-  // Focus the terminal cursor whenever the on-screen keyboard opens. The
-  // guarded helper textarea keeps the system keyboard suppressed, and re-focus
-  // after each keystroke keeps xterm's cursor block solid while using the OSK.
-  useEffect(() => {
-    if (!isOnScreenKeyboardOpen) return;
-    refocusTerminalRef.current?.();
-  }, [isOnScreenKeyboardOpen]);
-
-  useEffect(() => {
-    if (!isOnScreenKeyboardOpen) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (containerRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest(ON_SCREEN_KEYBOARD_CONTROL_SELECTOR)) {
-        return;
-      }
-      closeOnScreenKeyboard();
-    };
-    const handleFocusIn = (event: FocusEvent) => {
-      if (event.target === terminalRef.current?.textarea) return;
-      if (
-        event.target instanceof Element &&
-        event.target.closest(ON_SCREEN_KEYBOARD_CONTROL_SELECTOR)
-      ) {
-        return;
-      }
-      closeOnScreenKeyboard();
-    };
-    // Some Android IMEs ignore both flags on an already-focused textarea. A large,
-    // width-stable viewport shrink is the final signal to evict that stale IME.
-    const visualViewport = window.visualViewport;
-    let baselineViewportHeight = visualViewport?.height ?? 0;
-    let baselineViewportWidth = visualViewport?.width ?? 0;
-    const handleViewportResize = () => {
-      if (!visualViewport) return;
-      const viewportHeight = visualViewport.height;
-      const viewportWidth = visualViewport.width;
-      const didViewportWidthChange =
-        Math.abs(viewportWidth - baselineViewportWidth) >= TERMINAL_VIEWPORT_WIDTH_STABLE_PX;
-      if (didViewportWidthChange) {
-        baselineViewportHeight = viewportHeight;
-        baselineViewportWidth = viewportWidth;
-        return;
-      }
-      const didSystemKeyboardOpen =
-        viewportHeight < baselineViewportHeight - TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX;
-      if (onScreenKeyboardOpenRef.current && didSystemKeyboardOpen) {
-        baselineViewportHeight = viewportHeight;
-        suppressTerminalSystemKeyboard(terminalRef.current?.textarea);
-        dismissSystemKeyboard();
-        refocusTerminalRef.current?.();
-        return;
-      }
-      baselineViewportHeight = Math.max(baselineViewportHeight, viewportHeight);
-    };
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    document.addEventListener("focusin", handleFocusIn, true);
-    visualViewport?.addEventListener("resize", handleViewportResize);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown, true);
-      document.removeEventListener("focusin", handleFocusIn, true);
-      visualViewport?.removeEventListener("resize", handleViewportResize);
-    };
-  }, [closeOnScreenKeyboard, isOnScreenKeyboardOpen]);
-
-  // Hardware back / iOS edge-swipe dismisses the on-screen keyboard instead of
-  // navigating: push a history entry on open and pop it on close so a back
-  // gesture closes the keyboard.
-  useEffect(() => {
-    if (!isOnScreenKeyboardOpen) return;
-    window.history.pushState({ localtermOsk: true }, "");
-    const onPopState = () => dismissOnScreenKeyboard();
-    window.addEventListener("popstate", onPopState);
-    return () => {
-      window.removeEventListener("popstate", onPopState);
-      if (window.history.state?.localtermOsk) window.history.back();
-    };
-  }, [dismissOnScreenKeyboard, isOnScreenKeyboardOpen]);
-  // Apple WebKit ignores `interactive-widget=resizes-content` (set in
-  // index.html) — its keyboard overlays the layout viewport, where Chromium
-  // shrinks it above the keyboard in one browser-driven pass. Only WebKit
-  // needs this hand-rolled shrink+translate, rAF-coalesced so the keyboard
-  // animation's per-frame visualViewport events fold into one aligned style
-  // write; the transform drops at zero offset to avoid a needless layer.
-  useEffect(() => {
-    if (!isTouchDevice || !isAppleWebKit) return;
-    const root = rootRef.current;
-    const visualViewport = typeof window !== "undefined" ? window.visualViewport : undefined;
-    if (!root || !visualViewport) return;
-    let pendingFrame: number | null = null;
-    const apply = () => {
-      pendingFrame = null;
-      root.style.height = `${visualViewport.height}px`;
-      const offsetTop = visualViewport.offsetTop;
-      root.style.transform = offsetTop ? `translateY(${offsetTop}px)` : "";
-    };
-    const schedule = () => {
-      if (pendingFrame !== null) return;
-      pendingFrame = window.requestAnimationFrame(apply);
-    };
-    schedule();
-    visualViewport.addEventListener("resize", schedule);
-    visualViewport.addEventListener("scroll", schedule);
-    return () => {
-      if (pendingFrame !== null) window.cancelAnimationFrame(pendingFrame);
-      visualViewport.removeEventListener("resize", schedule);
-      visualViewport.removeEventListener("scroll", schedule);
-      root.style.height = "";
-      root.style.transform = "";
-    };
-  }, [isTouchDevice, isAppleWebKit]);
+  const {
+    isOnScreenKeyboardOpen,
+    onScreenKeyboardHeight,
+    onScreenKeyboardOpenRef,
+    setOnScreenKeyboardHeight,
+    refocusTerminal,
+    closeOnScreenKeyboard,
+    dismissOnScreenKeyboard,
+    openOnScreenKeyboard,
+    toggleOnScreenKeyboard,
+  } = useTerminalOnScreenKeyboard({
+    containerRef,
+    rootRef,
+    terminalRef,
+    refocusTerminalRef,
+    deviceTier,
+    isTouchDevice,
+    setIsActionsMenuOpen,
+  });
   // On touch the expanded action toolbar dismisses on a tap landing outside
   // itself, replacing the dedicated overlay layer. The settings and keep-awake
   // popovers portal to <body> and own their own outside-tap dismissal, so while
@@ -809,12 +475,6 @@ export const Terminal = () => {
     isPortsOpen ||
     isQrOpen ||
     isSecretsOpen;
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResultState>({
-    resultIndex: -1,
-    resultCount: 0,
-  });
-
   const [sessionInfo, setSessionInfo] = useState<TerminalSessionInfo | null>(null);
   const [notificationsPermission, setNotificationsPermission] = useState<
     NotificationPermission | "unsupported"
@@ -824,6 +484,21 @@ export const Terminal = () => {
   const liveCwdRef = useRef<string | null>(null);
   const wsConnectedRef = useRef(false);
   const isMac = useMemo(detectIsMacPlatform, []);
+  const {
+    searchAddonRef,
+    searchInputRef,
+    isSearchOpen,
+    searchQuery,
+    searchResults,
+    setSearchResults,
+    openSearch,
+    closeSearch,
+    findNextMatch,
+    findPreviousMatch,
+    handleSearchInputChange,
+    handleSearchKeyDown,
+    matchLabel,
+  } = useTerminalSearch({ isMac, refocusTerminalRef });
   // Keep-awake (caffeinate) is daemon-owned global state: the server is the
   // source of truth for the mode, the live process state, and the trigger
   // commands, and broadcasts changes to every tab. Seed `supported` from the
@@ -1884,7 +1559,7 @@ export const Terminal = () => {
       const shouldSpawnFresh = shouldSpawnFreshSession;
       nextConnectSid = null;
       const nextSocket = new WebSocket(
-        buildWebSocketUrl({
+        buildTerminalWebSocketUrl({
           cwdOverride: liveCwdRef.current,
           sid: shouldSpawnFresh ? null : (connectSid ?? liveSessionId),
           omitAddressBarSessionId: shouldSpawnFresh,
@@ -1932,7 +1607,7 @@ export const Terminal = () => {
       // The persistent Brotli decompressor for "br-ctx" (one per PTY, reset on
       // {session} and {compress}); its LZ77 window holds the prior screen so each
       // frame decompresses as a delta.
-      let ctxDecoder: ReturnType<typeof makeCtxDecoder> | null = null;
+      let contextDecompressor: ReturnType<typeof createContextDecompressor> | null = null;
       const enqueueDecompress = (task: () => Promise<void> | void): void => {
         decompressQueue = decompressQueue.then(task).catch((error: unknown) => {
           console.warn("[localterm] output decompress error", error);
@@ -1977,7 +1652,7 @@ export const Terminal = () => {
                 true,
               );
               const compressed = data.subarray(WS_OUTPUT_CTX_HEADER_BYTES);
-              bytes = await ctxDecoder!.decompress(compressed, rawSize);
+              bytes = await contextDecompressor!.decompress(compressed, rawSize);
             } else {
               const payload = data.subarray(1);
               if (header === WS_OUTPUT_BROTLI) bytes = await decompressFrame("br", payload);
@@ -2018,9 +1693,9 @@ export const Terminal = () => {
           // the prior PTY's persistent Brotli decompressor (its LZ77 context is
           // stale for the new PTY).
           negotiatedCompressMode = null;
-          if (ctxDecoder !== null) {
-            void ctxDecoder.release();
-            ctxDecoder = null;
+          if (contextDecompressor !== null) {
+            void contextDecompressor.release();
+            contextDecompressor = null;
           }
           // A new session frame means a fresh attach: drop any suppressed-replay
           // window left open by a prior (possibly failed) attach — its replay
@@ -2140,11 +1815,13 @@ export const Terminal = () => {
           // never sends this frame, so negotiatedCompressMode stays null and the
           // binary handler reads frames as raw (no header) — graceful degrade.
           negotiatedCompressMode = message.mode;
-          if (ctxDecoder !== null) {
-            void ctxDecoder.release();
-            ctxDecoder = null;
+          if (contextDecompressor !== null) {
+            void contextDecompressor.release();
+            contextDecompressor = null;
           }
-          if (message.mode === "br-ctx") ctxDecoder = makeCtxDecoder();
+          if (message.mode === "br-ctx") {
+            contextDecompressor = createContextDecompressor();
+          }
         } else if (message.type === "replay-end") {
           // The server has finished sending the scrollback replay. Write the
           // buffered frames as one block with onData suppressed so xterm's
@@ -2566,36 +2243,6 @@ export const Terminal = () => {
     [handleOverlayOpenChange],
   );
 
-  useEffect(() => {
-    if (!isSearchOpen) return;
-    const input = searchInputRef.current;
-    if (!input) return;
-    input.focus();
-    input.select();
-  }, [isSearchOpen, searchOpenAttempt]);
-
-  const findNextMatch = useCallback((query: string) => {
-    if (!query) {
-      searchAddonRef.current?.clearDecorations();
-      setSearchResults({ resultIndex: -1, resultCount: 0 });
-      return;
-    }
-    searchAddonRef.current?.findNext(query, { decorations: SEARCH_DECORATION_OPTIONS });
-  }, []);
-
-  const findPreviousMatch = useCallback((query: string) => {
-    if (!query) return;
-    searchAddonRef.current?.findPrevious(query, { decorations: SEARCH_DECORATION_OPTIONS });
-  }, []);
-
-  const closeSearch = useCallback(() => {
-    setIsSearchOpen(false);
-    setSearchQuery("");
-    setSearchResults({ resultIndex: -1, resultCount: 0 });
-    searchAddonRef.current?.clearDecorations();
-    refocusTerminalRef.current?.();
-  }, []);
-
   const handleToolbarAreaEnter = useCallback(() => {
     if (toolbarHoverTimeoutRef.current !== null) {
       window.clearTimeout(toolbarHoverTimeoutRef.current);
@@ -2620,83 +2267,11 @@ export const Terminal = () => {
     [isSettingsOpen, isAutomationsOpen],
   );
 
-  const refreshCdpStatus = useCallback(() => {
-    void fetchServerHealth().then((health) => {
-      if (health) setCdpStatus(health.cdp);
-    });
-  }, []);
-
-  // The CDP port lives on the daemon, so the settings field is hydrated when
-  // the modal opens (not held in localStorage like the terminal-appearance
-  // prefs). A port change PUTs to the daemon, which reconnects in the
-  // background; health is re-fetched after a short delay so the "Connected"
-  // status reflects the new endpoint.
-  // Persist the configured port. No connect and no status refresh here — a
-  // port change only updates the value the daemon's next connect reads. The
-  // explicit Connect button applies it; the live socket is left untouched.
-  const handleCdpPortChange = useCallback((next: number | null) => {
-    setCdpPort(next);
-    void updateDaemonConfig({ cdpPort: next }).then((confirmed) => {
-      if (confirmed) setCdpPort(confirmed.cdpPort);
-    });
-  }, []);
-
-  // The grace window lives on the daemon; PUT the new value and adopt the
-  // clamped confirmation (the daemon re-arms already-dormant shells).
-  const handleGraceSecondsChange = useCallback((next: number | null) => {
-    setGraceSeconds(next);
-    void updateDaemonConfig({ graceSeconds: next }).then((confirmed) => {
-      if (confirmed) setGraceSeconds(confirmed.graceSeconds);
-    });
-  }, []);
-
-  // The workspace-restore toggle lives on the daemon; PUT the new value and
-  // adopt the confirmation. Takes effect on the next daemon start (restore
-  // runs once at startup, not live-reactively).
-  const handleWorkspaceRestoreChange = useCallback((next: boolean) => {
-    setWorkspaceRestore(next);
-    void updateDaemonConfig({ workspaceRestore: next }).then((confirmed) => {
-      if (confirmed) setWorkspaceRestore(confirmed.workspaceRestore);
-    });
-  }, []);
-
-  // Explicit "Connect now": await the daemon's connect and fold the result
-  // (including any error) into cdpStatus, so the field shows why a connection
-  // failed rather than silently staying "Not connected".
-  const handleCdpConnect = useCallback(() => {
-    setCdpConnecting(true);
-    void connectCdp().then((result) => {
-      setCdpConnecting(false);
-      if (result) {
-        setCdpStatus({
-          connected: result.connected,
-          browser: result.browser,
-          port: result.port,
-          error: result.error,
-        });
-      } else {
-        refreshCdpStatus();
-      }
-    });
-  }, [refreshCdpStatus]);
-
-  const handleOpenInspect = useCallback(() => {
-    void openInspectPage();
-  }, []);
-
   const handleSettingsOpenChange = useCallback(
     (open: boolean) => {
       setIsSettingsOpen(open);
       if (open) {
-        void fetchDaemonConfig().then((config) => {
-          if (config) {
-            setCdpPort(config.cdpPort);
-            setGraceSeconds(config.graceSeconds);
-            setWorkspaceRestore(config.workspaceRestore);
-            setDetectedDefaultShell(config.defaultShell);
-          }
-        });
-        refreshCdpStatus();
+        loadDaemonSettings();
       } else {
         setIsActionsMenuOpen(false);
         if (toolbarHoverTimeoutRef.current !== null) {
@@ -2708,7 +2283,7 @@ export const Terminal = () => {
         }, TOOLBAR_HIDE_DELAY_MS);
       }
     },
-    [refreshCdpStatus],
+    [loadDaemonSettings],
   );
 
   const handleAutomationsOpenChange = useCallback(
@@ -2758,7 +2333,7 @@ export const Terminal = () => {
   toggleSecretsRef.current = toggleSecrets;
 
   const openShellAt = useCallback((shellCwd: string, command?: string) => {
-    window.open(buildNewTabUrl(shellCwd, command), "_blank", "noopener,noreferrer");
+    window.open(buildNewTerminalTabUrl(shellCwd, command), "_blank", "noopener,noreferrer");
   }, []);
 
   // Create a worktree on a fresh branch (or `pr-<N>`), then (when openAfter) open
@@ -2800,11 +2375,10 @@ export const Terminal = () => {
   }, []);
 
   const openSearchOverlay = useCallback(() => {
-    setIsSearchOpen(true);
+    openSearch();
     setIsActionsMenuOpen(false);
     setIsCommandPaletteOpen(false);
-    setSearchOpenAttempt((previous) => previous + 1);
-  }, []);
+  }, [openSearch]);
   openSearchOverlayRef.current = openSearchOverlay;
 
   const openDiffViewer = useCallback(() => {
@@ -2831,162 +2405,12 @@ export const Terminal = () => {
     pasteToTerminalRef.current?.(text);
   }, []);
 
-  const toastManager = useToast();
-  const pasteImageFromBlobRef = useRef<((blob: Blob, filename: string) => Promise<void>) | null>(
-    null,
-  );
-
-  const showPastedImageNotice = useCallback(
-    (notice: { kind: "uploading" | "done" | "error"; message: string }) => {
-      const toastVariant =
-        notice.kind === "done" ? "success" : notice.kind === "error" ? "destructive" : "loading";
-      toastManager.add({
-        id: PASTED_IMAGE_TOAST_ID,
-        title: notice.message,
-        type: toastVariant,
-        timeout: notice.kind === "uploading" ? 0 : PASTED_IMAGE_FEEDBACK_MS,
-      });
-    },
-    [toastManager],
-  );
-
-  const pasteImageFromBlob = useCallback(
-    async (blob: Blob, filename: string) => {
-      const sessionId = liveSessionIdRef.current;
-      if (!blob.type.startsWith("image/")) {
-        showPastedImageNotice({ kind: "error", message: "Not an image" });
-        return;
-      }
-      if (blob.size > MAX_IMAGE_UPLOAD_BYTES) {
-        showPastedImageNotice({ kind: "error", message: "Image too large" });
-        return;
-      }
-      if (!sessionId) {
-        showPastedImageNotice({ kind: "error", message: "No session yet" });
-        return;
-      }
-      showPastedImageNotice({ kind: "uploading", message: "Pasting image…" });
-      try {
-        const absolutePath = await uploadPastedImage(sessionId, blob, filename);
-        pasteToTerminalRef.current?.(shellQuoteArg(absolutePath));
-        const basename = absolutePath.split(/[/\\]/).pop() ?? absolutePath;
-        showPastedImageNotice({ kind: "done", message: `Pasted ${basename}` });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Upload failed";
-        showPastedImageNotice({ kind: "error", message });
-      }
-    },
-    [showPastedImageNotice],
-  );
-
-  useEffect(() => {
-    pasteImageFromBlobRef.current = pasteImageFromBlob;
-  }, [pasteImageFromBlob]);
-
-  // The mobile entry point: open the system photo/file picker. A hidden
-  // appended <input type=file> is the cross-platform path (iOS Safari blocks
-  // clipboard image reads and mobile paste into xterm's off-screen textarea is
-  // unreliable), so the button/keyboard key both route here. Desktop clipboard
-  // paste + drag-drop are handled by the listeners below.
-  const pickAndPasteImage = useCallback(() => {
-    setIsActionsMenuOpen(false);
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
-    input.style.display = "none";
-    document.body.appendChild(input);
-    input.onchange = () => {
-      const file = input.files?.[0];
-      document.body.removeChild(input);
-      if (file) void pasteImageFromBlobRef.current?.(file, file.name);
-    };
-    input.click();
-  }, []);
-
-  // Clipboard paste (Ctrl/Cmd+V) and drag-drop onto the terminal surface. Both
-  // fire on the container, which is an ancestor of xterm's helper textarea, so
-  // a paste bubbles here; the capture-phase listener intercepts an image paste
-  // before xterm reads the clipboard's empty text representation. Text pastes
-  // fall through (no image item) so xterm's normal text paste is untouched.
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const imageFromDataTransfer = (
-      dataTransfer: DataTransfer | null,
-    ): { blob: Blob; name: string } | null => {
-      const items = dataTransfer?.items;
-      if (!items) return null;
-      for (let index = 0; index < items.length; index++) {
-        const item = items[index];
-        if (item.kind === "file" && item.type.startsWith("image/")) {
-          const file = item.getAsFile();
-          if (file) return { blob: file, name: file.name || "image" };
-        }
-      }
-      return null;
-    };
-    const handlePaste = (event: ClipboardEvent) => {
-      const image = imageFromDataTransfer(event.clipboardData);
-      if (!image) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void pasteImageFromBlobRef.current?.(image.blob, image.name);
-    };
-    // Suppress the browser default (navigate to the dropped file) for ANY file
-    // drop so an accidental drop never leaves the terminal; only images upload.
-    const handleDrop = (event: DragEvent) => {
-      const image = imageFromDataTransfer(event.dataTransfer);
-      const hasFile = event.dataTransfer?.types?.includes("Files") ?? false;
-      if (!image && !hasFile) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (image) void pasteImageFromBlobRef.current?.(image.blob, image.name);
-    };
-    const handleDragOver = (event: DragEvent) => {
-      if (event.dataTransfer?.types?.includes("Files")) event.preventDefault();
-    };
-    container.addEventListener("paste", handlePaste, true);
-    container.addEventListener("drop", handleDrop, true);
-    container.addEventListener("dragover", handleDragOver);
-    return () => {
-      container.removeEventListener("paste", handlePaste, true);
-      container.removeEventListener("drop", handleDrop, true);
-      container.removeEventListener("dragover", handleDragOver);
-    };
-  }, []);
-
-  const handleSearchInputChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const next = event.target.value;
-      setSearchQuery(next);
-      findNextMatch(next);
-    },
-    [findNextMatch],
-  );
-
-  const handleSearchKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLInputElement>) => {
-      if (isFindShortcut(event.nativeEvent, isMac)) {
-        event.preventDefault();
-        event.currentTarget.select();
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeSearch();
-        return;
-      }
-      if (event.key === "Enter") {
-        event.preventDefault();
-        if (event.shiftKey) {
-          findPreviousMatch(searchQuery);
-        } else {
-          findNextMatch(searchQuery);
-        }
-      }
-    },
-    [closeSearch, findNextMatch, findPreviousMatch, isMac, searchQuery],
-  );
+  const pickAndPasteImage = useTerminalImagePaste({
+    containerRef,
+    liveSessionIdRef,
+    pasteToTerminalRef,
+    setIsActionsMenuOpen,
+  });
 
   const triggerManualReconnect = useCallback(() => {
     setIsRetryingConnection(true);
@@ -3067,7 +2491,7 @@ export const Terminal = () => {
     }
   }, [liveCwd]);
 
-  const newShellUrl = buildNewTabUrl(liveCwd);
+  const newShellUrl = buildNewTerminalTabUrl(liveCwd);
   const openNewShell = useCallback(() => {
     if (deviceTier !== "desktop") {
       spawnFreshSessionRef.current?.();
@@ -3125,11 +2549,6 @@ export const Terminal = () => {
       setIsWorktreesOpen(false);
     }
   }, [isModalOpen]);
-  const matchLabel =
-    searchResults.resultCount === 0
-      ? "0/0"
-      : `${searchResults.resultIndex + 1}/${searchResults.resultCount}`;
-
   const pageBackground = effectiveTheme.colors.background ?? FALLBACK_TERMINAL_BACKGROUND_HEX;
   const syntaxHighlightColorScheme = isLightTerminalTheme(effectiveTheme) ? "light" : "dark";
 
