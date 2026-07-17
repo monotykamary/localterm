@@ -1,6 +1,12 @@
 import kleur from "kleur";
 import { writeFile } from "node:fs/promises";
 import open from "open";
+import {
+  MILLISECONDS_PER_SECOND,
+  SESSION_MAX_EXIT_CODE,
+  SESSION_SHORT_ID_LENGTH,
+  SESSION_TIMEOUT_EXIT_CODE,
+} from "../constants.js";
 import { reportDaemonDown } from "../utils/daemon-api.js";
 import { shortSessionId } from "../utils/short-session-id.js";
 import { fetchSessionApi } from "./session-api.js";
@@ -28,9 +34,6 @@ interface ExecResult {
   truncated: boolean;
   durationMs: number;
 }
-
-const MAX_EXIT_CODE = 255;
-const TIMEOUT_EXIT_CODE = 124;
 
 const stateColor = (state: string): string => {
   switch (state) {
@@ -92,7 +95,7 @@ const unescapeKeys = (raw: string): string => {
   return result;
 };
 
-const secondsToMs = (seconds: number): number => seconds * 1000;
+const secondsToMs = (seconds: number): number => seconds * MILLISECONDS_PER_SECOND;
 
 const renderExecResult = (result: ExecResult, json: boolean): void => {
   if (json) {
@@ -101,12 +104,12 @@ const renderExecResult = (result: ExecResult, json: boolean): void => {
   }
   if (result.output) process.stdout.write(result.output);
   if (result.timedOut) {
-    console.error(kleur.yellow(`\n[timed out after ${Math.round(result.durationMs / 1000)}s]`));
-    process.exitCode = TIMEOUT_EXIT_CODE;
+    console.error(kleur.yellow(`\n[timed out after ${Math.round(result.durationMs / MILLISECONDS_PER_SECOND)}s]`));
+    process.exitCode = SESSION_TIMEOUT_EXIT_CODE;
     return;
   }
   if (result.truncated) console.error(kleur.dim("\n[output truncated]"));
-  process.exitCode = result.exitCode === null ? 1 : Math.min(result.exitCode, MAX_EXIT_CODE);
+  process.exitCode = result.exitCode === null ? 1 : Math.min(result.exitCode, SESSION_MAX_EXIT_CODE);
 };
 
 // `localterm session ls [--json]` — every live PTY (attached, dormant, or
@@ -124,7 +127,7 @@ const runList = async (options: { json: boolean }): Promise<void> => {
     console.log(kleur.dim("no sessions. open a tab, or `localterm session new`."));
     return;
   }
-  const idWidth = 8;
+  const idWidth = SESSION_SHORT_ID_LENGTH;
   console.log(
     `${"ID".padEnd(idWidth)}  ${"PID".padStart(7)}  STATE        PIN  C  SHELL       CWD / TITLE`,
   );

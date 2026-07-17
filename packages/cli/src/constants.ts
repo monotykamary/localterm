@@ -73,6 +73,11 @@ export const EXIT_OK = 0;
 export const EXIT_FAILURE = 1;
 export const EXIT_USAGE_ERROR = 2;
 
+export const SESSION_SHORT_ID_LENGTH = 8;
+export const SESSION_MAX_EXIT_CODE = 255;
+export const SESSION_TIMEOUT_EXIT_CODE = 124;
+export const MILLISECONDS_PER_SECOND = 1_000;
+
 export const RESTART_BIND_RETRY_INTERVAL_MS = 200;
 export const RESTART_BIND_RETRY_MAX_MS = 5000;
 
