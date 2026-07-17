@@ -136,6 +136,11 @@ export const TRIAGE_WEEK_BAND_DAYS = 7;
 
 export const WORKTREES_MODAL_CLOSE_TRANSITION_MS = 150;
 export const WORKTREES_LIST_ROW_HEIGHT_PX = 56;
+export const WORKTREES_LIST_OVERSCAN_COUNT = 8;
+export const WORKTREE_SHORT_SHA_LENGTH = 7;
+export const WORKTREE_COMMAND_ID_RANDOM_RADIX = 36;
+export const WORKTREE_COMMAND_ID_RANDOM_START_INDEX = 2;
+export const MINIMUM_PULL_REQUEST_NUMBER = 1;
 // Min height for the error block (stacked Alert + message + Retry button needs
 // ~84px of vertical room). Preserves the original min-h-32 (8rem) comfort.
 export const WORKTREES_MESSAGE_BLOCK_MIN_HEIGHT_PX = 128;
@@ -232,6 +237,7 @@ export const SECRETS_BODY_MIN_HEIGHT_PX = 112;
 // corrects each row to its measured height, so this only sizes the first paint
 // before measurement.
 export const SECRETS_LIST_ROW_HEIGHT_PX = 44;
+export const SECRETS_LIST_OVERSCAN_COUNT = 8;
 // Quiet-zone margin (QR modules) around the share QR so cameras lock on
 // without edge bleed.
 export const QR_CODE_MARGIN_MODULES = 2;
