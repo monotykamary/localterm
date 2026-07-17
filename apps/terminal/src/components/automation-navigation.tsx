@@ -2,10 +2,7 @@ import type { AutomationWithNextRun } from "@monotykamary/localterm-server/proto
 import { Search } from "lucide-react";
 import { useMemo, useRef, useState, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import {
-  AUTOMATIONS_SORT_OPTIONS,
-  type AutomationsSort,
-} from "@/lib/automations-sort";
+import { AUTOMATIONS_SORT_OPTIONS, type AutomationsSort } from "@/lib/automations-sort";
 import { AUTOMATIONS_LIST_OVERSCAN_ROWS, AUTOMATIONS_LIST_ROW_HEIGHT_PX } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/utils/format-relative-time";

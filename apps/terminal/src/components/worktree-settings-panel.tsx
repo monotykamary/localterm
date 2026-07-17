@@ -12,10 +12,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { WorktreeIncludeFileEditor } from "@/components/worktree-include-file-editor";
 import { createWorktreeCommandId } from "@/utils/create-worktree-command-id";
-import {
-  updateWorktreeConfig,
-  updateWorktreeIncludeFile,
-} from "@/utils/fetch-git-worktrees";
+import { updateWorktreeConfig, updateWorktreeIncludeFile } from "@/utils/fetch-git-worktrees";
 
 interface WorktreeSettingsPanelProps {
   cwd: string | null;

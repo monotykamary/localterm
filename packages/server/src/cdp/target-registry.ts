@@ -54,10 +54,7 @@ export class TargetRegistry {
       )?.targetInfo;
       if (!target || target.type !== "page" || typeof target.targetId !== "string") return;
       if (this.targetIdToToken.has(target.targetId)) return; // already injected
-      if (
-        typeof target.url !== "string" ||
-        (this.tabUrlFilter && !this.tabUrlFilter(target.url))
-      )
+      if (typeof target.url !== "string" || (this.tabUrlFilter && !this.tabUrlFilter(target.url)))
         return;
       void this.injectToken(target.targetId).catch(() => {
         /* injection is best-effort; never blocks observeTargets */

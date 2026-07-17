@@ -35,13 +35,7 @@ interface AutomationScheduleBuilderProps {
   onChange: (next: ScheduleFormState) => void;
 }
 
-const ToggleChip = ({
-  label,
-  active,
-  onToggle,
-  ariaLabel,
-  className,
-}: ToggleChipProps) => (
+const ToggleChip = ({ label, active, onToggle, ariaLabel, className }: ToggleChipProps) => (
   <button
     type="button"
     aria-label={ariaLabel}

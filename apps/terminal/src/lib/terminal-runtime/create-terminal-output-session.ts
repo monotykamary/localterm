@@ -1,4 +1,4 @@
-import type {CompressMode} from "@monotykamary/localterm-server/protocol";
+import type { CompressMode } from "@monotykamary/localterm-server/protocol";
 
 import {
   WS_OUTPUT_BROTLI,
@@ -7,8 +7,8 @@ import {
   WS_OUTPUT_GZIP,
   WS_OUTPUT_RAW,
 } from "@/lib/constants";
-import {createContextDecompressor} from "@/utils/create-context-decompressor";
-import {decompressFrame} from "@/utils/decompress-frame";
+import { createContextDecompressor } from "@/utils/create-context-decompressor";
+import { decompressFrame } from "@/utils/decompress-frame";
 
 interface CreateTerminalOutputSessionOptions {
   onOutput: (bytes: Uint8Array) => void;

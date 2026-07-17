@@ -154,8 +154,7 @@ const SplitDiffCell = ({
       </>
     );
   }
-  const effectiveType =
-    line.type === "context" ? "context" : side === "left" ? "del" : "add";
+  const effectiveType = line.type === "context" ? "context" : side === "left" ? "del" : "add";
   return (
     <>
       {onAnnotate && onDragStart ? (

@@ -1,4 +1,8 @@
-import { AUTOMATION_RUN_LIMIT_MAX, type CdpHealth, type SecretEntryResponse } from "@monotykamary/localterm-server/protocol";
+import {
+  AUTOMATION_RUN_LIMIT_MAX,
+  type CdpHealth,
+  type SecretEntryResponse,
+} from "@monotykamary/localterm-server/protocol";
 import type { ReactNode } from "react";
 import { AgentComposer } from "@/components/agent-composer";
 import { AutomationScheduleBuilder } from "@/components/automation-schedule-builder";
@@ -10,14 +14,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
-import { FORM_INPUT_CLASSES, FORM_SECTION_CARD_CLASSES, SECTION_LABEL_CLASSES } from "@/lib/automation-form-styles";
+import {
+  FORM_INPUT_CLASSES,
+  FORM_SECTION_CARD_CLASSES,
+  SECTION_LABEL_CLASSES,
+} from "@/lib/automation-form-styles";
 import type { AutomationFormState } from "@/lib/automation-form-state";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/utils/format-relative-time";
 import { isHarnessKind } from "@/utils/is-harness-kind";
 import { isRunnerType } from "@/utils/is-runner-type";
 import { isTriggerType } from "@/utils/is-trigger-type";
-import { SESSION_EVENT_DESCRIPTIONS, SESSION_EVENT_LABELS, SESSION_EVENTS } from "@/utils/schedule-builder";
+import {
+  SESSION_EVENT_DESCRIPTIONS,
+  SESSION_EVENT_LABELS,
+  SESSION_EVENTS,
+} from "@/utils/schedule-builder";
 
 interface FormSectionProps {
   label: string;

@@ -13,14 +13,8 @@ import {
   setActiveTheme as pushActiveTheme,
   deleteTheme as removeRemoteTheme,
 } from "@/utils/fetch-themes";
-import {
-  loadStoredCustomThemes,
-  storeCustomThemes,
-} from "@/utils/stored-custom-themes";
-import {
-  loadStoredTerminalThemeId,
-  storeTerminalThemeId,
-} from "@/utils/stored-terminal-theme-id";
+import { loadStoredCustomThemes, storeCustomThemes } from "@/utils/stored-custom-themes";
+import { loadStoredTerminalThemeId, storeTerminalThemeId } from "@/utils/stored-terminal-theme-id";
 import { generateExtendedPalette } from "@/utils/generate-extended-palette";
 
 interface TerminalThemesState {
@@ -134,8 +128,7 @@ export const useTerminalThemeSettings = () => {
     const local = activeCustomThemesRef.current;
     const serverIds = new Set(state.customThemes.map((theme) => theme.id));
     const customsDiffer =
-      state.customThemes.length !== local.length ||
-      local.some((theme) => !serverIds.has(theme.id));
+      state.customThemes.length !== local.length || local.some((theme) => !serverIds.has(theme.id));
     if (customsDiffer) {
       setActiveCustomThemes([...state.customThemes]);
       storeCustomThemes(state.customThemes);

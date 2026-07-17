@@ -85,9 +85,7 @@ export const WorktreeRow = ({
           tone="blue"
           title={`${worktree.activeSessionCount} shell${worktree.activeSessionCount === 1 ? "" : "s"} open here — close ${worktree.activeSessionCount === 1 ? "it" : "them"} first to remove`}
         >
-          {worktree.activeSessionCount === 1
-            ? "in use"
-            : `${worktree.activeSessionCount} in use`}
+          {worktree.activeSessionCount === 1 ? "in use" : `${worktree.activeSessionCount} in use`}
         </WorktreeBadge>
       ) : null}
       {worktree.isCurrent ? null : (

@@ -114,9 +114,7 @@ const formForAutomation = (automation: AutomationWithNextRun): AutomationFormSta
     eventNames: trigger.eventNames,
     limitMode: automation.limit.kind === "count" ? "count" : "forever",
     limitMax:
-      automation.limit.kind === "count"
-        ? automation.limit.max
-        : AUTOMATION_RUN_LIMIT_DEFAULT_COUNT,
+      automation.limit.kind === "count" ? automation.limit.max : AUTOMATION_RUN_LIMIT_DEFAULT_COUNT,
     closeOnFinish: automation.closeOnFinish,
     requestedSecrets: automation.requestedSecrets,
   };

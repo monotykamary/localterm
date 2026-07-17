@@ -138,8 +138,7 @@ export const installTerminalTouchInteractions = ({
         const height = visualViewport.height;
         const width = visualViewport.width;
         const grew = height > prevViewportHeight + TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX;
-        const widthStable =
-          Math.abs(width - prevViewportWidth) < TERMINAL_VIEWPORT_WIDTH_STABLE_PX;
+        const widthStable = Math.abs(width - prevViewportWidth) < TERMINAL_VIEWPORT_WIDTH_STABLE_PX;
         if (grew && widthStable) blurAndGuardTextarea();
         prevViewportHeight = height;
         prevViewportWidth = width;

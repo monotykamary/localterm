@@ -1,5 +1,5 @@
-import {useCallback, type MouseEvent, type RefObject} from "react";
-import {TOOLBAR_HIDE_DELAY_MS, TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS} from "@/lib/constants";
+import { useCallback, type MouseEvent, type RefObject } from "react";
+import { TOOLBAR_HIDE_DELAY_MS, TOOLBAR_VIEWPORT_EDGE_HIDE_DELAY_MS } from "@/lib/constants";
 
 interface UseTerminalOverlayControlsOptions {
   isAutomationsOpen: boolean;
@@ -142,12 +142,7 @@ export const useTerminalOverlayControls = ({
         }
       }, delay);
     },
-    [
-      isSettingsOpen,
-      isAutomationsOpen,
-      setIsToolbarHovered,
-      toolbarHoverTimeoutRef,
-    ],
+    [isSettingsOpen, isAutomationsOpen, setIsToolbarHovered, toolbarHoverTimeoutRef],
   );
 
   const handleSettingsOpenChange = useCallback(

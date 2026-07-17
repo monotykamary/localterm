@@ -1,9 +1,4 @@
-import {
-  COLORTERM_VALUE,
-  LOCALTERM_VALUE,
-  PTY_ENV_DENYLIST,
-  TERM_TYPE,
-} from "./constants.js";
+import { COLORTERM_VALUE, LOCALTERM_VALUE, PTY_ENV_DENYLIST, TERM_TYPE } from "./constants.js";
 import type { SpawnPtyInput } from "./types.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
 

@@ -100,9 +100,7 @@ export const useWorktreeActions = ({
   };
 
   const armRemove = (worktree: GitWorktree) => {
-    setArmedRemovePath((currentPath) =>
-      currentPath === worktree.path ? null : worktree.path,
-    );
+    setArmedRemovePath((currentPath) => (currentPath === worktree.path ? null : worktree.path));
   };
 
   const confirmRemove = async (worktree: GitWorktree) => {

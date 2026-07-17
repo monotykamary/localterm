@@ -5,18 +5,27 @@ import type {
   MouseEventHandler,
   RefObject,
 } from "react";
-import type {GitBranchPr, GitDiffSummary} from "@monotykamary/localterm-server/protocol";
-import {Binary, ChevronDown, ChevronUp, Command, ImageIcon, Keyboard, Search, X} from "lucide-react";
-import type {LucideIcon} from "lucide-react";
-import {AutomationsButton} from "@/components/automations-menu";
-import {KeepAwakeMenu} from "@/components/keep-awake-menu";
-import {PortsButton} from "@/components/ports-menu";
-import {QrButton} from "@/components/qr-button";
-import {SecretsButton} from "@/components/secrets-menu";
-import {SessionsButton} from "@/components/sessions-menu";
-import {SettingsMenu} from "@/components/settings-menu";
-import {WorktreesButton} from "@/components/worktrees-menu";
-import {Button} from "@/components/ui/button";
+import type { GitBranchPr, GitDiffSummary } from "@monotykamary/localterm-server/protocol";
+import {
+  Binary,
+  ChevronDown,
+  ChevronUp,
+  Command,
+  ImageIcon,
+  Keyboard,
+  Search,
+  X,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { AutomationsButton } from "@/components/automations-menu";
+import { KeepAwakeMenu } from "@/components/keep-awake-menu";
+import { PortsButton } from "@/components/ports-menu";
+import { QrButton } from "@/components/qr-button";
+import { SecretsButton } from "@/components/secrets-menu";
+import { SessionsButton } from "@/components/sessions-menu";
+import { SettingsMenu } from "@/components/settings-menu";
+import { WorktreesButton } from "@/components/worktrees-menu";
+import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
@@ -24,15 +33,11 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "@/components/ui/input-group";
-import {ON_SCREEN_KEYBOARD_TOGGLE_SELECTOR} from "@/lib/on-screen-keyboard-selectors";
-import {
-  PR_DISPLAY_STATE_LABELS,
-  PR_STATE_STYLES,
-  type PrDisplayState,
-} from "@/lib/pr-state";
-import {cn} from "@/lib/utils";
-import type {DeviceTier} from "@/utils/detect-device-tier";
-import {formatDiffCount} from "@/utils/format-diff-count";
+import { ON_SCREEN_KEYBOARD_TOGGLE_SELECTOR } from "@/lib/on-screen-keyboard-selectors";
+import { PR_DISPLAY_STATE_LABELS, PR_STATE_STYLES, type PrDisplayState } from "@/lib/pr-state";
+import { cn } from "@/lib/utils";
+import type { DeviceTier } from "@/utils/detect-device-tier";
+import { formatDiffCount } from "@/utils/format-diff-count";
 
 interface AmbientActionSearchToolbarProps {
   toolbarRef: RefObject<HTMLDivElement | null>;

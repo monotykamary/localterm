@@ -17,18 +17,9 @@ import {
   loadStoredLigaturesEnabled,
   storeLigaturesEnabled,
 } from "@/utils/stored-ligatures-enabled";
-import {
-  loadStoredMuteEmojiColors,
-  storeMuteEmojiColors,
-} from "@/utils/stored-mute-emoji-colors";
-import {
-  loadStoredNerdFontEnabled,
-  storeNerdFontEnabled,
-} from "@/utils/stored-nerd-font-enabled";
-import {
-  loadStoredTerminalFontId,
-  storeTerminalFontId,
-} from "@/utils/stored-terminal-font-id";
+import { loadStoredMuteEmojiColors, storeMuteEmojiColors } from "@/utils/stored-mute-emoji-colors";
+import { loadStoredNerdFontEnabled, storeNerdFontEnabled } from "@/utils/stored-nerd-font-enabled";
+import { loadStoredTerminalFontId, storeTerminalFontId } from "@/utils/stored-terminal-font-id";
 import {
   loadStoredTerminalFontSize,
   storeTerminalFontSize,

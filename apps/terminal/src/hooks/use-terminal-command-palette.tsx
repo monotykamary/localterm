@@ -10,18 +10,18 @@ import {
   Search,
   SquareTerminal,
 } from "lucide-react";
-import {useCallback, useMemo} from "react";
-import {type CommandItem} from "@/components/command-palette";
-import {type CaffeinateMode} from "@/components/keep-awake-menu";
-import {TERMINAL_FONT_SIZE_STEP_PX} from "@/lib/constants";
+import { useCallback, useMemo } from "react";
+import { type CommandItem } from "@/components/command-palette";
+import { type CaffeinateMode } from "@/components/keep-awake-menu";
+import { TERMINAL_FONT_SIZE_STEP_PX } from "@/lib/constants";
 import {
   TERMINAL_CURSOR_STYLES,
   isTerminalCursorStyle,
   type TerminalCursorStyle,
 } from "@/lib/terminal-cursor";
-import {TERMINAL_FONTS} from "@/lib/terminal-fonts";
-import {TERMINAL_THEMES} from "@/lib/terminal-themes";
-import {type CreateWorktreeOptions} from "@/utils/fetch-git-worktrees";
+import { TERMINAL_FONTS } from "@/lib/terminal-fonts";
+import { TERMINAL_THEMES } from "@/lib/terminal-themes";
+import { type CreateWorktreeOptions } from "@/utils/fetch-git-worktrees";
 
 interface UseTerminalCommandPaletteOptions {
   activeCursorBlink: boolean;
@@ -33,10 +33,7 @@ interface UseTerminalCommandPaletteOptions {
   activeThemeId: string;
   caffeinateMode: CaffeinateMode;
   caffeinateSupported: boolean;
-  createWorktree: (
-    options: CreateWorktreeOptions,
-    openAfter: boolean,
-  ) => Promise<boolean>;
+  createWorktree: (options: CreateWorktreeOptions, openAfter: boolean) => Promise<boolean>;
   handleAutomationsOpenChange: (open: boolean) => void;
   handleCaffeinateModeChange: (mode: CaffeinateMode) => void;
   handleCursorBlinkChange: (enabled: boolean) => void;
@@ -216,11 +213,11 @@ export const useTerminalCommandPalette = ({
       ...(caffeinateSupported
         ? (
             [
-              {mode: "off", label: "Keep awake: off"},
-              {mode: "on", label: "Keep awake: on"},
-              {mode: "automatic", label: "Keep awake: automatic"},
+              { mode: "off", label: "Keep awake: off" },
+              { mode: "on", label: "Keep awake: on" },
+              { mode: "automatic", label: "Keep awake: automatic" },
             ] as const
-          ).map(({mode, label}) => ({
+          ).map(({ mode, label }) => ({
             id: `keep-awake:${mode}`,
             label,
             category: "Keep awake",
@@ -292,5 +289,5 @@ export const useTerminalCommandPalette = ({
     [setPreviewCursorStyle, setPreviewFontId, setPreviewThemeId],
   );
 
-  return {commandPaletteCommands, handleCommandPaletteHighlight};
+  return { commandPaletteCommands, handleCommandPaletteHighlight };
 };

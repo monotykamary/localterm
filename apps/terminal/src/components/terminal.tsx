@@ -1,38 +1,31 @@
+import { FitAddon } from "@xterm/addon-fit";
 
-import {FitAddon} from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { Terminal as XtermTerminal } from "@xterm/xterm";
 
-import {WebglAddon} from "@xterm/addon-webgl";
-import {Terminal as XtermTerminal} from "@xterm/xterm";
-
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import {OnScreenKeyboard} from "@/components/on-screen-keyboard/on-screen-keyboard";
-import {useDaemonSettings} from "@/hooks/use-daemon-settings";
-import {useDeviceTier} from "@/hooks/use-device-tier";
-import {PR_STATE_ICONS, resolvePrDisplayState} from "@/lib/pr-state";
-import {Badge} from "@/components/ui/badge";
-import {ToastProvider, Toaster} from "@/components/ui/toast";
-import {AmbientActionSearchToolbar} from "@/components/ambient-action-search-toolbar";
-import {ConnectionStatusDialog} from "@/components/connection-status-dialog";
-import {type CaffeinateMode} from "@/components/keep-awake-menu";
-import {TerminalOverlays} from "@/components/terminal-overlays";
-import {useGitBranchInfo} from "@/hooks/use-git-branch-info";
-import {useGitDiffSummary} from "@/hooks/use-git-diff-summary";
-import {useScreenWakeLock} from "@/hooks/use-screen-wake-lock";
-import {useTerminalCommandPalette} from "@/hooks/use-terminal-command-palette";
-import {useTerminalImagePaste} from "@/hooks/use-terminal-image-paste";
-import {useTerminalOnScreenKeyboard} from "@/hooks/use-terminal-on-screen-keyboard";
-import {useTerminalOverlayControls} from "@/hooks/use-terminal-overlay-controls";
-import {useTerminalRuntime, type TerminalExitInfo} from "@/hooks/use-terminal-runtime";
-import {useTerminalSearch} from "@/hooks/use-terminal-search";
-import {useTerminalSettings} from "@/hooks/use-terminal-settings";
-import {useUpdateStatus} from "@/hooks/use-update-status";
-import {createGitWorktree, type CreateWorktreeOptions} from "@/utils/fetch-git-worktrees";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { OnScreenKeyboard } from "@/components/on-screen-keyboard/on-screen-keyboard";
+import { useDaemonSettings } from "@/hooks/use-daemon-settings";
+import { useDeviceTier } from "@/hooks/use-device-tier";
+import { PR_STATE_ICONS, resolvePrDisplayState } from "@/lib/pr-state";
+import { Badge } from "@/components/ui/badge";
+import { ToastProvider, Toaster } from "@/components/ui/toast";
+import { AmbientActionSearchToolbar } from "@/components/ambient-action-search-toolbar";
+import { ConnectionStatusDialog } from "@/components/connection-status-dialog";
+import { type CaffeinateMode } from "@/components/keep-awake-menu";
+import { TerminalOverlays } from "@/components/terminal-overlays";
+import { useGitBranchInfo } from "@/hooks/use-git-branch-info";
+import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
+import { useScreenWakeLock } from "@/hooks/use-screen-wake-lock";
+import { useTerminalCommandPalette } from "@/hooks/use-terminal-command-palette";
+import { useTerminalImagePaste } from "@/hooks/use-terminal-image-paste";
+import { useTerminalOnScreenKeyboard } from "@/hooks/use-terminal-on-screen-keyboard";
+import { useTerminalOverlayControls } from "@/hooks/use-terminal-overlay-controls";
+import { useTerminalRuntime, type TerminalExitInfo } from "@/hooks/use-terminal-runtime";
+import { useTerminalSearch } from "@/hooks/use-terminal-search";
+import { useTerminalSettings } from "@/hooks/use-terminal-settings";
+import { useUpdateStatus } from "@/hooks/use-update-status";
+import { createGitWorktree, type CreateWorktreeOptions } from "@/utils/fetch-git-worktrees";
 import {
   COPY_FEEDBACK_MS,
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
@@ -44,28 +37,28 @@ import {
   RESTART_COMMAND,
   RETRY_BUTTON_FEEDBACK_MS,
 } from "@/lib/constants";
-import {type AutomationWithNextRun} from "@monotykamary/localterm-server/protocol";
-import type {TerminalSessionInfo} from "@/lib/terminal-session-info";
+import { type AutomationWithNextRun } from "@monotykamary/localterm-server/protocol";
+import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
 
-import {triggerHapticFeedback} from "@/utils/haptic-feedback";
+import { triggerHapticFeedback } from "@/utils/haptic-feedback";
 
-import {detectIsMacPlatform} from "@/utils/detect-is-mac-platform";
-import {detectLikelyKeepAwakeSupported} from "@/utils/detect-likely-keep-awake-supported";
-import {shellQuoteArg} from "@/utils/shell-quote-arg";
-import {buildFileUrl} from "@/utils/build-file-url";
+import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
+import { detectLikelyKeepAwakeSupported } from "@/utils/detect-likely-keep-awake-supported";
+import { shellQuoteArg } from "@/utils/shell-quote-arg";
+import { buildFileUrl } from "@/utils/build-file-url";
 
-import {LocalEcho} from "@/lib/local-echo";
-import {isCoarsePointer} from "@/utils/is-coarse-pointer";
-import {buildNewTerminalTabUrl} from "@/utils/build-new-terminal-tab-url";
-import {CWD_QUERY_PARAM} from "@/utils/build-terminal-websocket-url";
+import { LocalEcho } from "@/lib/local-echo";
+import { isCoarsePointer } from "@/utils/is-coarse-pointer";
+import { buildNewTerminalTabUrl } from "@/utils/build-new-terminal-tab-url";
+import { CWD_QUERY_PARAM } from "@/utils/build-terminal-websocket-url";
 
-import {probeServerHealth} from "@/utils/probe-server-health";
+import { probeServerHealth } from "@/utils/probe-server-health";
 
-import {computePtyViewportOverlay} from "@/utils/compute-pty-viewport-overlay";
+import { computePtyViewportOverlay } from "@/utils/compute-pty-viewport-overlay";
 
-import {isHerdrProcess} from "@/utils/is-herdr-process";
+import { isHerdrProcess } from "@/utils/is-herdr-process";
 
-import {isLightTerminalTheme} from "@/utils/is-light-terminal-theme";
+import { isLightTerminalTheme } from "@/utils/is-light-terminal-theme";
 
 import "@xterm/xterm/css/xterm.css";
 
@@ -789,7 +782,7 @@ export const Terminal = () => {
   const pageBackground = effectiveTheme.colors.background ?? FALLBACK_TERMINAL_BACKGROUND_HEX;
   const syntaxHighlightColorScheme = isLightTerminalTheme(effectiveTheme) ? "light" : "dark";
 
-  const {commandPaletteCommands, handleCommandPaletteHighlight} = useTerminalCommandPalette({
+  const { commandPaletteCommands, handleCommandPaletteHighlight } = useTerminalCommandPalette({
     activeCursorBlink,
     activeCursorStyle,
     activeFontId,

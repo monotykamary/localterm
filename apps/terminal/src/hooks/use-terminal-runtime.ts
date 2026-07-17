@@ -1,13 +1,13 @@
-import {FitAddon} from "@xterm/addon-fit";
-import {SearchAddon} from "@xterm/addon-search";
-import {WebglAddon} from "@xterm/addon-webgl";
-import {Terminal as XtermTerminal} from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { Terminal as XtermTerminal } from "@xterm/xterm";
 
 import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 
-import {type CaffeinateMode} from "@/components/keep-awake-menu";
+import { type CaffeinateMode } from "@/components/keep-awake-menu";
 
-import {type CreateWorktreeOptions} from "@/utils/fetch-git-worktrees";
+import { type CreateWorktreeOptions } from "@/utils/fetch-git-worktrees";
 import {
   DEAD_SESSION_TITLE_PREFIX,
   DEFAULT_DOCUMENT_TITLE,
@@ -35,49 +35,60 @@ import {
   buildCustomTerminalFont,
   findTerminalFontById,
 } from "@/lib/terminal-fonts";
-import type {TerminalSessionInfo} from "@/lib/terminal-session-info";
-import {findTerminalThemeById, type TerminalTheme} from "@/lib/terminal-themes";
-import {awaitFontReady} from "@/utils/await-font-ready";
-import {captureTerminalScrollAnchor, type TerminalScrollAnchor} from "@/utils/capture-terminal-scroll-anchor";
-import {fitTerminalPreservingScroll} from "@/utils/fit-terminal-preserving-scroll";
-import {formatShellExitMarker} from "@/utils/format-shell-exit-marker";
-import {triggerHapticFeedback} from "@/utils/haptic-feedback";
-import {chunkInputByCodeUnits} from "@/utils/chunk-input-by-code-units";
-import {restoreTerminalScrollAnchor} from "@/utils/restore-terminal-scroll-anchor";
-import {outputBatcher} from "@/utils/write-terminal-output";
-import {shouldBlockTerminalScrollbackPurge} from "@/utils/should-block-terminal-scrollback-purge";
-import {shouldSuppressSessionNotification} from "@/utils/should-suppress-session-notification";
-import {subscribeTerminalUserInput} from "@/utils/subscribe-terminal-user-input";
+import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
+import { findTerminalThemeById, type TerminalTheme } from "@/lib/terminal-themes";
+import { awaitFontReady } from "@/utils/await-font-ready";
+import {
+  captureTerminalScrollAnchor,
+  type TerminalScrollAnchor,
+} from "@/utils/capture-terminal-scroll-anchor";
+import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
+import { formatShellExitMarker } from "@/utils/format-shell-exit-marker";
+import { triggerHapticFeedback } from "@/utils/haptic-feedback";
+import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
+import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anchor";
+import { outputBatcher } from "@/utils/write-terminal-output";
+import { shouldBlockTerminalScrollbackPurge } from "@/utils/should-block-terminal-scrollback-purge";
+import { shouldSuppressSessionNotification } from "@/utils/should-suppress-session-notification";
+import { subscribeTerminalUserInput } from "@/utils/subscribe-terminal-user-input";
 
-import {isBinaryMessageData} from "@/utils/is-binary-message-data";
-import {removeInitialCommandQueryParam} from "@/utils/remove-initial-command-query-param";
-import {FRESH_SESSION_QUERY_PARAM, removeFreshSessionQueryParam} from "@/utils/fresh-session-query-param";
-import {removeRunQueryParam, RUN_QUERY_PARAM} from "@/utils/remove-run-query-param";
-import {SESSION_ID_QUERY_PARAM, syncSessionIdQueryParam} from "@/utils/sync-session-id-query-param";
-import {LocalEcho} from "@/lib/local-echo";
+import { isBinaryMessageData } from "@/utils/is-binary-message-data";
+import { removeInitialCommandQueryParam } from "@/utils/remove-initial-command-query-param";
+import {
+  FRESH_SESSION_QUERY_PARAM,
+  removeFreshSessionQueryParam,
+} from "@/utils/fresh-session-query-param";
+import { removeRunQueryParam, RUN_QUERY_PARAM } from "@/utils/remove-run-query-param";
+import {
+  SESSION_ID_QUERY_PARAM,
+  syncSessionIdQueryParam,
+} from "@/utils/sync-session-id-query-param";
+import { LocalEcho } from "@/lib/local-echo";
 
-import {buildTerminalWebSocketUrl} from "@/utils/build-terminal-websocket-url";
-import {detectDeviceTier} from "@/utils/detect-device-tier";
-import {fetchSessions} from "@/utils/fetch-sessions";
-import {loadStoredMobileResume} from "@/utils/stored-mobile-resume";
-import {resolveResumeSession} from "@/utils/resolve-resume-session";
-import {setTabFaviconState} from "@/utils/set-tab-favicon-state";
+import { buildTerminalWebSocketUrl } from "@/utils/build-terminal-websocket-url";
+import { detectDeviceTier } from "@/utils/detect-device-tier";
+import { fetchSessions } from "@/utils/fetch-sessions";
+import { loadStoredMobileResume } from "@/utils/stored-mobile-resume";
+import { resolveResumeSession } from "@/utils/resolve-resume-session";
+import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 
-import {createTerminalSurface} from "@/lib/terminal-runtime/create-terminal-surface";
+import { createTerminalSurface } from "@/lib/terminal-runtime/create-terminal-surface";
 import {
   createTerminalOutputSession,
   type TerminalOutputSession,
 } from "@/lib/terminal-runtime/create-terminal-output-session";
 
-import {detectOutputCompressMode} from "@/utils/detect-output-compress-mode";
+import { detectOutputCompressMode } from "@/utils/detect-output-compress-mode";
 
+import { installTerminalInputHandlers } from "@/utils/install-terminal-input-handlers";
+import { installTerminalScrollbar } from "@/utils/install-terminal-scrollbar";
+import { installTerminalTouchInteractions } from "@/utils/install-terminal-touch-interactions";
+import { registerTerminalKittyKeyboardProtocol } from "@/utils/register-terminal-kitty-keyboard-protocol";
 
-import {installTerminalInputHandlers} from "@/utils/install-terminal-input-handlers";
-import {installTerminalScrollbar} from "@/utils/install-terminal-scrollbar";
-import {installTerminalTouchInteractions} from "@/utils/install-terminal-touch-interactions";
-import {registerTerminalKittyKeyboardProtocol} from "@/utils/register-terminal-kitty-keyboard-protocol";
-
-import {MAX_INPUT_BYTES, type ClientToServerMessage} from "@monotykamary/localterm-server/protocol";
+import {
+  MAX_INPUT_BYTES,
+  type ClientToServerMessage,
+} from "@monotykamary/localterm-server/protocol";
 
 const titleForLiveSession = (raw: string): string => raw || DEFAULT_DOCUMENT_TITLE;
 const titleForDeadSession = (raw: string): string =>
@@ -165,9 +176,7 @@ interface TerminalRuntimeActionRefs {
   setCaffeinateCommandsRef: CurrentRef<((commands: string[]) => void) | null>;
   setCaffeinateActivityGateRef: CurrentRef<((enabled: boolean) => void) | null>;
   setCaffeinatePeerKeepAwakeRef: CurrentRef<((enabled: boolean) => void) | null>;
-  setCaffeinateBatteryThresholdRef: CurrentRef<
-    ((percent: number | null) => void) | null
-  >;
+  setCaffeinateBatteryThresholdRef: CurrentRef<((percent: number | null) => void) | null>;
   qrPeerAttachedRef: CurrentRef<(() => void) | null>;
 }
 
@@ -1247,5 +1256,4 @@ export const useTerminalRuntime = ({
       document.title = DEFAULT_DOCUMENT_TITLE;
     };
   }, []);
-
-}
+};

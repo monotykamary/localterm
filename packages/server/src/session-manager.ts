@@ -687,7 +687,9 @@ export class SessionManager {
   private installSessionListeners(managed: ManagedSession): void {
     const session = managed.session;
     session.on("output", (data: string) => this.outputCoordinator.onSessionOutput(managed, data));
-    session.on("title", (title: string) => this.outputTransport.broadcast(managed, { type: "title", title }));
+    session.on("title", (title: string) =>
+      this.outputTransport.broadcast(managed, { type: "title", title }),
+    );
     session.on("cwd", (cwd: string) => {
       this.outputTransport.broadcast(managed, { type: "cwd", cwd });
       managed.gitWatcher.stop();

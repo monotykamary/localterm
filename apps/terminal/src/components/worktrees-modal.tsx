@@ -1,4 +1,13 @@
-import { AlertTriangle, FolderGit2, GitPullRequest, Plus, RefreshCw, Settings, WandSparkles, X } from "lucide-react";
+import {
+  AlertTriangle,
+  FolderGit2,
+  GitPullRequest,
+  Plus,
+  RefreshCw,
+  Settings,
+  WandSparkles,
+  X,
+} from "lucide-react";
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { PullRequestWorktreeForm } from "@/components/pull-request-worktree-form";
@@ -308,11 +317,7 @@ export const WorktreesModal = ({
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
                     <AlertTriangle className="size-4" aria-hidden="true" />
                     Couldn't load worktrees from the localterm daemon.
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      onClick={() => void resources.refresh()}
-                    >
+                    <Button variant="outline" size="xs" onClick={() => void resources.refresh()}>
                       Retry
                     </Button>
                   </div>
@@ -376,11 +381,7 @@ export const WorktreesModal = ({
           <footer className="flex shrink-0 items-center gap-2 border-t border-border/40 px-4 py-2">
             <AlertTriangle className="size-3.5 shrink-0 text-red-400" aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate text-xs text-red-400">{actionError}</span>
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={actions.dismissMessages}
-            >
+            <Button variant="ghost" size="xs" onClick={actions.dismissMessages}>
               Dismiss
             </Button>
           </footer>

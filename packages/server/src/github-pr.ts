@@ -8,11 +8,7 @@ import { getCurrentBranch, isGitRepo, verifyRef, type RefInfo } from "./git-bran
 import { resolveGithubToken } from "./utils/resolve-github-token.js";
 import { memoBy } from "./utils/memo-by.js";
 import { runGit } from "./utils/run-git.js";
-import type {
-  GitBranchPr,
-  GitBranchPrMergeable,
-  GitBranchPrState,
-} from "./types.js";
+import type { GitBranchPr, GitBranchPrMergeable, GitBranchPrState } from "./types.js";
 
 // PrApiData is the raw shape the GitHub API returns — PR fields plus the
 // internal owner/repo hints. It does NOT carry a resolved base ref (the API
@@ -194,8 +190,7 @@ const defaultPrFetcher: PrFetcher = {
           url: pullRequest.url ?? null,
           state,
           isDraft: pullRequest.isDraft ?? false,
-          mergeable:
-            state === "open" ? resolveGraphqlMergeable(pullRequest.mergeable) : "unknown",
+          mergeable: state === "open" ? resolveGraphqlMergeable(pullRequest.mergeable) : "unknown",
           headOwner: pullRequest.headRepositoryOwner?.login ?? null,
           baseRepoFullName: pullRequest.baseRepository?.nameWithOwner ?? null,
           mergedAt: pullRequest.mergedAt ?? null,

@@ -113,154 +113,153 @@ export class SessionCommandExecutor {
     return renderer;
   }
 
-async execute(
-  managed: ManagedSession,
-  command: string,
-  options: ExecOptions = {},
-): Promise<ExecResult> {
-  const session = managed.session;
+  async execute(
+    managed: ManagedSession,
+    command: string,
+    options: ExecOptions = {},
+  ): Promise<ExecResult> {
+    const session = managed.session;
 
-  const timeoutMs = this.clampInt(
-    options.timeoutMs ?? EXEC_DEFAULT_TIMEOUT_MS,
-    1,
-    EXEC_MAX_TIMEOUT_MS,
-  );
-  const outputLimit = this.clampInt(
-    options.outputLimitBytes ?? EXEC_DEFAULT_OUTPUT_LIMIT_BYTES,
-    1,
-    EXEC_MAX_OUTPUT_LIMIT_BYTES,
-  );
+    const timeoutMs = this.clampInt(
+      options.timeoutMs ?? EXEC_DEFAULT_TIMEOUT_MS,
+      1,
+      EXEC_MAX_TIMEOUT_MS,
+    );
+    const outputLimit = this.clampInt(
+      options.outputLimitBytes ?? EXEC_DEFAULT_OUTPUT_LIMIT_BYTES,
+      1,
+      EXEC_MAX_OUTPUT_LIMIT_BYTES,
+    );
 
-  const token = randomBytes(8).toString("hex");
-  const startMarker = `__LT_S_${token}__`;
-  const endMarkerPrefix = `__LT_E_${token}__`;
-  const endPattern = new RegExp(`${endMarkerPrefix} (\\d+)`);
-  const cmd = command.trim() || ":";
-  const wrapped = `printf '${startMarker}\\n'; ${cmd}; printf '${endMarkerPrefix} %d\\n' "$?"`;
+    const token = randomBytes(8).toString("hex");
+    const startMarker = `__LT_S_${token}__`;
+    const endMarkerPrefix = `__LT_E_${token}__`;
+    const endPattern = new RegExp(`${endMarkerPrefix} (\\d+)`);
+    const cmd = command.trim() || ":";
+    const wrapped = `printf '${startMarker}\\n'; ${cmd}; printf '${endMarkerPrefix} %d\\n' "$?"`;
 
-  const startedAt = Date.now();
-  let accumulated = "";
-  let capped = false;
-  let exitCode: number | null = null;
-  let didTimeout = false;
-  let resolved = false;
-  let timeoutHandle: NodeJS.Timeout | null = null;
-  let interruptHandle: NodeJS.Timeout | null = null;
+    const startedAt = Date.now();
+    let accumulated = "";
+    let capped = false;
+    let exitCode: number | null = null;
+    let didTimeout = false;
+    let resolved = false;
+    let timeoutHandle: NodeJS.Timeout | null = null;
+    let interruptHandle: NodeJS.Timeout | null = null;
 
-  return new Promise<ExecResult>((resolve) => {
-    const finalize = async (finalExit: number | null, finalTimedOut: boolean) => {
-      if (resolved) return;
-      resolved = true;
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-      if (interruptHandle) clearTimeout(interruptHandle);
-      session.off("output", onOutput);
-      session.off("exit", onExit);
-      resolve(
-        await this.buildExecResult(
-          session.cols,
-          session.rows,
-          accumulated,
-          startMarker,
-          endMarkerPrefix,
-          finalExit,
-          finalTimedOut,
-          outputLimit,
-          startedAt,
-        ),
-      );
-    };
+    return new Promise<ExecResult>((resolve) => {
+      const finalize = async (finalExit: number | null, finalTimedOut: boolean) => {
+        if (resolved) return;
+        resolved = true;
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (interruptHandle) clearTimeout(interruptHandle);
+        session.off("output", onOutput);
+        session.off("exit", onExit);
+        resolve(
+          await this.buildExecResult(
+            session.cols,
+            session.rows,
+            accumulated,
+            startMarker,
+            endMarkerPrefix,
+            finalExit,
+            finalTimedOut,
+            outputLimit,
+            startedAt,
+          ),
+        );
+      };
 
-    const onOutput = (data: string): void => {
-      if (!capped) {
-        if (accumulated.length + data.length <= EXEC_RAW_ACCUMULATE_CAP_BYTES) {
-          accumulated += data;
-        } else {
-          const room = EXEC_RAW_ACCUMULATE_CAP_BYTES - accumulated.length;
-          if (room > 0) accumulated += data.slice(0, room);
-          capped = true;
+      const onOutput = (data: string): void => {
+        if (!capped) {
+          if (accumulated.length + data.length <= EXEC_RAW_ACCUMULATE_CAP_BYTES) {
+            accumulated += data;
+          } else {
+            const room = EXEC_RAW_ACCUMULATE_CAP_BYTES - accumulated.length;
+            if (room > 0) accumulated += data.slice(0, room);
+            capped = true;
+          }
         }
-      }
-      // Once the timeout has fired we've committed to a timed-out result; a
-      // marker arriving during the interrupt grace (Ctrl-C kills the command,
-      // the trailing `printf END $?` runs with the interrupt exit code) is
-      // ignored so the call resolves as timed out, not as a normal completion.
-      if (didTimeout) return;
-      const match = accumulated.match(endPattern);
-      if (match) {
-        exitCode = Number.parseInt(match[1], 10);
-        finalize(exitCode, false);
-      }
-    };
-    const onExit = (code: number | null): void => {
-      exitCode = code;
-      finalize(code, false);
-    };
+        // Once the timeout has fired we've committed to a timed-out result; a
+        // marker arriving during the interrupt grace (Ctrl-C kills the command,
+        // the trailing `printf END $?` runs with the interrupt exit code) is
+        // ignored so the call resolves as timed out, not as a normal completion.
+        if (didTimeout) return;
+        const match = accumulated.match(endPattern);
+        if (match) {
+          exitCode = Number.parseInt(match[1], 10);
+          finalize(exitCode, false);
+        }
+      };
+      const onExit = (code: number | null): void => {
+        exitCode = code;
+        finalize(code, false);
+      };
 
-    session.on("output", onOutput);
-    session.on("exit", onExit);
+      session.on("output", onOutput);
+      session.on("exit", onExit);
 
-    timeoutHandle = setTimeout(() => {
-      // Commit to a timed-out result: the command didn't finish within
-      // timeoutMs. Send Ctrl-C to interrupt it (so the session returns to a
-      // prompt for a follow-up call), then resolve after a short grace so any
-      // output already in flight is captured into the partial result. A marker
-      // arriving during the grace is ignored (see onOutput).
-      didTimeout = true;
-      session.write("\x03");
-      interruptHandle = setTimeout(() => finalize(null, true), EXEC_TIMEOUT_INTERRUPT_GRACE_MS);
-      interruptHandle.unref?.();
-    }, timeoutMs);
-    timeoutHandle.unref?.();
+      timeoutHandle = setTimeout(() => {
+        // Commit to a timed-out result: the command didn't finish within
+        // timeoutMs. Send Ctrl-C to interrupt it (so the session returns to a
+        // prompt for a follow-up call), then resolve after a short grace so any
+        // output already in flight is captured into the partial result. A marker
+        // arriving during the grace is ignored (see onOutput).
+        didTimeout = true;
+        session.write("\x03");
+        interruptHandle = setTimeout(() => finalize(null, true), EXEC_TIMEOUT_INTERRUPT_GRACE_MS);
+        interruptHandle.unref?.();
+      }, timeoutMs);
+      timeoutHandle.unref?.();
 
-    // A client sending input is live; for a detached session there's no
-    // pending handshake, so the bytes reach the PTY directly.
-    session.write(`${wrapped}\r`);
-  });
-}
-
-private async buildExecResult(
-  cols: number,
-  rows: number,
-  accumulated: string,
-  startMarker: string,
-  endMarkerPrefix: string,
-  exitCode: number | null,
-  timedOut: boolean,
-  outputLimit: number,
-  startedAt: number,
-): Promise<ExecResult> {
-  // Render the captured raw stream through a fresh headless terminal and slice
-  // between the start/end marker rows for clean, ANSI-processed text. A fresh
-  // (not the persistent) renderer so this exec's output is isolated and the
-  // markers are always near the bottom of the buffer.
-  const renderer = new CaptureRenderer(cols, rows, EXEC_EPHEMERAL_SCROLLBACK);
-  let output: string;
-  try {
-    renderer.write(accumulated);
-    await renderer.flush();
-    const endRow =
-      exitCode !== null && !timedOut ? renderer.findRow(`${endMarkerPrefix} ${exitCode}`) : -1;
-    const startRow = renderer.findRow(startMarker);
-    output = renderer.extractBetween(startRow, endRow);
-  } finally {
-    renderer.dispose();
+      // A client sending input is live; for a detached session there's no
+      // pending handshake, so the bytes reach the PTY directly.
+      session.write(`${wrapped}\r`);
+    });
   }
-  const textBytes = Buffer.byteLength(output, "utf8");
-  const truncated = textBytes > outputLimit;
-  if (truncated) {
-    output = Buffer.from(output, "utf8").subarray(0, outputLimit).toString("utf8");
+
+  private async buildExecResult(
+    cols: number,
+    rows: number,
+    accumulated: string,
+    startMarker: string,
+    endMarkerPrefix: string,
+    exitCode: number | null,
+    timedOut: boolean,
+    outputLimit: number,
+    startedAt: number,
+  ): Promise<ExecResult> {
+    // Render the captured raw stream through a fresh headless terminal and slice
+    // between the start/end marker rows for clean, ANSI-processed text. A fresh
+    // (not the persistent) renderer so this exec's output is isolated and the
+    // markers are always near the bottom of the buffer.
+    const renderer = new CaptureRenderer(cols, rows, EXEC_EPHEMERAL_SCROLLBACK);
+    let output: string;
+    try {
+      renderer.write(accumulated);
+      await renderer.flush();
+      const endRow =
+        exitCode !== null && !timedOut ? renderer.findRow(`${endMarkerPrefix} ${exitCode}`) : -1;
+      const startRow = renderer.findRow(startMarker);
+      output = renderer.extractBetween(startRow, endRow);
+    } finally {
+      renderer.dispose();
+    }
+    const textBytes = Buffer.byteLength(output, "utf8");
+    const truncated = textBytes > outputLimit;
+    if (truncated) {
+      output = Buffer.from(output, "utf8").subarray(0, outputLimit).toString("utf8");
+    }
+    return {
+      exitCode,
+      output,
+      timedOut,
+      truncated,
+      durationMs: Date.now() - startedAt,
+    };
   }
-  return {
-    exitCode,
-    output,
-    timedOut,
-    truncated,
-    durationMs: Date.now() - startedAt,
-  };
-}
 
-private clampInt(value: number, min: number, max: number): number {
-  return Math.min(Math.max(Math.trunc(value), min), max);
-}
-
+  private clampInt(value: number, min: number, max: number): number {
+    return Math.min(Math.max(Math.trunc(value), min), max);
+  }
 }

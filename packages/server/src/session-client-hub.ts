@@ -56,9 +56,10 @@ export class SessionClientHub {
     }
     return [...counts.entries()]
       .map(([windowId, count]) => ({ windowId, count }))
-      .sort((firstProfile, secondProfile) =>
-        secondProfile.count - firstProfile.count ||
-        firstProfile.windowId.localeCompare(secondProfile.windowId),
+      .sort(
+        (firstProfile, secondProfile) =>
+          secondProfile.count - firstProfile.count ||
+          firstProfile.windowId.localeCompare(secondProfile.windowId),
       );
   }
 
@@ -139,7 +140,8 @@ export class SessionClientHub {
     // auto-closes. Gated on existing clients so a fresh spawn's first attach
     // stays silent, and fired before adding the joiner so it isn't told about
     // itself. See peerAttachedMessageSchema for the frame's payload rationale.
-    if (managed.clients.size > 0) this.outputTransport.broadcast(managed, { type: "peer-attached" });
+    if (managed.clients.size > 0)
+      this.outputTransport.broadcast(managed, { type: "peer-attached" });
     const coordinator = this.coordinatorForCwd(managed.session.cwd);
     const client: ManagedClient = {
       ws,

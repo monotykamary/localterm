@@ -16,11 +16,7 @@ interface DiffViewerPrBadgeProps {
 // "This branch has a GitHub PR" chip — color-coded by state and set apart from
 // the add/delete greens and reds so a detected PR is obvious at a glance. Links
 // to the PR when gh gave us a URL.
-export const DiffViewerPrBadge = ({
-  pr,
-  currentBranch,
-  hideTitle,
-}: DiffViewerPrBadgeProps) => {
+export const DiffViewerPrBadge = ({ pr, currentBranch, hideTitle }: DiffViewerPrBadgeProps) => {
   const displayState = resolvePrDisplayState(pr, currentBranch);
   if (!displayState) return null;
   const PrIcon = PR_STATE_ICONS[displayState];

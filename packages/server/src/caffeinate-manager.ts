@@ -1,16 +1,10 @@
 import { EventEmitter } from "node:events";
 import { CaffeinateAutomaticDetector } from "./caffeinate-automatic-detector.js";
-import {
-  defaultBatteryProbe,
-  type BatteryProbe,
-} from "./caffeinate-battery.js";
+import { defaultBatteryProbe, type BatteryProbe } from "./caffeinate-battery.js";
 import { CaffeinateBatteryGuard } from "./caffeinate-battery-guard.js";
 import type { CaffeinateController } from "./caffeinate-controller.js";
 import type { CaffeinatePreferencesStore } from "./caffeinate-preferences-store.js";
-import {
-  defaultSnapshotProcesses,
-  type SnapshotProcesses,
-} from "./caffeinate-process-match.js";
+import { defaultSnapshotProcesses, type SnapshotProcesses } from "./caffeinate-process-match.js";
 import { CAFFEINATE_AUTO_DEFAULT_COMMANDS } from "./constants.js";
 import type { CaffeinateMode } from "./types.js";
 

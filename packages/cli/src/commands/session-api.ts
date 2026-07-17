@@ -5,7 +5,10 @@ import {
   reportDaemonDown,
 } from "../utils/daemon-api.js";
 
-export const fetchSessionApi = async (path: string, init: RequestInit): Promise<Response | null> => {
+export const fetchSessionApi = async (
+  path: string,
+  init: RequestInit,
+): Promise<Response | null> => {
   let base: string;
   try {
     base = daemonBaseUrl();

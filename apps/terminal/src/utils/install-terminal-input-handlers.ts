@@ -187,8 +187,7 @@ export const installTerminalInputHandlers = ({
     //      working.
     if (event.type === "keydown" && event.key === "Enter") {
       const modifierBits = extractKeyboardModifiers(event);
-      const isKittyDisambiguateActive =
-        (getKittyFlags() & KITTY_KEYBOARD_DISAMBIGUATE_FLAG) !== 0;
+      const isKittyDisambiguateActive = (getKittyFlags() & KITTY_KEYBOARD_DISAMBIGUATE_FLAG) !== 0;
       if (modifierBits !== 0 && isKittyDisambiguateActive) {
         event.preventDefault();
         sendInput(buildKittyKeySequence(ENTER_KEY_CODE, modifierBits));
@@ -202,5 +201,4 @@ export const installTerminalInputHandlers = ({
     }
     return true;
   });
-
 };

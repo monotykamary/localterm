@@ -1,12 +1,12 @@
-import type {ComponentProps} from "react";
-import {AutomationsModal} from "@/components/automations-modal";
-import {CommandPalette} from "@/components/command-palette";
-import {DiffViewer} from "@/components/diff-viewer";
-import {PortsModal} from "@/components/ports-modal";
-import {QrModal} from "@/components/qr-modal";
-import {SecretsModal} from "@/components/secrets-modal";
-import {SessionsModal} from "@/components/sessions-modal";
-import {WorktreesModal} from "@/components/worktrees-modal";
+import type { ComponentProps } from "react";
+import { AutomationsModal } from "@/components/automations-modal";
+import { CommandPalette } from "@/components/command-palette";
+import { DiffViewer } from "@/components/diff-viewer";
+import { PortsModal } from "@/components/ports-modal";
+import { QrModal } from "@/components/qr-modal";
+import { SecretsModal } from "@/components/secrets-modal";
+import { SessionsModal } from "@/components/sessions-modal";
+import { WorktreesModal } from "@/components/worktrees-modal";
 
 interface TerminalOverlaysProps {
   commandPalette: ComponentProps<typeof CommandPalette>;

@@ -50,8 +50,8 @@ export const SecretExportForm = ({
         />
       </div>
       <div className="text-[10px] leading-relaxed text-muted-foreground/60">
-        Encrypts every secret's value into an age file. Keep the passphrase — it can't be
-        recovered. The file also decrypts with the stock `age` CLI.
+        Encrypts every secret's value into an age file. Keep the passphrase — it can't be recovered.
+        The file also decrypts with the stock `age` CLI.
       </div>
       {error ? <div className="text-[11px] text-red-500 dark:text-red-400">{error}</div> : null}
       <div className="flex items-center justify-end gap-1.5 pt-1">

@@ -1,4 +1,7 @@
-import type { AutomationRunRecord, AutomationWithNextRun } from "@monotykamary/localterm-server/protocol";
+import type {
+  AutomationRunRecord,
+  AutomationWithNextRun,
+} from "@monotykamary/localterm-server/protocol";
 import { ArrowUpRight, ChevronDown, Eraser } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -48,13 +51,7 @@ interface AutomationRecentRunsViewProps {
   onClearHistory: () => void;
 }
 
-const TriageRunRow = ({
-  automation,
-  run,
-  nowMs,
-  onOpenLog,
-  onSelect,
-}: TriageRunRowProps) => {
+const TriageRunRow = ({ automation, run, nowMs, onOpenLog, onSelect }: TriageRunRowProps) => {
   const badge = runStatusBadge(run.status, run.exitCode);
   const findingsPreview = findFirstFindingsLine(run.findings);
   return (

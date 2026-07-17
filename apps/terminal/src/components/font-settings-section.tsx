@@ -108,14 +108,10 @@ export const FontSettingsSection = ({
           <TooltipTrigger render={<span className={SETTINGS_ROW_LABEL_CLASSES} />}>
             Custom font family
           </TooltipTrigger>
-          <TooltipContent
-            side="bottom"
-            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-            className="max-w-xs"
-          >
-            A font family installed on the host — most useful for a system-installed Nerd Font
-            (e.g. “JetBrainsMono Nerd Font Mono”, “MesloLGS NF”) the browser resolves via
-            fontconfig. Leave empty to fall back to the bundled default.
+          <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX} className="max-w-xs">
+            A font family installed on the host — most useful for a system-installed Nerd Font (e.g.
+            “JetBrainsMono Nerd Font Mono”, “MesloLGS NF”) the browser resolves via fontconfig.
+            Leave empty to fall back to the bundled default.
           </TooltipContent>
         </Tooltip>
       ) : null}
@@ -160,11 +156,7 @@ export const FontSettingsSection = ({
           <TooltipTrigger render={<span className={SETTINGS_ROW_LABEL_CLASSES} />}>
             Nerd Font icons
           </TooltipTrigger>
-          <TooltipContent
-            side="bottom"
-            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-            className="max-w-xs"
-          >
+          <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX} className="max-w-xs">
             Appends a Symbols Only Nerd Font to the font stack. Icon glyphs (Private Use Area
             codepoints) are resolved by the symbols font while all other characters render from the
             primary font above.
@@ -181,11 +173,7 @@ export const FontSettingsSection = ({
           <TooltipTrigger render={<span className={SETTINGS_ROW_LABEL_CLASSES} />}>
             Ligatures
           </TooltipTrigger>
-          <TooltipContent
-            side="bottom"
-            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-            className="max-w-xs"
-          >
+          <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX} className="max-w-xs">
             Fuses multi-character operators such as {"->"}, {"=>"}, and {"!=="} into single glyphs
             when the active font defines them (e.g. Fira Code, JetBrains Mono). Joins every run of
             operator characters so composable arrows like
@@ -205,11 +193,7 @@ export const FontSettingsSection = ({
           <TooltipTrigger render={<span className={SETTINGS_ROW_LABEL_CLASSES} />}>
             Mute emoji colors
           </TooltipTrigger>
-          <TooltipContent
-            side="bottom"
-            sideOffset={TOOLTIP_SIDE_OFFSET_PX}
-            className="max-w-xs"
-          >
+          <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX} className="max-w-xs">
             Tints emoji with the surrounding terminal text color so they are less visually
             distracting. Turn this off to show their native colors.
           </TooltipContent>

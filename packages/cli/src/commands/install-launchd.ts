@@ -4,11 +4,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import kleur from "kleur";
-import {
-  DAEMON_BASE_PATH,
-  LAUNCHD_LABEL,
-  PORTLESS_RESOLVE_TIMEOUT_MS,
-} from "../constants.js";
+import { DAEMON_BASE_PATH, LAUNCHD_LABEL, PORTLESS_RESOLVE_TIMEOUT_MS } from "../constants.js";
 import { cliError, type CliError, exitCodeForCliError } from "../errors.js";
 import { getLaunchdPlistPath, getStateDirectory } from "../paths.js";
 import { cliEntry } from "../utils/cli-entry.js";

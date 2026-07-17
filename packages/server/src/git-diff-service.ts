@@ -15,11 +15,7 @@ import {
   resolveDefaultBase,
   verifyRef,
 } from "./git-branch-metadata.js";
-import {
-  readDiffCache,
-  writeDiffCache,
-  type DiffCache,
-} from "./git-diff-cache.js";
+import { readDiffCache, writeDiffCache, type DiffCache } from "./git-diff-cache.js";
 import {
   buildUntrackedPatch,
   countLines,

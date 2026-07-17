@@ -1,28 +1,28 @@
-import {ClipboardAddon} from "@xterm/addon-clipboard";
-import {FitAddon} from "@xterm/addon-fit";
-import {ImageAddon} from "@xterm/addon-image";
-import {ProgressAddon} from "@xterm/addon-progress";
-import {SearchAddon} from "@xterm/addon-search";
-import {UnicodeGraphemesAddon} from "@xterm/addon-unicode-graphemes";
-import {WebLinksAddon} from "@xterm/addon-web-links";
-import {WebglAddon} from "@xterm/addon-webgl";
-import {Terminal as XtermTerminal} from "@xterm/xterm";
-import type {IUnicodeVersionProvider} from "@xterm/xterm";
+import { ClipboardAddon } from "@xterm/addon-clipboard";
+import { FitAddon } from "@xterm/addon-fit";
+import { ImageAddon } from "@xterm/addon-image";
+import { ProgressAddon } from "@xterm/addon-progress";
+import { SearchAddon } from "@xterm/addon-search";
+import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { Terminal as XtermTerminal } from "@xterm/xterm";
+import type { IUnicodeVersionProvider } from "@xterm/xterm";
 
 import {
   LOCALTERM_MOUSE_CELLS_PROPERTY,
   LOCALTERM_PANE_TEXT_PROPERTY,
 } from "@monotykamary/localterm-server/protocol";
 
-import {XTERM_DEFAULT_SCROLL_SENSITIVITY} from "@/lib/constants";
-import type {TerminalFont} from "@/lib/terminal-fonts";
-import {familyForFont} from "@/lib/terminal-fonts";
-import type {TerminalTheme} from "@/lib/terminal-themes";
-import {generateExtendedPalette} from "@/utils/generate-extended-palette";
-import {getTerminalMinimumContrastRatio} from "@/utils/get-terminal-minimum-contrast-ratio";
-import {preserveTerminalMouseWheelMagnitude} from "@/utils/preserve-terminal-mouse-wheel-magnitude";
-import {EmojiWidthUnicodeProvider} from "@/utils/emoji-width-unicode-provider";
-import {outputBatcher} from "@/utils/write-terminal-output";
+import { XTERM_DEFAULT_SCROLL_SENSITIVITY } from "@/lib/constants";
+import type { TerminalFont } from "@/lib/terminal-fonts";
+import { familyForFont } from "@/lib/terminal-fonts";
+import type { TerminalTheme } from "@/lib/terminal-themes";
+import { generateExtendedPalette } from "@/utils/generate-extended-palette";
+import { getTerminalMinimumContrastRatio } from "@/utils/get-terminal-minimum-contrast-ratio";
+import { preserveTerminalMouseWheelMagnitude } from "@/utils/preserve-terminal-mouse-wheel-magnitude";
+import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider";
+import { outputBatcher } from "@/utils/write-terminal-output";
 
 interface CurrentRef<Value> {
   current: Value;
@@ -96,7 +96,7 @@ export const createTerminalSurface = ({
       getCellSizePixels: true,
       getWinSizeChars: true,
     },
-    scrollbar: {showScrollbar: false},
+    scrollbar: { showScrollbar: false },
   });
   outputBatcher.attach(terminal);
   const fitAddon = new FitAddon();
@@ -109,7 +109,7 @@ export const createTerminalSurface = ({
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const graphemesProvider = (
     terminal as unknown as {
-      _core: {unicodeService: {_activeProvider: IUnicodeVersionProvider}};
+      _core: { unicodeService: { _activeProvider: IUnicodeVersionProvider } };
     }
   )._core.unicodeService._activeProvider;
   terminal.unicode.register(

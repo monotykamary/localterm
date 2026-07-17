@@ -1,6 +1,6 @@
-import {Check, Copy} from "lucide-react";
-import type {TerminalExitInfo} from "@/hooks/use-terminal-runtime";
-import {RESTART_COMMAND} from "@/lib/constants";
+import { Check, Copy } from "lucide-react";
+import type { TerminalExitInfo } from "@/hooks/use-terminal-runtime";
+import { RESTART_COMMAND } from "@/lib/constants";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,7 +16,7 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group";
-import {Spinner} from "@/components/ui/spinner";
+import { Spinner } from "@/components/ui/spinner";
 
 interface ConnectionStatusDialogProps {
   open: boolean;

@@ -140,8 +140,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
 
   if (!mounted) return null;
   const isVisible = open && settled;
-  const activeCount =
-    tab === "secrets" ? resources.secrets?.length : resources.processes?.length;
+  const activeCount = tab === "secrets" ? resources.secrets?.length : resources.processes?.length;
   const activeFormOpen =
     tab === "secrets"
       ? secretActions.form !== null ||

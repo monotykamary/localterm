@@ -24,10 +24,7 @@ import {
   COMMAND_PALETTE_PANEL_CLASSES,
   MODAL_PANEL_CLASSES,
 } from "@/lib/animation-classes";
-import {
-  SETTINGS_MODAL_CLOSE_TRANSITION_MS,
-  SETTINGS_MODAL_MAX_HEIGHT_CSS,
-} from "@/lib/constants";
+import { SETTINGS_MODAL_CLOSE_TRANSITION_MS, SETTINGS_MODAL_MAX_HEIGHT_CSS } from "@/lib/constants";
 import type { TerminalCursorStyle } from "@/lib/terminal-cursor";
 import type { TerminalTheme } from "@/lib/terminal-themes";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";

@@ -5,14 +5,7 @@ import type {
 } from "@monotykamary/localterm-server/protocol";
 import type { SyntaxHighlightColorScheme } from "@/utils/syntax-highlight";
 import { ChevronDown, ExternalLink, GitBranch, RefreshCw, Send, X } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FileDiffPane } from "@/components/diff-viewer-file-diff-pane";
 import { FileListPopover, FileListSidebar } from "@/components/diff-viewer-file-picker";
 import {

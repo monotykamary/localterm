@@ -397,9 +397,9 @@ export const LaunchSettingsSection = ({
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX} className="max-w-xs">
         Absolute path to the shell binary new tabs spawn. Leave empty to use the daemon's detected
-        login shell (LOCALTERM_SHELL, then your passwd entry, then $SHELL). The
-        `localterm session new --shell` flag and the `?shell=` query param override this per session;
-        an address-bar `?shell=` wins for one tab.
+        login shell (LOCALTERM_SHELL, then your passwd entry, then $SHELL). The `localterm session
+        new --shell` flag and the `?shell=` query param override this per session; an address-bar
+        `?shell=` wins for one tab.
       </TooltipContent>
     </Tooltip>
     <Input
@@ -497,9 +497,7 @@ export const NotificationsSettingsSection = ({
       <Switch
         aria-label="toggle desktop notifications"
         checked={notificationsPermission === "granted"}
-        disabled={
-          notificationsPermission === "unsupported" || notificationsPermission === "denied"
-        }
+        disabled={notificationsPermission === "unsupported" || notificationsPermission === "denied"}
         onCheckedChange={(checked) => {
           if (checked) onNotificationsPermissionRequest();
         }}
@@ -631,11 +629,7 @@ export const ShellSettingsSection = ({ sessionInfo }: ShellSettingsSectionProps)
       <dl className="flex flex-col gap-1 pt-2 text-xs">
         <SessionInfoRow label="Name" value={sessionInfo.shellName} />
         <SessionInfoRow label="Path" value={sessionInfo.shell} title={sessionInfo.shell} />
-        <SessionInfoRow
-          label="PID"
-          value={String(sessionInfo.pid)}
-          valueClassName="tabular-nums"
-        />
+        <SessionInfoRow label="PID" value={String(sessionInfo.pid)} valueClassName="tabular-nums" />
         <SessionInfoRow label="Cwd" value={sessionInfo.cwd} title={sessionInfo.cwd} />
       </dl>
     </CollapsibleContent>

@@ -1,5 +1,17 @@
-import type { AutomationRunRecord, AutomationWithNextRun } from "@monotykamary/localterm-server/protocol";
-import { ChevronDown, Eraser, Minimize2, Pencil, Play, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import type {
+  AutomationRunRecord,
+  AutomationWithNextRun,
+} from "@monotykamary/localterm-server/protocol";
+import {
+  ChevronDown,
+  Eraser,
+  Minimize2,
+  Pencil,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useState } from "react";
 import { AutomationRunRow } from "@/components/automation-run-row";
 import { Button } from "@/components/ui/button";
