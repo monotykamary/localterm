@@ -1,13 +1,7 @@
-import {ClipboardAddon} from "@xterm/addon-clipboard";
 import {FitAddon} from "@xterm/addon-fit";
-import {ImageAddon} from "@xterm/addon-image";
-import {ProgressAddon} from "@xterm/addon-progress";
 import {SearchAddon} from "@xterm/addon-search";
-import {UnicodeGraphemesAddon} from "@xterm/addon-unicode-graphemes";
-import {WebLinksAddon} from "@xterm/addon-web-links";
 import {WebglAddon} from "@xterm/addon-webgl";
 import {Terminal as XtermTerminal} from "@xterm/xterm";
-import type {IUnicodeVersionProvider} from "@xterm/xterm";
 
 import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 
@@ -24,19 +18,11 @@ import {
   NOTIFICATION_TITLE,
   RECONNECT_DELAY_MS,
   RESIZE_DEBOUNCE_MS,
-  WS_OUTPUT_BROTLI,
-  WS_OUTPUT_BROTLI_CTX,
-  WS_OUTPUT_CTX_HEADER_BYTES,
-  WS_OUTPUT_GZIP,
-  WS_OUTPUT_RAW,
-  XTERM_DEFAULT_SCROLL_SENSITIVITY,
 } from "@/lib/constants";
 import {
   AMBIENT_TAB_CLOSE_DEADLINE_MS,
   LOCALTERM_TAB_TOKEN_EVENT,
   LOCALTERM_TAB_TOKEN_PROPERTY,
-  LOCALTERM_PANE_TEXT_PROPERTY,
-  LOCALTERM_MOUSE_CELLS_PROPERTY,
   serverToClientMessageSchema,
   type AutomationWithNextRun,
   type FontsResponse,
@@ -47,15 +33,12 @@ import {
 import {
   CUSTOM_FONT_ID,
   buildCustomTerminalFont,
-  familyForFont,
   findTerminalFontById,
 } from "@/lib/terminal-fonts";
 import type {TerminalSessionInfo} from "@/lib/terminal-session-info";
 import {findTerminalThemeById, type TerminalTheme} from "@/lib/terminal-themes";
-import {generateExtendedPalette} from "@/utils/generate-extended-palette";
 import {awaitFontReady} from "@/utils/await-font-ready";
 import {captureTerminalScrollAnchor, type TerminalScrollAnchor} from "@/utils/capture-terminal-scroll-anchor";
-import {EmojiWidthUnicodeProvider} from "@/utils/emoji-width-unicode-provider";
 import {fitTerminalPreservingScroll} from "@/utils/fit-terminal-preserving-scroll";
 import {formatShellExitMarker} from "@/utils/format-shell-exit-marker";
 import {triggerHapticFeedback} from "@/utils/haptic-feedback";
@@ -74,26 +57,27 @@ import {SESSION_ID_QUERY_PARAM, syncSessionIdQueryParam} from "@/utils/sync-sess
 import {LocalEcho} from "@/lib/local-echo";
 
 import {buildTerminalWebSocketUrl} from "@/utils/build-terminal-websocket-url";
-import {createContextDecompressor} from "@/utils/create-context-decompressor";
-import {decompressFrame} from "@/utils/decompress-frame";
 import {detectDeviceTier} from "@/utils/detect-device-tier";
 import {fetchSessions} from "@/utils/fetch-sessions";
 import {loadStoredMobileResume} from "@/utils/stored-mobile-resume";
 import {resolveResumeSession} from "@/utils/resolve-resume-session";
 import {setTabFaviconState} from "@/utils/set-tab-favicon-state";
 
-import {preserveTerminalMouseWheelMagnitude} from "@/utils/preserve-terminal-mouse-wheel-magnitude";
+import {createTerminalSurface} from "@/lib/terminal-runtime/create-terminal-surface";
+import {
+  createTerminalOutputSession,
+  type TerminalOutputSession,
+} from "@/lib/terminal-runtime/create-terminal-output-session";
 
 import {detectOutputCompressMode} from "@/utils/detect-output-compress-mode";
 
-import {getTerminalMinimumContrastRatio} from "@/utils/get-terminal-minimum-contrast-ratio";
 
 import {installTerminalInputHandlers} from "@/utils/install-terminal-input-handlers";
 import {installTerminalScrollbar} from "@/utils/install-terminal-scrollbar";
 import {installTerminalTouchInteractions} from "@/utils/install-terminal-touch-interactions";
 import {registerTerminalKittyKeyboardProtocol} from "@/utils/register-terminal-kitty-keyboard-protocol";
 
-import {MAX_INPUT_BYTES, type ClientToServerMessage, type CompressMode} from "@monotykamary/localterm-server/protocol";
+import {MAX_INPUT_BYTES, type ClientToServerMessage} from "@monotykamary/localterm-server/protocol";
 
 const titleForLiveSession = (raw: string): string => raw || DEFAULT_DOCUMENT_TITLE;
 const titleForDeadSession = (raw: string): string =>
@@ -402,9 +386,6 @@ export const useTerminalRuntime = ({
     // sequence. `suppressOutput` gates onData; `inReplay` routes binary frames
     // to the buffer instead of the live batcher; `replayChunks` holds them
     // until `replay-end` lands.
-    let suppressOutput = false;
-    let inReplay = false;
-    let replayChunks: Uint8Array[] = [];
     let reconnectTimer: number | null = null;
     let resizeTimer: number | null = null;
     let faviconRunningTimer: number | null = null;
@@ -494,101 +475,25 @@ export const useTerminalRuntime = ({
       fitToContainer();
     });
 
-    const terminal = new XtermTerminal({
-      allowProposedApi: true,
-      cursorBlink: initialCursorBlinkRef.current,
-      cursorStyle: initialCursorStyleRef.current,
-      fontFamily: familyForFont(initialFont, initialNerdFontEnabledRef.current),
-      fontSize: initialFontSizeRef.current,
-      lineHeight: initialLineHeightRef.current,
-      minimumContrastRatio: getTerminalMinimumContrastRatio(initialTheme),
-      scrollback: initialScrollbackRef.current,
-      scrollSensitivity: XTERM_DEFAULT_SCROLL_SENSITIVITY,
-      theme: {
-        ...initialTheme.colors,
-        extendedAnsi: generateExtendedPalette(initialTheme.colors),
-      },
-      macOptionIsMeta: true,
-      scrollOnUserInput: initialScrollOnUserInputRef.current,
-      windowOptions: {
-        getWinSizePixels: true,
-        getCellSizePixels: true,
-        getWinSizeChars: true,
-      },
-      scrollbar: { showScrollbar: false },
+    const terminalSurface = createTerminalSurface({
+      container,
+      initialCursorBlink: initialCursorBlinkRef.current,
+      initialCursorStyle: initialCursorStyleRef.current,
+      initialFont,
+      initialFontSize: initialFontSizeRef.current,
+      initialLineHeight: initialLineHeightRef.current,
+      initialMuteEmojiColors: initialMuteEmojiColorsRef.current,
+      initialNerdFontEnabled: initialNerdFontEnabledRef.current,
+      initialScrollback: initialScrollbackRef.current,
+      initialScrollOnUserInput: initialScrollOnUserInputRef.current,
+      initialTheme,
+      fitAddonRef,
+      searchAddonRef,
+      webglAddonRef,
+      setSearchResults,
     });
+    const { terminal, fitAddon } = terminalSurface;
     terminalRef.current = terminal;
-    outputBatcher.attach(terminal);
-    const fitAddon = new FitAddon();
-    fitAddonRef.current = fitAddon;
-    terminal.loadAddon(fitAddon);
-    terminal.loadAddon(new WebLinksAddon());
-    terminal.loadAddon(new ClipboardAddon());
-    terminal.loadAddon(new ImageAddon());
-    terminal.loadAddon(new ProgressAddon());
-    terminal.loadAddon(new UnicodeGraphemesAddon());
-    const graphemesProvider = (
-      terminal as unknown as {
-        _core: { unicodeService: { _activeProvider: IUnicodeVersionProvider } };
-      }
-    )._core.unicodeService._activeProvider;
-    terminal.unicode.register(
-      new EmojiWidthUnicodeProvider(
-        graphemesProvider,
-        // The spacing-combining-mark override only matches Claude Code, which
-        // runs in the normal buffer. Full-screen TUIs (vim, less, tmux) run in
-        // the alternate buffer and use correct combining-mark widths.
-        () => terminal.buffer.active.type === "normal",
-      ),
-    );
-    terminal.unicode.activeVersion = "15-graphemes-emoji";
-    const searchAddon = new SearchAddon();
-    terminal.loadAddon(searchAddon);
-    searchAddonRef.current = searchAddon;
-    const searchResultsDisposable = searchAddon.onDidChangeResults(setSearchResults);
-
-    terminal.open(container);
-    const mouseWheelMagnitudeDisposable = preserveTerminalMouseWheelMagnitude(terminal);
-
-    // Expose viewport serializers to the daemon's CDP automation (capture-pane
-    // --png, mouse). The daemon reads these off the tab's window over the
-    // existing CDP socket: a pane-text serializer (the render-landed source of
-    // truth — a content-equality check against the server-side capture renderer
-    // that can't return stale pixels) and a cell-metrics helper (col/row →
-    // pixel for Input.dispatchMouseEvent). Mirrors LOCALTERM_TAB_TOKEN_PROPERTY
-    // — well-known names so the wire protocol stays authoritative. Torn down
-    // on unmount so a tab the user closed never answers a stale query.
-    const w = window as unknown as Record<string, unknown>;
-    w[LOCALTERM_PANE_TEXT_PROPERTY] = (): string => {
-      const buffer = terminal.buffer.active;
-      const rows: string[] = [];
-      for (let i = buffer.baseY; i < buffer.baseY + terminal.rows; i++) {
-        const line = buffer.getLine(i);
-        rows.push(line ? line.translateToString(true) : "");
-      }
-      while (rows.length > 0 && rows[rows.length - 1] === "") rows.pop();
-      return rows.join("\n");
-    };
-    w[LOCALTERM_MOUSE_CELLS_PROPERTY] = (): {
-      left: number;
-      top: number;
-      cellWidth: number;
-      cellHeight: number;
-      cols: number;
-      rows: number;
-    } | null => {
-      const screen = container.querySelector(".xterm-screen");
-      if (!(screen instanceof HTMLElement)) return null;
-      const rect = screen.getBoundingClientRect();
-      return {
-        left: rect.left,
-        top: rect.top,
-        cellWidth: terminal.cols > 0 ? rect.width / terminal.cols : 0,
-        cellHeight: terminal.rows > 0 ? rect.height / terminal.rows : 0,
-        cols: terminal.cols,
-        rows: terminal.rows,
-      };
-    };
 
     const terminalTouchInteractions = installTerminalTouchInteractions({
       terminal,
@@ -610,21 +515,7 @@ export const useTerminalRuntime = ({
     });
     const updateScrollbar = terminalScrollbar.update;
 
-    try {
-      const webglAddon = new WebglAddon({
-        muteEmojiColors: initialMuteEmojiColorsRef.current,
-      });
-      webglAddon.onContextLoss(() => {
-        if (webglAddonRef.current === webglAddon) webglAddonRef.current = null;
-        outputBatcher.setInteractiveRenderingEnabled(false);
-        webglAddon.dispose();
-      });
-      terminal.loadAddon(webglAddon);
-      webglAddonRef.current = webglAddon;
-      outputBatcher.setInteractiveRenderingEnabled(true);
-    } catch {
-      /* webgl unavailable; xterm falls back to dom renderer */
-    }
+    terminalSurface.loadWebgl();
 
     const kittyKeyboardProtocol = registerTerminalKittyKeyboardProtocol(terminal);
     const getKittyFlags = kittyKeyboardProtocol.getFlags;
@@ -776,6 +667,21 @@ export const useTerminalRuntime = ({
     localEcho.setEnabled(activeLocalEchoRef.current);
     localEchoRef.current = localEcho;
 
+    let activeOutputSession: TerminalOutputSession | null = null;
+    const createOutputSession = () =>
+      createTerminalOutputSession({
+        onOutput: (bytes) => {
+          outputBatcher.pushBytes(localEcho.hasPending() ? localEcho.reconcile(bytes) : bytes);
+          noteOutputActivity();
+        },
+        onReplay: (chunks, onComplete) => {
+          for (let index = 0; index < chunks.length; index += 1) {
+            terminal.write(chunks[index], index === chunks.length - 1 ? onComplete : undefined);
+          }
+        },
+        onReplayComplete: updateScrollbar,
+      });
+
     let nextTerminalDataIsUserInput = false;
     const terminalUserInputDisposable = subscribeTerminalUserInput(terminal, () => {
       nextTerminalDataIsUserInput = true;
@@ -789,7 +695,7 @@ export const useTerminalRuntime = ({
       // keystrokes share onData and are dropped too, but the replay drain is
       // short (a screenful parses inside xterm's 12ms synchronous budget) and
       // the user is not typing in the moment after a switch.
-      if (suppressOutput) return;
+      if (activeOutputSession?.isSuppressingOutput()) return;
       for (const chunk of chunkInputByCodeUnits(data, MAX_INPUT_BYTES)) {
         if (isUserInput) localEcho.handleInput(chunk);
         else send({ type: "terminal-response", data: chunk });
@@ -882,6 +788,8 @@ export const useTerminalRuntime = ({
         }),
       );
       socket = nextSocket;
+      const outputSession = createOutputSession();
+      activeOutputSession = outputSession;
 
       nextSocket.binaryType = "arraybuffer";
       nextSocket.addEventListener("open", () => {
@@ -908,28 +816,6 @@ export const useTerminalRuntime = ({
         );
       });
 
-      // Decompression is async (DecompressionStream), so serialize per socket:
-      // frames must reach xterm in PTY order, and the replay-end flush must wait
-      // for the replay frames' decompresses. A promise chain (FIFO). ptyGeneration
-      // invalidates pending decompresses when a {session} frame switches PTYs —
-      // a prior PTY's frame still in the queue would otherwise land in the new
-      // PTY (after terminal.reset()).
-      let decompressQueue: Promise<void> = Promise.resolve();
-      let ptyGeneration = 0;
-      // The server's chosen compress mode (from the {compress} frame on promote),
-      // NOT the client's advertisement. null = raw (no header) — either a no-
-      // support browser or an old server that never sent {compress}.
-      let negotiatedCompressMode: CompressMode = null;
-      // The persistent Brotli decompressor for "br-ctx" (one per PTY, reset on
-      // {session} and {compress}); its LZ77 window holds the prior screen so each
-      // frame decompresses as a delta.
-      let contextDecompressor: ReturnType<typeof createContextDecompressor> | null = null;
-      const enqueueDecompress = (task: () => Promise<void> | void): void => {
-        decompressQueue = decompressQueue.then(task).catch((error: unknown) => {
-          console.warn("[localterm] output decompress error", error);
-        });
-      };
-
       nextSocket.addEventListener("message", (event) => {
         if (disposed || socket !== nextSocket) return;
         // Output frames are raw UTF-8 bytes (binary WebSocket frames) — bypass
@@ -937,55 +823,7 @@ export const useTerminalRuntime = ({
         // emits every other message type as JSON text, so anything that isn't
         // an ArrayBuffer goes through the schema parser.
         if (isBinaryMessageData(event.data)) {
-          const data = new Uint8Array(event.data);
-          if (negotiatedCompressMode === null) {
-            // Raw passthrough (no compression — a no-DecompressionStream browser,
-            // or an old server that never sent a {compress} frame): no header byte.
-            if (inReplay) {
-              replayChunks.push(data);
-              return;
-            }
-            outputBatcher.pushBytes(localEcho.hasPending() ? localEcho.reconcile(data) : data);
-            noteOutputActivity();
-            return;
-          }
-          // Compressed frame. 0x00/0x01/0x02 use a 1-byte header (per-frame
-          // independent — a fresh DecompressionStream per frame reads to done).
-          // 0x03 is the context-takeover: a 5-byte header (0x03 + 4-byte LE raw
-          // size) then the compressed payload, fed to the per-socket persistent
-          // DecompressionStream and size-delimited by the raw size (the stream
-          // doesn't end per frame). Decompress is async, so enqueue per socket —
-          // frames reach xterm in PTY order and the replay-end flush waits for
-          // the replay frames' decompresses. Capture the PTY generation so a
-          // {session} switch drops a prior PTY's frame still mid-decompress.
-          const generationAtEnqueue = ptyGeneration;
-          enqueueDecompress(async () => {
-            const header = data[0];
-            let bytes: Uint8Array;
-            if (header === WS_OUTPUT_BROTLI_CTX) {
-              const rawSize = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(
-                1,
-                true,
-              );
-              const compressed = data.subarray(WS_OUTPUT_CTX_HEADER_BYTES);
-              bytes = await contextDecompressor!.decompress(compressed, rawSize);
-            } else {
-              const payload = data.subarray(1);
-              if (header === WS_OUTPUT_BROTLI) bytes = await decompressFrame("br", payload);
-              else if (header === WS_OUTPUT_GZIP) bytes = await decompressFrame("gzip", payload);
-              else if (header === WS_OUTPUT_RAW) bytes = payload;
-              else return; // unknown header — a version mismatch; drop the frame
-            }
-            if (ptyGeneration !== generationAtEnqueue) return;
-            if (inReplay) {
-              // Buffer the DECOMPRESSED bytes; replay-end writes them as one
-              // suppressed block (dropping xterm's stale query responses).
-              replayChunks.push(bytes);
-              return;
-            }
-            outputBatcher.pushBytes(localEcho.hasPending() ? localEcho.reconcile(bytes) : bytes);
-            noteOutputActivity();
-          });
+          outputSession.handleBinaryMessage(event.data);
           return;
         }
         let raw: unknown;
@@ -1000,26 +838,10 @@ export const useTerminalRuntime = ({
         if (message.type === "title") {
           applyIncomingTitle(message.title);
         } else if (message.type === "session") {
-          ptyGeneration += 1;
           const priorSessionId = liveSessionId;
           const didSpawnFreshSession = shouldSpawnFreshSession;
           shouldSpawnFreshSession = false;
-          // A new session frame is a fresh attach: reset the negotiated compress
-          // mode (the server sends a new {compress} frame on promote) and release
-          // the prior PTY's persistent Brotli decompressor (its LZ77 context is
-          // stale for the new PTY).
-          negotiatedCompressMode = null;
-          if (contextDecompressor !== null) {
-            void contextDecompressor.release();
-            contextDecompressor = null;
-          }
-          // A new session frame means a fresh attach: drop any suppressed-replay
-          // window left open by a prior (possibly failed) attach — its replay
-          // is moot now, and an unbalanced window would leave onData suppressed
-          // (a dead terminal). Re-opened below if this attach wants a replay.
-          inReplay = false;
-          replayChunks = [];
-          suppressOutput = false;
+          outputSession.beginSession();
           localEcho.flush();
           reattachPending = false;
           reattachCloseCode = 0;
@@ -1118,26 +940,11 @@ export const useTerminalRuntime = ({
             // Open the suppressed-replay window: buffer the replay frames and
             // drop xterm's responses until `replay-end` writes them as one
             // block. Cleared in the replay-end handler.
-            inReplay = true;
-            suppressOutput = true;
-            replayChunks = [];
+            outputSession.beginReplay();
           }
           send({ type: "ready", replay: wantsReplay, compress: COMPRESS_MODE });
         } else if (message.type === "compress") {
-          // The server's chosen compress mode, sent on promote BEFORE the
-          // scrollback replay so the client knows how to parse the compressed
-          // replay frames. Drives the binary handler (NOT COMPRESS_MODE — that's
-          // the client's advertisement). An old server that doesn't know "br-ctx"
-          // never sends this frame, so negotiatedCompressMode stays null and the
-          // binary handler reads frames as raw (no header) — graceful degrade.
-          negotiatedCompressMode = message.mode;
-          if (contextDecompressor !== null) {
-            void contextDecompressor.release();
-            contextDecompressor = null;
-          }
-          if (message.mode === "br-ctx") {
-            contextDecompressor = createContextDecompressor();
-          }
+          outputSession.setCompressMode(message.mode);
         } else if (message.type === "replay-end") {
           // The server has finished sending the scrollback replay. Write the
           // buffered frames as one block with onData suppressed so xterm's
@@ -1149,32 +956,7 @@ export const useTerminalRuntime = ({
           // queued behind it in xterm's FIFO buffer and parses after the
           // callback clears suppression. An empty replay (blank PTY) writes
           // nothing and just clears the window.
-          const flushReplay = () => {
-            const chunks = replayChunks;
-            inReplay = false;
-            replayChunks = [];
-            if (chunks.length === 0) {
-              suppressOutput = false;
-            } else {
-              const finishReplay = () => {
-                suppressOutput = false;
-                updateScrollbar();
-              };
-              for (let index = 0; index < chunks.length; index += 1) {
-                terminal.write(
-                  chunks[index],
-                  index === chunks.length - 1 ? finishReplay : undefined,
-                );
-              }
-            }
-          };
-          // Compressed replay frames are decompressed async (the per-socket
-          // queue); the flush must wait for them or it'd write an incomplete
-          // block. Raw mode (no compression) flushes inline — the frames
-          // arrived synchronously and the flush must land before the next
-          // (inline) live frame reads `inReplay`.
-          if (negotiatedCompressMode === null) flushReplay();
-          else enqueueDecompress(flushReplay);
+          outputSession.finishReplay();
         } else if (message.type === "automations") {
           setAutomations(message.automations);
         } else if (message.type === "themes") {
@@ -1444,12 +1226,8 @@ export const useTerminalRuntime = ({
       kittyKeyboardProtocol.dispose();
       scrollbackPurgeDisposable.dispose();
       selectiveScrollbackPurgeDisposable.dispose();
-      mouseWheelMagnitudeDisposable?.dispose();
       terminalDataDisposable.dispose();
       terminalUserInputDisposable?.dispose();
-      const w = window as unknown as Record<string, unknown>;
-      delete w[LOCALTERM_PANE_TEXT_PROPERTY];
-      delete w[LOCALTERM_MOUSE_CELLS_PROPERTY];
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       clearResizeScrollRestore();
@@ -1465,9 +1243,7 @@ export const useTerminalRuntime = ({
       socket = null;
       localEcho.dispose();
       localEchoRef.current = null;
-      outputBatcher.detach();
-      webglAddonRef.current = null;
-      terminal.dispose();
+      terminalSurface.dispose();
       document.title = DEFAULT_DOCUMENT_TITLE;
     };
   }, []);
