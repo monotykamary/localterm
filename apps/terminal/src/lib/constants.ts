@@ -12,6 +12,9 @@ export const TERMINAL_TAP_MOVEMENT_THRESHOLD_PX = 10;
 export const TERMINAL_CURSOR_KEYBOARD_TAP_TARGET_PX = 44;
 export const TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX = 150;
 export const TERMINAL_VIEWPORT_WIDTH_STABLE_PX = 20;
+export const XTERM_DEFAULT_SCROLL_SENSITIVITY = 1;
+export const XTERM_TRACKPAD_WHEEL_DELTA_THRESHOLD_PX = 50;
+export const XTERM_TRACKPAD_WHEEL_SCALE = 0.3;
 export const DEFAULT_TERMINAL_LINE_HEIGHT = 1.2;
 // xterm.js refuses lineHeight < 1 (throws "lineHeight cannot be less than 1").
 export const TERMINAL_LINE_HEIGHT_MIN = 1.0;

@@ -123,6 +123,7 @@ import {
   WS_OUTPUT_CTX_HEADER_BYTES,
   WS_OUTPUT_GZIP,
   WS_OUTPUT_RAW,
+  XTERM_DEFAULT_SCROLL_SENSITIVITY,
 } from "@/lib/constants";
 import {
   AMBIENT_TAB_CLOSE_DEADLINE_MS,
@@ -212,6 +213,8 @@ import { fetchServerHealth } from "@/utils/fetch-server-health";
 import { connectCdp } from "@/utils/connect-cdp";
 import { openInspectPage } from "@/utils/open-inspect-page";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
+import { preserveTerminalMouseWheelMagnitude } from "@/utils/preserve-terminal-mouse-wheel-magnitude";
+import { syncTerminalMouseWheelSensitivity } from "@/utils/sync-terminal-mouse-wheel-sensitivity";
 import { computePtyViewportOverlay } from "@/utils/compute-pty-viewport-overlay";
 import { detectOutputCompressMode } from "@/utils/detect-output-compress-mode";
 import { isHerdrProcess } from "@/utils/is-herdr-process";
@@ -1083,6 +1086,7 @@ export const Terminal = () => {
       lineHeight: initialLineHeightRef.current,
       minimumContrastRatio: getTerminalMinimumContrastRatio(initialTheme),
       scrollback: initialScrollbackRef.current,
+      scrollSensitivity: XTERM_DEFAULT_SCROLL_SENSITIVITY,
       theme: {
         ...initialTheme.colors,
         extendedAnsi: generateExtendedPalette(initialTheme.colors),
@@ -1127,6 +1131,7 @@ export const Terminal = () => {
     const searchResultsDisposable = searchAddon.onDidChangeResults(setSearchResults);
 
     terminal.open(container);
+    const mouseWheelMagnitudeDisposable = preserveTerminalMouseWheelMagnitude(terminal);
 
     // Expose viewport serializers to the daemon's CDP automation (capture-pane
     // --png, mouse). The daemon reads these off the tab's window over the
@@ -1572,6 +1577,7 @@ export const Terminal = () => {
     };
 
     terminal.attachCustomWheelEventHandler((event) => {
+      syncTerminalMouseWheelSensitivity(event, terminal);
       if (shouldSuppressAltBufferWheel(event, terminal)) {
         event.preventDefault();
         return false;
@@ -2458,6 +2464,7 @@ export const Terminal = () => {
       kittySetDisposable.dispose();
       scrollbackPurgeDisposable.dispose();
       selectiveScrollbackPurgeDisposable.dispose();
+      mouseWheelMagnitudeDisposable?.dispose();
       terminalDataDisposable.dispose();
       terminalUserInputDisposable?.dispose();
       const w = window as unknown as Record<string, unknown>;
