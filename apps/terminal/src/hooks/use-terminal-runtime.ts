@@ -412,6 +412,9 @@ export const useTerminalRuntime = ({
     const send = (message: ClientToServerMessage) => {
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
     };
+    const sendClientFocus = (focused: boolean) => {
+      send({ type: "client-focus", focused });
+    };
     const sendInput = (data: string) => {
       if (socket?.readyState !== WebSocket.OPEN) return;
       outputBatcher.noteUserInput();
@@ -494,13 +497,10 @@ export const useTerminalRuntime = ({
       };
       const canvasWidth = terminalInternals._core._renderService?.dimensions?.css?.canvas?.width;
       const canvasHeight = terminalInternals._core._renderService?.dimensions?.css?.canvas?.height;
-      // Report the viewer's NATURAL cols, not the (possibly clamped) grid
-      // cols: the server sizes the PTY to the min across clients, so a wider
-      // viewer reporting its clamped cols would deadlock the PTY at the narrow
-      // size when the constraining peer leaves. Rows are unclamped, so the
-      // passed rows are already the natural height. The canvas pixels stay as
-      // measured — the server only uses them for a sole (unclamped) viewer,
-      // where the canvas is already the natural size.
+      // Report the viewer's natural cols, not the grid clamped to the active
+      // viewer's PTY width. The server retains every client's available size
+      // so a focus or input handoff can resize to it immediately. Rows are
+      // unclamped, so the passed rows are already the natural height.
       send({
         type: "resize",
         cols: naturalColsRef.current ?? cols,
@@ -577,8 +577,17 @@ export const useTerminalRuntime = ({
     });
 
     const observer = new ResizeObserver(scheduleFit);
-    const onVisibilityChange = tabOutputActivity.handleVisibilityChange;
+    const handleWindowFocus = () => sendClientFocus(true);
+    const handleWindowBlur = () => sendClientFocus(false);
+    const handlePointerDown = () => sendClientFocus(true);
+    const onVisibilityChange = () => {
+      tabOutputActivity.handleVisibilityChange();
+      sendClientFocus(document.visibilityState === "visible" && document.hasFocus());
+    };
     document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("pointerdown", handlePointerDown, true);
 
     observer.observe(container);
     fitToContainer();
@@ -651,6 +660,7 @@ export const useTerminalRuntime = ({
         wsConnectedRef.current = true;
         setConsecutiveFailures(0);
         sendResize(terminal.cols, terminal.rows);
+        sendClientFocus(document.visibilityState === "visible" && document.hasFocus());
         // Ambient tab provenance: echo the CDP-injected token so the server
         // pairs this socket with its CDP target for closeTab on shell exit.
         // Always send — with `token:null` when injection hasn't landed yet —
@@ -917,6 +927,9 @@ export const useTerminalRuntime = ({
       clearResizeScrollRestore();
       tabOutputActivity.reset();
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("pointerdown", handlePointerDown, true);
       observer.disconnect();
       terminalTouchInteractions.dispose();
       try {

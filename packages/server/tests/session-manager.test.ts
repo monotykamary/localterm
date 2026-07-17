@@ -421,13 +421,13 @@ describe("SessionManager pty-size", { tags: ["integration"] }, () => {
     });
     const desktop = createFakeSocket();
     manager.spawnAndAttach(desktop, shellInput);
-    manager.promote(desktop, false);
+    void manager.promote(desktop, false);
     manager.resize(desktop, 120, 40);
     manager.resize(desktop, 100, 30);
     expect(sent.filter((entry) => entry.payload.type === "pty-size")).toEqual([]);
   });
 
-  it("broadcasts the constrained size when a narrower peer joins and clears it when the peer leaves", () => {
+  it("hands PTY size from mobile back to a focused desktop", () => {
     const sent: { ws: ClientSocket; payload: ServerToClientMessage }[] = [];
     manager = new SessionManager({
       sendControl: (ws, payload) => sent.push({ ws, payload }),
@@ -437,27 +437,47 @@ describe("SessionManager pty-size", { tags: ["integration"] }, () => {
     const spawned = manager.spawnAndAttach(desktop, shellInput);
     expect(spawned).not.toBeNull();
     if (!spawned) return;
-    manager.promote(desktop, false);
+    void manager.promote(desktop, false);
     manager.resize(desktop, 120, 40);
-    // Lone desktop: unconstrained, so no pty-size frame.
-    expect(sent.filter((entry) => entry.payload.type === "pty-size")).toEqual([]);
+    manager.setClientFocus(desktop, true);
 
-    // A mobile ingests the share QR and reports its narrow viewport.
     const mobile = createFakeSocket();
     manager.attach(mobile, spawned.id);
-    manager.promote(mobile, false);
+    void manager.promote(mobile, false);
     manager.resize(mobile, 40, 24);
-    const constrained = sent.filter(
+    expect(
+      sent.some(
+        (entry) =>
+          entry.payload.type === "pty-size" &&
+          entry.payload.cols === 40 &&
+          entry.payload.rows === 24,
+      ),
+    ).toBe(false);
+
+    manager.setClientFocus(mobile, true);
+    const mobileSizeFrames = sent.filter(
       (entry) =>
         entry.payload.type === "pty-size" && entry.payload.cols === 40 && entry.payload.rows === 24,
     );
-    // Both viewers learn the effective size — the mobile is the limiter so its
-    // own grid matches (no mask); the desktop masks the dead area.
-    expect(constrained.some((entry) => entry.ws === desktop)).toBe(true);
-    expect(constrained.some((entry) => entry.ws === mobile)).toBe(true);
+    expect(mobileSizeFrames.some((entry) => entry.ws === desktop)).toBe(true);
+    expect(mobileSizeFrames.some((entry) => entry.ws === mobile)).toBe(true);
 
-    // The mobile leaves → the desktop is unconstrained again → one clear frame
-    // at the lone viewer's own size so the mask erases.
+    sent.length = 0;
+    manager.setClientFocus(desktop, true);
+    expect(sent.filter((entry) => entry.payload.type === "pty-size")).toEqual([
+      { ws: desktop, payload: { type: "pty-size", cols: 120, rows: 40 } },
+      { ws: mobile, payload: { type: "pty-size", cols: 120, rows: 40 } },
+    ]);
+
+    manager.setClientFocus(mobile, true);
+    sent.length = 0;
+    manager.setClientFocus(mobile, false);
+    expect(sent.filter((entry) => entry.payload.type === "pty-size")).toEqual([
+      { ws: desktop, payload: { type: "pty-size", cols: 120, rows: 40 } },
+      { ws: mobile, payload: { type: "pty-size", cols: 120, rows: 40 } },
+    ]);
+
+    manager.setClientFocus(mobile, true);
     sent.length = 0;
     manager.detach(mobile);
     expect(sent.filter((entry) => entry.payload.type === "pty-size")).toEqual([
@@ -465,7 +485,7 @@ describe("SessionManager pty-size", { tags: ["integration"] }, () => {
     ]);
   });
 
-  it("seeds a wider joiner with the current constrained size when its report doesn't change the min", () => {
+  it("lets input reclaim PTY size without a focus frame", () => {
     const sent: { ws: ClientSocket; payload: ServerToClientMessage }[] = [];
     manager = new SessionManager({
       sendControl: (ws, payload) => sent.push({ ws, payload }),
@@ -475,29 +495,60 @@ describe("SessionManager pty-size", { tags: ["integration"] }, () => {
     const spawned = manager.spawnAndAttach(desktop, shellInput);
     expect(spawned).not.toBeNull();
     if (!spawned) return;
-    manager.promote(desktop, false);
+    void manager.promote(desktop, false);
     manager.resize(desktop, 120, 40);
-    // A mobile constrains the PTY to its narrow viewport.
+
     const mobile = createFakeSocket();
     manager.attach(mobile, spawned.id);
-    manager.promote(mobile, false);
+    void manager.promote(mobile, false);
     manager.resize(mobile, 40, 24);
+    vi.spyOn(spawned.session, "write").mockImplementation(() => {});
     sent.length = 0;
-    // A second desktop joins — wider than the mobile's limit, so the min stays
-    // 40 and recomputeResize doesn't broadcast. The joiner must still learn it's
-    // constrained via the seed, or it would render no mask over its wide grid.
+
+    manager.writeInput(mobile, "x");
+
+    const mobileSizeFrames = sent.filter(
+      (entry) =>
+        entry.payload.type === "pty-size" && entry.payload.cols === 40 && entry.payload.rows === 24,
+    );
+    expect(mobileSizeFrames.some((entry) => entry.ws === desktop)).toBe(true);
+    expect(mobileSizeFrames.some((entry) => entry.ws === mobile)).toBe(true);
+  });
+
+  it("seeds a wider joiner with the active viewer's current size", () => {
+    const sent: { ws: ClientSocket; payload: ServerToClientMessage }[] = [];
+    manager = new SessionManager({
+      sendControl: (ws, payload) => sent.push({ ws, payload }),
+      hooks: noopHooks,
+    });
+    const desktop = createFakeSocket();
+    const spawned = manager.spawnAndAttach(desktop, shellInput);
+    expect(spawned).not.toBeNull();
+    if (!spawned) return;
+    void manager.promote(desktop, false);
+    manager.resize(desktop, 120, 40);
+
+    const mobile = createFakeSocket();
+    manager.attach(mobile, spawned.id);
+    void manager.promote(mobile, false);
+    manager.resize(mobile, 40, 24);
+    manager.setClientFocus(mobile, true);
+    sent.length = 0;
+
     const secondDesktop = createFakeSocket();
     manager.attach(secondDesktop, spawned.id);
-    manager.promote(secondDesktop, false);
+    void manager.promote(secondDesktop, false);
     manager.resize(secondDesktop, 120, 40);
-    const seeded = sent.filter(
-      (entry) =>
-        entry.ws === secondDesktop &&
-        entry.payload.type === "pty-size" &&
-        entry.payload.cols === 40 &&
-        entry.payload.rows === 24,
-    );
-    expect(seeded.length).toBeGreaterThan(0);
+
+    expect(
+      sent.some(
+        (entry) =>
+          entry.ws === secondDesktop &&
+          entry.payload.type === "pty-size" &&
+          entry.payload.cols === 40 &&
+          entry.payload.rows === 24,
+      ),
+    ).toBe(true);
   });
 });
 

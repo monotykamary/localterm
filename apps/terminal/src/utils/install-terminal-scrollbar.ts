@@ -61,8 +61,8 @@ export const installTerminalScrollbar = ({
       // Stash the natural cols so sendResize reports them (not the clamped
       // grid) and the overlay gates the mask on natural-vs-effective.
       naturalColsRef.current = naturalCols;
-      // Reflow the local grid to the PTY's effective cols when a narrower peer
-      // constrains it: xterm reflows the whole buffer on resize, so the dead
+      // Reflow the local grid to the active viewer's effective PTY cols when
+      // this client is wider. xterm reflows the whole buffer on resize, so the
       // columns beyond the effective width carry no stale wide content (a
       // narrow phone joining a wide desktop otherwise leaves the desktop's
       // pre-join 120-col scrollback sitting in cols 40-120, bleeding through

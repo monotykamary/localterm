@@ -69,21 +69,19 @@ export const Terminal = () => {
   // mask so it can be positioned off the live `.xterm-screen` rect in the
   // surface's coordinate space.
   const terminalSurfaceRef = useRef<HTMLDivElement | null>(null);
-  // The PTY's effective cols/rows (the min across attached clients) reported by
-  // the server, or null until the first `pty-size` frame lands (and cleared on
+  // The active viewer's effective PTY cols/rows reported by the server, or
+  // null until the first `pty-size` frame lands (and cleared on
   // every session frame so a switch never inherits the prior PTY's mask).
   const [ptySize, setPtySize] = useState<{ cols: number; rows: number } | null>(null);
   // ptySize as a ref so the proposeDimensions closure (set once at terminal
   // creation) can read the live effective size and clamp the local grid to it.
   const ptySizeRef = useRef<{ cols: number; rows: number } | null>(null);
   // The local viewer's natural cols (the viewport's width in cells, ignoring
-  // any peer-imposed clamp), stashed by proposeDimensions so sendResize can
-  // report it to the server and the overlay can gate the mask on it. The
-  // server sizes the PTY to the min across clients, so each viewer must report
-  // its NATURAL cols — reporting the clamped grid would deadlock the PTY at
-  // the narrow size when the constraining peer leaves (the server would never
-  // learn a wider size is available). The grid reflow is a purely local
-  // render concern the server never sees.
+  // the active viewer's width), stashed by proposeDimensions so sendResize
+  // can report it to the server and the overlay can gate the mask on it. Each
+  // viewer reports its natural cols so the server can resize immediately when
+  // focus or input hands PTY ownership to that viewer. The grid reflow is a
+  // purely local render concern the server never sees.
   const naturalColsRef = useRef<number | null>(null);
   // Bumped on any resize/layout change so the pty-viewport overlay recomputes
   // against the freshly-measured `.xterm-screen` rect. ptySize alone only
@@ -367,12 +365,11 @@ export const Terminal = () => {
   const shouldShowToolbarHandle =
     !isTouchDevice && !isToolbarVisible && !isSearchOpen && !hasToolbarIndicator;
 
-  // Rectangle of the dead columns beyond the PTY's effective viewport (the
-  // area right of a narrower peer's wrap), in the terminal surface's coordinate
-  // space. Recomputes when the effective size changes (a `pty-size` frame) or
-  // the local grid/cells move (resize, font, padding). Null when there's nothing
-  // to mask — no frame yet, the local grid already matches the effective size
-  // (sole/limiting viewer), or the terminal isn't measurable.
+  // Rectangle of the dead columns beyond the active viewer's PTY viewport,
+  // in the terminal surface's coordinate space. Recomputes when a `pty-size`
+  // frame changes the effective size or the local grid moves. Null when there is
+  // no frame, the effective PTY is at least as wide, or the terminal cannot be
+  // measured.
   const ptyViewportOverlay = useMemo(() => {
     const terminal = terminalRef.current;
     const surface = terminalSurfaceRef.current;

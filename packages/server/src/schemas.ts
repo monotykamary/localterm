@@ -454,6 +454,13 @@ const resizeMessageSchema = z
   })
   .strict();
 
+const clientFocusMessageSchema = z
+  .object({
+    type: z.literal("client-focus"),
+    focused: z.boolean(),
+  })
+  .strict();
+
 // Keep-awake (`caffeinate -dims`) has three modes. "off" never caffeinates,
 // "on" always does, and "automatic" caffeinates only while a recognized program
 // is running in some localterm session.
@@ -560,6 +567,7 @@ export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   inputMessageSchema,
   terminalResponseMessageSchema,
   resizeMessageSchema,
+  clientFocusMessageSchema,
   caffeinateModeInputMessageSchema,
   caffeinateCommandsInputMessageSchema,
   caffeinateActivityGateInputMessageSchema,
@@ -1566,14 +1574,10 @@ const compressMessageSchema = z
 // attached to the session a peer joined.
 const peerAttachedMessageSchema = z.object({ type: z.literal("peer-attached") }).strict();
 
-// The PTY's effective size — the min cols/rows across all attached clients
-// (tmux-style: a narrower peer constrains everyone). Broadcast whenever that
-// min changes (a peer attaches/detaches, or any client resizes) so each
-// viewer can mask the dead area beyond its own — possibly wider — grid as
-// inactive chrome instead of empty terminal background. A viewer whose own
-// cols/rows equal the effective size is the sole/limiting one and renders no
-// mask; a lone viewer is never sent the frame at all. See
-// SessionManager.recomputeResize for the broadcast gating.
+// The PTY's effective size follows the most recently focused or interactive
+// viewer. Broadcast whenever that viewer or its dimensions change so passive
+// clients can reflow to the live PTY width and mask any wider dead area. A lone
+// viewer is only sent the frame when a peer detaches, clearing a prior mask.
 const ptySizeMessageSchema = z
   .object({
     type: z.literal("pty-size"),

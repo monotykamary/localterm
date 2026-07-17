@@ -91,6 +91,8 @@ export interface ManagedClient {
   pendingTimer: NodeJS.Timeout | null;
   cols: number;
   rows: number;
+  focused: boolean;
+  lastActivitySequence: number;
   pixelWidth?: number;
   pixelHeight?: number;
   // The per-browser-profile handle this tab carried on the WS upgrade (the
@@ -153,17 +155,14 @@ export interface ManagedSession {
   // the first capture; fed the session's live output thereafter and disposed on
   // teardown. Kept on the managed session so its lifecycle is bound to the PTY.
   captureRenderer: CaptureRenderer | undefined;
-  // Last effective size broadcast to clients (the min cols/rows across
-  // attached clients), or null before the first compute. Tracked so the
-  // manager only broadcasts pty-size on an actual change instead of every
-  // resize tick. See recomputeResize for the broadcast gating.
+  resizeOwner: ManagedClient | null;
+  // Last effective size broadcast to clients, or null before the active viewer
+  // reports its dimensions. Tracked so resize activity that does not change the
+  // PTY size stays quiet on the wire.
   ptySizeCols: number | null;
   ptySizeRows: number | null;
-  // Whether the last recompute saw more than one client — drives the 2→1
-  // clear: when a peer detaches and drops the session to a lone viewer, one
-  // final pty-size (now the lone viewer's own, unconstrained size) is sent so
-  // the remaining viewer erases any mask the leaving peer imposed. Stays false
-  // for a lone viewer across its own resizes, so those stay quiet on the wire.
+  // Whether the last resize saw more than one client. When a peer detaches and
+  // leaves one viewer, a final pty-size clears any mask the peer had imposed.
   ptySizeWasMultiViewer: boolean;
 }
 
@@ -204,10 +203,10 @@ interface SessionManagerOptions {
 // a switch in progress) before it's reaped — so there are no zombies, but a
 // shell also survives the brief disconnects that a single-WS-per-PTY model
 // would kill mid-command. Any number of clients may attach to one PTY;
-// output/title/cwd/foreground/exit fan out to all of them, resize is the min
-// dimensions across attached clients (tmux style, so two clients of different
-// sizes don't fight), and a slow receiver pauses the PTY via OS pipe
-// backpressure instead of dropping the connection.
+// output/title/cwd/foreground/exit fan out to all of them, while the most
+// recently focused or interactive client owns the PTY dimensions. A slow
+// receiver pauses the PTY via OS pipe backpressure instead of dropping the
+// connection.
 export class SessionManager {
   private readonly sessions = new Map<string, ManagedSession>();
   private readonly lastOutputAtByPid = new Map<number, number>();
@@ -426,6 +425,7 @@ export class SessionManager {
       parkedAt: null,
       pinned: false,
       captureRenderer: undefined,
+      resizeOwner: null,
       ptySizeCols: null,
       ptySizeRows: null,
       ptySizeWasMultiViewer: false,
@@ -484,6 +484,10 @@ export class SessionManager {
 
   writeTerminalResponse(ws: ClientSocket, data: string): void {
     this.clientHub.writeTerminalResponse(ws, data);
+  }
+
+  setClientFocus(ws: ClientSocket, focused: boolean): void {
+    this.clientHub.setClientFocus(ws, focused);
   }
 
   resize(

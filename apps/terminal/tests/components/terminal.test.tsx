@@ -791,6 +791,31 @@ describe("Terminal overlay input routing", () => {
   });
 });
 
+describe("Terminal PTY resize ownership", () => {
+  it("reports browser focus and pointer activity to the server", () => {
+    render(<Terminal />);
+    act(() => fakeWebSockets[0]?.fireOpen());
+    fakeWebSockets[0]?.send.mockClear();
+
+    fireEvent.blur(window);
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "client-focus", focused: false }),
+    );
+
+    fakeWebSockets[0]?.send.mockClear();
+    fireEvent.focus(window);
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "client-focus", focused: true }),
+    );
+
+    fakeWebSockets[0]?.send.mockClear();
+    fireEvent.pointerDown(document.body);
+    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "client-focus", focused: true }),
+    );
+  });
+});
+
 const dispatchTabKey = (
   handle: FakeXtermHandle | undefined,
   modifiers: KeyboardModifiers = {},

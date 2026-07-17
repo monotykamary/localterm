@@ -1,5 +1,9 @@
 import path from "node:path";
-import { WS_OUTPUT_BROTLI_QUALITY } from "./constants.js";
+import {
+  CLIENT_ACTIVITY_SEQUENCE_INCREMENT,
+  INITIAL_CLIENT_ACTIVITY_SEQUENCE,
+  WS_OUTPUT_BROTLI_QUALITY,
+} from "./constants.js";
 import { GitMetadataCoordinator } from "./git-metadata-coordinator.js";
 import type { ManagedClient, ManagedSession } from "./session-manager.js";
 import { makeBrotliEncoder, SessionOutputTransport } from "./session-output-transport.js";
@@ -34,6 +38,7 @@ export class SessionClientHub {
   private readonly cancelGrace: (managed: ManagedSession) => void;
   private readonly startGrace: (managed: ManagedSession) => void;
   private readonly onSessionActivity: () => void;
+  private nextActivitySequence = INITIAL_CLIENT_ACTIVITY_SEQUENCE;
 
   constructor(options: SessionClientHubOptions) {
     this.outputTransport = options.outputTransport;
@@ -151,6 +156,8 @@ export class SessionClientHub {
       pendingTimer: null,
       cols: 0,
       rows: 0,
+      focused: false,
+      lastActivitySequence: INITIAL_CLIENT_ACTIVITY_SEQUENCE,
       windowId,
       coordinator,
       compressMode: null,
@@ -160,13 +167,16 @@ export class SessionClientHub {
     coordinator.add(ws);
     managed.clients.add(client);
     this.wsToClient.set(ws, { client, session: managed });
-    this.recomputeResize(managed);
-    // Seed a joiner with the current effective size when it's entering an
-    // already-multi-viewer session whose min its own (possibly wider) report
-    // doesn't change — recomputeResize only broadcasts on a change, so without
-    // this the new viewer would never learn it's constrained and would render
-    // no mask. A fresh spawn (now the lone viewer) has no stored size and is
-    // skipped, and a joiner that changes the min is reached by the broadcast.
+    if (managed.resizeOwner === null) {
+      this.promoteResizeOwner(managed, client);
+    } else {
+      this.recomputeResize(managed);
+    }
+    // Seed a joiner with the active viewer's current effective size when it
+    // enters a multi-viewer session without changing the PTY size.
+    // recomputeResize only broadcasts on a change, so without
+    // this the new viewer would not learn the live width or render a mask. A
+    // fresh spawn has no stored size and is skipped.
     if (managed.clients.size > 1 && managed.ptySizeCols !== null && managed.ptySizeRows !== null) {
       this.outputTransport.sendToClient(client, {
         type: "pty-size",
@@ -265,6 +275,8 @@ export class SessionClientHub {
     // The localterm client sends {type:"ready"} before any input, so this is a
     // no-op for it. Promote flushes any buffered output before the input echoes.
     if (entry.client.pending) void this.promote(ws, false);
+    entry.client.focused = true;
+    this.promoteResizeOwner(entry.session, entry.client);
     // Query replies follow the viewer that most recently drove the PTY.
     this.assignTerminalResponder(entry.session, entry.client);
     entry.session.session.write(data);
@@ -273,7 +285,20 @@ export class SessionClientHub {
   writeTerminalResponse(ws: ClientSocket, data: string): void {
     const entry = this.wsToClient.get(ws);
     if (!entry?.client.terminalResponder) return;
-    this.writeInput(ws, data);
+    entry.session.session.write(data);
+  }
+
+  setClientFocus(ws: ClientSocket, focused: boolean): void {
+    const entry = this.wsToClient.get(ws);
+    if (!entry) return;
+    entry.client.focused = focused;
+    if (focused) {
+      this.promoteResizeOwner(entry.session, entry.client);
+      return;
+    }
+    if (entry.session.resizeOwner !== entry.client) return;
+    const focusedClient = this.latestClientByActivity(entry.session, true);
+    if (focusedClient) this.promoteResizeOwner(entry.session, focusedClient);
   }
 
   private ensureTerminalResponder(managed: ManagedSession, preferredClient?: ManagedClient): void {
@@ -304,7 +329,7 @@ export class SessionClientHub {
     entry.client.rows = rows;
     entry.client.pixelWidth = pixelWidth;
     entry.client.pixelHeight = pixelHeight;
-    this.recomputeResize(entry.session);
+    if (entry.session.resizeOwner === entry.client) this.recomputeResize(entry.session);
   }
 
   // Detach a single client. If this was the last subscriber, arm the
@@ -318,6 +343,10 @@ export class SessionClientHub {
     const client = entry.client;
     this.releaseClient(client);
     managed.clients.delete(client);
+    if (managed.resizeOwner === client) {
+      managed.resizeOwner =
+        this.latestClientByActivity(managed, true) ?? this.latestClientByActivity(managed, false);
+    }
     if (client.terminalResponder) this.ensureTerminalResponder(managed);
     this.recomputeResize(managed);
     if (managed.clients.size === 0 && !managed.session.isExited) this.startGrace(managed);
@@ -336,37 +365,54 @@ export class SessionClientHub {
     }
   }
 
+  private promoteResizeOwner(managed: ManagedSession, client: ManagedClient): void {
+    this.nextActivitySequence += CLIENT_ACTIVITY_SEQUENCE_INCREMENT;
+    client.lastActivitySequence = this.nextActivitySequence;
+    if (managed.resizeOwner === client) return;
+    managed.resizeOwner = client;
+    this.recomputeResize(managed);
+  }
+
+  private latestClientByActivity(
+    managed: ManagedSession,
+    focusedOnly: boolean,
+  ): ManagedClient | null {
+    let latestClient: ManagedClient | null = null;
+    for (const client of managed.clients) {
+      if (focusedOnly && !client.focused) continue;
+      if (
+        latestClient === null ||
+        client.lastActivitySequence > latestClient.lastActivitySequence
+      ) {
+        latestClient = client;
+      }
+    }
+    return latestClient;
+  }
+
   private recomputeResize(managed: ManagedSession): void {
     const session = managed.session;
-    if (session.isExited) return;
-    let cols = Infinity;
-    let rows = Infinity;
-    let single: ManagedClient | null = null;
-    let count = 0;
-    for (const client of managed.clients) {
-      count++;
-      single = client;
-      if (client.cols > 0 && client.cols < cols) cols = client.cols;
-      if (client.rows > 0 && client.rows < rows) rows = client.rows;
-    }
-    if (count === 0) return;
-    if (!Number.isFinite(cols) || !Number.isFinite(rows)) return;
-    if (count === 1 && single?.pixelWidth !== undefined && single?.pixelHeight !== undefined) {
-      session.resize(cols, rows, single.pixelWidth, single.pixelHeight);
+    const resizeOwner = managed.resizeOwner;
+    if (session.isExited || resizeOwner === null) return;
+    const { cols, rows } = resizeOwner;
+    if (cols <= 0 || rows <= 0) return;
+    const count = managed.clients.size;
+    if (
+      count === 1 &&
+      resizeOwner.pixelWidth !== undefined &&
+      resizeOwner.pixelHeight !== undefined
+    ) {
+      session.resize(cols, rows, resizeOwner.pixelWidth, resizeOwner.pixelHeight);
     } else {
       session.resize(cols, rows);
     }
     // Keep the capture renderer's grid at the PTY's effective size so a
     // capture-pane reflects the same line wrapping a viewer would see.
     managed.captureRenderer?.resize(cols, rows);
-    // The PTY's effective size is the min across attached clients (tmux-style):
-    // a narrower peer constrains everyone. Broadcast it on change so each
-    // viewer can mask the dead area beyond its own (possibly wider) grid as
-    // inactive chrome. A lone viewer is never constrained (its effective size
-    // always equals its own), so it's left quiet except for one clear frame when
-    // a peer detaches and drops it back to solo — that erases the mask the
-    // leaving peer had imposed. A joiner entering an already-constrained
-    // session without changing the min is seeded in attach.
+    // One PTY can only have one size. Following the most recently focused or
+    // interactive viewer makes a mobile-to-desktop handoff resize immediately
+    // instead of leaving every viewer constrained by the phone. Passive wider
+    // clients still receive pty-size so they can mask their dead columns.
     const sizeChanged = managed.ptySizeCols !== cols || managed.ptySizeRows !== rows;
     managed.ptySizeCols = cols;
     managed.ptySizeRows = rows;
@@ -411,6 +457,7 @@ export class SessionClientHub {
       this.wsToClient.delete(client.ws);
     }
     managed.clients.clear();
+    managed.resizeOwner = null;
   }
 
   private releaseClient(client: ManagedClient): void {

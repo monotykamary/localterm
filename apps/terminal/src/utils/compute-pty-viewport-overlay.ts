@@ -26,7 +26,7 @@ export interface ComputePtyViewportOverlayOptions {
   terminal: Terminal;
   effectiveCols: number;
   // The local viewer's natural cols — the viewport's width in cells, ignoring
-  // any peer-imposed clamp. The grid is reflowed to effectiveCols (see
+  // the active viewer's PTY width. The grid is reflowed to effectiveCols (see
   // proposeDimensions in terminal.tsx), so terminal.cols equals effectiveCols
   // and can't gate the mask; instead it fires when the effective size is
   // narrower than what the local viewport could display (effectiveCols <
@@ -43,11 +43,10 @@ export interface ComputePtyViewportOverlayOptions {
   origin: DOMRect;
 }
 
-// The PTY only streams into its effective cols×rows — the min across every
-// attached client (tmux-style), so a narrower peer (a phone) constrains a
-// wider viewer (a desktop). The local grid is reflowed to that effective
-// width (terminal.tsx's proposeDimensions clamps xterm to it), so the dead
-// columns beyond it are empty page background, not stale wide scrollback.
+// The PTY streams at the most recently focused or interactive viewer's
+// cols×rows. The local grid is reflowed to that effective width when this
+// viewer is wider (terminal.tsx's proposeDimensions clamps xterm to it), so
+// the dead columns beyond it are empty page background, not stale scrollback.
 // This returns the rectangle of that dead area, relative to `origin`, so the
 // caller can mask it as inactive chrome.
 //
@@ -62,8 +61,7 @@ export interface ComputePtyViewportOverlayOptions {
 // The mask is gated on the local viewport being wider than the effective size
 // (effectiveCols < localCols) — a col count, not a pixel sliver, so a
 // sub-pixel gap from cell-width rounding can't render a phantom strip on the
-// sole/limiting viewer (where effectiveCols equals localCols → nothing to
-// mask).
+// viewer when the effective width is at least its local width.
 export const computePtyViewportOverlay = ({
   terminal,
   effectiveCols,
@@ -81,9 +79,9 @@ export const computePtyViewportOverlay = ({
   const hasDeadCols = effectiveCols < localCols;
   if (!hasDeadCols) return { right: null };
 
-  // Clamp the live width to the local viewport: the effective size is the min
-  // across clients so it can never exceed the viewer's own cols, but a frame
-  // arriving mid-resize can transiently outrun the settled viewport — clamp
+  // Clamp the live width to the local viewport: the active viewer may be
+  // wider than this passive client, and a frame arriving mid-resize can
+  // transiently outrun the settled viewport — clamp
   // so the boundary never lands past the live text (and hasDeadCols stays
   // false → no mask).
   const liveWidth = Math.min(effectiveCols, localCols) * cellWidth;

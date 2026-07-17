@@ -3232,6 +3232,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               parsed.data.pixelWidth,
               parsed.data.pixelHeight,
             );
+          } else if (parsed.data.type === "client-focus") {
+            registry.setClientFocus(ws, parsed.data.focused);
           } else if (parsed.data.type === "ready") {
             // Attach handshake: the client has the {type:"session"} frame and
             // says whether it wants the scrollback replay (a switch to a PTY

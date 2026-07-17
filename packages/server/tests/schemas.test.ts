@@ -30,6 +30,16 @@ describe("clientToServerMessageSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts client focus frames", () => {
+    expect(
+      clientToServerMessageSchema.safeParse({ type: "client-focus", focused: true }).success,
+    ).toBe(true);
+    expect(
+      clientToServerMessageSchema.safeParse({ type: "client-focus", focused: false }).success,
+    ).toBe(true);
+    expect(clientToServerMessageSchema.safeParse({ type: "client-focus" }).success).toBe(false);
+  });
+
   it("rejects oversized input", () => {
     const oversized = "a".repeat(MAX_INPUT_BYTES + 1);
     const result = clientToServerMessageSchema.safeParse({ type: "input", data: oversized });

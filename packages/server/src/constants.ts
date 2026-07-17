@@ -401,6 +401,8 @@ export const SESSION_ACTIVITY_WINDOW_MS = 750;
 // 2s clears even a flaky relayed tailnet with room to spare while staying well
 // under any user-perceptible delay for the back-compat fallback.
 export const SESSION_PENDING_PROMOTE_TIMEOUT_MS = 2_000;
+export const INITIAL_CLIENT_ACTIVITY_SEQUENCE = 0;
+export const CLIENT_ACTIVITY_SEQUENCE_INCREMENT = 1;
 // Query param a reconnecting or switching client carries to attach to a live
 // PTY by id instead of spawning a fresh shell.
 export const SESSION_ID_QUERY_PARAM = "sid";
