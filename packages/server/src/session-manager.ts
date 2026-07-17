@@ -1,39 +1,10 @@
-import { randomBytes } from "node:crypto";
 import path from "node:path";
-import zlib from "node:zlib";
-import { CaptureRenderer } from "./capture-renderer.js";
+import type { CaptureRenderer } from "./capture-renderer.js";
 import {
-  CAPTURE_PANE_MAX_LINES,
-  EXEC_DEFAULT_OUTPUT_LIMIT_BYTES,
-  EXEC_DEFAULT_TIMEOUT_MS,
-  EXEC_EPHEMERAL_SCROLLBACK,
-  EXEC_MAX_OUTPUT_LIMIT_BYTES,
-  EXEC_MAX_TIMEOUT_MS,
-  EXEC_RAW_ACCUMULATE_CAP_BYTES,
-  EXEC_TIMEOUT_INTERRUPT_GRACE_MS,
-  MAX_AUTOMATION_LOG_LENGTH,
   MAX_CONCURRENT_SESSIONS,
-  MAX_OUTPUT_BYTES,
-  OUTPUT_BATCH_FLUSH_BYTES,
-  OUTPUT_BATCH_WINDOW_MS,
   SESSION_ACTIVITY_WINDOW_MS,
   SESSION_GRACE_MS,
   SESSION_PENDING_PROMOTE_TIMEOUT_MS,
-  WAIT_IDLE_POLL_INTERVAL_MS,
-  WS_BACKPRESSURE_THRESHOLD_BYTES,
-  WS_CLOSE_BACKPRESSURE,
-  WS_OUTBOUND_DRAIN_POLL_MS,
-  WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES,
-  WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
-  WS_READY_STATE_OPEN,
-  WS_OUTPUT_BROTLI,
-  WS_OUTPUT_BROTLI_CTX,
-  WS_OUTPUT_BROTLI_QUALITY,
-  WS_OUTPUT_COMPRESS_THRESHOLD_BYTES,
-  WS_OUTPUT_CTX_HEADER_BYTES,
-  WS_OUTPUT_GZIP,
-  WS_OUTPUT_GZIP_LEVEL,
-  WS_OUTPUT_RAW,
 } from "./constants.js";
 import {
   GitDiffWatcher,
@@ -42,6 +13,13 @@ import {
 } from "./git-diff-watcher.js";
 import { GitMetadataCoordinator } from "./git-metadata-coordinator.js";
 import { Session } from "./session.js";
+import { SessionCommandExecutor } from "./session-command-executor.js";
+import { SessionOutputCoordinator } from "./session-output-coordinator.js";
+import {
+  SessionOutputTransport,
+  makeBrotliEncoder,
+  type BrotliEncoder,
+} from "./session-output-transport.js";
 import type { SessionEventName } from "./session-event-manager.js";
 import type {
   GitBranchPr,
@@ -52,61 +30,13 @@ import type {
 import type { CompressMode } from "./schemas.js";
 import type { SessionOwner } from "./identity/types.js";
 
-// Persistent Brotli compressor for the context-takeover mode ("br-ctx"). Each
-// output frame is flushed as a chunk of ONE continuous Brotli stream, so frame N
-// compresses against frames 0..N-1 (the prior screen primes the LZ77 window —
-// the delta). Per-client, created on promote, released on detach. The flushes
-// are chained (a per-encoder FIFO) so frames compress + ship in PTY order even
-// though each flush is async (the BROTLI_OPERATION_FLUSH callback fires on the
-// next tick). The accumulator is trimmed after each flush so a long session
-// doesn't grow without bound.
-interface BrotliEncoder {
-  flush: (bytes: Uint8Array<ArrayBuffer>) => Promise<Buffer<ArrayBuffer>>;
-  release: () => void;
-}
-const makeBrotliEncoder = (level: number): BrotliEncoder => {
-  const enc = zlib.createBrotliCompress({
-    params: { [zlib.constants.BROTLI_PARAM_QUALITY]: level },
-  });
-  let buf = Buffer.alloc(0);
-  enc.on("data", (d: Buffer) => {
-    buf = Buffer.concat([buf, d]);
-  });
-  let chain: Promise<Buffer<ArrayBuffer>> = Promise.resolve(Buffer.alloc(0));
-  const flush = (bytes: Uint8Array<ArrayBuffer>): Promise<Buffer<ArrayBuffer>> => {
-    chain = chain.then(
-      () =>
-        new Promise<Buffer<ArrayBuffer>>((resolve) => {
-          const before = buf.length;
-          enc.write(bytes);
-          enc.flush(zlib.constants.BROTLI_OPERATION_FLUSH, () => {
-            setImmediate(() => {
-              const out = buf.subarray(before, buf.length);
-              buf = buf.subarray(buf.length);
-              resolve(out);
-            });
-          });
-        }),
-    );
-    return chain;
-  };
-  const release = () => {
-    try {
-      enc.destroy();
-    } catch {
-      /* already closed */
-    }
-  };
-  return { flush, release };
-};
 import {
   createSynchronizedOutputEndDetector,
   type SynchronizedOutputEndDetector,
 } from "./utils/create-synchronized-output-end-detector.js";
 import { resolveNamedKeys } from "./utils/named-keys.js";
 import { deletePasteImagesForSession } from "./utils/paste-image-store.js";
-import { stripAnsi } from "./utils/strip-ansi.js";
-import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
+import type { ClientSocket } from "./utils/ws-socket.js";
 import type { WorkspaceEntry, WorkspaceTab } from "./workspace-store.js";
 
 export interface AutomationContext {
@@ -159,7 +89,7 @@ export interface WaitResult {
 // so a quiet-but-running shell isn't reaped.
 export type SessionActivityState = "running" | "alive-quiet" | "ready";
 
-interface ManagedClient {
+export interface ManagedClient {
   ws: ClientSocket;
   pending: boolean;
   // Buffered while pending: live output bytes and control messages are queued
@@ -298,6 +228,9 @@ export class SessionManager {
   private readonly coordinatorsByCwd = new Map<string, GitMetadataCoordinator>();
   private readonly hooks: SessionManagerHooks;
   private readonly sendControl: (ws: ClientSocket, payload: ServerToClientMessage) => void;
+  private readonly outputTransport: SessionOutputTransport;
+  private readonly commandExecutor: SessionCommandExecutor;
+  private readonly outputCoordinator: SessionOutputCoordinator;
   private readonly getGraceMs: () => number | null;
   private readonly pendingPromoteTimeoutMs: number;
   private readonly shimsDir?: string;
@@ -305,6 +238,13 @@ export class SessionManager {
   constructor(options: SessionManagerOptions) {
     this.hooks = options.hooks;
     this.sendControl = options.sendControl;
+    this.outputTransport = new SessionOutputTransport(options.sendControl);
+    this.commandExecutor = new SessionCommandExecutor();
+    this.outputCoordinator = new SessionOutputCoordinator({
+      outputTransport: this.outputTransport,
+      noteOutputActivity: (pid) => this.noteOutput(pid),
+      onOutputActivity: () => this.hooks.onOutputActivity(),
+    });
     this.getGraceMs = options.getGraceMs ?? (() => SESSION_GRACE_MS);
     this.pendingPromoteTimeoutMs =
       options.pendingPromoteTimeoutMs ?? SESSION_PENDING_PROMOTE_TIMEOUT_MS;
@@ -607,7 +547,7 @@ export class SessionManager {
     // auto-closes. Gated on existing clients so a fresh spawn's first attach
     // stays silent, and fired before adding the joiner so it isn't told about
     // itself. See peerAttachedMessageSchema for the frame's payload rationale.
-    if (managed.clients.size > 0) this.broadcast(managed, { type: "peer-attached" });
+    if (managed.clients.size > 0) this.outputTransport.broadcast(managed, { type: "peer-attached" });
     const coordinator = this.coordinatorForCwd(managed.session.cwd);
     const client: ManagedClient = {
       ws,
@@ -634,7 +574,7 @@ export class SessionManager {
     // no mask. A fresh spawn (now the lone viewer) has no stored size and is
     // skipped, and a joiner that changes the min is reached by the broadcast.
     if (managed.clients.size > 1 && managed.ptySizeCols !== null && managed.ptySizeRows !== null) {
-      this.sendToClient(client, {
+      this.outputTransport.sendToClient(client, {
         type: "pty-size",
         cols: managed.ptySizeCols,
         rows: managed.ptySizeRows,
@@ -700,7 +640,7 @@ export class SessionManager {
     // new-client pair degrades to raw (no header) instead of mis-parsing.
     this.sendControl(ws, { type: "compress", mode: compress });
     if (replay) {
-      await this.sendScrollback(ws, entry.session, client);
+      await this.outputTransport.sendScrollback(ws, entry.session, client);
     }
     // Tell the client the replay bytes have all landed so it can write them as
     // one suppressed block (dropping xterm's responses to the stale query
@@ -709,7 +649,7 @@ export class SessionManager {
     // exits its suppressed-replay window and never deadlocks on a slow link.
     this.sendControl(ws, { type: "replay-end" });
     for (const payload of client.pendingControl) this.sendControl(ws, payload);
-    for (const bytes of client.pendingBytes) await this.sendOutputFrame(ws, bytes, client);
+    for (const bytes of client.pendingBytes) await this.outputTransport.sendOutputFrame(ws, bytes, client);
     client.pendingControl = [];
     client.pendingBytes = [];
     client.pending = false;
@@ -873,9 +813,7 @@ export class SessionManager {
   ): Promise<string | null> {
     const managed = this.sessionFor(id, owner);
     if (!managed) return null;
-    const capped = lines && lines > 0 ? Math.min(lines, CAPTURE_PANE_MAX_LINES) : undefined;
-    const renderer = await this.ensureCaptureRenderer(managed);
-    return renderer.capture(capped);
+    return this.commandExecutor.capturePane(managed, lines);
   }
 
   // Toggle a session's pinned flag — PATCH /api/sessions/:id. Re-arms (or
@@ -927,61 +865,7 @@ export class SessionManager {
   ): Promise<WaitResult | null> {
     const managed = this.sessionFor(id, owner);
     if (!managed) return null;
-    const session = managed.session;
-    const startedAt = Date.now();
-    let resolved = false;
-    let lastChangeAt = Date.now();
-    let timeoutHandle: NodeJS.Timeout | null = null;
-    let idleTimer: NodeJS.Timeout | null = null;
-    return new Promise<WaitResult>((resolve) => {
-      const finalize = async (matched: boolean) => {
-        if (resolved) return;
-        resolved = true;
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        if (idleTimer) clearInterval(idleTimer);
-        session.off("output", onOutput);
-        session.off("exit", onExit);
-        const snapshot = await this.capturePane(id).catch(() => "");
-        resolve({
-          matched,
-          elapsedMs: Date.now() - startedAt,
-          snapshot: snapshot ?? "",
-        });
-      };
-      const testPredicate = async (): Promise<boolean> => {
-        const renderer = await this.ensureCaptureRenderer(managed);
-        await renderer.flush();
-        return predicate.test(renderer.capture());
-      };
-      const onOutput = (): void => {
-        lastChangeAt = Date.now();
-        void testPredicate().then((hit) => {
-          if (hit && !resolved) finalize(true);
-        });
-      };
-      const onExit = (): void => {
-        void finalize(false);
-      };
-      // Idle mode: resolve once no output has arrived for `idleMs`. The interval
-      // checks recency without forcing a renderer read each tick (the output
-      // listener already bumps lastChangeAt).
-      if (predicate.kind === "idle") {
-        idleTimer = setInterval(() => {
-          if (!resolved && Date.now() - lastChangeAt >= (idleMs ?? 0)) finalize(true);
-        }, WAIT_IDLE_POLL_INTERVAL_MS);
-        idleTimer.unref?.();
-      } else {
-        // Text/regex: test once up front in case the pane already matches, then
-        // react to output events.
-        void testPredicate().then((hit) => {
-          if (hit && !resolved) finalize(true);
-        });
-      }
-      session.on("output", onOutput);
-      session.on("exit", onExit);
-      timeoutHandle = setTimeout(() => finalize(false), timeoutMs);
-      timeoutHandle.unref?.();
-    });
+    return this.commandExecutor.waitFor(managed, predicate, timeoutMs, idleMs);
   }
 
   // Resolve the (col, row) of a label on the session's visible viewport — the
@@ -995,9 +879,7 @@ export class SessionManager {
   ): Promise<{ col: number; row: number } | null> {
     const managed = this.sessionFor(id, owner);
     if (!managed) return null;
-    const renderer = await this.ensureCaptureRenderer(managed);
-    await renderer.flush();
-    return renderer.findTextInViewport(needle);
+    return this.commandExecutor.findTextInViewport(managed, needle);
   }
 
   // Whether the session's foreground app enabled a mouse tracking mode — gates
@@ -1014,21 +896,6 @@ export class SessionManager {
     const managed = this.sessions.get(id);
     if (!managed || (owner !== null && managed.owner !== owner)) return { cols: 0, rows: 0 };
     return { cols: managed.session.cols, rows: managed.session.rows };
-  }
-
-  // Lazily create (and prime) a session's capture renderer. Fed the scrollback
-  // snapshot at creation so it catches up on recent history before the renderer
-  // existed, then kept alive and fed live output by onSessionOutput. Awaits the
-  // snapshot's async parse so the first capture-pane read lands on a populated
-  // grid instead of a blank one (xterm parses `write` on a timer).
-  private async ensureCaptureRenderer(managed: ManagedSession): Promise<CaptureRenderer> {
-    if (managed.captureRenderer) return managed.captureRenderer;
-    const renderer = new CaptureRenderer(managed.session.cols, managed.session.rows);
-    const snapshot = managed.session.snapshotScrollback();
-    if (snapshot) renderer.write(snapshot);
-    await renderer.flush();
-    managed.captureRenderer = renderer;
-    return renderer;
   }
 
   // Run a single shell command line inside a persistent session, capture its
@@ -1048,286 +915,7 @@ export class SessionManager {
   ): Promise<ExecResult | null> {
     const managed = this.sessionFor(id, owner);
     if (!managed) return null;
-    const session = managed.session;
-
-    const timeoutMs = this.clampInt(
-      options.timeoutMs ?? EXEC_DEFAULT_TIMEOUT_MS,
-      1,
-      EXEC_MAX_TIMEOUT_MS,
-    );
-    const outputLimit = this.clampInt(
-      options.outputLimitBytes ?? EXEC_DEFAULT_OUTPUT_LIMIT_BYTES,
-      1,
-      EXEC_MAX_OUTPUT_LIMIT_BYTES,
-    );
-
-    const token = randomBytes(8).toString("hex");
-    const startMarker = `__LT_S_${token}__`;
-    const endMarkerPrefix = `__LT_E_${token}__`;
-    const endPattern = new RegExp(`${endMarkerPrefix} (\\d+)`);
-    const cmd = command.trim() || ":";
-    const wrapped = `printf '${startMarker}\\n'; ${cmd}; printf '${endMarkerPrefix} %d\\n' "$?"`;
-
-    const startedAt = Date.now();
-    let accumulated = "";
-    let capped = false;
-    let exitCode: number | null = null;
-    let didTimeout = false;
-    let resolved = false;
-    let timeoutHandle: NodeJS.Timeout | null = null;
-    let interruptHandle: NodeJS.Timeout | null = null;
-
-    return new Promise<ExecResult>((resolve) => {
-      const finalize = async (finalExit: number | null, finalTimedOut: boolean) => {
-        if (resolved) return;
-        resolved = true;
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        if (interruptHandle) clearTimeout(interruptHandle);
-        session.off("output", onOutput);
-        session.off("exit", onExit);
-        resolve(
-          await this.buildExecResult(
-            session.cols,
-            session.rows,
-            accumulated,
-            startMarker,
-            endMarkerPrefix,
-            finalExit,
-            finalTimedOut,
-            outputLimit,
-            startedAt,
-          ),
-        );
-      };
-
-      const onOutput = (data: string): void => {
-        if (!capped) {
-          if (accumulated.length + data.length <= EXEC_RAW_ACCUMULATE_CAP_BYTES) {
-            accumulated += data;
-          } else {
-            const room = EXEC_RAW_ACCUMULATE_CAP_BYTES - accumulated.length;
-            if (room > 0) accumulated += data.slice(0, room);
-            capped = true;
-          }
-        }
-        // Once the timeout has fired we've committed to a timed-out result; a
-        // marker arriving during the interrupt grace (Ctrl-C kills the command,
-        // the trailing `printf END $?` runs with the interrupt exit code) is
-        // ignored so the call resolves as timed out, not as a normal completion.
-        if (didTimeout) return;
-        const match = accumulated.match(endPattern);
-        if (match) {
-          exitCode = Number.parseInt(match[1], 10);
-          finalize(exitCode, false);
-        }
-      };
-      const onExit = (code: number | null): void => {
-        exitCode = code;
-        finalize(code, false);
-      };
-
-      session.on("output", onOutput);
-      session.on("exit", onExit);
-
-      timeoutHandle = setTimeout(() => {
-        // Commit to a timed-out result: the command didn't finish within
-        // timeoutMs. Send Ctrl-C to interrupt it (so the session returns to a
-        // prompt for a follow-up call), then resolve after a short grace so any
-        // output already in flight is captured into the partial result. A marker
-        // arriving during the grace is ignored (see onOutput).
-        didTimeout = true;
-        session.write("\x03");
-        interruptHandle = setTimeout(() => finalize(null, true), EXEC_TIMEOUT_INTERRUPT_GRACE_MS);
-        interruptHandle.unref?.();
-      }, timeoutMs);
-      timeoutHandle.unref?.();
-
-      // A client sending input is live; for a detached session there's no
-      // pending handshake, so the bytes reach the PTY directly.
-      session.write(`${wrapped}\r`);
-    });
-  }
-
-  private async buildExecResult(
-    cols: number,
-    rows: number,
-    accumulated: string,
-    startMarker: string,
-    endMarkerPrefix: string,
-    exitCode: number | null,
-    timedOut: boolean,
-    outputLimit: number,
-    startedAt: number,
-  ): Promise<ExecResult> {
-    // Render the captured raw stream through a fresh headless terminal and slice
-    // between the start/end marker rows for clean, ANSI-processed text. A fresh
-    // (not the persistent) renderer so this exec's output is isolated and the
-    // markers are always near the bottom of the buffer.
-    const renderer = new CaptureRenderer(cols, rows, EXEC_EPHEMERAL_SCROLLBACK);
-    let output: string;
-    try {
-      renderer.write(accumulated);
-      await renderer.flush();
-      const endRow =
-        exitCode !== null && !timedOut ? renderer.findRow(`${endMarkerPrefix} ${exitCode}`) : -1;
-      const startRow = renderer.findRow(startMarker);
-      output = renderer.extractBetween(startRow, endRow);
-    } finally {
-      renderer.dispose();
-    }
-    const textBytes = Buffer.byteLength(output, "utf8");
-    const truncated = textBytes > outputLimit;
-    if (truncated) {
-      output = Buffer.from(output, "utf8").subarray(0, outputLimit).toString("utf8");
-    }
-    return {
-      exitCode,
-      output,
-      timedOut,
-      truncated,
-      durationMs: Date.now() - startedAt,
-    };
-  }
-
-  private clampInt(value: number, min: number, max: number): number {
-    return Math.min(Math.max(Math.trunc(value), min), max);
-  }
-
-  private async sendScrollback(
-    ws: ClientSocket,
-    managed: ManagedSession,
-    client: ManagedClient,
-  ): Promise<void> {
-    const snapshot = managed.session.snapshotScrollback();
-    if (!snapshot) return;
-    const bytes = Buffer.from(snapshot, "utf8");
-    for (let offset = 0; offset < bytes.byteLength; offset += MAX_OUTPUT_BYTES) {
-      await this.sendOutputFrame(ws, bytes.subarray(offset, offset + MAX_OUTPUT_BYTES), client);
-    }
-  }
-
-  private sendOutputBytes(ws: ClientSocket, bytes: Uint8Array<ArrayBuffer>): void {
-    if (ws.readyState !== WS_READY_STATE_OPEN) return;
-    if (getBufferedAmount(ws) > WS_BACKPRESSURE_THRESHOLD_BYTES) {
-      ws.close(WS_CLOSE_BACKPRESSURE, "backpressure");
-      return;
-    }
-    try {
-      ws.send(bytes);
-    } catch {
-      /* socket closed between readyState check and send */
-    }
-  }
-
-  private compressPayload(
-    bytes: Uint8Array<ArrayBuffer>,
-    mode: "br" | "gzip",
-  ): Buffer<ArrayBuffer> {
-    return mode === "br"
-      ? zlib.brotliCompressSync(bytes, {
-          params: { [zlib.constants.BROTLI_PARAM_QUALITY]: WS_OUTPUT_BROTLI_QUALITY },
-        })
-      : zlib.gzipSync(bytes, { level: WS_OUTPUT_GZIP_LEVEL });
-  }
-
-  private frameWithHeader(header: number, payload: Uint8Array<ArrayBuffer>): Buffer<ArrayBuffer> {
-    const out = Buffer.allocUnsafe(1 + payload.length);
-    out[0] = header;
-    out.set(payload, 1);
-    return out;
-  }
-
-  // 5-byte header for the context-takeover mode: 0x03 + 4-byte LE raw size, so
-  // the client can size-delimit a frame out of the persistent DecompressionStream
-  // (which doesn't end per frame and emits in arbitrary 16KB chunks).
-  private frameWithCtxHeader(
-    compressed: Uint8Array<ArrayBuffer>,
-    rawSize: number,
-  ): Buffer<ArrayBuffer> {
-    const out = Buffer.allocUnsafe(WS_OUTPUT_CTX_HEADER_BYTES + compressed.length);
-    out[0] = WS_OUTPUT_BROTLI_CTX;
-    out.writeUInt32LE(rawSize, 1);
-    out.set(compressed, WS_OUTPUT_CTX_HEADER_BYTES);
-    return out;
-  }
-
-  private async sendOutputFrame(
-    ws: ClientSocket,
-    bytes: Uint8Array<ArrayBuffer>,
-    client: ManagedClient,
-  ): Promise<void> {
-    const mode = client.compressMode;
-    if (mode === null) {
-      this.sendOutputBytes(ws, bytes);
-      return;
-    }
-    if (bytes.length < WS_OUTPUT_COMPRESS_THRESHOLD_BYTES) {
-      this.sendOutputBytes(ws, this.frameWithHeader(WS_OUTPUT_RAW, bytes));
-      return;
-    }
-    if (mode === "br-ctx") {
-      const compressed = await client.brotliEncoder!.flush(bytes);
-      this.sendOutputBytes(ws, this.frameWithCtxHeader(compressed, bytes.length));
-      return;
-    }
-    const compressed = this.compressPayload(bytes, mode);
-    this.sendOutputBytes(
-      ws,
-      this.frameWithHeader(mode === "br" ? WS_OUTPUT_BROTLI : WS_OUTPUT_GZIP, compressed),
-    );
-  }
-
-  private broadcastBytes(managed: ManagedSession, bytes: Uint8Array<ArrayBuffer>): void {
-    if (bytes.length === 0) return;
-    const compressible = bytes.length >= WS_OUTPUT_COMPRESS_THRESHOLD_BYTES;
-    let brotli: Buffer<ArrayBuffer> | null = null;
-    let gzip: Buffer<ArrayBuffer> | null = null;
-    for (const client of managed.clients) {
-      if (client.pending) {
-        client.pendingBytes.push(bytes);
-        continue;
-      }
-      const mode = client.compressMode;
-      if (mode === null) {
-        this.sendOutputBytes(client.ws, bytes);
-        continue;
-      }
-      if (!compressible) {
-        this.sendOutputBytes(client.ws, this.frameWithHeader(WS_OUTPUT_RAW, bytes));
-        continue;
-      }
-      if (mode === "br-ctx") {
-        // Per-client persistent stream: the flush is async (chained per encoder
-        // in PTY order), so fire-and-forget here — the chain preserves order
-        // across this client's frames and sendOutputBytes checks
-        // readyState/backpressure at send time.
-        void client
-          .brotliEncoder!.flush(bytes)
-          .then((compressed) =>
-            this.sendOutputBytes(client.ws, this.frameWithCtxHeader(compressed, bytes.length)),
-          );
-        continue;
-      }
-      if (mode === "br") {
-        if (brotli === null) brotli = this.compressPayload(bytes, "br");
-        this.sendOutputBytes(client.ws, this.frameWithHeader(WS_OUTPUT_BROTLI, brotli));
-      } else {
-        if (gzip === null) gzip = this.compressPayload(bytes, "gzip");
-        this.sendOutputBytes(client.ws, this.frameWithHeader(WS_OUTPUT_GZIP, gzip));
-      }
-    }
-  }
-
-  private sendToClient(client: ManagedClient, payload: ServerToClientMessage): void {
-    if (client.pending) {
-      client.pendingControl.push(payload);
-      return;
-    }
-    this.sendControl(client.ws, payload);
-  }
-
-  private broadcast(managed: ManagedSession, payload: ServerToClientMessage): void {
-    for (const client of managed.clients) this.sendToClient(client, payload);
+    return this.commandExecutor.execute(managed, command, options);
   }
 
   // Fan a control message out to every client currently viewing any session
@@ -1338,124 +926,8 @@ export class SessionManager {
   // session, so matching session.owner === managed.owner is the partition).
   private broadcastToOwner(managed: ManagedSession, payload: ServerToClientMessage): void {
     for (const { client, session } of this.wsToClient.values()) {
-      if (session.owner === managed.owner) this.sendToClient(client, payload);
+      if (session.owner === managed.owner) this.outputTransport.sendToClient(client, payload);
     }
-  }
-
-  private onSessionOutput(managed: ManagedSession, data: string): void {
-    const didEndSynchronizedOutput = managed.synchronizedOutputEndDetector.push(data);
-    managed.outputBatch += data;
-    managed.lastOutputAt = Date.now();
-    if (managed.automation) this.appendAutomationLog(managed, data);
-    this.noteOutput(managed.session.pid);
-    this.hooks.onOutputActivity();
-    // Keep the capture renderer (if one exists) in lockstep with the PTY so a
-    // later capture-pane reads current rendered text. Lazily created, so this
-    // is a no-op for sessions nobody has captured (the common browser case).
-    managed.captureRenderer?.write(data);
-    // DEC synchronized output supplies the exact safe redraw boundary. Flush
-    // when DECRST 2026 arrives instead of waiting for the idle fallback, while
-    // unsynchronized output keeps the existing anti-flicker window unchanged.
-    if (didEndSynchronizedOutput || managed.outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
-      if (managed.outputBatchTimer !== null) {
-        clearTimeout(managed.outputBatchTimer);
-        managed.outputBatchTimer = null;
-      }
-      this.flushOutput(managed);
-      return;
-    }
-    // Without a synchronized-output boundary, reset the coalescing window on
-    // every chunk so the flush lands OUTPUT_BATCH_WINDOW_MS after the LAST
-    // chunk of a burst, not a fixed window after the first. A full-screen TUI
-    // redraw of a large session emits across more than the window (node-pty
-    // delivers it as many 1024-byte data events over successive event-loop
-    // turns); a one-shot window flushed mid-redraw and split the frame across
-    // multiple WebSocket messages. Over a bandwidth-limited link each split
-    // arrives as its own atomic message and xterm paints it separately — the
-    // visible top-to-bottom crawl. A resetting window holds the whole burst until the
-    // PTY goes idle, then sends one message; the browser receives it atomically
-    // and xterm renders it in a single paint regardless of link bandwidth.
-    // Sustained high-throughput output never idles, so OUTPUT_BATCH_FLUSH_BYTES
-    // still gates the message rate there (unchanged).
-    if (managed.outputBatchTimer !== null) {
-      managed.outputBatchTimer.refresh();
-      return;
-    }
-    managed.outputBatchTimer = setTimeout(() => {
-      managed.outputBatchTimer = null;
-      this.flushOutput(managed);
-    }, OUTPUT_BATCH_WINDOW_MS);
-    managed.outputBatchTimer.unref?.();
-  }
-
-  // Accumulate ANSI-stripped PTY output for an automation shell run, keeping
-  // the tail within the log cap so a long command's final output survives.
-  private appendAutomationLog(managed: ManagedSession, data: string): void {
-    const stripped = stripAnsi(data);
-    if (stripped.length === 0) return;
-    const combined = managed.automationLog + stripped;
-    if (combined.length <= MAX_AUTOMATION_LOG_LENGTH) {
-      managed.automationLog = combined;
-      return;
-    }
-    const overflow = combined.length - MAX_AUTOMATION_LOG_LENGTH;
-    managed.automationLog = combined.slice(overflow);
-  }
-
-  private flushOutput(managed: ManagedSession): void {
-    const batch = managed.outputBatch;
-    managed.outputBatch = "";
-    if (!batch) return;
-    const bytes = Buffer.from(batch, "utf8");
-    if (bytes.byteLength <= MAX_OUTPUT_BYTES) {
-      this.broadcastBytes(managed, bytes);
-    } else {
-      for (let offset = 0; offset < bytes.byteLength; offset += MAX_OUTPUT_BYTES) {
-        this.broadcastBytes(managed, bytes.subarray(offset, offset + MAX_OUTPUT_BYTES));
-      }
-    }
-    this.maybePauseAfterFlush(managed);
-  }
-
-  private maybePauseAfterFlush(managed: ManagedSession): void {
-    if (managed.session.isPaused) return;
-    for (const client of managed.clients) {
-      if (client.pending) continue;
-      if (getBufferedAmount(client.ws) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES) {
-        managed.session.pause();
-        this.ensureDrainPoll(managed);
-        return;
-      }
-    }
-  }
-
-  private ensureDrainPoll(managed: ManagedSession): void {
-    if (managed.drainPollTimer !== null) return;
-    managed.drainPollTimer = setInterval(() => {
-      if (!managed.session.isPaused) {
-        this.stopDrainPoll(managed);
-        return;
-      }
-      let allLow = true;
-      for (const client of managed.clients) {
-        if (client.pending) continue;
-        if (getBufferedAmount(client.ws) > WS_OUTBOUND_RESUME_LOW_WATER_BYTES) {
-          allLow = false;
-          break;
-        }
-      }
-      if (allLow) {
-        managed.session.resume();
-        this.stopDrainPoll(managed);
-      }
-    }, WS_OUTBOUND_DRAIN_POLL_MS);
-    managed.drainPollTimer.unref?.();
-  }
-
-  private stopDrainPoll(managed: ManagedSession): void {
-    if (managed.drainPollTimer === null) return;
-    clearInterval(managed.drainPollTimer);
-    managed.drainPollTimer = null;
   }
 
   private recomputeResize(managed: ManagedSession): void {
@@ -1495,20 +967,20 @@ export class SessionManager {
     if (count > 1) {
       managed.ptySizeWasMultiViewer = true;
       if (sizeChanged) {
-        this.broadcast(managed, { type: "pty-size", cols, rows });
+        this.outputTransport.broadcast(managed, { type: "pty-size", cols, rows });
       }
     } else if (managed.ptySizeWasMultiViewer) {
       managed.ptySizeWasMultiViewer = false;
-      this.broadcast(managed, { type: "pty-size", cols, rows });
+      this.outputTransport.broadcast(managed, { type: "pty-size", cols, rows });
     }
   }
 
   private installSessionListeners(managed: ManagedSession): void {
     const session = managed.session;
-    session.on("output", (data: string) => this.onSessionOutput(managed, data));
-    session.on("title", (title: string) => this.broadcast(managed, { type: "title", title }));
+    session.on("output", (data: string) => this.outputCoordinator.onSessionOutput(managed, data));
+    session.on("title", (title: string) => this.outputTransport.broadcast(managed, { type: "title", title }));
     session.on("cwd", (cwd: string) => {
-      this.broadcast(managed, { type: "cwd", cwd });
+      this.outputTransport.broadcast(managed, { type: "cwd", cwd });
       managed.gitWatcher.stop();
       managed.gitWatcher.start(cwd);
       for (const client of managed.clients) this.moveClientCoordinator(client, cwd);
@@ -1517,7 +989,7 @@ export class SessionManager {
     session.on("foreground", (process: string | null) => {
       managed.hasForeground = process !== null;
       managed.foregroundName = process;
-      this.broadcast(managed, { type: "foreground", process });
+      this.outputTransport.broadcast(managed, { type: "foreground", process });
       this.hooks.onSessionActivity();
       if (!managed.automation && session.lastEmittedCwd) {
         this.hooks.onSessionEvent("foreground", session.lastEmittedCwd);
@@ -1584,7 +1056,7 @@ export class SessionManager {
   }
 
   private handleExit(managed: ManagedSession, code: number | null): void {
-    this.flushOutput(managed);
+    this.outputCoordinator.flushOutput(managed);
     for (const client of managed.clients) {
       this.hooks.onClientExit(client.ws, code);
       this.sendControl(client.ws, { type: "exit", code });
@@ -1614,7 +1086,7 @@ export class SessionManager {
       clearTimeout(managed.outputBatchTimer);
       managed.outputBatchTimer = null;
     }
-    this.stopDrainPoll(managed);
+    this.outputCoordinator.stopDrainPoll(managed);
     managed.gitWatcher.dispose();
     for (const client of managed.clients) {
       if (client.pendingTimer !== null) {
