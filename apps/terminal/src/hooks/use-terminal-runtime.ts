@@ -11,11 +11,7 @@ import { type CreateWorktreeOptions } from "@/utils/fetch-git-worktrees";
 import {
   DEAD_SESSION_TITLE_PREFIX,
   DEFAULT_DOCUMENT_TITLE,
-  FAVICON_RUNNING_DEBOUNCE_MS,
-  FAVICON_READY_DEBOUNCE_MS,
   HAPTIC_TAP_MS,
-  NOTIFICATION_TAG_PREFIX,
-  NOTIFICATION_TITLE,
   RECONNECT_DELAY_MS,
   RESIZE_DEBOUNCE_MS,
 } from "@/lib/constants";
@@ -24,10 +20,6 @@ import {
   LOCALTERM_TAB_TOKEN_EVENT,
   LOCALTERM_TAB_TOKEN_PROPERTY,
   serverToClientMessageSchema,
-  type AutomationWithNextRun,
-  type FontsResponse,
-  type GitBranchPr,
-  type GitDiffSummary,
 } from "@monotykamary/localterm-server/protocol";
 
 import {
@@ -49,7 +41,6 @@ import { chunkInputByCodeUnits } from "@/utils/chunk-input-by-code-units";
 import { restoreTerminalScrollAnchor } from "@/utils/restore-terminal-scroll-anchor";
 import { outputBatcher } from "@/utils/write-terminal-output";
 import { shouldBlockTerminalScrollbackPurge } from "@/utils/should-block-terminal-scrollback-purge";
-import { shouldSuppressSessionNotification } from "@/utils/should-suppress-session-notification";
 import { subscribeTerminalUserInput } from "@/utils/subscribe-terminal-user-input";
 
 import { isBinaryMessageData } from "@/utils/is-binary-message-data";
@@ -59,10 +50,7 @@ import {
   removeFreshSessionQueryParam,
 } from "@/utils/fresh-session-query-param";
 import { removeRunQueryParam, RUN_QUERY_PARAM } from "@/utils/remove-run-query-param";
-import {
-  SESSION_ID_QUERY_PARAM,
-  syncSessionIdQueryParam,
-} from "@/utils/sync-session-id-query-param";
+import { SESSION_ID_QUERY_PARAM } from "@/utils/sync-session-id-query-param";
 import { LocalEcho } from "@/lib/local-echo";
 
 import { buildTerminalWebSocketUrl } from "@/utils/build-terminal-websocket-url";
@@ -77,6 +65,13 @@ import {
   createTerminalOutputSession,
   type TerminalOutputSession,
 } from "@/lib/terminal-runtime/create-terminal-output-session";
+import { createTabOutputActivity } from "@/lib/terminal-runtime/create-tab-output-activity";
+import { createTerminalSessionLifecycle } from "@/lib/terminal-runtime/create-terminal-session-lifecycle";
+import { SHELL_CLOSE_MASK_DELAY_MS } from "@/lib/terminal-runtime/constants";
+import {
+  dispatchTerminalControlMessage,
+  type TerminalControlMessageCallbacks,
+} from "@/lib/terminal-runtime/dispatch-terminal-control-message";
 
 import { detectOutputCompressMode } from "@/utils/detect-output-compress-mode";
 
@@ -128,11 +123,6 @@ interface TerminalPtySize {
 interface TerminalSearchResultState {
   resultIndex: number;
   resultCount: number;
-}
-
-interface TerminalThemesState {
-  activeThemeId: string;
-  customThemes: readonly TerminalTheme[];
 }
 
 interface TerminalRuntimeRefs {
@@ -196,8 +186,7 @@ interface TerminalRuntimeInitialSettings {
   activeLocalEchoRef: CurrentRef<boolean>;
 }
 
-interface TerminalRuntimeCallbacks {
-  setPtySize: (value: TerminalPtySize | null) => void;
+interface TerminalRuntimeCallbacks extends TerminalControlMessageCallbacks {
   setPtyViewportVersion: Dispatch<SetStateAction<number>>;
   setTerminalReady: (ready: boolean) => void;
   setExitInfo: (value: TerminalExitInfo | null) => void;
@@ -206,22 +195,6 @@ interface TerminalRuntimeCallbacks {
   setLiveCwd: (cwd: string | null) => void;
   setForegroundProcess: (process: string | null) => void;
   setSearchResults: (value: TerminalSearchResultState) => void;
-  setAutomations: (value: AutomationWithNextRun[]) => void;
-  setCaffeinateSupported: (value: boolean) => void;
-  setCaffeinateActive: (value: boolean) => void;
-  setCaffeinatePeerActive: (value: boolean) => void;
-  setCaffeinateMode: (value: CaffeinateMode) => void;
-  setCaffeinateDefaultCommands: (value: string[]) => void;
-  setCaffeinateCommands: (value: string[]) => void;
-  setCaffeinateActivityGate: (value: boolean) => void;
-  setCaffeinatePeerKeepAwake: (value: boolean) => void;
-  setCaffeinateBatteryThreshold: (value: number | null) => void;
-  setCaffeinateActiveTrigger: (value: string | null) => void;
-  setGitDiffSummary: (summary: GitDiffSummary | null) => void;
-  setGitDirtyVersion: Dispatch<SetStateAction<number | undefined>>;
-  setPushedPr: (pr: GitBranchPr | null) => void;
-  applyThemesState: (state: TerminalThemesState) => void;
-  applyFontsState: (state: FontsResponse) => void;
 }
 
 interface UseTerminalRuntimeOptions {
@@ -309,22 +282,6 @@ export const useTerminalRuntime = ({
     setLiveCwd,
     setForegroundProcess,
     setSearchResults,
-    setAutomations,
-    setCaffeinateSupported,
-    setCaffeinateActive,
-    setCaffeinatePeerActive,
-    setCaffeinateMode,
-    setCaffeinateDefaultCommands,
-    setCaffeinateCommands,
-    setCaffeinateActivityGate,
-    setCaffeinatePeerKeepAwake,
-    setCaffeinateBatteryThreshold,
-    setCaffeinateActiveTrigger,
-    setGitDiffSummary,
-    setGitDirtyVersion,
-    setPushedPr,
-    applyThemesState,
-    applyFontsState,
   } = callbacks;
   const resizeScrollRestoreRef = useRef<ResizeScrollRestoreState | null>(null);
 
@@ -342,46 +299,16 @@ export const useTerminalRuntime = ({
       (window as unknown as Record<string, string | undefined>)[LOCALTERM_TAB_TOKEN_PROPERTY];
 
     let disposed = false;
-    let exited = false;
-    let wasEverConnected = false;
     let lastTitle = "";
     let socket: WebSocket | null = null;
-    // Server-side PTY id (sent in the {type:"session"} message). Preserved
-    // across reconnects and forwarded as `?sid=` so the daemon can attach to
-    // the live PTY instead of spawning a fresh shell. Cleared on genuine shell
-    // exit (markShellDead) so the dead session is never reattached on a manual
-    // Reconnect. Mirrored into liveSessionIdRef so the session picker can badge
-    // the PTY this tab is currently viewing and skip re-switching to it.
-    let liveSessionId: string | null = null;
-    // Override sid for the next connect(): set by switchSession() so the next
-    // WebSocket opens against the picked PTY instead of the current one. The
-    // session-frame handler leaves liveSessionId alone until the new frame
-    // lands, so the new id compares unequal to the old one and the handler
-    // treats it as a switch (reset + scrollback replay). A fresh in-place
-    // switch keeps liveSessionId for the same comparison but omits it from every
-    // retry until the replacement session frame lands.
-    let nextConnectSid: string | null = null;
-    let shouldSpawnFreshSession = false;
-    let initialMobileResumePending = false;
-    // Silent-reattach state: on a WS close while we still have a liveSessionId,
-    // we skip the connection-lost modal and try one quiet reconnect — the
-    // daemon keeps the PTY alive across transient drops (portless teardown on
-    // wake, brief network blip). If the reconnect's session frame has the same
-    // id the shell survived and the user sees nothing; if the id differs the
-    // shell was reaped while dormant and a fresh shell spawned (the session
-    // handler resets the terminal and replays its scrollback). Cleared on
-    // session landing or on a second close (silent reconnect failed). Stashed
-    // close info is reused for the failed-reconnect modal so we don't lose the
-    // original code/reason.
-    let reattachPending = false;
-    let reattachCloseCode = 0;
-    let reattachCloseReason = "";
-    // Whether the server paired this WS socket with a CDP target via the
-    // `{type:"identify"}` handshake → the server will drive closeTab on a
-    // clean shell exit, so the client defers window.close() to give the
-    // CDP-driven close time to land. Reset whenever the socket changes; the
-    // next identify acks with the up-to-date value over the new WS.
-    let cdpControlled = false;
+    const sessionLifecycle = createTerminalSessionLifecycle({
+      liveSessionIdRef,
+      previousSessionIdRef,
+    });
+    const tabOutputActivity = createTabOutputActivity(
+      () => disposed || sessionLifecycle.getExited(),
+      setForegroundProcess,
+    );
     // Suppressed-replay window. On a switch (or fresh load) the server replays
     // the PTY's scrollback ring buffer as binary frames terminated by a
     // `{type:"replay-end"}` marker. The raw bytes contain stale terminal
@@ -397,73 +324,6 @@ export const useTerminalRuntime = ({
     // until `replay-end` lands.
     let reconnectTimer: number | null = null;
     let resizeTimer: number | null = null;
-    let faviconRunningTimer: number | null = null;
-    let faviconReadyTimer: number | null = null;
-    let lastOutputTimestamp = 0;
-    let faviconState: "ready" | "running" | "alive-quiet" = "ready";
-    let faviconBadge = false;
-    let hadForegroundThisCycle = false;
-    let hasForegroundProcess = false;
-    const checkReadyAfterOutput = () => {
-      const silence = performance.now() - lastOutputTimestamp;
-      if (silence < FAVICON_READY_DEBOUNCE_MS) {
-        faviconReadyTimer = window.setTimeout(
-          checkReadyAfterOutput,
-          FAVICON_READY_DEBOUNCE_MS - silence,
-        );
-        return;
-      }
-      faviconReadyTimer = null;
-      if (faviconRunningTimer !== null) {
-        window.clearTimeout(faviconRunningTimer);
-        faviconRunningTimer = null;
-      }
-      if (faviconState === "running") {
-        if (document.hidden && hadForegroundThisCycle) {
-          faviconBadge = true;
-        }
-        if (!hasForegroundProcess) hadForegroundThisCycle = false;
-        if (hasForegroundProcess) {
-          faviconState = "alive-quiet";
-          setTabFaviconState("alive-quiet", faviconBadge);
-        } else {
-          faviconState = "ready";
-          setTabFaviconState("ready", faviconBadge);
-        }
-      }
-    };
-
-    const noteOutputActivity = () => {
-      if (faviconState !== "running" && faviconRunningTimer === null) {
-        faviconRunningTimer = window.setTimeout(() => {
-          faviconRunningTimer = null;
-          if (disposed || exited) return;
-          faviconState = "running";
-          faviconBadge = false;
-          setTabFaviconState("running");
-        }, FAVICON_RUNNING_DEBOUNCE_MS);
-      }
-      lastOutputTimestamp = performance.now();
-      if (faviconReadyTimer !== null) return;
-      faviconReadyTimer = window.setTimeout(checkReadyAfterOutput, FAVICON_READY_DEBOUNCE_MS);
-    };
-
-    const resetFavicon = () => {
-      if (faviconRunningTimer !== null) {
-        window.clearTimeout(faviconRunningTimer);
-        faviconRunningTimer = null;
-      }
-      if (faviconReadyTimer !== null) {
-        window.clearTimeout(faviconReadyTimer);
-        faviconReadyTimer = null;
-      }
-      if (faviconState !== "ready" || faviconBadge) {
-        faviconState = "ready";
-        faviconBadge = false;
-        setTabFaviconState("ready");
-      }
-      hadForegroundThisCycle = false;
-    };
 
     const initialFont =
       initialFontIdRef.current === CUSTOM_FONT_ID
@@ -595,7 +455,7 @@ export const useTerminalRuntime = ({
       terminal,
       isMac,
       sendInput,
-      getHasForegroundProcess: () => hasForegroundProcess,
+      getHasForegroundProcess: tabOutputActivity.getHasForegroundProcess,
       getKittyFlags,
       getLocalEcho: () => localEchoRef.current,
       onOpenNewShell: () => openNewShellRef.current?.(),
@@ -611,7 +471,7 @@ export const useTerminalRuntime = ({
     });
 
     const applyIncomingTitle = (rawTitle: string) => {
-      if (exited) return;
+      if (sessionLifecycle.getExited()) return;
       const trimmed = rawTitle.trim();
       if (!trimmed) return;
       lastTitle = trimmed;
@@ -671,7 +531,8 @@ export const useTerminalRuntime = ({
     const localEcho = new LocalEcho({
       terminal,
       send: sendInput,
-      isSafeState: () => !hasForegroundProcess && terminal.buffer.active.type === "normal",
+      isSafeState: () =>
+        !tabOutputActivity.getHasForegroundProcess() && terminal.buffer.active.type === "normal",
     });
     localEcho.setEnabled(activeLocalEchoRef.current);
     localEchoRef.current = localEcho;
@@ -681,7 +542,7 @@ export const useTerminalRuntime = ({
       createTerminalOutputSession({
         onOutput: (bytes) => {
           outputBatcher.pushBytes(localEcho.hasPending() ? localEcho.reconcile(bytes) : bytes);
-          noteOutputActivity();
+          tabOutputActivity.noteOutputActivity();
         },
         onReplay: (chunks, onComplete) => {
           for (let index = 0; index < chunks.length; index += 1) {
@@ -716,14 +577,7 @@ export const useTerminalRuntime = ({
     });
 
     const observer = new ResizeObserver(scheduleFit);
-    const onVisibilityChange = () => {
-      if (!document.hidden) {
-        if (faviconBadge) {
-          faviconBadge = false;
-          setTabFaviconState(faviconState);
-        }
-      }
-    };
+    const onVisibilityChange = tabOutputActivity.handleVisibilityChange;
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     observer.observe(container);
@@ -732,7 +586,7 @@ export const useTerminalRuntime = ({
 
     const showDeadSessionMask = (exitCode: number | null) => {
       if (disposed) return;
-      resetFavicon();
+      tabOutputActivity.reset();
       setForegroundProcess(null);
       setTabFaviconState("dead");
       terminal.write(formatShellExitMarker(exitCode));
@@ -741,14 +595,7 @@ export const useTerminalRuntime = ({
       setSessionInfo(null);
     };
     const markShellDead = (exitCode: number | null) => {
-      if (exited) return;
-      exited = true;
-      // The PTY is gone — drop its id so a manual Reconnect spawns a fresh
-      // shell instead of trying to reattach to the dead one, and clear the
-      // address-bar ?sid= so a refresh here never targets the dead PTY.
-      liveSessionId = null;
-      liveSessionIdRef.current = null;
-      syncSessionIdQueryParam(null);
+      if (!sessionLifecycle.markShellDead()) return;
       if (exitCode !== null && exitCode !== 0) {
         // Non-zero exit — surface immediately. The server's onExit deliberately
         // skips closeTab on non-clean codes so the tab stays as the failure mask.
@@ -757,9 +604,9 @@ export const useTerminalRuntime = ({
       }
       const settleAndMask = () => {
         window.close();
-        setTimeout(() => showDeadSessionMask(exitCode), 100);
+        setTimeout(() => showDeadSessionMask(exitCode), SHELL_CLOSE_MASK_DELAY_MS);
       };
-      if (cdpControlled) {
+      if (sessionLifecycle.getCdpControlled()) {
         // CDP-controlled tab: defer window.close() (and the mask) so the
         // daemon's server-driven closeTab has time to settle first. closeTab
         // drives the browser's own close path via CDP — reliable where
@@ -774,9 +621,8 @@ export const useTerminalRuntime = ({
     };
 
     const markConnectionLost = (closeCode: number, closeReason: string, wasClean: boolean) => {
-      if (exited) return;
-      exited = true;
-      resetFavicon();
+      if (!sessionLifecycle.markConnectionLost()) return;
+      tabOutputActivity.reset();
       setTabFaviconState("dead");
       document.title = titleForDeadSession(lastTitle);
       setExitInfo({ reason: "connection-lost", closeCode, closeReason, wasClean });
@@ -786,14 +632,12 @@ export const useTerminalRuntime = ({
 
     const connect = () => {
       if (disposed) return;
-      const connectSid = nextConnectSid;
-      const shouldSpawnFresh = shouldSpawnFreshSession;
-      nextConnectSid = null;
+      const connectionRequest = sessionLifecycle.prepareConnection();
       const nextSocket = new WebSocket(
         buildTerminalWebSocketUrl({
           cwdOverride: liveCwdRef.current,
-          sid: shouldSpawnFresh ? null : (connectSid ?? liveSessionId),
-          omitAddressBarSessionId: shouldSpawnFresh,
+          sid: connectionRequest.sessionId,
+          omitAddressBarSessionId: connectionRequest.shouldSpawnFreshSession,
         }),
       );
       socket = nextSocket;
@@ -803,7 +647,7 @@ export const useTerminalRuntime = ({
       nextSocket.binaryType = "arraybuffer";
       nextSocket.addEventListener("open", () => {
         if (disposed || socket !== nextSocket) return;
-        wasEverConnected = true;
+        sessionLifecycle.noteConnected();
         wsConnectedRef.current = true;
         setConsecutiveFailures(0);
         sendResize(terminal.cols, terminal.rows);
@@ -847,14 +691,10 @@ export const useTerminalRuntime = ({
         if (message.type === "title") {
           applyIncomingTitle(message.title);
         } else if (message.type === "session") {
-          const priorSessionId = liveSessionId;
-          const didSpawnFreshSession = shouldSpawnFreshSession;
-          shouldSpawnFreshSession = false;
+          const sessionTransition = sessionLifecycle.handleSession(message.id);
+          const { isSwitch, priorSessionId } = sessionTransition;
           outputSession.beginSession();
           localEcho.flush();
-          reattachPending = false;
-          reattachCloseCode = 0;
-          reattachCloseReason = "";
           // Drop the prior PTY's effective-viewport mask: the new PTY's size
           // arrives in its own `pty-size` frame, and until it does the mask
           // would otherwise show the old PTY's narrower region over the new one.
@@ -866,14 +706,6 @@ export const useTerminalRuntime = ({
           // prior PTY's effective size). The mask is already cleared above, so
           // the debounced refit can't flash a stale region.
           scheduleFit();
-          if (message.id) {
-            if (priorSessionId !== null && message.id !== priorSessionId) {
-              previousSessionIdRef.current = priorSessionId;
-            }
-            liveSessionId = message.id;
-            liveSessionIdRef.current = message.id;
-            syncSessionIdQueryParam(message.id);
-          }
           removeFreshSessionQueryParam();
           // A switch (or a missed reattach that spawned a fresh shell): the
           // new PTY is a different one than the tab was just viewing, so reset
@@ -881,8 +713,6 @@ export const useTerminalRuntime = ({
           // live fan-out begins. The replay lands as one binary frame right
           // after this, so the screen shows the PTY's recent output instead
           // of the prior PTY's stale content.
-          const isSwitch =
-            didSpawnFreshSession || (priorSessionId !== null && message.id !== priorSessionId);
           if (isSwitch) {
             terminal.reset();
             // xterm's reset() (RIS) does not clear coreService.isCursorHidden —
@@ -893,37 +723,10 @@ export const useTerminalRuntime = ({
             // with the target's own cursor state, and an empty replay keeps it on.
             terminal.write("\x1b[?25h");
           }
-          // Re-sync the foreground flag from the PTY's current state, then re-seed
-          // the favicon to match. The server's foreground watcher only emits on
-          // change, so without this a reattaching client (page refresh, silent
-          // reattach) or a fresh PTY after a daemon restart keeps hasForegroundProcess
-          // at its stale prior value — stuck blue after a restart (stale true) or
-          // grey-after-green on refresh (stale false, the deduped watcher never
-          // re-emits). On a switch to a different PTY, drop the prior PTY's pending
-          // favicon timers so they don't fire against the new one. A same-PTY
-          // reattach keeps its timers — clearing the ready timer would interrupt
-          // an in-progress green→blue quiet transition (leaving the icon stuck
-          // green, never blue). Never clobber an active "running" (green): output
-          // drives that, and checkReadyAfterOutput picks up the re-synced
-          // hasForegroundProcess when output goes quiet.
-          hasForegroundProcess = message.foreground !== null;
-          setForegroundProcess(message.foreground);
-          hadForegroundThisCycle = hasForegroundProcess;
-          if (isSwitch) {
-            if (faviconRunningTimer !== null) {
-              window.clearTimeout(faviconRunningTimer);
-              faviconRunningTimer = null;
-            }
-            if (faviconReadyTimer !== null) {
-              window.clearTimeout(faviconReadyTimer);
-              faviconReadyTimer = null;
-            }
-          }
-          if (isSwitch || faviconState !== "running") {
-            faviconBadge = false;
-            faviconState = hasForegroundProcess ? "alive-quiet" : "ready";
-            setTabFaviconState(faviconState);
-          }
+          tabOutputActivity.beginSession({
+            foregroundProcess: message.foreground,
+            isSwitch,
+          });
           setSessionInfo({
             shell: message.shell,
             shellName: message.shellName,
@@ -966,116 +769,19 @@ export const useTerminalRuntime = ({
           // callback clears suppression. An empty replay (blank PTY) writes
           // nothing and just clears the window.
           outputSession.finishReplay();
-        } else if (message.type === "automations") {
-          setAutomations(message.automations);
-        } else if (message.type === "themes") {
-          applyThemesState({
-            activeThemeId: message.activeThemeId,
-            customThemes: message.customThemes,
-          });
-        } else if (message.type === "fonts") {
-          applyFontsState({
-            activeFontId: message.activeFontId,
-            customFontFamily: message.customFontFamily,
-            nerdFontEnabled: message.nerdFontEnabled,
-            ligaturesEnabled: message.ligaturesEnabled,
-            initialized: message.initialized,
-          });
-        } else if (message.type === "caffeinate") {
-          setCaffeinateSupported(message.supported);
-          setCaffeinateActive(message.active);
-          setCaffeinatePeerActive(message.peerActive);
-          setCaffeinateMode(message.mode);
-          setCaffeinateDefaultCommands(message.defaultCommands);
-          setCaffeinateCommands(message.commands);
-          setCaffeinateActivityGate(message.activityGate);
-          setCaffeinatePeerKeepAwake(message.peerKeepAwake);
-          setCaffeinateBatteryThreshold(message.batteryThreshold);
-          setCaffeinateActiveTrigger(message.activeTrigger);
-        } else if (message.type === "cwd") {
-          setLiveCwd(message.cwd);
-          setGitDiffSummary(null);
-        } else if (message.type === "git-diff-summary") {
-          setGitDiffSummary(message.summary);
-          setGitDirtyVersion((version) => (version ?? 0) + 1);
-        } else if (message.type === "git-branch-pr") {
-          setPushedPr(message.pr);
-        } else if (message.type === "foreground") {
-          const nowHasProcess = message.process !== null;
-          if (nowHasProcess) {
-            hadForegroundThisCycle = true;
-          } else if (faviconState === "alive-quiet") {
-            if (document.hidden && hadForegroundThisCycle) faviconBadge = true;
-            faviconState = "ready";
-            hadForegroundThisCycle = false;
-            setTabFaviconState("ready", faviconBadge);
-          }
-          hasForegroundProcess = nowHasProcess;
-          setForegroundProcess(message.process);
-        } else if (message.type === "notification") {
-          if ("Notification" in window && Notification.permission === "granted") {
-            // Show via the SW so the click fires the SW's notificationclick,
-            // which can focus a background tab through WindowClient.focus() —
-            // the API browsers honor, unlike a main-thread window.focus(). The
-            // per-session tag coalesces the copies the daemon fanned out to the
-            // user's other tabs into one OS notification. Falls back to a
-            // page-owned Notification when no SW is active (dev / not controlling).
-            const sid = message.sessionId;
-            const isViewer = sid === liveSessionIdRef.current;
-            // The foreground viewer tab can already see the result on screen, so
-            // it skips the OS notification — see shouldSuppressSessionNotification
-            // for the cross-tab + foreground suppression rules.
-            if (
-              shouldSuppressSessionNotification({
-                isViewer,
-                hasViewers: message.hasViewers,
-                documentVisible: document.visibilityState === "visible",
-                documentFocused: document.hasFocus(),
-              })
-            ) {
-              return;
-            }
-            const sw = navigator.serviceWorker;
-            if (sw?.controller) {
-              void sw.ready.then((reg) =>
-                reg.showNotification(NOTIFICATION_TITLE, {
-                  body: message.body,
-                  tag: `${NOTIFICATION_TAG_PREFIX}${sid}`,
-                  data: { sid, hasViewers: message.hasViewers },
-                }),
-              );
-            } else {
-              const notification = new Notification(message.body);
-              notification.onclick = () => {
-                window.focus();
-                if (!isViewer && sid) {
-                  // Orphaned (suppression only shows this when !hasViewers):
-                  // open a fresh tab on the session instead of hijacking this one.
-                  const url = new URL(window.location.href);
-                  url.searchParams.set(SESSION_ID_QUERY_PARAM, sid);
-                  window.open(url.toString(), "_blank");
-                }
-                notification.close();
-              };
-            }
-          }
         } else if (message.type === "exit") {
-          resetFavicon();
+          tabOutputActivity.reset();
           markShellDead(message.code);
-        } else if (message.type === "cdp-controlled") {
-          cdpControlled = message.controlled;
-        } else if (message.type === "peer-attached") {
-          qrPeerAttachedRef.current?.();
-        } else if (message.type === "pty-size") {
-          ptySizeRef.current = { cols: message.cols, rows: message.rows };
-          setPtySize({ cols: message.cols, rows: message.rows });
-          // Refit immediately (not the debounced scheduleFit) so the grid
-          // reflows to the new effective size in the same tick the mask
-          // recomputes — a debounced refit would leave the old grid sitting
-          // under the new mask position for a frame, bleeding the prior
-          // effective width through the wash. pty-size frames are infrequent
-          // (peer attach/detach/resize), so the synchronous reflow cost is fine.
-          fitToContainer();
+        } else {
+          dispatchTerminalControlMessage(message, {
+            activity: tabOutputActivity,
+            callbacks,
+            fitToContainer,
+            lifecycle: sessionLifecycle,
+            liveSessionIdRef,
+            ptySizeRef,
+            qrPeerAttachedRef,
+          });
         }
       });
 
@@ -1083,46 +789,34 @@ export const useTerminalRuntime = ({
         if (socket !== nextSocket) return;
         socket = null;
         wsConnectedRef.current = false;
-        cdpControlled = false;
         if (disposed) return;
-        if (exited) return;
+        const closeAction = sessionLifecycle.handleConnectionClose(
+          event.code,
+          event.reason,
+          event.wasClean,
+        );
+        if (closeAction.type === "ignore") return;
         localEcho.flush();
-        if (wasEverConnected) {
+        if (closeAction.type !== "retry") {
           // Surface close metadata in DevTools so "the terminal randomly dies"
           // reports always come back with a concrete code/reason instead of
           // the previous black-box `null` exit.
           console.warn(
             `[localterm] websocket closed: code=${event.code} reason=${JSON.stringify(event.reason)} wasClean=${event.wasClean}`,
           );
-          // Silent-reattach attempt: the daemon keeps the PTY alive across
-          // this drop, and on a successful reattach the user should see nothing
-          // — mid-keystroke interactive CLIs continue uninterrupted. We stash
-          // the close info and schedule a direct reconnect (bypassing the
-          // connection-lost/modal path that fires `exited = true`). If the
-          // silent reconnect itself closes before a session frame lands
-          // (daemon genuinely down), fall through to markConnectionLost with
-          // the stashed close info.
-          if (liveSessionId && !reattachPending) {
-            reattachPending = true;
-            reattachCloseCode = event.code;
-            reattachCloseReason = event.reason;
-            reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
-            return;
-          }
-          if (reattachPending) {
-            const stashedCode = reattachCloseCode;
-            const stashedReason = reattachCloseReason;
-            reattachPending = false;
-            reattachCloseCode = 0;
-            reattachCloseReason = "";
-            markConnectionLost(stashedCode, stashedReason, event.wasClean);
-            return;
-          }
-          markConnectionLost(event.code, event.reason, event.wasClean);
-          return;
         }
-        setConsecutiveFailures((previous) => previous + 1);
-        reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
+        if (closeAction.type === "reconnect") {
+          reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
+        } else if (closeAction.type === "connection-lost") {
+          markConnectionLost(
+            closeAction.closeCode,
+            closeAction.closeReason,
+            closeAction.wasClean,
+          );
+        } else {
+          setConsecutiveFailures((previous) => previous + 1);
+          reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
+        }
       });
 
       nextSocket.addEventListener("error", (event) => {
@@ -1137,17 +831,7 @@ export const useTerminalRuntime = ({
 
     manualReconnectRef.current = () => {
       if (disposed) return;
-      initialMobileResumePending = false;
-      // Reset the per-session "we're done" flags so a Reconnect after a shell
-      // exit *or* a transport-level connection loss actually opens a fresh WS.
-      // The server always spawns a new PTY on connect; the alternative ("must
-      // open a new tab") loses the user's tab state for a recoverable failure.
-      exited = false;
-      wasEverConnected = false;
-      cdpControlled = false;
-      reattachPending = false;
-      reattachCloseCode = 0;
-      reattachCloseReason = "";
+      sessionLifecycle.beginManualReconnect();
       wsConnectedRef.current = false;
       setExitInfo(null);
       setSessionInfo(null);
@@ -1174,19 +858,15 @@ export const useTerminalRuntime = ({
     // stale exit state) and just seed the sid override first — the
     // session-frame handler sees the new id differ from the old one and treats
     // it as a switch (reset terminal + scrollback replay).
-    switchSessionRef.current = (sid: string) => {
-      if (disposed) return;
-      if (sid === liveSessionId) return;
-      nextConnectSid = sid;
-      shouldSpawnFreshSession = false;
+    switchSessionRef.current = (sessionId: string) => {
+      if (disposed || !sessionLifecycle.requestSessionSwitch(sessionId)) return;
       triggerHapticFeedback(HAPTIC_TAP_MS);
       manualReconnectRef.current?.();
     };
 
     spawnFreshSessionRef.current = () => {
       if (disposed) return;
-      nextConnectSid = null;
-      shouldSpawnFreshSession = true;
+      sessionLifecycle.requestFreshSession();
       triggerHapticFeedback(HAPTIC_TAP_MS);
       manualReconnectRef.current?.();
     };
@@ -1214,13 +894,12 @@ export const useTerminalRuntime = ({
         );
       })();
     if (shouldAttemptMobileResume) {
-      initialMobileResumePending = true;
+      sessionLifecycle.startInitialMobileResume();
       void (async () => {
         const sessions = await fetchSessions();
-        if (disposed || !initialMobileResumePending) return;
-        initialMobileResumePending = false;
+        if (disposed) return;
         const resumeSid = sessions === null ? null : resolveResumeSession(sessions);
-        if (resumeSid) nextConnectSid = resumeSid;
+        if (!sessionLifecycle.completeInitialMobileResume(resumeSid)) return;
         connect();
       })();
     } else {
@@ -1240,7 +919,7 @@ export const useTerminalRuntime = ({
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       clearResizeScrollRestore();
-      resetFavicon();
+      tabOutputActivity.reset();
       document.removeEventListener("visibilitychange", onVisibilityChange);
       observer.disconnect();
       terminalTouchInteractions.dispose();

@@ -1,0 +1,1 @@
+export const SHELL_CLOSE_MASK_DELAY_MS = 100;
