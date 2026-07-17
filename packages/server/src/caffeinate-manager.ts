@@ -1,29 +1,18 @@
 import { EventEmitter } from "node:events";
-import type { CaffeinateController } from "./caffeinate-controller.js";
-import type { CaffeinatePreferencesStore } from "./caffeinate-preferences-store.js";
+import { CaffeinateAutomaticDetector } from "./caffeinate-automatic-detector.js";
 import {
   defaultBatteryProbe,
   type BatteryProbe,
-  type BatteryStatus,
 } from "./caffeinate-battery.js";
+import { CaffeinateBatteryGuard } from "./caffeinate-battery-guard.js";
+import type { CaffeinateController } from "./caffeinate-controller.js";
+import type { CaffeinatePreferencesStore } from "./caffeinate-preferences-store.js";
 import {
-  anySessionRunsTrigger,
-  commandMatchesTriggers,
   defaultSnapshotProcesses,
   type SnapshotProcesses,
 } from "./caffeinate-process-match.js";
-import {
-  CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS,
-  CAFFEINATE_AUTO_DEFAULT_COMMANDS,
-  CAFFEINATE_AUTO_POKE_DEBOUNCE_MS,
-  CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS,
-  CAFFEINATE_BATTERY_POLL_MIN_INTERVAL_MS,
-  CAFFEINATE_BATTERY_POLL_TIME_FRACTION,
-  MS_PER_MINUTE,
-} from "./constants.js";
+import { CAFFEINATE_AUTO_DEFAULT_COMMANDS } from "./constants.js";
 import type { CaffeinateMode } from "./types.js";
-
-const EMPTY_FOREGROUND_NAMES: Map<number, string> = new Map();
 
 export interface CaffeinateManagerOptions {
   controller: CaffeinateController;
@@ -107,59 +96,39 @@ interface CaffeinateManagerEvents {
 export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
   private readonly controller: CaffeinateController;
   private readonly store: CaffeinatePreferencesStore;
-  private readonly listSessionPids: () => number[];
-  private readonly snapshotProcesses: SnapshotProcesses;
-  private readonly checkRecentOutput?: (pids: readonly number[], withinMs: number) => boolean;
-  private readonly hasPeerClient: () => boolean;
-  private readonly foregroundNames?: () => Map<number, string>;
-  private readonly batteryProbe: BatteryProbe;
+  private readonly automaticDetector: CaffeinateAutomaticDetector;
+  private readonly batteryGuard: CaffeinateBatteryGuard;
   readonly defaultCommands: readonly string[];
-
-  private autoActive = false;
-  private autoTrigger: string | null = null;
-  // Whether the most recent poll held caffeinate because a peer was attached
-  // (vs. a recognized program). Drives the activity-gate timer arming: a peer
-  // holds until it disconnects (an event that pokes its own re-check), so the
-  // silence-release timer must not arm while one is present.
-  private autoPeerActive = false;
-  private pokeTimer: NodeJS.Timeout | null = null;
-  private activityGateTimer: NodeJS.Timeout | null = null;
-  // The cached battery-suppression flag: true means the machine is on battery
-  // power at or below the configured threshold, so `recompute` suppresses
-  // caffeinate regardless of what the mode wants.
-  private batteryLow = false;
-  // The most recent battery read, used to choose the next adaptive delay. Null
-  // until the first read completes (and is reset to null after a read failure
-  // so computeBatteryDelay's null branch picks MAX — fail-open retries slowly).
-  private lastBatteryStatus: BatteryStatus | null = null;
-  // Whether performBatteryCheck has resolved at least once. Drives
-  // `needsFirstProbe` in `recompute` independently of lastBatteryStatus: a
-  // daemon that boots with the battery already below the floor never briefly
-  // spawns the power assertion before the first read suppresses it, while a
-  // later failed read (lastBatteryStatus -> null) still fail-opens instead of
-  // re-gating caffeinate off forever.
-  private hasProbedBattery = false;
-  private batteryTimer: NodeJS.Timeout | null = null;
-  // Coalesces concurrent battery checks: callers (the timer, setBatteryThreshold,
-  // pollBatteryNow) all funnel through runBatteryCheck, which returns the same
-  // in-flight promise so they all settle on the same result without piling up
-  // battery reads — the promise-tracking analogue of pollAuto's polling flag.
-  private batteryCheckInFlight: Promise<void> | null = null;
-  private polling = false;
-  private pollQueued = false;
   private disposed = false;
 
   constructor(options: CaffeinateManagerOptions) {
     super();
     this.controller = options.controller;
     this.store = options.store;
-    this.listSessionPids = options.listSessionPids;
-    this.snapshotProcesses = options.snapshotProcesses ?? defaultSnapshotProcesses;
     this.defaultCommands = options.defaultCommands ?? CAFFEINATE_AUTO_DEFAULT_COMMANDS;
-    this.checkRecentOutput = options.hasRecentOutput;
-    this.hasPeerClient = options.hasPeerClient ?? (() => false);
-    this.foregroundNames = options.foregroundNames;
-    this.batteryProbe = options.batteryProbe ?? defaultBatteryProbe;
+    this.automaticDetector = new CaffeinateAutomaticDetector({
+      listSessionPids: options.listSessionPids,
+      snapshotProcesses: options.snapshotProcesses ?? defaultSnapshotProcesses,
+      defaultCommands: this.defaultCommands,
+      getCommands: () => this.store.getCommands(),
+      getMode: () => this.mode,
+      getActivityGate: () => this.activityGate,
+      getPeerKeepAwake: () => this.peerKeepAwake,
+      isSupported: () => this.supported,
+      hasRecentOutput: options.hasRecentOutput,
+      hasPeerClient: options.hasPeerClient ?? (() => false),
+      foregroundNames: options.foregroundNames,
+      emitChange: () => this.emit("change"),
+      recompute: () => this.recompute(),
+    });
+    this.batteryGuard = new CaffeinateBatteryGuard({
+      batteryProbe: options.batteryProbe ?? defaultBatteryProbe,
+      getBatteryThreshold: () => this.batteryThreshold,
+      isSupported: () => this.supported,
+      wantsActive: () => this.modeWantsActive(),
+      emitChange: () => this.emit("change"),
+      recompute: () => this.recompute(),
+    });
 
     // An unexpected death of the caffeinate process flips controller state; pass
     // that through so every tab rebroadcasts the authoritative `active`.
@@ -168,7 +137,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.recompute();
     // One snapshot at startup in case a trigger is already running before any
     // event arrives; from here on detection is purely event-driven.
-    if (this.mode === "automatic" && this.supported) void this.pollAuto();
+    if (this.mode === "automatic" && this.supported) void this.automaticDetector.poll();
   }
 
   get supported(): boolean {
@@ -200,30 +169,19 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
   }
 
   get activeTrigger(): string | null {
-    return this.autoActive ? this.autoTrigger : null;
+    return this.automaticDetector.activeTrigger;
   }
 
-  // Whether automatic mode is currently holding caffeinate because a peer (a
-  // second client on a session) is attached — independent of the program
-  // trigger, so the UI can highlight the peer setting row even when a program
-  // is also active (in which case `activeTrigger` carries the program name).
   get peerActive(): boolean {
-    return this.autoPeerActive;
+    return this.automaticDetector.peerActive;
   }
 
   setMode(mode: CaffeinateMode): void {
     if (this.disposed) return;
     this.store.setMode(mode);
-    // Leaving automatic clears the cached detection so a later return to
-    // automatic re-derives it from scratch rather than trusting a stale flag.
-    if (mode !== "automatic") {
-      this.autoActive = false;
-      this.autoTrigger = null;
-      this.autoPeerActive = false;
-      this.clearActivityGateTimer();
-    }
+    this.automaticDetector.modeChanged(mode);
     this.recompute();
-    if (mode === "automatic" && this.supported) void this.pollAuto();
+    if (mode === "automatic" && this.supported) void this.automaticDetector.poll();
     this.emit("change");
   }
 
@@ -231,23 +189,14 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     if (this.disposed) return;
     this.store.setCommands(commands);
     // The trigger set changed; re-derive automatic detection immediately.
-    if (this.mode === "automatic" && this.supported) void this.pollAuto();
+    if (this.mode === "automatic" && this.supported) void this.automaticDetector.poll();
     this.emit("change");
   }
 
   setActivityGate(enabled: boolean): void {
     if (this.disposed) return;
     this.store.setActivityGate(enabled);
-    if (enabled) {
-      // Gate just turned on — re-check whether caffeinate should still be
-      // active given current output activity.
-      if (this.mode === "automatic" && this.supported) void this.pollAuto();
-    } else {
-      // Gate turned off — no need to re-snapshot; just recompute (which will
-      // drop the output check from the condition).
-      this.clearActivityGateTimer();
-      this.recompute();
-    }
+    this.automaticDetector.activityGateChanged(enabled);
     this.emit("change");
   }
 
@@ -256,126 +205,20 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.store.setPeerKeepAwake(enabled);
     // The trigger set changed; re-derive automatic detection immediately so a
     // peer that was already attached engages (or releases) at once.
-    if (this.mode === "automatic" && this.supported) void this.pollAuto();
+    if (this.mode === "automatic" && this.supported) void this.automaticDetector.poll();
     this.emit("change");
   }
 
-  // Cheap, debounced nudge to re-check automatic detection in response to an
-  // event (a session's foreground process changing, or a session
-  // connecting/disconnecting). The debounce coalesces a burst of simultaneous
-  // events into a single `ps` snapshot — it fires once and does not repeat.
   pokeAuto(): void {
-    if (this.disposed || this.mode !== "automatic" || !this.supported) return;
-    if (this.pokeTimer !== null) return;
-    this.pokeTimer = setTimeout(() => {
-      this.pokeTimer = null;
-      void this.pollAuto();
-    }, CAFFEINATE_AUTO_POKE_DEBOUNCE_MS);
-    this.pokeTimer.unref?.();
+    this.automaticDetector.poke();
   }
 
-  // Record that output just arrived from a session. When the activity gate is
-  // on, this resets the trailing-edge timer that checks whether caffeinate
-  // should stay active. Output arriving while caffeinate is inactive is a
-  // no-op (the foreground-change poke already handles the transition).
   noteOutputActivity(): void {
-    if (this.disposed || this.mode !== "automatic" || !this.activityGate || !this.supported) {
-      return;
-    }
-    if (!this.autoActive) {
-      // Caffeinate is off but output just arrived — nudge a re-check
-      // (the registry already recorded the fresh output timestamp).
-      this.pokeAuto();
-      return;
-    }
-    // A peer is holding caffeinate; output is irrelevant to it. The peer
-    // releases on disconnect (an event that pokes its own re-check), so the
-    // silence timer must not arm while one is present — otherwise the trailing
-    // edge would poll on a timer and defeat the event-driven design.
-    if (this.autoPeerActive) return;
-    this.clearActivityGateTimer();
-    // Schedule a re-check after the debounce window. If more output arrives
-    // before this fires, the timer resets (trailing-edge).
-    this.activityGateTimer = setTimeout(() => {
-      this.activityGateTimer = null;
-      void this.pollAuto();
-    }, CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS);
-    this.activityGateTimer.unref?.();
+    this.automaticDetector.noteOutputActivity();
   }
 
-  // Force an immediate automatic re-check and resolve when it settles. Used by
-  // tests; production code re-checks via the event-driven debounced pokeAuto.
   pollNow(): Promise<void> {
-    return this.pollAuto();
-  }
-
-  dispose(): void {
-    this.disposed = true;
-    if (this.pokeTimer !== null) {
-      clearTimeout(this.pokeTimer);
-      this.pokeTimer = null;
-    }
-    this.clearActivityGateTimer();
-    this.clearBatteryTimer();
-    this.controller.dispose();
-    this.removeAllListeners();
-  }
-
-  // The effective keep-awake triggers: fixed defaults plus the user's customs,
-  // lowercased for case-insensitive matching.
-  private triggerSet(): Set<string> {
-    const triggers = new Set<string>();
-    for (const command of this.defaultCommands) triggers.add(command.toLowerCase());
-    for (const command of this.store.getCommands()) triggers.add(command.toLowerCase());
-    return triggers;
-  }
-
-  // Whether any live session's shell-hook foreground name (OSC 7777 fg;<token>)
-  // is itself a keep-awake trigger — the cheap, walk-free path used before
-  // falling back to the `ps` process-tree snapshot. Returns the matching
-  // trigger (lowercased) or null when no session's name matches.
-  private hookTriggerFor(pids: readonly number[], triggers: ReadonlySet<string>): string | null {
-    const names = this.foregroundNames?.() ?? EMPTY_FOREGROUND_NAMES;
-    for (const pid of pids) {
-      const name = names.get(pid);
-      if (name) {
-        const match = commandMatchesTriggers(name, triggers);
-        if (match) return match;
-      }
-    }
-    return null;
-  }
-
-  private recompute(): void {
-    const wantActive = this.modeWantsActive();
-    const guardApplies = this.supported && this.batteryThreshold !== null;
-    // While the guard is on but we've never read the battery, hold off engaging
-    // until that first read resolves — otherwise a daemon that boots with the
-    // battery already below the floor briefly spawns the power assertion before
-    // the probe suppresses it. Subsequent arms use the cached flag instead.
-    const needsFirstProbe = guardApplies && !this.hasProbedBattery;
-    const desired = wantActive && !(guardApplies && (this.batteryLow || needsFirstProbe));
-    this.controller.setActive(desired);
-    if (wantActive && guardApplies) {
-      // Start (or keep) the adaptive battery check armed. The next delay is
-      // derived from the last status, or an immediate probe when there's no
-      // cached reading yet.
-      this.scheduleBatteryCheck(this.lastBatteryStatus);
-    } else {
-      this.clearBatteryTimer();
-    }
-  }
-
-  private modeWantsActive(): boolean {
-    const mode = this.mode;
-    return mode === "on" || (mode === "automatic" && this.autoActive);
-  }
-
-  private clearActivityGateTimer(): void {
-    if (this.activityGateTimer !== null) {
-      clearTimeout(this.activityGateTimer);
-      this.activityGateTimer = null;
-    }
+    return this.automaticDetector.poll();
   }
 
   // Force an immediate battery re-check and resolve when it settles. Used by
@@ -383,7 +226,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
   // in-flight check (so concurrent test calls see the same resolved state)
   // rather than queueing a second probe.
   pollBatteryNow(): Promise<void> {
-    return this.runBatteryCheck();
+    return this.batteryGuard.pollNow();
   }
 
   // Set the persisted battery floor. `null` disables the guard. Persists
@@ -394,215 +237,24 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     if (this.disposed) return;
     this.store.setBatteryThreshold(percent);
     this.emit("change");
-    // Clear any pending adaptive check so the next read re-arms with a delay
-    // derived from the new threshold (and a fresh status), not the old one.
-    this.clearBatteryTimer();
-    if (!this.supported || percent === null) {
-      // Guard disabled: clear any stale suppression so it can't keep
-      // caffeinate off after the user turned the floor off.
-      this.batteryLow = false;
-      this.recompute();
-      return;
-    }
-    if (this.modeWantsActive()) {
-      // Probe immediately so an already-low battery stops caffeinate at once
-      // (the adaptive arming would otherwise wait up to MAX_INTERVAL for the
-      // first read, since lastBatteryStatus is stale/null until this resolves).
-      void this.runBatteryCheck();
-    }
+    this.batteryGuard.thresholdChanged(percent);
   }
 
-  // Single entry point for every battery probe. Coalesces concurrent callers
-  // onto one in-flight promise so the `pmset` call fires at most once per tick
-  // even if the timer, setBatteryThreshold, and a manual pollBatteryNow all race.
-  private runBatteryCheck(): Promise<void> {
-    if (this.batteryCheckInFlight !== null) return this.batteryCheckInFlight;
-    const promise = this.performBatteryCheck().finally(() => {
-      if (this.batteryCheckInFlight === promise) this.batteryCheckInFlight = null;
-    });
-    this.batteryCheckInFlight = promise;
-    return promise;
+  dispose(): void {
+    this.disposed = true;
+    this.automaticDetector.dispose();
+    this.batteryGuard.dispose();
+    this.controller.dispose();
+    this.removeAllListeners();
   }
 
-  private async performBatteryCheck(): Promise<void> {
-    if (this.disposed) return;
-    const threshold = this.batteryThreshold;
-    // Nothing to gate on: unsupported, guard disabled, or nothing wanting
-    // active. The last case keeps the design claim that reads happen only while
-    // a mode wants caffeinate active (a probe here would be wasted work and
-    // couldn't change `desired`, since `wantActive` already forces it false).
-    if (!this.supported || threshold === null || !this.modeWantsActive()) {
-      this.clearBatteryTimer();
-      return;
-    }
-    const status = await this.batteryProbe();
-    if (this.disposed) return;
-    this.lastBatteryStatus = status;
-    this.hasProbedBattery = true;
-    // Fail-open on read failure (null): a missing battery or a transient pmset
-    // error cannot take keep-awake away from the user. The scheduler stays
-    // armed via the recompute below so a later successful read can re-impose
-    // the floor.
-    const nextLow = status !== null && status.isOnBattery && status.percent <= threshold;
-    if (nextLow !== this.batteryLow) {
-      this.batteryLow = nextLow;
-      this.emit("change");
-    }
-    this.recompute();
+  private recompute(): void {
+    const wantActive = this.modeWantsActive();
+    this.controller.setActive(this.batteryGuard.shouldActivate(wantActive));
   }
 
-  private scheduleBatteryCheck(status: BatteryStatus | null): void {
-    if (this.disposed) return;
-    // Coalesce: if a check is already armed, let it run — it reschedules
-    // adaptively from a fresh read when it completes, so re-entry here is a no-op.
-    if (this.batteryTimer !== null) return;
-    if (!this.hasProbedBattery) {
-      // Never probed: fire immediately (coalesced by runBatteryCheck) so the
-      // first arm doesn't wait MAX before applying the floor — a daemon that
-      // boots with the battery already below the threshold suppresses at once.
-      void this.runBatteryCheck();
-      return;
-    }
-    // A null status here means a prior probe failed or found no battery:
-    // computeBatteryDelay maps that to MAX so we retry slowly instead of
-    // re-firing immediately and busy-looping on a persistently-failing read.
-    const delay = this.computeBatteryDelay(status);
-    this.batteryTimer = setTimeout(() => {
-      this.batteryTimer = null;
-      void this.runBatteryCheck();
-    }, delay);
-    this.batteryTimer.unref?.();
-  }
-
-  private computeBatteryDelay(status: BatteryStatus | null): number {
-    const threshold = this.batteryThreshold;
-    if (threshold === null) return CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS;
-    // Already suppressed: poll fast so charging back above the threshold or
-    // plugging in resumes promptly. Bounded by how long the machine stays
-    // below the floor — which should be short (it's about to lose power).
-    if (this.batteryLow) return CAFFEINATE_BATTERY_POLL_MIN_INTERVAL_MS;
-    if (status === null || !status.isOnBattery) return CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS;
-    if (status.minutesToEmpty === null) return CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS;
-    // Half of the interpolated time-to-threshold: the OS estimate (minutes to
-    // 0%) scaled by the charge fraction still above the floor. Halving gives a
-    // 2× buffer against the EWMA lagging real discharge (and the active program
-    // draining faster than the idle minutes the average was computed over), so
-    // a stale-high estimate still catches the crossing in time rather than
-    // sleeping past it. Clamped to [MIN, MAX] below.
-    const remaining = status.percent - threshold;
-    if (remaining <= 0) return CAFFEINATE_BATTERY_POLL_MIN_INTERVAL_MS;
-    const fractionAbove = remaining / status.percent;
-    const interpolatedMs = status.minutesToEmpty * MS_PER_MINUTE * fractionAbove;
-    const scheduledMs = interpolatedMs / CAFFEINATE_BATTERY_POLL_TIME_FRACTION;
-    return Math.max(
-      CAFFEINATE_BATTERY_POLL_MIN_INTERVAL_MS,
-      Math.min(scheduledMs, CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS),
-    );
-  }
-
-  private clearBatteryTimer(): void {
-    if (this.batteryTimer !== null) {
-      clearTimeout(this.batteryTimer);
-      this.batteryTimer = null;
-    }
-  }
-
-  private async pollAuto(): Promise<void> {
-    if (this.disposed || this.mode !== "automatic" || !this.supported) return;
-    // Serialize: if a snapshot is already running, run exactly one more after it
-    // so the latest state always wins without piling up `ps` calls.
-    if (this.polling) {
-      this.pollQueued = true;
-      return;
-    }
-    this.polling = true;
-    try {
-      const pids = this.listSessionPids();
-      let programActive = false;
-      let programTrigger: string | null = null;
-      if (pids.length > 0) {
-        const triggers = this.triggerSet();
-        // Short-circuit: if any live session's hook-reported foreground name is
-        // itself a trigger, engage without a `ps` snapshot (the common case —
-        // the user runs vim/ffmpeg/etc. directly). Only fall back to the
-        // process-tree walk when no hook name matches, which still catches
-        // triggers that are children of the foreground command (make -> ffmpeg)
-        // or running in an unhooked shell (sh/dash).
-        programTrigger = this.hookTriggerFor(pids, triggers);
-        if (programTrigger === null) {
-          const snapshot = await this.snapshotProcesses();
-          programTrigger = anySessionRunsTrigger(pids, snapshot, triggers);
-        }
-        if (programTrigger) {
-          if (!this.activityGate) {
-            programActive = true;
-          } else if (this.checkRecentOutput) {
-            programActive = this.checkRecentOutput(pids, CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS);
-          }
-        }
-      }
-      if (this.disposed || this.mode !== "automatic") return;
-      // A peer (a second client on a session) holds caffeinate independently of
-      // the program detection and bypasses the activity gate: an idle-but-
-      // attached phone must not release the machine to sleep. The peer's hold is
-      // surfaced via `peerActive` (independent of `activeTrigger`, which carries
-      // the program name) so the UI can highlight each setting row on its own
-      // when both are active.
-      const peerActive = this.peerKeepAwake && this.hasPeerClient();
-      const next = programActive || peerActive;
-      const prevAutoActive = this.autoActive;
-      const prevAutoTrigger = this.autoTrigger;
-      const prevAutoPeerActive = this.autoPeerActive;
-      this.autoActive = next;
-      // `autoTrigger` carries only the program trigger (a command name or null);
-      // the peer trigger is surfaced separately via `peerActive` so the UI can
-      // highlight each setting row independently when both are active.
-      this.autoTrigger = next ? programTrigger : null;
-      this.autoPeerActive = peerActive;
-      // Broadcast on any change to the broadcastable derived state, not just
-      // when caffeinate turns on/off: the trigger identity (which program, or
-      // whether a peer is holding) can flip while caffeinate stays continuously
-      // active (a program starting while a peer is attached, a peer leaving
-      // while a program runs). Without these the UI keeps a stale `activeTrigger`
-      // / `peerActive` and the wrong row (or none) highlights.
-      if (
-        next !== prevAutoActive ||
-        this.autoTrigger !== prevAutoTrigger ||
-        this.autoPeerActive !== prevAutoPeerActive
-      ) {
-        this.emit("change");
-      }
-      this.recompute();
-      if (peerActive) {
-        // A peer now holds caffeinate; any program-silence timer armed before
-        // the peer joined is obsolete (the peer releases on disconnect, not
-        // on silence). Clear it so a stale trailing edge can't fire a spurious
-        // poll and re-arm into a timer-driven loop.
-        this.clearActivityGateTimer();
-      }
-      // Arm the silence-release timer only when a gated program is the SOLE
-      // reason caffeinate is active. A peer holds until it disconnects (which
-      // pokes its own re-check via onSessionActivity), so silence must not
-      // release while one is present — and a program active alongside a peer is
-      // also covered by the peer's hold.
-      if (this.activityGate && programActive && !peerActive) {
-        this.armActivityGateTimerIfNeeded();
-      }
-    } finally {
-      this.polling = false;
-      if (this.pollQueued && !this.disposed) {
-        this.pollQueued = false;
-        void this.pollAuto();
-      }
-    }
-  }
-
-  private armActivityGateTimerIfNeeded(): void {
-    if (this.activityGateTimer !== null) return;
-    this.activityGateTimer = setTimeout(() => {
-      this.activityGateTimer = null;
-      void this.pollAuto();
-    }, CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS);
-    this.activityGateTimer.unref?.();
+  private modeWantsActive(): boolean {
+    const mode = this.mode;
+    return mode === "on" || (mode === "automatic" && this.automaticDetector.active);
   }
 }
