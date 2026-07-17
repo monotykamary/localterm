@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.66.9
+
+### Patch Changes
+
+- 8804b0e: Refactor terminal, automation, settings, diff, session, Git, CDP, caffeinate, and CLI internals into focused modules while preserving public APIs and runtime behavior.
+
 ## 2.66.8
 
 ## 2.66.7
