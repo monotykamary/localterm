@@ -514,6 +514,8 @@ export const GIT_CACHE_TTL_MS = 5_000;
 // git-dirty signal. The branch is part of the cache key, so switching branches
 // naturally misses and refetches.
 export const GIT_PR_CACHE_TTL_MS = 60_000;
+export const GIT_PR_FETCH_LIMIT = 30;
+export const GIT_GITHUB_REQUEST_TIMEOUT_MS = 8_000;
 
 // "Branch" diff mode compares the working tree against a base branch (via
 // merge-base). The GitHub REST API is consulted to discover the current branch's
