@@ -7,7 +7,7 @@ import {
   SESSION_SHORT_ID_LENGTH,
   SESSION_TIMEOUT_EXIT_CODE,
 } from "../constants.js";
-import { reportDaemonDown } from "../utils/daemon-api.js";
+import { daemonBaseUrl, daemonFetch, reportDaemonDown } from "../utils/daemon-api.js";
 import { shortSessionId } from "../utils/short-session-id.js";
 import { fetchSessionApi } from "./session-api.js";
 import { resolveDaemonUrl } from "../utils/portless.js";
@@ -104,12 +104,17 @@ const renderExecResult = (result: ExecResult, json: boolean): void => {
   }
   if (result.output) process.stdout.write(result.output);
   if (result.timedOut) {
-    console.error(kleur.yellow(`\n[timed out after ${Math.round(result.durationMs / MILLISECONDS_PER_SECOND)}s]`));
+    console.error(
+      kleur.yellow(
+        `\n[timed out after ${Math.round(result.durationMs / MILLISECONDS_PER_SECOND)}s]`,
+      ),
+    );
     process.exitCode = SESSION_TIMEOUT_EXIT_CODE;
     return;
   }
   if (result.truncated) console.error(kleur.dim("\n[output truncated]"));
-  process.exitCode = result.exitCode === null ? 1 : Math.min(result.exitCode, SESSION_MAX_EXIT_CODE);
+  process.exitCode =
+    result.exitCode === null ? 1 : Math.min(result.exitCode, SESSION_MAX_EXIT_CODE);
 };
 
 // `localterm session ls [--json]` — every live PTY (attached, dormant, or
@@ -231,7 +236,9 @@ const runNew = async (options: {
     console.log(JSON.stringify(body.session));
     return;
   }
-  console.log(kleur.green(`✓ session ${shortSessionId(body.session.id)} (${body.session.shellName})`));
+  console.log(
+    kleur.green(`✓ session ${shortSessionId(body.session.id)} (${body.session.shellName})`),
+  );
   console.log(kleur.dim(`  cwd: ${body.session.cwd}`));
   console.log(
     kleur.dim(

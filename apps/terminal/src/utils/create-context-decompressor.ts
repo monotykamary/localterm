@@ -1,3 +1,8 @@
+interface ContextDecompressWaitState {
+  requiredLength: number;
+  resolve: (() => void) | null;
+}
+
 // Persistent Brotli decompressor for the context-takeover mode ("br-ctx"). One
 // per PTY (created on the {compress} frame, released on {session} or teardown).
 // The DecompressionStream doesn't end per frame, so a concurrent reader runs for
@@ -11,8 +16,7 @@ export const createContextDecompressor = () => {
   const reader = stream.readable.getReader();
   const chunks: Uint8Array[] = [];
   let bufferedLength = 0;
-  let waitingForLength = 0;
-  let resolveWaitingDecompress: (() => void) | null = null;
+  const waitState: ContextDecompressWaitState = { requiredLength: 0, resolve: null };
   void (async () => {
     try {
       while (true) {
@@ -22,10 +26,10 @@ export const createContextDecompressor = () => {
           chunks.push(value);
           bufferedLength += value.length;
         }
-        if (resolveWaitingDecompress !== null && bufferedLength >= waitingForLength) {
-          const resolve = resolveWaitingDecompress;
-          resolveWaitingDecompress = null;
-          resolve();
+        const resolveWaitingDecompress = waitState.resolve;
+        if (resolveWaitingDecompress !== null && bufferedLength >= waitState.requiredLength) {
+          waitState.resolve = null;
+          resolveWaitingDecompress();
         }
       }
     } catch {
@@ -38,9 +42,9 @@ export const createContextDecompressor = () => {
   ): Promise<Uint8Array> => {
     await writer.write(compressed);
     if (bufferedLength < rawSize) {
-      waitingForLength = rawSize;
+      waitState.requiredLength = rawSize;
       await new Promise<void>((resolve) => {
-        resolveWaitingDecompress = resolve;
+        waitState.resolve = resolve;
       });
     }
     const output = new Uint8Array(rawSize);
