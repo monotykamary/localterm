@@ -215,6 +215,7 @@ import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer
 import { computePtyViewportOverlay } from "@/utils/compute-pty-viewport-overlay";
 import { detectOutputCompressMode } from "@/utils/detect-output-compress-mode";
 import { isHerdrProcess } from "@/utils/is-herdr-process";
+import { getTerminalMinimumContrastRatio } from "@/utils/get-terminal-minimum-contrast-ratio";
 import { isLightTerminalTheme } from "@/utils/is-light-terminal-theme";
 import { isTerminalCursorTap } from "@/utils/is-terminal-cursor-tap";
 import { dispatchTerminalMouseTap } from "@/utils/dispatch-terminal-mouse-tap";
@@ -1080,6 +1081,7 @@ export const Terminal = () => {
       fontFamily: familyForFont(initialFont, initialNerdFontEnabledRef.current),
       fontSize: initialFontSizeRef.current,
       lineHeight: initialLineHeightRef.current,
+      minimumContrastRatio: getTerminalMinimumContrastRatio(initialTheme),
       scrollback: initialScrollbackRef.current,
       theme: {
         ...initialTheme.colors,

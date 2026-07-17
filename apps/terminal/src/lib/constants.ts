@@ -29,6 +29,8 @@ export const DEFAULT_TERMINAL_SCROLL_ON_USER_INPUT = true;
 export const FALLBACK_TERMINAL_BACKGROUND_HEX = "#101010";
 export const FALLBACK_TERMINAL_FOREGROUND_HEX = "#ffffff";
 export const DARK_TERMINAL_THEME_LIGHTNESS_THRESHOLD_PERCENT = 50;
+export const DISABLED_TERMINAL_MINIMUM_CONTRAST_RATIO = 1;
+export const LIGHT_TERMINAL_MINIMUM_CONTRAST_RATIO = 4.5;
 export const DEFAULT_DOCUMENT_TITLE = "localterm";
 export const DEAD_SESSION_TITLE_PREFIX = "† ";
 // Title and per-session tag for desktop notifications shown via the service

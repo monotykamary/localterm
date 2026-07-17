@@ -39,6 +39,7 @@ import {
   subscribeStoredCustomThemes,
 } from "@/utils/stored-custom-themes";
 import { applyTerminalAppearance } from "@/utils/apply-terminal-appearance";
+import { getTerminalMinimumContrastRatio } from "@/utils/get-terminal-minimum-contrast-ratio";
 import {
   loadStoredDefaultCwd,
   storeDefaultCwd,
@@ -282,8 +283,13 @@ export const useTerminalSettings = ({
     if (!terminalReady) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
+    const minimumContrastRatio = getTerminalMinimumContrastRatio(effectiveTheme);
+    if (terminal.options.minimumContrastRatio !== minimumContrastRatio) {
+      terminal.options.minimumContrastRatio = minimumContrastRatio;
+    }
+    // Theme changes rebuild the glyph model, so the redraw must see the new contrast floor.
     terminal.options.theme = effectiveThemeWithExtendedPalette;
-  }, [terminalReady, effectiveThemeWithExtendedPalette]);
+  }, [terminalReady, effectiveTheme, effectiveThemeWithExtendedPalette]);
 
   useEffect(() => {
     if (!terminalReady) return;

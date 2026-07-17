@@ -5,6 +5,8 @@ import {
   DEFAULT_MUTE_EMOJI_COLORS,
   DEFAULT_TERMINAL_FONT_SIZE_PX,
   DEFAULT_TERMINAL_LINE_HEIGHT,
+  DISABLED_TERMINAL_MINIMUM_CONTRAST_RATIO,
+  LIGHT_TERMINAL_MINIMUM_CONTRAST_RATIO,
   RECONNECT_DELAY_MS,
   TERMINAL_CURSOR_BLINK_STORAGE_KEY,
   TERMINAL_CURSOR_STYLE_STORAGE_KEY,
@@ -1281,6 +1283,17 @@ describe("Terminal theme picker", () => {
     render(<Terminal />);
     const seededTheme = fakeXterms[0]?.getOptions().theme as { background?: string } | undefined;
     expect(seededTheme?.background).toBe("#101010");
+    expect(fakeXterms[0]?.getOptions().minimumContrastRatio).toBe(
+      DISABLED_TERMINAL_MINIMUM_CONTRAST_RATIO,
+    );
+  });
+
+  it("seeds xterm with an accessible contrast floor for a stored light theme", () => {
+    installFakeLocalStorage({ "localterm:terminal-theme-id": "github-light" });
+    render(<Terminal />);
+    expect(fakeXterms[0]?.getOptions().minimumContrastRatio).toBe(
+      LIGHT_TERMINAL_MINIMUM_CONTRAST_RATIO,
+    );
   });
 
   it("seeds xterm with the stored theme on mount", () => {
@@ -1317,6 +1330,23 @@ describe("Terminal theme picker", () => {
       "#282a36",
     );
     expect(document.body.style.background).toBe("rgb(40, 42, 54)");
+  });
+
+  it("updates the contrast floor when a light theme is pushed live", () => {
+    installFakeLocalStorage();
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({
+        type: "themes",
+        activeThemeId: "github-light",
+        customThemes: [],
+        initialized: true,
+      });
+    });
+    expect(fakeXterms[0]?.getOptions().minimumContrastRatio).toBe(
+      LIGHT_TERMINAL_MINIMUM_CONTRAST_RATIO,
+    );
   });
 
   it("seeds xterm and LocalTerm chrome from a cached custom theme", () => {

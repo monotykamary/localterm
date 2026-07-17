@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>localterm light-theme rendering diagnostic</title>
+    <link rel="stylesheet" href="/xterm/css/xterm.css" />
+    <style>
+      @font-face {
+        font-family: "Geist Mono";
+        src: url("/fonts/geist-mono-latin-400-normal.woff2") format("woff2");
+        font-weight: 400;
+      }
+      @font-face {
+        font-family: "Geist Mono";
+        src: url("/fonts/geist-mono-latin-700-normal.woff2") format("woff2");
+        font-weight: 700;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      :root {
+        color-scheme: dark;
+        font-family: "Geist Mono", ui-monospace, monospace;
+        background: #111318;
+        color: #edf0f7;
+      }
+      body {
+        margin: 0;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        border-bottom: 1px solid #ffffff18;
+        background: #171a20;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      h1 {
+        margin-right: auto;
+        font-size: 15px;
+      }
+      button,
+      input,
+      select {
+        border: 1px solid #ffffff26;
+        border-radius: 6px;
+        background: #242832;
+        color: inherit;
+        font: inherit;
+      }
+      button {
+        padding: 6px 11px;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: #8ab4ff;
+      }
+      button:disabled {
+        cursor: wait;
+        opacity: 0.6;
+      }
+      input {
+        width: 62px;
+        padding: 5px 7px;
+      }
+      select {
+        padding: 5px 7px;
+      }
+      label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: #aab1c0;
+        font-size: 12px;
+      }
+      main {
+        display: grid;
+        gap: 18px;
+        padding: 16px;
+      }
+      #status,
+      #summary {
+        border: 1px solid #ffffff18;
+        border-radius: 8px;
+        background: #171a20;
+        padding: 10px 12px;
+        white-space: pre-wrap;
+      }
+      #status {
+        color: #aab1c0;
+      }
+      #summary {
+        display: grid;
+        gap: 6px;
+      }
+      .theme-section {
+        display: grid;
+        gap: 10px;
+        padding: 14px;
+        border: 1px solid #ffffff18;
+        border-radius: 10px;
+        background: #171a20;
+      }
+      .theme-heading {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .theme-heading h2 {
+        font-size: 14px;
+      }
+      .theme-heading span,
+      .metrics {
+        color: #aab1c0;
+        font-size: 11px;
+      }
+      .renderer-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+        gap: 10px;
+      }
+      .renderer-card {
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid #00000035;
+        border-radius: 8px;
+      }
+      .renderer-bar {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 5px 8px;
+        color: #111318;
+        background: #e4e7ed;
+        font-size: 11px;
+      }
+      .terminal-host {
+        overflow: hidden;
+        padding: 7px 9px;
+      }
+      .contrast-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+        gap: 5px;
+      }
+      .contrast-swatch {
+        display: grid;
+        grid-template-columns: 16px 1fr auto;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        padding: 4px 6px;
+        border: 1px solid #ffffff12;
+        border-radius: 5px;
+        font-size: 10px;
+      }
+      .contrast-dot {
+        width: 14px;
+        height: 14px;
+        border: 1px solid #00000040;
+        border-radius: 3px;
+      }
+      .contrast-ratio {
+        font-variant-numeric: tabular-nums;
+      }
+      [data-grade="pass"] .contrast-ratio {
+        color: #91d7a3;
+      }
+      [data-grade="low"] .contrast-ratio {
+        color: #f3c969;
+      }
+      [data-grade="fail"] .contrast-ratio {
+        color: #ff8f9c;
+      }
+      .verdict {
+        padding: 7px 9px;
+        border-left: 3px solid #8ab4ff;
+        background: #ffffff09;
+        color: #d9deea;
+        font-size: 11px;
+      }
+      .measurement-host {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: -1;
+        opacity: 0;
+        pointer-events: none;
+      }
+      code {
+        color: #a9c8ff;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Light-theme rendering diagnostic</h1>
+      <label
+        >theme
+        <select id="theme">
+          <option value="github-light">GitHub Light</option>
+          <option value="solarized-light">Solarized Light</option>
+          <option value="catppuccin-latte">Catppuccin Latte</option>
+        </select>
+      </label>
+      <label>font px <input id="font-size" type="number" min="10" max="24" value="14" /></label>
+      <label
+        >contrast floor
+        <select id="contrast-floor">
+          <option value="1">off (1.0)</option>
+          <option value="4.5">4.5:1</option>
+        </select>
+      </label>
+      <button id="run">Run diagnostic</button>
+    </header>
+    <main>
+      <div id="status">Ready.</div>
+      <div id="summary">
+        Run the diagnostic to compare the current alpha-mask renderer with pinned upstream xterm.
+      </div>
+      <div id="themes"></div>
+    </main>
+    <script type="module" src="/harness/main.mjs"></script>
+  </body>
+</html>
