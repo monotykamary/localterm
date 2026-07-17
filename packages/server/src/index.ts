@@ -47,6 +47,7 @@ import {
   FRIENDLY_HOSTNAME,
   GIT_DIRTY_THROTTLE_MS,
   GIT_MAX_REF_LENGTH,
+  HERDR_THEME_SYNC_DEBOUNCE_MS,
   HTTP_STATUS_ACCEPTED,
   HTTP_STATUS_BAD_REQUEST,
   HTTP_STATUS_CONFLICT,
@@ -88,6 +89,8 @@ import {
 } from "./constants.js";
 import { getDefaultShell, listKnownShells, resolveShellOverride } from "./default-shell.js";
 import { resolveWindowId } from "./utils/resolve-window-id.js";
+import { getHerdrConfigPaths } from "./utils/get-herdr-config-paths.js";
+import { isHerdrProcess } from "./utils/is-herdr-process.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
 import { openChromeInspect } from "./utils/open-chrome-inspect.js";
 import { readServerVersion } from "./utils/read-server-version.js";
@@ -112,6 +115,7 @@ import { createDefaultSecretBackend, type SecretBackend } from "./secret-backend
 import { SecretStore } from "./secret-store.js";
 import { ProcessStore } from "./process-store.js";
 import { ThemeStore } from "./theme-store.js";
+import { HerdrThemeSync } from "./herdr-theme-sync.js";
 import { FontStore } from "./font-store.js";
 import { parseImportedTheme } from "./theme-parser.js";
 import { isBuiltinThemeId, BUILTIN_THEME_IDS } from "./terminal-themes.js";
@@ -2133,6 +2137,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const shimsDir = path.join(stateDirectory, SECRETS_SHIMS_DIRNAME);
   // One pi session file per thread-mode agent automation, resumed each fire.
   const agentSessionsDir = path.join(stateDirectory, AUTOMATION_AGENT_SESSIONS_DIRNAME);
+  let herdrThemeSync: HerdrThemeSync | null = null;
+  const refreshHerdrThemeSyncState = (): void => {
+    const hasHerdrForeground = [...registry.foregroundNames().values()].some(isHerdrProcess);
+    herdrThemeSync?.setActive(hasHerdrForeground);
+  };
   const registry = new SessionManager({
     shimsDir,
     getGraceMs: () => {
@@ -2145,6 +2154,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       onSessionActivity: () => {
         caffeinateManager.pokeAuto();
         scheduleWorkspaceSnapshot();
+        refreshHerdrThemeSyncState();
       },
       onSessionEvent: (event, cwd) => {
         sessionEventManager.onSessionEvent(event, cwd);
@@ -2496,6 +2506,25 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       safeSend(clientSocket, payload);
     }
   };
+
+  herdrThemeSync = new HerdrThemeSync({
+    configPaths: getHerdrConfigPaths({
+      environment: process.env,
+      homeDirectory: os.homedir(),
+    }),
+    debounceMs: HERDR_THEME_SYNC_DEBOUNCE_MS,
+    onThemeChange: (themeId) => {
+      if (!isBuiltinThemeId(themeId) || themeStore.getActive() === themeId) return;
+      try {
+        themeStore.setActive(themeId);
+        broadcastThemes();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`unable to synchronize Herdr theme: ${message}`);
+      }
+    },
+  });
+  refreshHerdrThemeSyncState();
 
   // Push the full font state to every tab on any mutation (set/family/toggle/
   // migrate) so open terminals reflect a CLI or other-tab change instantly —
@@ -3402,6 +3431,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     webhookTriggerManager.dispose();
     caffeinateManager.dispose();
     processActivityWatcher?.dispose();
+    herdrThemeSync?.dispose();
     cdpClient?.close();
     registry.disposeAll();
     // Forcibly tear down every WS first. node-pty + ws upgraded sockets

@@ -131,6 +131,7 @@ export const PROCESSES_FILE_VERSION = 1;
 export const PROCESSES_FILENAME = "processes.json";
 export const THEMES_FILENAME = "themes.json";
 export const THEMES_FILE_VERSION = 1;
+export const HERDR_THEME_SYNC_DEBOUNCE_MS = 75;
 export const FONTS_FILENAME = "fonts.json";
 export const FONTS_FILE_VERSION = 1;
 export const SECRETS_SHIMS_DIRNAME = "shims";
