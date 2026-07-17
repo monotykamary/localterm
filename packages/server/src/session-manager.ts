@@ -1,20 +1,13 @@
 import path from "node:path";
 import type { CaptureRenderer } from "./capture-renderer.js";
-import {
-  MAX_CONCURRENT_SESSIONS,
-  SESSION_ACTIVITY_WINDOW_MS,
-  SESSION_GRACE_MS,
-  SESSION_PENDING_PROMOTE_TIMEOUT_MS,
-} from "./constants.js";
-import {
-  GitDiffWatcher,
-  GIT_DIFF_WATCHER_EVENT_NAMES,
-  type GitRefEventName,
-} from "./git-diff-watcher.js";
+import { SESSION_GRACE_MS, SESSION_PENDING_PROMOTE_TIMEOUT_MS } from "./constants.js";
+import { GitDiffWatcher } from "./git-diff-watcher.js";
 import type { GitMetadataCoordinator } from "./git-metadata-coordinator.js";
 import { Session } from "./session.js";
 import { SessionClientHub } from "./session-client-hub.js";
 import { SessionCommandExecutor } from "./session-command-executor.js";
+import { SessionGitEventBridge } from "./session-git-event-bridge.js";
+import { SessionLifecyclePolicy } from "./session-lifecycle-policy.js";
 import { SessionOutputCoordinator } from "./session-output-coordinator.js";
 import { SessionOutputTransport, type BrotliEncoder } from "./session-output-transport.js";
 import type { SessionEventName } from "./session-event-manager.js";
@@ -223,31 +216,39 @@ export class SessionManager {
   private readonly outputTransport: SessionOutputTransport;
   private readonly clientHub: SessionClientHub;
   private readonly commandExecutor: SessionCommandExecutor;
+  private readonly gitEventBridge: SessionGitEventBridge;
+  private readonly lifecyclePolicy: SessionLifecyclePolicy;
   private readonly outputCoordinator: SessionOutputCoordinator;
-  private readonly getGraceMs: () => number | null;
   private readonly shimsDir?: string;
 
   constructor(options: SessionManagerOptions) {
     this.hooks = options.hooks;
     this.sendControl = options.sendControl;
     this.outputTransport = new SessionOutputTransport(options.sendControl);
+    this.lifecyclePolicy = new SessionLifecyclePolicy(
+      options.getGraceMs ?? (() => SESSION_GRACE_MS),
+      (managed) => this.tearDown(managed),
+      () => this.hooks.onSessionActivity(),
+    );
     this.clientHub = new SessionClientHub({
       outputTransport: this.outputTransport,
       sendControl: this.sendControl,
       pendingPromoteTimeoutMs:
         options.pendingPromoteTimeoutMs ?? SESSION_PENDING_PROMOTE_TIMEOUT_MS,
       sessionFor: (id, owner) => this.sessionFor(id, owner),
-      cancelGrace: (managed) => this.cancelGrace(managed),
-      startGrace: (managed) => this.startGrace(managed),
+      cancelGrace: (managed) => this.lifecyclePolicy.cancelGrace(managed),
+      startGrace: (managed) => this.lifecyclePolicy.startGrace(managed),
       onSessionActivity: () => this.hooks.onSessionActivity(),
     });
     this.commandExecutor = new SessionCommandExecutor();
+    this.gitEventBridge = new SessionGitEventBridge(this.clientHub, (event, cwd) =>
+      this.hooks.onSessionEvent(event, cwd),
+    );
     this.outputCoordinator = new SessionOutputCoordinator({
       outputTransport: this.outputTransport,
       noteOutputActivity: (pid) => this.noteOutput(pid),
       onOutputActivity: () => this.hooks.onOutputActivity(),
     });
-    this.getGraceMs = options.getGraceMs ?? (() => SESSION_GRACE_MS);
     this.shimsDir = options.shimsDir;
   }
 
@@ -256,14 +257,7 @@ export class SessionManager {
   }
 
   atCapacity(): boolean {
-    if (this.sessions.size < MAX_CONCURRENT_SESSIONS) return false;
-    for (const managed of this.sessions.values()) {
-      // A dormant, non-pinned session can be evicted to make room. Pinned
-      // sessions hold their slots (never silently reaped), so a full cap of
-      // pinned sessions surfaces a real capacity error instead of a steal.
-      if (managed.clients.size === 0 && !managed.pinned) return false;
-    }
-    return true;
+    return this.lifecyclePolicy.atCapacity(this.sessions);
   }
 
   // Shell pids of every live session. The keep-awake manager scopes its `ps`
@@ -323,7 +317,7 @@ export class SessionManager {
       lastOutputAt: managed.lastOutputAt,
       clients: managed.clients.size,
       clientProfiles: this.clientHub.clientProfilesFor(managed),
-      state: this.computeState(managed),
+      state: this.lifecyclePolicy.computeState(managed),
       pinned: managed.pinned,
     }));
   }
@@ -410,8 +404,7 @@ export class SessionManager {
     automation?: AutomationContext,
     owner: SessionOwner = null,
   ): ManagedSession | null {
-    if (this.sessions.size >= MAX_CONCURRENT_SESSIONS) this.evictOldestDormant();
-    if (this.sessions.size >= MAX_CONCURRENT_SESSIONS) return null;
+    if (!this.lifecyclePolicy.makeRoomForSession(this.sessions)) return null;
     const session = new Session(this.shimsDir ? { ...input, shimsDir: this.shimsDir } : input);
     const managed: ManagedSession = {
       session,
@@ -542,7 +535,9 @@ export class SessionManager {
     managed.pinned = pinned;
     // A detached session has no client to detach from, so arm the grace now (a
     // no-op arm when pinned — startGrace parks it indefinitely instead).
-    if (managed.clients.size === 0 && !managed.session.isExited) this.startGrace(managed);
+    if (managed.clients.size === 0 && !managed.session.isExited) {
+      this.lifecyclePolicy.startGrace(managed);
+    }
     return managed.id;
   }
 
@@ -589,7 +584,9 @@ export class SessionManager {
     const managed = this.sessions.get(id);
     if (!managed || (owner !== null && managed.owner !== owner)) return false;
     managed.pinned = pinned;
-    if (managed.clients.size === 0 && !managed.session.isExited) this.startGrace(managed);
+    if (managed.clients.size === 0 && !managed.session.isExited) {
+      this.lifecyclePolicy.startGrace(managed);
+    }
     return true;
   }
 
@@ -692,10 +689,7 @@ export class SessionManager {
     );
     session.on("cwd", (cwd: string) => {
       this.outputTransport.broadcast(managed, { type: "cwd", cwd });
-      managed.gitWatcher.stop();
-      managed.gitWatcher.start(cwd);
-      this.clientHub.moveClientCoordinators(managed, cwd);
-      if (!managed.automation) this.hooks.onSessionEvent("cwd", cwd);
+      this.gitEventBridge.handleCwdChange(managed, cwd);
     });
     session.on("foreground", (process: string | null) => {
       managed.hasForeground = process !== null;
@@ -722,11 +716,7 @@ export class SessionManager {
         this.hooks.onSessionEvent("notification", session.lastEmittedCwd);
       }
     });
-    session.on("git-dirty", () => {
-      const cwd = session.lastEmittedCwd;
-      if (cwd) this.clientHub.coordinatorForCwd(cwd).signal();
-      if (!managed.automation && cwd) this.hooks.onSessionEvent("git-dirty", cwd);
-    });
+    this.gitEventBridge.installSessionListener(managed);
     session.on("exit", (code: number | null) => this.handleExit(managed, code));
     const automation = managed.automation;
     if (automation) {
@@ -739,20 +729,7 @@ export class SessionManager {
         ),
       );
     }
-    managed.gitWatcher.on("git-dirty", () => {
-      const cwd = session.lastEmittedCwd;
-      if (cwd) this.clientHub.coordinatorForCwd(cwd).signal();
-    });
-    for (const refEvent of GIT_DIFF_WATCHER_EVENT_NAMES) {
-      if (refEvent === "git-dirty") continue;
-      const eventName: GitRefEventName = refEvent;
-      managed.gitWatcher.on(eventName, () => {
-        if (!managed.automation && session.lastEmittedCwd) {
-          this.hooks.onSessionEvent(eventName, session.lastEmittedCwd);
-        }
-      });
-    }
-    managed.gitWatcher.start(session.cwd);
+    this.gitEventBridge.installWatcher(managed);
   }
 
   private handleExit(managed: ManagedSession, code: number | null): void {
@@ -774,11 +751,7 @@ export class SessionManager {
   }
 
   private tearDown(managed: ManagedSession): void {
-    if (managed.graceTimer !== null) {
-      clearTimeout(managed.graceTimer);
-      managed.graceTimer = null;
-    }
-    managed.parkedAt = null;
+    this.lifecyclePolicy.cancelGrace(managed);
     managed.captureRenderer?.dispose();
     managed.captureRenderer = undefined;
     deletePasteImagesForSession(managed.id);
@@ -787,7 +760,7 @@ export class SessionManager {
       managed.outputBatchTimer = null;
     }
     this.outputCoordinator.stopDrainPoll(managed);
-    managed.gitWatcher.dispose();
+    this.gitEventBridge.dispose(managed);
     this.clientHub.tearDown(managed);
     this.sessions.delete(managed.id);
     this.lastOutputAtByPid.delete(managed.session.pid);
@@ -798,90 +771,20 @@ export class SessionManager {
     }
   }
 
-  private evictOldestDormant(): void {
-    let oldest: ManagedSession | null = null;
-    let oldestKey = Infinity;
-    for (const managed of this.sessions.values()) {
-      if (managed.clients.size > 0) continue;
-      // Pinned sessions are never silently evicted — they're explicitly held.
-      if (managed.pinned) continue;
-      // Evict the parked session whose grace fires soonest (armed earliest); a
-      // parked session with no timer is a fresh spawn nobody attached yet —
-      // yield it only after all armed ones.
-      const key = managed.parkedAt ?? managed.createdAt;
-      if (key < oldestKey) {
-        oldestKey = key;
-        oldest = managed;
-      }
-    }
-    if (oldest) this.tearDown(oldest);
-  }
-
-  private startGrace(managed: ManagedSession): void {
-    this.cancelGrace(managed);
-    managed.parkedAt = Date.now();
-    // Pinned sessions park indefinitely — never reaped by the idle grace and
-    // never evicted at the cap. They live until an explicit kill or shell exit.
-    if (managed.pinned) return;
-    const graceMs = this.getGraceMs();
-    // "Never reap": park the shell with no timer. It lingers until a viewer
-    // reattaches, it's killed from the switcher, the shell exits, or it's
-    // evicted at MAX_CONCURRENT_SESSIONS. parkedAt stays set so eviction
-    // ordering still treats it as dormant.
-    if (graceMs === null) return;
-    managed.graceTimer = setTimeout(() => {
-      managed.graceTimer = null;
-      managed.parkedAt = null;
-      // Re-check on fire: reschedule while the shell is still doing something —
-      // output still arriving (running), or a foreground program still alive
-      // though quiet (alive-quiet) — so a closed tab never kills a running
-      // command mid-stream, even after it's gone quiet. The shell only dies on
-      // a real idle (ready: no recent output and no foreground program, no
-      // clients), the same "no activity" signal that turns the tab's favicon
-      // grey.
-      if (this.computeState(managed) !== "ready") {
-        this.startGrace(managed);
-        return;
-      }
-      this.tearDown(managed);
-      this.hooks.onSessionActivity();
-    }, graceMs);
-    managed.graceTimer.unref?.();
-  }
-
   // Re-arm every parked session's grace timer with the current grace value.
   // Called after a `PUT /api/config` grace change so it takes effect on shells
   // that are already dormant, not only the next detach: a finite value arms (or
   // resets) their timers, and `null` cancels them so they park indefinitely.
   rearmGrace(): void {
-    for (const managed of this.sessions.values()) {
-      if (managed.clients.size === 0 && !managed.session.isExited) this.startGrace(managed);
-    }
-  }
-
-  private cancelGrace(managed: ManagedSession): void {
-    if (managed.graceTimer !== null) {
-      clearTimeout(managed.graceTimer);
-      managed.graceTimer = null;
-    }
-    managed.parkedAt = null;
-  }
-
-  // The favicon-equivalent state, computed from the same signals the client's
-  // favicon uses (recent output → running; a foreground program but quiet →
-  // alive-quiet; idle → ready). Surfaced on the session list so the row icon
-  // colors match the tab the user is looking at.
-  private computeState(managed: ManagedSession): SessionActivityState {
-    if (Date.now() - managed.lastOutputAt < SESSION_ACTIVITY_WINDOW_MS) return "running";
-    return managed.hasForeground ? "alive-quiet" : "ready";
+    this.lifecyclePolicy.rearmGrace(this.sessions);
   }
 
   broadcastGitBranchPr(cwd: string, pr: GitBranchPr | null): void {
-    this.clientHub.broadcastGitBranchPr(cwd, pr);
+    this.gitEventBridge.broadcastGitBranchPr(cwd, pr);
   }
 
   hasCoordinatorFor(cwd: string): boolean {
-    return this.clientHub.hasCoordinatorFor(cwd);
+    return this.gitEventBridge.hasCoordinatorFor(cwd);
   }
 }
 
