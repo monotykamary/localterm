@@ -1,5 +1,13 @@
 # localterm
 
+## 2.66.14
+
+### Patch Changes
+
+- 9242023: Restore Kitty graphics detection for synchronized terminal probes, initialize Pi image capabilities before its cell-size query, and render inline images at device resolution on HiDPI displays.
+- Updated dependencies [9242023]
+  - @monotykamary/localterm-server@2.66.14
+
 ## 2.66.13
 
 ### Patch Changes
