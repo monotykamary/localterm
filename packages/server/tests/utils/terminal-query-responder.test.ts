@@ -7,6 +7,7 @@ const DA1_RESPONSE = "\x1b[?62;4;9;22c";
 const DA2_REQUEST = "\x1b[>c";
 const DA2_REQUEST_ZERO = "\x1b[>0c";
 const DA2_RESPONSE = "\x1b[>0;276;0c";
+const KITTY_CAPABILITY_QUERY = "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\";
 
 describe("TerminalQueryResponder.interceptRequest", () => {
   let responder: TerminalQueryResponder;
@@ -19,16 +20,16 @@ describe("TerminalQueryResponder.interceptRequest", () => {
     responder.reset();
   });
 
-  it("passes the request through when the cache is cold (first probe round-trips)", () => {
-    const { passthrough, responses } = responder.interceptRequest(`before${DA1_REQUEST}after`);
-    expect(passthrough).toBe(`before${DA1_REQUEST}after`);
+  it("passes a standalone request through when the cache is cold", () => {
+    const { passthrough, responses } = responder.interceptRequest(DA1_REQUEST);
+    expect(passthrough).toBe(DA1_REQUEST);
     expect(responses).toEqual([]);
   });
 
-  it("removes a DA1 request and answers from cache once warmed", () => {
+  it("removes a standalone DA1 request and answers from cache once warmed", () => {
     responder.captureResponse(DA1_RESPONSE);
-    const { passthrough, responses } = responder.interceptRequest(`before${DA1_REQUEST}after`);
-    expect(passthrough).toBe("beforeafter");
+    const { passthrough, responses } = responder.interceptRequest(DA1_REQUEST);
+    expect(passthrough).toBe("");
     expect(responses).toEqual([DA1_RESPONSE]);
   });
 
@@ -42,10 +43,10 @@ describe("TerminalQueryResponder.interceptRequest", () => {
     expect(zero.passthrough).toBe("");
   });
 
-  it("removes a DA2 request and answers from cache once warmed", () => {
+  it("removes a standalone DA2 request and answers from cache once warmed", () => {
     responder.captureResponse(DA2_RESPONSE);
-    const { passthrough, responses } = responder.interceptRequest(`before${DA2_REQUEST}after`);
-    expect(passthrough).toBe("beforeafter");
+    const { passthrough, responses } = responder.interceptRequest(DA2_REQUEST);
+    expect(passthrough).toBe("");
     expect(responses).toEqual([DA2_RESPONSE]);
   });
 
@@ -64,10 +65,20 @@ describe("TerminalQueryResponder.interceptRequest", () => {
     expect(responses).toEqual([DA1_RESPONSE, DA2_RESPONSE, DA1_RESPONSE]);
   });
 
-  it("leaves surrounding output (SGR, text) untouched", () => {
+  it("leaves mixed output whole instead of moving its DA response ahead", () => {
     responder.captureResponse(DA1_RESPONSE);
-    const { passthrough } = responder.interceptRequest(`\x1b[1;31mred${DA1_REQUEST}\x1b[0m text`);
-    expect(passthrough).toBe("\x1b[1;31mred\x1b[0m text");
+    const data = `\x1b[1;31mred${DA1_REQUEST}\x1b[0m text`;
+    const { passthrough, responses } = responder.interceptRequest(data);
+    expect(passthrough).toBe(data);
+    expect(responses).toEqual([]);
+  });
+
+  it("keeps a DA barrier behind the preceding Kitty capability query", () => {
+    responder.captureResponse(DA1_RESPONSE);
+    const data = `${KITTY_CAPABILITY_QUERY}${DA1_REQUEST}`;
+    const { passthrough, responses } = responder.interceptRequest(data);
+    expect(passthrough).toBe(data);
+    expect(responses).toEqual([]);
   });
 
   it("does not match a DA1 response (CSI ? ... c) as a request", () => {

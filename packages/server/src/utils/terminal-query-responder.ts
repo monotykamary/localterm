@@ -13,8 +13,8 @@
 // `:q`) gives up before the slow response lands, so the response is orphaned in
 // the PTY stdin and the next reader treats it as typed text — `62;4;9;22c`
 // leaking into the shell. Latency tuning can't win this race reliably (every
-// program's timeout differs), so the fix is to answer in the same process that
-// holds the PTY, the tmux/mosh model: nothing round-trips to xterm at all.
+// program's timeout differs), so the common standalone probe is answered in
+// the same process that holds the PTY, following the tmux/mosh model.
 //
 // Scope is deliberately a fixed, standard, stateless family: DA1 (`CSI [Ps] c`
 // -> `CSI ? ... c`) and DA2 (`CSI > [Ps] c` -> `CSI > ... c`). Their responses
@@ -32,10 +32,11 @@
 // (every variant enumerated) and lossy. This responder intercepts a fixed
 // set of live queries with unambiguous CSI finals (final `c`, intermediate
 // none = DA1 / `>` = DA2 — no other sequence has these shapes), removes exactly
-// those bytes from the output so xterm never sees the request and never
-// responds, and writes the cached response straight to the PTY. A request
-// split across PTY chunks simply isn't matched (DA queries are single small
-// writes, one per chunk), so it passes through unchanged — no corruption.
+// those bytes from request-only output so xterm never sees the request and
+// never responds, and writes the cached response straight to the PTY. A chunk
+// containing any other output is left whole: an earlier control sequence may
+// itself produce a response, and letting xterm process the full chunk preserves
+// wire order. Split or mixed requests therefore pass through unchanged.
 
 /* eslint-disable no-control-regex -- these match ANSI Device Attribute query/response sequences; control char is intentional */
 const DA_REQUEST = /\x1b\[(>?)0?c/g;
@@ -49,21 +50,20 @@ class TerminalQueryResponder {
   // (before the cache is warm the request round-trips to xterm as it does
   // today — the round-trip is fine on a fresh spawn where the shell reads
   // patiently; the leak only happens at the switch/exit moments where the cache
-  // is already warm). Once captured, every subsequent probe across every PTY
-  // is answered instantly from here.
+  // is already warm). Once captured, subsequent standalone probe chunks across
+  // every PTY are answered instantly from here.
   private da1Response: string | null = null;
   private da2Response: string | null = null;
 
-  // Scan PTY output for DA1/DA2 requests. Returns the output with matched
-  // requests removed (so xterm never sees them and never responds) plus the
-  // cached responses to write straight to the PTY, in order. When a cache is
-  // cold the request is left in the output to round-trip to xterm (whose
-  // response is then captured via captureResponse) — so the first probe ever
-  // behaves exactly as it does today, and only subsequent probes are answered
-  // here.
+  // Scan PTY output for DA1/DA2 requests. A chunk made entirely of warm-
+  // cached requests is removed (so xterm never sees it) and returned as cached
+  // responses to write straight to the PTY, in order. Cold requests and chunks
+  // containing any other output are left whole to round-trip through xterm.
+  // Keeping mixed chunks intact is load-bearing: programs use DA as a response
+  // barrier behind other terminal queries, whose replies must arrive first.
   interceptRequest = (data: string): { passthrough: string; responses: string[] } => {
     const responses: string[] = [];
-    const passthrough = data.replace(DA_REQUEST, (match, intermediate) => {
+    const remainingOutput = data.replace(DA_REQUEST, (match, intermediate) => {
       if (intermediate === ">") {
         if (this.da2Response === null) return match;
         responses.push(this.da2Response);
@@ -73,7 +73,8 @@ class TerminalQueryResponder {
       responses.push(this.da1Response);
       return "";
     });
-    return { passthrough, responses };
+    if (remainingOutput.length > 0) return { passthrough: data, responses: [] };
+    return { passthrough: remainingOutput, responses };
   };
 
   // Scan xterm's input (its query responses) for DA1/DA2 and cache the first

@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAgentNotify } from "./agent-notify.js";
 import { registerBashSecretScrub } from "./bash-secret-scrub.js";
-import { registerKittyImages } from "./kitty-images.js";
+import { enableKittyImages } from "./kitty-images.js";
 
 // localterm <-> pi integration, inert outside localterm. LOCALTERM=1 is
 // injected into every localterm PTY; when it's absent, nothing is registered
@@ -15,7 +15,7 @@ import { registerKittyImages } from "./kitty-images.js";
 // finished.
 export default (pi: ExtensionAPI): void => {
   if (process.env.LOCALTERM !== "1") return;
-  registerKittyImages(pi);
+  enableKittyImages();
   registerBashSecretScrub(pi);
   registerAgentNotify(pi);
 };

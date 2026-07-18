@@ -256,10 +256,10 @@ describe("Session", { tags: ["integration"] }, () => {
     try {
       await collectOutput(session, 10_000);
       // Enter alt screen + enable mouse (tracked modes) and emit a DECRQM
-      // request — a query the DA1/DA2 responder does NOT handle. DA1/DA2 are
-      // removed at append time by the responder, so they never reach the ring
-      // buffer; other queries (DECRQM/OSC/DSR) stay in the raw replay and are
-      // dropped client-side by the replay suppression on `replay-end`.
+      // request — a query the DA1/DA2 responder does NOT handle. Warm,
+      // standalone DA requests are removed at append time; cold or mixed DA
+      // requests and other queries (DECRQM/OSC/DSR) stay in the raw replay and
+      // are dropped client-side by replay suppression on `replay-end`.
       session.write("printf '\\033[?1049h\\033[?1002h\\033[?2026$p'\n");
       await collectOutput(session, 10_000);
       const snapshot = session.snapshotScrollback();

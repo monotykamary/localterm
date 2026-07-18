@@ -154,15 +154,15 @@ export class Session extends EventEmitter<SessionEvents> {
     });
 
     this.pty.onData((data) => {
-      // Intercept DA1/DA2 identity queries: answer them from the cached xterm
-      // response instantly (in-process, no round-trip to xterm) and remove the
-      // request from the output so xterm never sees it and never responds.
+      // Intercept standalone DA1/DA2 identity queries: answer them from the
+      // cached xterm response instantly (in-process, no round-trip to xterm) and
+      // remove the request from the output so xterm never sees or answers it.
       // Without this the remote round-trip loses the race against a short read
       // timeout or a process exit, orphaning the response in the PTY stdin as
-      // typed text (e.g. `62;4;9;22c`). Cold cache: the request round-trips to
-      // xterm as today and the response is captured in write(). The cleaned
-      // output (request removed) is what clients and the scrollback see, so the
-      // replay never carries a stale DA request either.
+      // typed text (e.g. `62;4;9;22c`). Cold or mixed chunk: the request
+      // round-trips to xterm so earlier query replies retain wire order, and the
+      // response is captured in write(). Only intercepted standalone requests
+      // are removed from client output and scrollback.
       const { passthrough, responses } = terminalQueryResponder.interceptRequest(data);
       for (const response of responses) this.pty.write(response);
       this.onPtyOutput(passthrough);
@@ -321,12 +321,11 @@ export class Session extends EventEmitter<SessionEvents> {
   // bracketed paste, cursor hide) so a switch into a long-running TUI re-enters
   // the alt screen and re-enables mouse even when the TUI's mode-set sequences
   // have scrolled out of the 256KB window — otherwise the wheel scrolls xterm's
-  // scrollback instead of the TUI. DA1/DA2 identity requests never reach the
-  // ring buffer: the TerminalQueryResponder removes them at append time and
-  // answers them live, so the replay can't re-trigger their responses. Other
-  // stale query requests (DSR/OSC/DECRQM) do remain in the raw bytes; the server
-  // doesn't sanitize those (enumerating every query variant is unbounded), so
-  // the client writes the whole replay as one suppressed block on
+  // scrollback instead of the TUI. Warm standalone DA1/DA2 requests never reach
+  // the ring buffer: the TerminalQueryResponder removes and answers them live.
+  // Cold or mixed DA requests, like DSR/OSC/DECRQM queries, remain in the raw
+  // bytes because the server cannot reorder or exhaustively sanitize them. The
+  // client writes the whole replay as one suppressed block on
   // `replay-end`, dropping xterm's responses to any of them — a bounded fix
   // that covers any query, present or future. The join cost is paid here (read
   // time, cold switch path) not on the hot output path.
