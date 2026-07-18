@@ -13,11 +13,10 @@ interface TerminalKittyKeyboardProtocol {
 export const registerTerminalKittyKeyboardProtocol = (
   terminal: XtermTerminal,
 ): TerminalKittyKeyboardProtocol => {
-  // Kitty keyboard protocol (https://sw.kovidgoyal.net/kitty/keyboard-protocol/)
-  // tracks a stack of flags so a TUI can push/pop reporting modes. We only
-  // care that *some* flags are active when intercepting modifier+Enter so
-  // shells (which never push flags) keep getting bare \r and don't see CSI u
-  // garbage in their input. Stack always has at least one entry per spec.
+  // xterm.js owns Kitty keyboard encoding, including Escape press/release.
+  // This mirror only distinguishes native protocol handling from LocalTerm's
+  // legacy Shift+Enter fallback. Every parser callback returns false so the
+  // request continues to xterm's built-in handler after updating this stack.
   const kittyFlagStack: number[] = [0];
   const getKittyFlags = (): number => kittyFlagStack[kittyFlagStack.length - 1] ?? 0;
 
@@ -27,7 +26,7 @@ export const registerTerminalKittyKeyboardProtocol = (
       const first = params[0];
       const flags = typeof first === "number" ? first : 1;
       kittyFlagStack.push(flags);
-      return true;
+      return false;
     },
   );
   const popDisposable = terminal.parser.registerCsiHandler(
@@ -38,7 +37,7 @@ export const registerTerminalKittyKeyboardProtocol = (
       for (let popIndex = 0; popIndex < count && kittyFlagStack.length > 1; popIndex += 1) {
         kittyFlagStack.pop();
       }
-      return true;
+      return false;
     },
   );
   const setDisposable = terminal.parser.registerCsiHandler(
@@ -48,7 +47,7 @@ export const registerTerminalKittyKeyboardProtocol = (
       const second = params[1];
       // Sub-params (number arrays) aren't defined for kitty `=`. Bail rather
       // than coerce them to 0, which would silently nuke the stack entry.
-      if (typeof first !== "number") return true;
+      if (typeof first !== "number") return false;
       const flags = first;
       const mode =
         typeof second === "number" && second > 0 ? second : KITTY_KEYBOARD_SET_MODE_REPLACE;
@@ -61,7 +60,7 @@ export const registerTerminalKittyKeyboardProtocol = (
       } else if (mode === KITTY_KEYBOARD_SET_MODE_AND_NOT) {
         kittyFlagStack[top] = current & ~flags;
       }
-      return true;
+      return false;
     },
   );
   return {

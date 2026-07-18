@@ -266,14 +266,11 @@ export const TERMINAL_CURSOR_WORD_RIGHT_SEQUENCE = TERMINAL_ESCAPE_SEQUENCE + "f
 export const TERMINAL_CURSOR_LINE_START_SEQUENCE = String.fromCharCode(1);
 export const TERMINAL_CURSOR_LINE_END_SEQUENCE = String.fromCharCode(5);
 export const TERMINAL_DELETE_TO_LINE_START_SEQUENCE = String.fromCharCode(21);
-export const KEYBOARD_MODIFIER_SHIFT_BIT = 1;
-export const KEYBOARD_MODIFIER_ALT_BIT = 2;
-export const KEYBOARD_MODIFIER_CTRL_BIT = 4;
-export const KEYBOARD_MODIFIER_META_BIT = 8;
 // Kitty keyboard protocol "Disambiguate escape codes" flag (bit 0). Active means
 // modifier+key combos must be reported as `CSI <keycode>;<mods+1> u` instead of
 // the legacy bare control byte (which can't distinguish e.g. Enter vs Shift+Enter).
 export const KITTY_KEYBOARD_DISAMBIGUATE_FLAG = 1;
+export const KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG = 2;
 export const KITTY_KEYBOARD_SET_MODE_REPLACE = 1;
 export const KITTY_KEYBOARD_SET_MODE_OR = 2;
 export const KITTY_KEYBOARD_SET_MODE_AND_NOT = 3;

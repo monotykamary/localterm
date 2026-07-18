@@ -89,6 +89,7 @@ export const createTerminalSurface = ({
       ...initialTheme.colors,
       extendedAnsi: generateExtendedPalette(initialTheme.colors),
     },
+    vtExtensions: { kittyKeyboard: true },
     macOptionIsMeta: true,
     scrollOnUserInput: initialScrollOnUserInput,
     windowOptions: {

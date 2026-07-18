@@ -1,15 +1,11 @@
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import {
-  ENTER_KEY_CODE,
-  KEYBOARD_MODIFIER_SHIFT_BIT,
   KITTY_KEYBOARD_DISAMBIGUATE_FLAG,
   TERMINAL_BACK_TAB_SEQUENCE,
   TERMINAL_TAB_SEQUENCE,
 } from "@/lib/constants";
 import type { LocalEcho } from "@/lib/local-echo";
-import { buildKittyKeySequence } from "@/utils/build-kitty-key-sequence";
 import { buildTerminalEditingOutput } from "@/utils/build-terminal-editing-output";
-import { extractKeyboardModifiers } from "@/utils/extract-keyboard-modifiers";
 import { isAutomationsShortcut } from "@/utils/is-automations-shortcut";
 import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
 import { isDiffViewerShortcut } from "@/utils/is-diff-viewer-shortcut";
@@ -154,12 +150,15 @@ export const installTerminalInputHandlers = ({
       }
       return false;
     }
-    const terminalEditingOutput = buildTerminalEditingOutput({
-      key: event.key,
-      alternate: event.altKey,
-      command: isMac && event.metaKey,
-      control: event.ctrlKey,
-    });
+    const terminalEditingOutput =
+      getKittyFlags() === 0
+        ? buildTerminalEditingOutput({
+            key: event.key,
+            alternate: event.altKey,
+            command: isMac && event.metaKey,
+            control: event.ctrlKey,
+          })
+        : null;
     if (terminalEditingOutput !== null) {
       event.preventDefault();
       if (event.type === "keydown") {
@@ -172,28 +171,14 @@ export const installTerminalInputHandlers = ({
       }
       return false;
     }
-    // xterm.js's default keyboard handler ignores Shift/Ctrl/Meta on Enter
-    // and sends bare \r for all of them, so TUIs can't distinguish Shift+Enter
-    // from Enter. Three-tier dispatch:
-    //   1. Kitty disambiguate flag is active -> emit `CSI 13;mods+1 u` for any
-    //      modifier+Enter (including Alt, since the TUI explicitly asked for
-    //      the new protocol and prefers it over the legacy \e\r form).
-    //   2. Plain Shift+Enter without kitty -> emit LF. This matches the
-    //      iTerm2/VS Code/Terminal.app convention that Ink-based TUIs (Claude
-    //      Code, Cursor Agent) read as "newline within input". Bash/zsh/fish
-    //      bind \n to accept-line just like \r so shells are unaffected.
-    //   3. Anything else (plain Enter, Alt-only, Ctrl/Cmd+Enter without
-    //      kitty) -> fall through to xterm.js so app-specific bindings keep
-    //      working.
+    // xterm.js's native Kitty handler owns enhanced keyboard reporting,
+    // including Escape press/release and modified Enter. Without Kitty, its
+    // legacy handler sends bare \r for Shift+Enter, so preserve LocalTerm's LF
+    // fallback for Ink-based TUIs while delegating every other key to xterm.
     if (event.type === "keydown" && event.key === "Enter") {
-      const modifierBits = extractKeyboardModifiers(event);
+      const isPlainShiftEnter = event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
       const isKittyDisambiguateActive = (getKittyFlags() & KITTY_KEYBOARD_DISAMBIGUATE_FLAG) !== 0;
-      if (modifierBits !== 0 && isKittyDisambiguateActive) {
-        event.preventDefault();
-        sendInput(buildKittyKeySequence(ENTER_KEY_CODE, modifierBits));
-        return false;
-      }
-      if (modifierBits === KEYBOARD_MODIFIER_SHIFT_BIT) {
+      if (isPlainShiftEnter && !isKittyDisambiguateActive) {
         event.preventDefault();
         sendInput("\n");
         return false;

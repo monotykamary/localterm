@@ -18,6 +18,8 @@ import {
   TERMINAL_SCROLLBACK_STORAGE_KEY,
   TERMINAL_TAB_SEQUENCE,
   TERMINAL_BACK_TAB_SEQUENCE,
+  KITTY_KEYBOARD_DISAMBIGUATE_FLAG,
+  KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG,
   LIGATURES_ENABLED_STORAGE_KEY,
   MUTE_EMOJI_COLORS_STORAGE_KEY,
   MOBILE_RESUME_STORAGE_KEY,
@@ -923,17 +925,24 @@ describe("Terminal modified Tab routing", () => {
   });
 });
 
-const dispatchEnterKey = (
+const dispatchTerminalKey = (
   handle: FakeXtermHandle | undefined,
+  eventType: "keydown" | "keyup",
+  key: string,
   modifiers: KeyboardModifiers = {},
 ): DispatchedKeyResult | undefined => {
   if (!handle?.customKeyEventHandler) return undefined;
-  const event = new KeyboardEvent("keydown", { key: "Enter", ...modifiers });
+  const event = new KeyboardEvent(eventType, { key, ...modifiers });
   let preventDefaultCalls = 0;
   Object.defineProperty(event, "preventDefault", { value: () => preventDefaultCalls++ });
   const handlerResult = handle.customKeyEventHandler(event);
   return { preventDefaultCalls, handlerResult };
 };
+
+const dispatchEnterKey = (
+  handle: FakeXtermHandle | undefined,
+  modifiers: KeyboardModifiers = {},
+): DispatchedKeyResult | undefined => dispatchTerminalKey(handle, "keydown", "Enter", modifiers);
 
 describe("Terminal on-screen keyboard arbitration", () => {
   const queryOnScreenKeyboard = () => document.querySelector("[data-on-screen-keyboard]");
@@ -1070,89 +1079,81 @@ describe("Terminal on-screen keyboard arbitration", () => {
   });
 });
 
-describe("Terminal kitty keyboard Shift+Enter", () => {
-  it("emits CSI u for Shift+Enter once the TUI pushes the kitty disambiguate flag", () => {
+describe("Terminal Kitty keyboard protocol", () => {
+  it("enables xterm's native Kitty keyboard implementation", () => {
     render(<Terminal />);
-    act(() => {
-      fakeWebSockets[0]?.fireOpen();
-      fakeXterms[0]?.invokeCsiHandler(">", "u", [1]);
+
+    expect(fakeXterms[0]?.getOptions()).toMatchObject({
+      vtExtensions: { kittyKeyboard: true },
     });
-    fakeWebSockets[0]?.send.mockClear();
-
-    const result = dispatchEnterKey(fakeXterms[0], { shiftKey: true });
-
-    expect(result?.handlerResult).toBe(false);
-    expect(result?.preventDefaultCalls).toBe(1);
-    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
-      JSON.stringify({ type: "input", data: "\x1b[13;2u" }),
-    );
   });
 
-  it("emits CSI u for Ctrl+Enter and Cmd+Enter when kitty mode is active", () => {
+  it("lets Kitty mode requests continue to xterm's native parser", () => {
     render(<Terminal />);
+
+    let didLocalTermConsumeRequest = true;
     act(() => {
-      fakeWebSockets[0]?.fireOpen();
-      fakeXterms[0]?.invokeCsiHandler(">", "u", [1]);
+      didLocalTermConsumeRequest =
+        fakeXterms[0]?.invokeCsiHandler(">", "u", [
+          KITTY_KEYBOARD_DISAMBIGUATE_FLAG | KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG,
+        ]) ?? true;
     });
-    fakeWebSockets[0]?.send.mockClear();
 
-    dispatchEnterKey(fakeXterms[0], { ctrlKey: true });
-    dispatchEnterKey(fakeXterms[0], { metaKey: true });
-
-    expect(fakeWebSockets[0]?.send).toHaveBeenNthCalledWith(
-      1,
-      JSON.stringify({ type: "input", data: "\x1b[13;5u" }),
-    );
-    expect(fakeWebSockets[0]?.send).toHaveBeenNthCalledWith(
-      2,
-      JSON.stringify({ type: "input", data: "\x1b[13;9u" }),
-    );
+    expect(didLocalTermConsumeRequest).toBe(false);
   });
 
-  it("leaves plain Enter to the xterm.js default handler regardless of kitty mode", () => {
+  it("delegates Escape press and release to xterm while Kitty mode is active", () => {
     render(<Terminal />);
     act(() => {
       fakeWebSockets[0]?.fireOpen();
-      fakeXterms[0]?.invokeCsiHandler(">", "u", [1]);
+      fakeXterms[0]?.invokeCsiHandler(">", "u", [
+        KITTY_KEYBOARD_DISAMBIGUATE_FLAG | KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG,
+      ]);
     });
     fakeWebSockets[0]?.send.mockClear();
 
-    const plainResult = dispatchEnterKey(fakeXterms[0]);
+    const keyDownResult = dispatchTerminalKey(fakeXterms[0], "keydown", "Escape");
+    const keyUpResult = dispatchTerminalKey(fakeXterms[0], "keyup", "Escape");
 
-    expect(plainResult?.handlerResult).toBe(true);
+    expect(keyDownResult).toEqual({ handlerResult: true, preventDefaultCalls: 0 });
+    expect(keyUpResult).toEqual({ handlerResult: true, preventDefaultCalls: 0 });
     expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
   });
 
-  it("emits CSI u for Alt+Enter when kitty mode is active so the TUI gets the new protocol", () => {
+  it("delegates modified Enter to xterm when Kitty disambiguation is active", () => {
     render(<Terminal />);
     act(() => {
       fakeWebSockets[0]?.fireOpen();
-      fakeXterms[0]?.invokeCsiHandler(">", "u", [1]);
+      fakeXterms[0]?.invokeCsiHandler(">", "u", [KITTY_KEYBOARD_DISAMBIGUATE_FLAG]);
     });
     fakeWebSockets[0]?.send.mockClear();
 
-    const result = dispatchEnterKey(fakeXterms[0], { altKey: true });
+    const shiftResult = dispatchEnterKey(fakeXterms[0], { shiftKey: true });
+    const controlResult = dispatchEnterKey(fakeXterms[0], { ctrlKey: true });
+    const alternateResult = dispatchEnterKey(fakeXterms[0], { altKey: true });
+    const commandResult = dispatchEnterKey(fakeXterms[0], { metaKey: true });
 
-    expect(result?.handlerResult).toBe(false);
-    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
-      JSON.stringify({ type: "input", data: "\x1b[13;3u" }),
-    );
-  });
-
-  it("falls through Alt-only Enter to xterm.js when kitty mode is off so legacy \\e\\r is preserved", () => {
-    render(<Terminal />);
-    act(() => {
-      fakeWebSockets[0]?.fireOpen();
-    });
-    fakeWebSockets[0]?.send.mockClear();
-
-    const result = dispatchEnterKey(fakeXterms[0], { altKey: true });
-
-    expect(result?.handlerResult).toBe(true);
+    for (const result of [shiftResult, controlResult, alternateResult, commandResult]) {
+      expect(result).toEqual({ handlerResult: true, preventDefaultCalls: 0 });
+    }
     expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
   });
 
-  it("emits LF for Shift+Enter without kitty mode so Ink-based TUIs treat it as multi-line", () => {
+  it("leaves plain Enter to xterm regardless of Kitty mode", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeXterms[0]?.invokeCsiHandler(">", "u", [KITTY_KEYBOARD_DISAMBIGUATE_FLAG]);
+    });
+    fakeWebSockets[0]?.send.mockClear();
+
+    const result = dispatchEnterKey(fakeXterms[0]);
+
+    expect(result).toEqual({ handlerResult: true, preventDefaultCalls: 0 });
+    expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
+  });
+
+  it("emits LF for plain Shift+Enter without Kitty mode", () => {
     render(<Terminal />);
     act(() => {
       fakeWebSockets[0]?.fireOpen();
@@ -1161,45 +1162,51 @@ describe("Terminal kitty keyboard Shift+Enter", () => {
 
     const result = dispatchEnterKey(fakeXterms[0], { shiftKey: true });
 
-    expect(result?.handlerResult).toBe(false);
-    expect(result?.preventDefaultCalls).toBe(1);
+    expect(result).toEqual({ handlerResult: false, preventDefaultCalls: 1 });
     expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
       JSON.stringify({ type: "input", data: "\n" }),
     );
   });
 
-  it("does not fall back to LF for Ctrl+Shift+Enter so app-specific bindings stay intact", () => {
+  it("does not apply the LF fallback to other Enter modifiers", () => {
     render(<Terminal />);
     act(() => {
       fakeWebSockets[0]?.fireOpen();
     });
     fakeWebSockets[0]?.send.mockClear();
 
-    const result = dispatchEnterKey(fakeXterms[0], { shiftKey: true, ctrlKey: true });
+    const controlShiftResult = dispatchEnterKey(fakeXterms[0], {
+      shiftKey: true,
+      ctrlKey: true,
+    });
+    const alternateResult = dispatchEnterKey(fakeXterms[0], { altKey: true });
 
-    expect(result?.handlerResult).toBe(true);
+    expect(controlShiftResult).toEqual({ handlerResult: true, preventDefaultCalls: 0 });
+    expect(alternateResult).toEqual({ handlerResult: true, preventDefaultCalls: 0 });
     expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
   });
 
-  it("falls back from CSI u to LF for Shift+Enter after the TUI pops its kitty flag", () => {
+  it("restores the Shift+Enter fallback after a TUI pops Kitty mode", () => {
     render(<Terminal />);
     act(() => {
       fakeWebSockets[0]?.fireOpen();
-      fakeXterms[0]?.invokeCsiHandler(">", "u", [1]);
+      fakeXterms[0]?.invokeCsiHandler(">", "u", [KITTY_KEYBOARD_DISAMBIGUATE_FLAG]);
     });
-    fakeWebSockets[0]?.send.mockClear();
 
-    dispatchEnterKey(fakeXterms[0], { shiftKey: true });
-    expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
-      JSON.stringify({ type: "input", data: "\x1b[13;2u" }),
-    );
+    expect(dispatchEnterKey(fakeXterms[0], { shiftKey: true })).toEqual({
+      handlerResult: true,
+      preventDefaultCalls: 0,
+    });
 
     act(() => {
       fakeXterms[0]?.invokeCsiHandler("<", "u", [1]);
     });
     fakeWebSockets[0]?.send.mockClear();
 
-    dispatchEnterKey(fakeXterms[0], { shiftKey: true });
+    expect(dispatchEnterKey(fakeXterms[0], { shiftKey: true })).toEqual({
+      handlerResult: false,
+      preventDefaultCalls: 1,
+    });
     expect(fakeWebSockets[0]?.send).toHaveBeenCalledWith(
       JSON.stringify({ type: "input", data: "\n" }),
     );
