@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.13
+
+### Patch Changes
+
+- 528ed0e: Enable xterm's native Kitty keyboard protocol so nested terminal applications receive unambiguous Escape press and release events instead of delayed legacy bytes.
+  - @monotykamary/localterm-server@2.66.13
+
 ## 2.66.12
 
 ### Patch Changes
