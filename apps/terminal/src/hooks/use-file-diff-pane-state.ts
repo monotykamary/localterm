@@ -15,7 +15,8 @@ import {
   DIFF_VIEWER_SPLIT_WHEEL_LINE_PX,
   DIFF_VIEWER_SPLIT_WHEEL_PAGE_PX,
 } from "@/lib/constants";
-import { buildRenderChunks, renderChunkLength } from "@/utils/build-render-chunks";
+import { buildRenderChunkWindow } from "@/utils/build-render-chunk-window";
+import { buildRenderChunks } from "@/utils/build-render-chunks";
 import {
   buildDiffLineRangeIndex,
   coveredTargetKeys,
@@ -194,18 +195,11 @@ export const useFileDiffPaneState = ({
     () => buildRenderChunks(hunks, viewMode, DIFF_VIEWER_RENDER_CHUNK),
     [hunks, viewMode],
   );
-  const totalRenderRows = useMemo(
-    () => renderChunks.reduce((total, chunk) => total + renderChunkLength(chunk), 0),
-    [renderChunks],
-  );
-  const visibleChunks = useMemo(
-    () => renderChunks.filter((chunk) => chunk.startIndex < renderLimit),
-    [renderChunks, renderLimit],
-  );
-  const renderedRows = useMemo(
-    () => visibleChunks.reduce((total, chunk) => total + renderChunkLength(chunk), 0),
-    [visibleChunks],
-  );
+  const {
+    visibleChunks,
+    totalRows: totalRenderRows,
+    hiddenRows,
+  } = useMemo(() => buildRenderChunkWindow(renderChunks, renderLimit), [renderChunks, renderLimit]);
 
   const isDragging = drag !== null;
   const isDraggingRef = useRef(isDragging);
@@ -287,7 +281,7 @@ export const useFileDiffPaneState = ({
     tokenMap,
     highlightingPending,
     visibleChunks,
-    hiddenRows: totalRenderRows - renderedRows,
+    hiddenRows,
     isDragging,
     highlightedKeys,
     handleStartDrag,

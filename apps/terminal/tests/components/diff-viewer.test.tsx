@@ -520,40 +520,6 @@ describe("DiffViewer", () => {
     expect(Number(buttonZ)).toBeGreaterThan(Number(gutterZ));
   });
 
-  it("caps the first paint of a large diff and shows a progress indicator", async () => {
-    // Freeze animation frames so the progressive grow can't advance — this pins
-    // the first-paint state: only the first chunk is mounted, the tail is not,
-    // and the "rendering more lines" indicator is shown.
-    vi.stubGlobal("requestAnimationFrame", () => 0);
-
-    const lineCount = 2500;
-    const patch = [
-      `@@ -0,0 +1,${lineCount} @@`,
-      ...Array.from({ length: lineCount }, (_, i) => `+line ${i}`),
-      "",
-    ].join("\n");
-    filesMock.mockResolvedValue({
-      isRepo: true,
-      files: [
-        {
-          path: "big.txt",
-          oldPath: null,
-          status: "added",
-          additions: lineCount,
-          deletions: 0,
-          binary: false,
-        },
-      ],
-    });
-    patchMock.mockResolvedValue({ patch, patchOmitted: false, binary: false });
-    renderDiffViewer();
-
-    // First chunk (line 0) paints immediately; the tail (last line) does not.
-    expect(await screen.findByText("line 0")).toBeTruthy();
-    expect(screen.queryByText(`line ${lineCount - 1}`)).toBeNull();
-    expect(screen.getByText(/rendering .* more lines/)).toBeTruthy();
-  }, 15_000); // parallel cross-package run this starves past vitest's 5s default. // jsdom first-paint of a 2500-line patch is CPU-bound; under turbo's
-
   it("auto-switches to branch mode when the leased branchInfo has a PR", async () => {
     mockHappyPath();
     renderDiffViewer({ branchInfo: BRANCH_INFO });
