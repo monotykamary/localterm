@@ -18,6 +18,9 @@ import {
   TERMINAL_SCROLLBACK_STORAGE_KEY,
   TERMINAL_TAB_SEQUENCE,
   TERMINAL_BACK_TAB_SEQUENCE,
+  TERMINAL_CURSOR_LINE_END_SEQUENCE,
+  TERMINAL_CURSOR_LINE_START_SEQUENCE,
+  TERMINAL_DELETE_TO_LINE_START_SEQUENCE,
   KITTY_KEYBOARD_DISAMBIGUATE_FLAG,
   KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG,
   LIGATURES_ENABLED_STORAGE_KEY,
@@ -61,6 +64,7 @@ interface FakeXtermHandle {
   setBufferState: (state: { baseY: number; viewportY: number }) => void;
   scrollLines: ReturnType<typeof vi.fn>;
   scrollToBottom: ReturnType<typeof vi.fn>;
+  selectAll: ReturnType<typeof vi.fn>;
   write: ReturnType<typeof vi.fn>;
   focus: ReturnType<typeof vi.fn>;
   registerCharacterJoiner: ReturnType<typeof vi.fn>;
@@ -177,6 +181,7 @@ vi.mock("@xterm/xterm", () => {
     buffer = { active: { baseY: 0, viewportY: 0 } };
     scrollLines = vi.fn();
     scrollToBottom = vi.fn();
+    selectAll = vi.fn();
     write = vi.fn((_data: string, callback?: () => void) => callback?.());
     focus = vi.fn();
     registerCharacterJoiner = vi.fn((_handler: (text: string) => [number, number][]) => 1);
@@ -224,6 +229,7 @@ vi.mock("@xterm/xterm", () => {
         },
         scrollLines: this.scrollLines,
         scrollToBottom: this.scrollToBottom,
+        selectAll: this.selectAll,
         write: this.write,
         focus: this.focus,
         registerCharacterJoiner: this.registerCharacterJoiner,
@@ -944,6 +950,13 @@ const dispatchEnterKey = (
   modifiers: KeyboardModifiers = {},
 ): DispatchedKeyResult | undefined => dispatchTerminalKey(handle, "keydown", "Enter", modifiers);
 
+const activateKittyKeyboard = (flags: number): void => {
+  act(() => {
+    fakeWebSockets[0]?.fireOpen();
+    fakeXterms[0]?.invokeCsiHandler(">", "u", [flags]);
+  });
+};
+
 describe("Terminal on-screen keyboard arbitration", () => {
   const queryOnScreenKeyboard = () => document.querySelector("[data-on-screen-keyboard]");
   const openOnScreenKeyboard = () => {
@@ -1104,12 +1117,9 @@ describe("Terminal Kitty keyboard protocol", () => {
 
   it("delegates Escape press and release to xterm while Kitty mode is active", () => {
     render(<Terminal />);
-    act(() => {
-      fakeWebSockets[0]?.fireOpen();
-      fakeXterms[0]?.invokeCsiHandler(">", "u", [
-        KITTY_KEYBOARD_DISAMBIGUATE_FLAG | KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG,
-      ]);
-    });
+    activateKittyKeyboard(
+      KITTY_KEYBOARD_DISAMBIGUATE_FLAG | KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG,
+    );
     fakeWebSockets[0]?.send.mockClear();
 
     const keyDownResult = dispatchTerminalKey(fakeXterms[0], "keydown", "Escape");
@@ -1120,12 +1130,105 @@ describe("Terminal Kitty keyboard protocol", () => {
     expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
   });
 
+  it("preserves macOS editing mappings while Kitty mode is active", () => {
+    render(<Terminal />);
+    activateKittyKeyboard(
+      KITTY_KEYBOARD_DISAMBIGUATE_FLAG | KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG,
+    );
+    fakeWebSockets[0]?.send.mockClear();
+
+    const editingShortcuts = [
+      { key: "ArrowLeft", output: TERMINAL_CURSOR_LINE_START_SEQUENCE },
+      { key: "ArrowRight", output: TERMINAL_CURSOR_LINE_END_SEQUENCE },
+      { key: "Backspace", output: TERMINAL_DELETE_TO_LINE_START_SEQUENCE },
+    ];
+
+    for (const { key, output } of editingShortcuts) {
+      expect(dispatchTerminalKey(fakeXterms[0], "keydown", key, { metaKey: true })).toEqual({
+        handlerResult: false,
+        preventDefaultCalls: 1,
+      });
+      expect(fakeWebSockets[0]?.send).toHaveBeenLastCalledWith(
+        JSON.stringify({ type: "input", data: output }),
+      );
+      const sendCallCountBeforeKeyUp = fakeWebSockets[0]?.send.mock.calls.length;
+      expect(dispatchTerminalKey(fakeXterms[0], "keyup", key, { metaKey: true })).toEqual({
+        handlerResult: false,
+        preventDefaultCalls: 1,
+      });
+      expect(fakeWebSockets[0]?.send).toHaveBeenCalledTimes(sendCallCountBeforeKeyUp ?? 0);
+    }
+  });
+
+  it("leaves browser-owned Command text shortcuts outside Kitty input", () => {
+    render(<Terminal />);
+    activateKittyKeyboard(
+      KITTY_KEYBOARD_DISAMBIGUATE_FLAG | KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG,
+    );
+    fakeWebSockets[0]?.send.mockClear();
+
+    for (const key of ["c", "v", "V", "1"]) {
+      const modifiers = key === "V" ? { metaKey: true, shiftKey: true } : { metaKey: true };
+      expect(dispatchTerminalKey(fakeXterms[0], "keydown", key, modifiers)).toEqual({
+        handlerResult: false,
+        preventDefaultCalls: 0,
+      });
+      expect(dispatchTerminalKey(fakeXterms[0], "keyup", key, modifiers)).toEqual({
+        handlerResult: false,
+        preventDefaultCalls: 0,
+      });
+    }
+    expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps LocalTerm Command shortcuts ahead of browser arbitration", () => {
+    render(<Terminal />);
+    activateKittyKeyboard(KITTY_KEYBOARD_DISAMBIGUATE_FLAG);
+
+    let shortcutResult: DispatchedKeyResult | undefined;
+    act(() => {
+      shortcutResult = dispatchTerminalKey(fakeXterms[0], "keydown", "f", { metaKey: true });
+    });
+
+    expect(shortcutResult).toEqual({ handlerResult: false, preventDefaultCalls: 1 });
+    expect(screen.queryByRole("search")).not.toBeNull();
+  });
+
+  it("preserves xterm's terminal select-all behavior in Kitty mode", () => {
+    render(<Terminal />);
+    activateKittyKeyboard(KITTY_KEYBOARD_DISAMBIGUATE_FLAG);
+
+    expect(dispatchTerminalKey(fakeXterms[0], "keydown", "a", { metaKey: true })).toEqual({
+      handlerResult: false,
+      preventDefaultCalls: 0,
+    });
+    expect(fakeXterms[0]?.selectAll).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Option and Control arrows on xterm's native Kitty path", () => {
+    render(<Terminal />);
+    activateKittyKeyboard(KITTY_KEYBOARD_DISAMBIGUATE_FLAG);
+    fakeWebSockets[0]?.send.mockClear();
+
+    const alternateResult = dispatchTerminalKey(fakeXterms[0], "keydown", "ArrowLeft", {
+      altKey: true,
+    });
+    const controlResult = dispatchTerminalKey(fakeXterms[0], "keydown", "ArrowRight", {
+      ctrlKey: true,
+    });
+    const controlTextResult = dispatchTerminalKey(fakeXterms[0], "keydown", "v", {
+      ctrlKey: true,
+    });
+
+    expect(alternateResult).toEqual({ handlerResult: true, preventDefaultCalls: 0 });
+    expect(controlResult).toEqual({ handlerResult: true, preventDefaultCalls: 0 });
+    expect(controlTextResult).toEqual({ handlerResult: true, preventDefaultCalls: 0 });
+    expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
+  });
+
   it("delegates modified Enter to xterm when Kitty disambiguation is active", () => {
     render(<Terminal />);
-    act(() => {
-      fakeWebSockets[0]?.fireOpen();
-      fakeXterms[0]?.invokeCsiHandler(">", "u", [KITTY_KEYBOARD_DISAMBIGUATE_FLAG]);
-    });
+    activateKittyKeyboard(KITTY_KEYBOARD_DISAMBIGUATE_FLAG);
     fakeWebSockets[0]?.send.mockClear();
 
     const shiftResult = dispatchEnterKey(fakeXterms[0], { shiftKey: true });
@@ -1141,10 +1244,7 @@ describe("Terminal Kitty keyboard protocol", () => {
 
   it("leaves plain Enter to xterm regardless of Kitty mode", () => {
     render(<Terminal />);
-    act(() => {
-      fakeWebSockets[0]?.fireOpen();
-      fakeXterms[0]?.invokeCsiHandler(">", "u", [KITTY_KEYBOARD_DISAMBIGUATE_FLAG]);
-    });
+    activateKittyKeyboard(KITTY_KEYBOARD_DISAMBIGUATE_FLAG);
     fakeWebSockets[0]?.send.mockClear();
 
     const result = dispatchEnterKey(fakeXterms[0]);
@@ -1188,10 +1288,7 @@ describe("Terminal Kitty keyboard protocol", () => {
 
   it("restores the Shift+Enter fallback after a TUI pops Kitty mode", () => {
     render(<Terminal />);
-    act(() => {
-      fakeWebSockets[0]?.fireOpen();
-      fakeXterms[0]?.invokeCsiHandler(">", "u", [KITTY_KEYBOARD_DISAMBIGUATE_FLAG]);
-    });
+    activateKittyKeyboard(KITTY_KEYBOARD_DISAMBIGUATE_FLAG);
 
     expect(dispatchEnterKey(fakeXterms[0], { shiftKey: true })).toEqual({
       handlerResult: true,

@@ -150,15 +150,14 @@ export const installTerminalInputHandlers = ({
       }
       return false;
     }
-    const terminalEditingOutput =
-      getKittyFlags() === 0
-        ? buildTerminalEditingOutput({
-            key: event.key,
-            alternate: event.altKey,
-            command: isMac && event.metaKey,
-            control: event.ctrlKey,
-          })
-        : null;
+    const kittyFlags = getKittyFlags();
+    const isKittyKeyboardActive = kittyFlags !== 0;
+    const terminalEditingOutput = buildTerminalEditingOutput({
+      key: event.key,
+      alternate: event.altKey && !isKittyKeyboardActive,
+      command: isMac && event.metaKey,
+      control: event.ctrlKey && !isKittyKeyboardActive,
+    });
     if (terminalEditingOutput !== null) {
       event.preventDefault();
       if (event.type === "keydown") {
@@ -171,13 +170,23 @@ export const installTerminalInputHandlers = ({
       }
       return false;
     }
-    // xterm.js's native Kitty handler owns enhanced keyboard reporting,
-    // including Escape press/release and modified Enter. Without Kitty, its
-    // legacy handler sends bare \r for Shift+Enter, so preserve LocalTerm's LF
-    // fallback for Ink-based TUIs while delegating every other key to xterm.
+    // Native Kitty turns macOS Command text chords into terminal Super keys and
+    // cancels the DOM event, preventing browser copy, paste, and tab commands.
+    // LocalTerm shortcuts were handled above; leave every other text chord to
+    // the browser, matching xterm's legacy macOS behavior.
+    if (isKittyKeyboardActive && isMac && event.metaKey && event.key.length === 1) {
+      const isTerminalSelectAllShortcut =
+        event.key.toLowerCase() === "a" && !event.shiftKey && !event.ctrlKey && !event.altKey;
+      if (event.type === "keydown" && isTerminalSelectAllShortcut) terminal.selectAll();
+      return false;
+    }
+    // xterm.js's native Kitty handler owns all remaining enhanced keyboard
+    // reporting, especially Escape press/release and modified Enter. Without
+    // Kitty, its legacy handler sends bare \r for Shift+Enter, so preserve
+    // LocalTerm's LF fallback for Ink-based TUIs.
     if (event.type === "keydown" && event.key === "Enter") {
       const isPlainShiftEnter = event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
-      const isKittyDisambiguateActive = (getKittyFlags() & KITTY_KEYBOARD_DISAMBIGUATE_FLAG) !== 0;
+      const isKittyDisambiguateActive = (kittyFlags & KITTY_KEYBOARD_DISAMBIGUATE_FLAG) !== 0;
       if (isPlainShiftEnter && !isKittyDisambiguateActive) {
         event.preventDefault();
         sendInput("\n");

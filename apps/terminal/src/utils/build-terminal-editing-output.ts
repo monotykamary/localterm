@@ -13,8 +13,8 @@ export interface TerminalEditingInput {
   readonly control: boolean;
 }
 
-// These readline bindings are also recognized by pi, while xterm modifier CSI
-// sequences are unbound in default macOS bash and leak tails such as ";3D".
+// These readline bindings are recognized by shells and agent TUIs, while xterm
+// modifier CSI sequences are unbound in default macOS bash and leak tails such as ";3D".
 export const buildTerminalEditingOutput = ({
   key,
   alternate,
