@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.15
+
+### Patch Changes
+
+- 274c770: Restore macOS editing, copy, paste, select-all, and browser shortcuts while a nested TUI uses Kitty keyboard mode, without disabling native enhanced key reporting for Escape, modified Enter, or application-owned keys.
+  - @monotykamary/localterm-server@2.66.15
+
 ## 2.66.14
 
 ### Patch Changes
