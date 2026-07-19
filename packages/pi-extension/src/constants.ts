@@ -35,6 +35,10 @@ export const NOTIFICATION_MAX_LENGTH = 1024;
 // tab. Tunable: lower to notify sooner, raise to stay quieter while focused.
 export const AGENT_NOTIFY_MIN_ELAPSED_MS = 30_000;
 
+export const PI_RETRY_STARTED_EVENT = "pi-retry:started";
+export const PI_RETRY_COMPLETED_EVENT = "pi-retry:completed";
+export const PI_RETRY_CANCELLED_EVENT = "pi-retry:cancelled";
+
 // Cap on the assistant-response excerpt carried by the "pi finished"
 // notification body, counted in UTF-16 code units after whitespace is
 // collapsed. Long enough to surface a sentence or two of the agent's final

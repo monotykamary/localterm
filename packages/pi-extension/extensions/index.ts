@@ -10,9 +10,9 @@ import { enableKittyImages } from "./kitty-images.js";
 // detect, (2) scrubs localterm-managed secret env vars from the agent's
 // bash-tool children so a generated command can't read keys the shim injected
 // into pi's own env, and (3) writes an OSC 9 desktop notification on
-// agent_end (reusing localterm's existing OSC 9 -> browser notification
+// agent_settled (reusing localterm's existing OSC 9 -> browser notification
 // pipeline) so a user who stepped away from the pi tab learns the agent
-// finished.
+// finished, including after retries and queued continuations.
 export default (pi: ExtensionAPI): void => {
   if (process.env.LOCALTERM !== "1") return;
   enableKittyImages();

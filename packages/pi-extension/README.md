@@ -4,7 +4,7 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that integra
 
 1. **Kitty graphics + OSC 8 links** — localterm renders xterm.js with the Kitty graphics and web-links addons loaded, but sets `TERM=xterm-256color` and strips terminal-identity env vars (so Ink TUIs don't probe for a protocol xterm.js lacks). pi-tui therefore reports images/hyperlinks as unsupported. This extension detects `LOCALTERM=1` (injected into every localterm PTY) and force-enables those capabilities, so images and links render in the browser.
 2. **Secret scrubbing for the agent's bash tool** — localterm injects a secret only into the shimmed process's env (pi's), not its parent shell. But pi's bash tool spawns commands with `{ ...process.env }`, so without this the agent's commands would inherit every secret pi received. This extension overrides the `bash` tool with a spawn hook that deletes the `pi` process's localterm-managed secret env vars from each command's child env only — pi's own `process.env` (and its provider calls) keep them.
-3. **Desktop notifications on agent completion** — pi's only notification primitive is `ctx.ui.notify`, an in-TUI banner invisible once you switch away from the pi tab. localterm already has an OSC 9 (`ESC ] 9 ; MESSAGE BEL`) → browser desktop-notification pipeline (opt-in via "Desktop alerts" in Settings). The extension writes an OSC 9 on `agent_end`, reusing that pipeline so a user who stepped away gets an OS notification when the agent finishes. Threshold-gated (turns ≥ 30 s) so quick back-and-forth doesn't spam a focused user; TUI-mode-guarded so `json`/`rpc`/`-p` stdout isn't polluted with OSC bytes. Note: emitting OSC 9 also fires localterm's `notification` automation trigger, so a `notification`-event automation will fire on agent completion.
+3. **Desktop notifications on agent completion** — pi's only notification primitive is `ctx.ui.notify`, an in-TUI banner invisible once you switch away from the pi tab. localterm already has an OSC 9 (`ESC ] 9 ; MESSAGE BEL`) → browser desktop-notification pipeline (opt-in via "Desktop alerts" in Settings). The extension writes an OSC 9 on `agent_settled`, reusing that pipeline so a user who stepped away gets an OS notification only after the agent has no automatic retry, compaction, or queued continuation left. It also coordinates with `@monotykamary/pi-retry` through Pi's shared extension event bus so that extension's delayed hidden retries do not produce intermediate notifications. Threshold-gated (turns ≥ 30 s) so quick back-and-forth doesn't spam a focused user; TUI-mode-guarded so `json`/`rpc`/`-p` stdout isn't polluted with OSC bytes. Note: emitting OSC 9 also fires localterm's `notification` automation trigger, so a `notification`-event automation will fire on agent completion.
 
 ## Install
 
@@ -64,7 +64,7 @@ The scrub overrides pi's built-in `bash` tool **by name** (extensions apply afte
 
 ## Requirements
 
-- pi ≥ 0.80 (uses the `spawnHook` tool option and `createBashToolDefinition` export).
+- pi ≥ 0.80.7 (uses `agent_settled`, the shared extension event bus, the `spawnHook` tool option, and the `createBashToolDefinition` export).
 - localterm with `LOCALTERM=1` in the PTY environment (v0.7+). The scrub additionally needs localterm's secrets/processes policy files on the same machine.
 
 ## License
