@@ -196,10 +196,8 @@ export const SettingsMenu = ({
       return () => cancelAnimationFrame(frame);
     }
     setSettled(false);
-    if (mounted) {
-      const timer = window.setTimeout(() => setMounted(false), SETTINGS_MODAL_CLOSE_TRANSITION_MS);
-      return () => window.clearTimeout(timer);
-    }
+    const timer = window.setTimeout(() => setMounted(false), SETTINGS_MODAL_CLOSE_TRANSITION_MS);
+    return () => window.clearTimeout(timer);
   }, [isOpen]);
 
   // Escape closes (mirrors the other palette overlays).

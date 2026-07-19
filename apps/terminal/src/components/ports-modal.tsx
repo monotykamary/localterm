@@ -164,10 +164,8 @@ export const PortsModal = ({ open, isTouchDevice, onClose }: PortsModalProps) =>
       return () => cancelAnimationFrame(frame);
     }
     setSettled(false);
-    if (mounted) {
-      const timer = window.setTimeout(() => setMounted(false), PORTS_MODAL_CLOSE_TRANSITION_MS);
-      return () => window.clearTimeout(timer);
-    }
+    const timer = window.setTimeout(() => setMounted(false), PORTS_MODAL_CLOSE_TRANSITION_MS);
+    return () => window.clearTimeout(timer);
   }, [open]);
 
   useEffect(() => {

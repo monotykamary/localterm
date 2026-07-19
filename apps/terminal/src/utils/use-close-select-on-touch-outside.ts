@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { isCoarsePointer } from "./is-coarse-pointer";
+import { useLatestRef } from "./use-latest-ref";
 
 // On touch, tapping the terminal to dismiss an open select would otherwise let
 // the terminal's `touchend` handler call focusTerminalForInput() and pop the
@@ -22,10 +23,8 @@ export const useCloseSelectOnTouchOutside = (
   open: boolean,
   onOpenChange: (open: boolean) => void,
 ): void => {
-  const openRef = useRef(open);
-  openRef.current = open;
-  const onOpenChangeRef = useRef(onOpenChange);
-  onOpenChangeRef.current = onOpenChange;
+  const openRef = useLatestRef(open);
+  const onOpenChangeRef = useLatestRef(onOpenChange);
   useEffect(() => {
     if (!isCoarsePointer()) return;
     let dismissGesture = false;
@@ -51,5 +50,5 @@ export const useCloseSelectOnTouchOutside = (
       window.removeEventListener("touchstart", handleTouchStart, { capture: true });
       window.removeEventListener("touchend", handleTouchEnd, { capture: true });
     };
-  }, []);
+  }, [openRef, onOpenChangeRef]);
 };

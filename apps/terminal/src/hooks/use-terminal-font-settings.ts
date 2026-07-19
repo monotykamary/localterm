@@ -8,6 +8,7 @@ import {
 } from "@/lib/terminal-fonts";
 import { clampTerminalFontSize } from "@/utils/clamp-terminal-font-size";
 import { clampTerminalLineHeight } from "@/utils/clamp-terminal-line-height";
+import { useLatestRef } from "@/utils/use-latest-ref";
 import { fetchFonts, migrateFonts, updateFonts } from "@/utils/fetch-fonts";
 import {
   loadStoredCustomFontFamily,
@@ -59,14 +60,10 @@ export const useTerminalFontSettings = () => {
   // localStorage is a cache for instant initial render. These refs mirror the
   // state so the stable `applyFontsState` (called from the WS dispatcher) reads
   // the latest without re-creating per change.
-  const activeFontIdRef = useRef(activeFontId);
-  activeFontIdRef.current = activeFontId;
-  const activeCustomFontFamilyRef = useRef(activeCustomFontFamily);
-  activeCustomFontFamilyRef.current = activeCustomFontFamily;
-  const activeNerdFontEnabledRef = useRef(activeNerdFontEnabled);
-  activeNerdFontEnabledRef.current = activeNerdFontEnabled;
-  const activeLigaturesEnabledRef = useRef(activeLigaturesEnabled);
-  activeLigaturesEnabledRef.current = activeLigaturesEnabled;
+  const activeFontIdRef = useLatestRef(activeFontId);
+  const activeCustomFontFamilyRef = useLatestRef(activeCustomFontFamily);
+  const activeNerdFontEnabledRef = useLatestRef(activeNerdFontEnabled);
+  const activeLigaturesEnabledRef = useLatestRef(activeLigaturesEnabled);
   const effectiveFont = useMemo(
     () =>
       effectiveFontId === CUSTOM_FONT_ID
@@ -86,24 +83,32 @@ export const useTerminalFontSettings = () => {
   // matches (the browser's own write-through change, confirmed by the
   // broadcast). `initialized` is the migrate gate, not a setting, so it's
   // ignored here.
-  const applyFontsState = useCallback((state: FontsResponse) => {
-    if (state.activeFontId !== activeFontIdRef.current) {
-      setActiveFontId(state.activeFontId);
-      storeTerminalFontId(state.activeFontId);
-    }
-    if (state.customFontFamily !== activeCustomFontFamilyRef.current) {
-      setActiveCustomFontFamily(state.customFontFamily);
-      storeCustomFontFamily(state.customFontFamily);
-    }
-    if (state.nerdFontEnabled !== activeNerdFontEnabledRef.current) {
-      setActiveNerdFontEnabled(state.nerdFontEnabled);
-      storeNerdFontEnabled(state.nerdFontEnabled);
-    }
-    if (state.ligaturesEnabled !== activeLigaturesEnabledRef.current) {
-      setActiveLigaturesEnabled(state.ligaturesEnabled);
-      storeLigaturesEnabled(state.ligaturesEnabled);
-    }
-  }, []);
+  const applyFontsState = useCallback(
+    (state: FontsResponse) => {
+      if (state.activeFontId !== activeFontIdRef.current) {
+        setActiveFontId(state.activeFontId);
+        storeTerminalFontId(state.activeFontId);
+      }
+      if (state.customFontFamily !== activeCustomFontFamilyRef.current) {
+        setActiveCustomFontFamily(state.customFontFamily);
+        storeCustomFontFamily(state.customFontFamily);
+      }
+      if (state.nerdFontEnabled !== activeNerdFontEnabledRef.current) {
+        setActiveNerdFontEnabled(state.nerdFontEnabled);
+        storeNerdFontEnabled(state.nerdFontEnabled);
+      }
+      if (state.ligaturesEnabled !== activeLigaturesEnabledRef.current) {
+        setActiveLigaturesEnabled(state.ligaturesEnabled);
+        storeLigaturesEnabled(state.ligaturesEnabled);
+      }
+    },
+    [
+      activeFontIdRef,
+      activeCustomFontFamilyRef,
+      activeNerdFontEnabledRef,
+      activeLigaturesEnabledRef,
+    ],
+  );
 
   // One-shot on mount: fetch the server font state so the cache reconciles, and
   // push the legacy localStorage font state once on first contact with an

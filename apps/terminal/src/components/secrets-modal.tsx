@@ -74,13 +74,19 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
     secretActions.clearArmedDelete();
     transferActions.closeForms();
     processActions.clearArmedDelete();
-    if (mounted) {
-      const timer = window.setTimeout(() => setMounted(false), SECRETS_MODAL_CLOSE_TRANSITION_MS);
-      return () => window.clearTimeout(timer);
-    }
-  }, [open, mounted]);
+    const timer = window.setTimeout(() => setMounted(false), SECRETS_MODAL_CLOSE_TRANSITION_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    open,
+    secretActions.reset,
+    transferActions.reset,
+    processActions.reset,
+    secretActions.clearArmedDelete,
+    transferActions.closeForms,
+    processActions.clearArmedDelete,
+  ]);
 
-  const secrets = resources.secrets ?? [];
+  const secrets = useMemo(() => resources.secrets ?? [], [resources.secrets]);
   const filteredSecrets = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     if (!normalizedSearch) return secrets;
@@ -127,6 +133,10 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
     transferActions.exportForm,
     transferActions.importForm,
     processActions.form,
+    secretActions.cancelForm,
+    transferActions.cancelExport,
+    transferActions.cancelImport,
+    processActions.cancelForm,
     onClose,
   ]);
 

@@ -20,6 +20,13 @@
 - MUST: Put small, focused utility functions in `utils/` with one utility per file.
 - MUST: Use Boolean over !!.
 
+## React quality
+
+Do NOT run the full `pnpm run doctor:react` audit during normal turn flow. Use `pnpm run doctor:react:changed` while iterating on React code; it checks only touched lines relative to `main` and skips dead-code and supply-chain analysis. Run the full audit exactly once at the same end-of-task gate as the test suite, when no more iteration is expected.
+
+- MUST: Review React Doctor findings and fix newly introduced diagnostics rather than suppressing them.
+- MUST: Treat React Doctor errors as blocking.
+
 ## Testing
 
 Do NOT run `pnpm test` / `pnpm lint` / `pnpm typecheck` / `pnpm format` as part of your normal turn flow or to "verify your work" before responding. These are slow, and running them mid-task just stalls iteration. Run the full suite exactly once — at the very end, when the user signals the whole task is complete and no more iteration is expected (the dust has fully settled). Not per-turn, not per-commit, not before sending a response.
@@ -45,6 +52,7 @@ tail -25 /tmp/localterm-test.log                                       # the run
 The other end-of-task checks:
 
 ```bash
+pnpm run doctor:react
 pnpm lint
 pnpm typecheck
 pnpm format
@@ -76,3 +84,5 @@ See root `package.json` scripts for the full list. Quick reference:
 - **Build**: `pnpm build`
 - **Dev watch**: `pnpm dev`
 - **Lint dead code**: `pnpm lint:dead` (runs `knip` to find unused files, exports, and dependencies)
+- **Audit changed React code**: `pnpm run doctor:react:changed`
+- **Audit all React code (end of task only)**: `pnpm run doctor:react`

@@ -78,8 +78,10 @@ export const groupTriageRuns = (entries: TriageRunEntry[], nowMs: number): Triag
     else sectionsByLabel.set(label, [row]);
   }
 
-  return BAND_ORDER.filter((label) => sectionsByLabel.has(label)).map((label) => ({
-    label,
-    rows: sectionsByLabel.get(label) ?? [],
-  }));
+  const sections: TriageSection[] = [];
+  for (const label of BAND_ORDER) {
+    const sectionRows = sectionsByLabel.get(label);
+    if (sectionRows) sections.push({ label, rows: sectionRows });
+  }
+  return sections;
 };

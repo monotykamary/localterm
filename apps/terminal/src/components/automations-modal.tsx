@@ -120,6 +120,15 @@ const formForAutomation = (automation: AutomationWithNextRun): AutomationFormSta
   };
 };
 
+const loadSortFromStorage = (): AutomationsSort => {
+  try {
+    const storedSort = localStorage.getItem(AUTOMATIONS_SORT_STORAGE_KEY);
+    return isAutomationsSort(storedSort) ? storedSort : AUTOMATIONS_SORT_DEFAULT;
+  } catch {
+    return AUTOMATIONS_SORT_DEFAULT;
+  }
+};
+
 export const AutomationsModal = ({
   open,
   onClose,
@@ -144,15 +153,6 @@ export const AutomationsModal = ({
   const [armedClearId, setArmedClearId] = useState<string | null>(null);
   const [armedClearThreadId, setArmedClearThreadId] = useState<string | null>(null);
   const [runFilter, setRunFilter] = useState<"all" | "unread" | "failed" | "skipped">("all");
-  const loadSortFromStorage = (): AutomationsSort => {
-    try {
-      const storedSort = localStorage.getItem(AUTOMATIONS_SORT_STORAGE_KEY);
-      return isAutomationsSort(storedSort) ? storedSort : AUTOMATIONS_SORT_DEFAULT;
-    } catch {
-      return AUTOMATIONS_SORT_DEFAULT;
-    }
-  };
-
   const [sortBy, setSortBy] = useState<AutomationsSort>(loadSortFromStorage);
   const [search, setSearch] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -163,7 +163,7 @@ export const AutomationsModal = ({
   const contentRowRef = useRef<HTMLDivElement | null>(null);
   const [headerWidth, setHeaderWidth] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const headerConfigIndexRef = useRef(0);
+  const [headerConfigIndex, setHeaderConfigIndex] = useState(0);
 
   const refreshAutomations = useCallback(async () => {
     const fetched = await fetchAutomations();
@@ -187,13 +187,8 @@ export const AutomationsModal = ({
       return () => cancelAnimationFrame(frame);
     }
     setSettled(false);
-    if (mounted) {
-      const timer = window.setTimeout(
-        () => setMounted(false),
-        AUTOMATIONS_MODAL_CLOSE_TRANSITION_MS,
-      );
-      return () => window.clearTimeout(timer);
-    }
+    const timer = window.setTimeout(() => setMounted(false), AUTOMATIONS_MODAL_CLOSE_TRANSITION_MS);
+    return () => window.clearTimeout(timer);
   }, [open]);
 
   useEffect(() => {
@@ -345,11 +340,14 @@ export const AutomationsModal = ({
     const result = computeAutomationsHeaderLayout({
       availableWidth: headerWidth,
       showCreateButton: tab === "automations" && mode === "view",
-      previousConfigIndex: headerConfigIndexRef.current,
+      previousConfigIndex: headerConfigIndex,
     });
-    headerConfigIndexRef.current = result.configIndex;
     return result;
-  }, [headerWidth, tab, mode]);
+  }, [headerWidth, tab, mode, headerConfigIndex]);
+
+  useLayoutEffect(() => {
+    setHeaderConfigIndex(headerLayout.configIndex);
+  }, [headerLayout.configIndex]);
 
   const openCreate = () => {
     setForm(emptyForm(defaultCwd));

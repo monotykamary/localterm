@@ -154,10 +154,8 @@ export const CommandPalette = ({
       return () => cancelAnimationFrame(frame);
     }
     setSettled(false);
-    if (mounted) {
-      const timer = window.setTimeout(() => setMounted(false), COMMAND_PALETTE_CLOSE_TRANSITION_MS);
-      return () => window.clearTimeout(timer);
-    }
+    const timer = window.setTimeout(() => setMounted(false), COMMAND_PALETTE_CLOSE_TRANSITION_MS);
+    return () => window.clearTimeout(timer);
   }, [open]);
 
   useEffect(() => {

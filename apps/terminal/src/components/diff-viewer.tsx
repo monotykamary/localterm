@@ -152,10 +152,8 @@ export const DiffViewer = ({
       return () => cancelAnimationFrame(frame);
     }
     setSettled(false);
-    if (mounted) {
-      const timer = window.setTimeout(() => setMounted(false), DIFF_VIEWER_CLOSE_TRANSITION_MS);
-      return () => window.clearTimeout(timer);
-    }
+    const timer = window.setTimeout(() => setMounted(false), DIFF_VIEWER_CLOSE_TRANSITION_MS);
+    return () => window.clearTimeout(timer);
   }, [open]);
 
   // Switching repos resets mode overrides, file-list state, and patches.
@@ -350,7 +348,7 @@ export const DiffViewer = ({
         : (displayBase ?? baseOptions[0] ?? "");
 
   const isBranchMode = compareMode === "branch";
-  const headerConfigIndexRef = useRef(0);
+  const [headerConfigIndex, setHeaderConfigIndex] = useState(0);
 
   const headerLayout = useMemo(() => {
     const result = computeHeaderLayout({
@@ -361,11 +359,14 @@ export const DiffViewer = ({
       additions: totals.additions,
       deletions: totals.deletions,
       binaryCount: totals.binaries,
-      previousConfigIndex: headerConfigIndexRef.current,
+      previousConfigIndex: headerConfigIndex,
     });
-    headerConfigIndexRef.current = result.configIndex;
     return result;
-  }, [headerWidth, pr, isBranchMode, effectiveBaseLabel, totals]);
+  }, [headerWidth, pr, isBranchMode, effectiveBaseLabel, totals, headerConfigIndex]);
+
+  useLayoutEffect(() => {
+    setHeaderConfigIndex(headerLayout.configIndex);
+  }, [headerLayout.configIndex]);
 
   if (!mounted) return null;
 

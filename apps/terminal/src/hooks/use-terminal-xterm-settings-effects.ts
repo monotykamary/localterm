@@ -84,7 +84,7 @@ export const useTerminalXtermSettingsEffects = ({
     }
     // Theme changes rebuild the glyph model, so the redraw must see the new contrast floor.
     terminal.options.theme = effectiveThemeWithExtendedPalette;
-  }, [terminalReady, effectiveTheme, effectiveThemeWithExtendedPalette]);
+  }, [terminalReady, effectiveTheme, effectiveThemeWithExtendedPalette, terminalRef]);
 
   useEffect(() => {
     if (!terminalReady) return;
@@ -103,7 +103,7 @@ export const useTerminalXtermSettingsEffects = ({
     return () => {
       cancelled = true;
     };
-  }, [terminalReady, effectiveFont, effectiveFontFamily]);
+  }, [terminalReady, effectiveFont, effectiveFontFamily, terminalRef, fitAddonRef]);
 
   useEffect(() => {
     webglAddonRef.current?.setEmojiColorsMuted(activeMuteEmojiColors);
@@ -125,7 +125,7 @@ export const useTerminalXtermSettingsEffects = ({
       terminal.deregisterCharacterJoiner(ligatureJoinerIdRef.current);
       ligatureJoinerIdRef.current = null;
     }
-  }, [terminalReady, activeLigaturesEnabled]);
+  }, [terminalReady, activeLigaturesEnabled, terminalRef]);
 
   useEffect(() => {
     if (!terminalReady) return;
@@ -134,7 +134,7 @@ export const useTerminalXtermSettingsEffects = ({
     terminal.options.fontSize = activeFontSize;
     const fitAddon = fitAddonRef.current;
     if (fitAddon) fitTerminalPreservingScroll(terminal, fitAddon);
-  }, [terminalReady, activeFontSize]);
+  }, [terminalReady, activeFontSize, terminalRef, fitAddonRef]);
 
   useEffect(() => {
     if (!terminalReady) return;
@@ -143,40 +143,40 @@ export const useTerminalXtermSettingsEffects = ({
     terminal.options.lineHeight = activeLineHeight;
     const fitAddon = fitAddonRef.current;
     if (fitAddon) fitTerminalPreservingScroll(terminal, fitAddon);
-  }, [terminalReady, activeLineHeight]);
+  }, [terminalReady, activeLineHeight, terminalRef, fitAddonRef]);
 
   useEffect(() => {
     if (!terminalReady) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.cursorStyle = effectiveCursorStyle;
-  }, [terminalReady, effectiveCursorStyle]);
+  }, [terminalReady, effectiveCursorStyle, terminalRef]);
 
   useEffect(() => {
     if (!terminalReady) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.cursorBlink = activeCursorBlink;
-  }, [terminalReady, activeCursorBlink]);
+  }, [terminalReady, activeCursorBlink, terminalRef]);
 
   useEffect(() => {
     activeLocalEchoRef.current = activeLocalEcho;
     localEchoRef.current?.setEnabled(activeLocalEcho);
-  }, [activeLocalEcho]);
+  }, [activeLocalEcho, activeLocalEchoRef, localEchoRef]);
 
   useEffect(() => {
     if (!terminalReady) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.scrollback = activeScrollback;
-  }, [terminalReady, activeScrollback]);
+  }, [terminalReady, activeScrollback, terminalRef]);
 
   useEffect(() => {
     if (!terminalReady) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.scrollOnUserInput = activeScrollOnUserInput;
-  }, [terminalReady, activeScrollOnUserInput]);
+  }, [terminalReady, activeScrollOnUserInput, terminalRef]);
 
   useEffect(() => {
     if (!terminalReady) return;
@@ -184,5 +184,5 @@ export const useTerminalXtermSettingsEffects = ({
     if (!terminal) return;
     const fitAddon = fitAddonRef.current;
     if (fitAddon) fitTerminalPreservingScroll(terminal, fitAddon);
-  }, [terminalReady, activePaddingX, activePaddingY]);
+  }, [terminalReady, activePaddingX, activePaddingY, terminalRef, fitAddonRef]);
 };

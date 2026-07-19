@@ -1,6 +1,6 @@
 import type { AutomationSessionEvent } from "@monotykamary/localterm-server/protocol";
 import { Search, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
@@ -25,10 +25,12 @@ export const EventTriggerSelector = ({
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const listboxId = useId();
 
+  const selectedEvents = useMemo(() => new Set(selected), [selected]);
   const availableOptions = useMemo(
-    () => options.filter((event) => !selected.includes(event)),
-    [options, selected],
+    () => options.filter((event) => !selectedEvents.has(event)),
+    [options, selectedEvents],
   );
 
   const filteredOptions = useMemo(() => {
@@ -101,6 +103,7 @@ export const EventTriggerSelector = ({
           <div
             role="combobox"
             aria-expanded={open}
+            aria-controls={listboxId}
             aria-haspopup="listbox"
             tabIndex={0}
             className={cn(
@@ -148,6 +151,7 @@ export const EventTriggerSelector = ({
           />
         </div>
         <div
+          id={listboxId}
           className="max-h-60 overflow-y-auto overscroll-contain p-1"
           role="listbox"
           aria-label="Events"

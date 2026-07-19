@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactElement, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { agentModelId } from "@/utils/agent-model-id";
 import { matchAgentModels } from "@/utils/match-agent-model";
@@ -34,6 +34,7 @@ export const ModelSelector = ({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const { models, loading } = useAgentModels();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const listboxId = useId();
 
   const filtered = useMemo(() => matchAgentModels(models, query), [models, query]);
 
@@ -99,6 +100,7 @@ export const ModelSelector = ({
     <div
       role="combobox"
       aria-expanded={open}
+      aria-controls={listboxId}
       aria-haspopup="listbox"
       tabIndex={0}
       className={cn(
@@ -136,6 +138,7 @@ export const ModelSelector = ({
           />
         </div>
         <div
+          id={listboxId}
           className="max-h-60 overflow-y-auto overscroll-contain p-1"
           role="listbox"
           aria-label="Models"

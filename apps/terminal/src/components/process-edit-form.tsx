@@ -30,15 +30,25 @@ export const ProcessEditForm = ({
     <div className="m-1.5 rounded-sm border border-border/40 bg-muted/20 p-2.5">
       <div className="flex flex-col gap-2">
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-            Binary name
-          </label>
+          {isEditing ? (
+            <span className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+              Binary name
+            </span>
+          ) : (
+            <label
+              htmlFor="localterm-process-name"
+              className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase"
+            >
+              Binary name
+            </label>
+          )}
           {isEditing ? (
             <div className="flex h-7 items-center px-2 font-mono text-xs text-foreground">
               {form.originalName}
             </div>
           ) : (
             <Input
+              id="localterm-process-name"
               value={form.name}
               autoFocus
               name="localterm-process-name"

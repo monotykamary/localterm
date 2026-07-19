@@ -9,6 +9,11 @@ allowBuilds:
   node-pty: true
   protobufjs: true
 
+minimumReleaseAgeExclude:
+  - deslop-js@0.8.1
+  - oxlint-plugin-react-doctor@0.8.1
+  - react-doctor@0.8.1
+
 onlyBuiltDependencies:
   - "@parcel/watcher"
   - "@google/genai"

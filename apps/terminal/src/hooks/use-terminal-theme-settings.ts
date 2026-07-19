@@ -16,6 +16,7 @@ import {
 import { loadStoredCustomThemes, storeCustomThemes } from "@/utils/stored-custom-themes";
 import { loadStoredTerminalThemeId, storeTerminalThemeId } from "@/utils/stored-terminal-theme-id";
 import { generateExtendedPalette } from "@/utils/generate-extended-palette";
+import { useLatestRef } from "@/utils/use-latest-ref";
 
 interface TerminalThemesState {
   activeThemeId: string;
@@ -35,10 +36,8 @@ export const useTerminalThemeSettings = () => {
   // (~/.localterm/themes.json); localStorage is a cache for instant initial
   // render. These refs mirror the state so the stable `applyThemesState` (called
   // from the WS dispatcher) reads the latest without re-creating per change.
-  const activeThemeIdRef = useRef(activeThemeId);
-  activeThemeIdRef.current = activeThemeId;
-  const activeCustomThemesRef = useRef(activeCustomThemes);
-  activeCustomThemesRef.current = activeCustomThemes;
+  const activeThemeIdRef = useLatestRef(activeThemeId);
+  const activeCustomThemesRef = useLatestRef(activeCustomThemes);
   // The host's color-scheme drives the "Auto (system)" theme: VESPER when dark,
   // the light default when light. Updated live via matchMedia so a desktop
   // switch re-resolves without a reload (a Linux GTK color-scheme change).
@@ -120,20 +119,24 @@ export const useTerminalThemeSettings = () => {
   // cache. Stable (reads current state via refs) so the mount-once WS dispatcher
   // captures it for the tab's lifetime. No-op when the state already matches
   // (the browser's own write-through change, confirmed by the broadcast).
-  const applyThemesState = useCallback((state: TerminalThemesState) => {
-    if (state.activeThemeId !== activeThemeIdRef.current) {
-      setActiveThemeId(state.activeThemeId);
-      storeTerminalThemeId(state.activeThemeId);
-    }
-    const local = activeCustomThemesRef.current;
-    const serverIds = new Set(state.customThemes.map((theme) => theme.id));
-    const customsDiffer =
-      state.customThemes.length !== local.length || local.some((theme) => !serverIds.has(theme.id));
-    if (customsDiffer) {
-      setActiveCustomThemes([...state.customThemes]);
-      storeCustomThemes(state.customThemes);
-    }
-  }, []);
+  const applyThemesState = useCallback(
+    (state: TerminalThemesState) => {
+      if (state.activeThemeId !== activeThemeIdRef.current) {
+        setActiveThemeId(state.activeThemeId);
+        storeTerminalThemeId(state.activeThemeId);
+      }
+      const local = activeCustomThemesRef.current;
+      const serverIds = new Set(state.customThemes.map((theme) => theme.id));
+      const customsDiffer =
+        state.customThemes.length !== local.length ||
+        local.some((theme) => !serverIds.has(theme.id));
+      if (customsDiffer) {
+        setActiveCustomThemes([...state.customThemes]);
+        storeCustomThemes(state.customThemes);
+      }
+    },
+    [activeThemeIdRef, activeCustomThemesRef],
+  );
 
   // One-shot on mount: fetch the server state so the cache reconciles, and push
   // the legacy localStorage themes once on first contact with an uninitialized

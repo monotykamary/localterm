@@ -418,10 +418,8 @@ export const SessionsModal = ({
       return () => cancelAnimationFrame(frame);
     }
     setSettled(false);
-    if (mounted) {
-      const timer = window.setTimeout(() => setMounted(false), SESSIONS_MODAL_CLOSE_TRANSITION_MS);
-      return () => window.clearTimeout(timer);
-    }
+    const timer = window.setTimeout(() => setMounted(false), SESSIONS_MODAL_CLOSE_TRANSITION_MS);
+    return () => window.clearTimeout(timer);
   }, [open]);
 
   useEffect(() => {
@@ -474,7 +472,7 @@ export const SessionsModal = ({
     setActiveIndex(
       resolveInitialSessionIndex(ordered, previousSessionIdRef.current, liveSessionIdRef.current),
     );
-  }, [open, ordered]);
+  }, [open, ordered, previousSessionIdRef, liveSessionIdRef]);
 
   useEffect(() => {
     if (!open) {

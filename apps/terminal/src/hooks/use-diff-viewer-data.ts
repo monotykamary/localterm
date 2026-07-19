@@ -13,6 +13,7 @@ import {
 import { deriveDiffSummary } from "@/utils/derive-diff-summary";
 import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "@/utils/fetch-git-diff";
 import { parseUnifiedDiff } from "@/utils/parse-unified-diff";
+import { useLatestRef } from "@/utils/use-latest-ref";
 import { PrefetchQueue, type PrefetchQueueItem } from "@/utils/prefetch-queue";
 import { detectLangId, tokenizeDiffLines } from "@/utils/syntax-highlight";
 import type { SyntaxHighlightColorScheme } from "@/utils/syntax-highlight";
@@ -57,12 +58,9 @@ export const useDiffViewerData = ({
   const prefetchQueueRef = useRef<PrefetchQueue | null>(null);
   const lastFileMetaRef = useRef<Map<string, string>>(new Map());
   // Latest cache, read by loadPatch without making it depend on patchCache.
-  const patchCacheRef = useRef(patchCache);
-  patchCacheRef.current = patchCache;
-  const syntaxHighlightColorSchemeRef = useRef(syntaxHighlightColorScheme);
-  syntaxHighlightColorSchemeRef.current = syntaxHighlightColorScheme;
-  const onDiffSummaryUpdateRef = useRef(onDiffSummaryUpdate);
-  onDiffSummaryUpdateRef.current = onDiffSummaryUpdate;
+  const patchCacheRef = useLatestRef(patchCache);
+  const syntaxHighlightColorSchemeRef = useLatestRef(syntaxHighlightColorScheme);
+  const onDiffSummaryUpdateRef = useLatestRef(onDiffSummaryUpdate);
 
   useEffect(() => {
     selectedPathRef.current = selectedPath;
@@ -105,10 +103,8 @@ export const useDiffViewerData = ({
     return () => controller.abort();
   }, [cwd]);
 
-  const workingFilesRef = useRef(workingFiles);
-  workingFilesRef.current = workingFiles;
-  const branchFilesRef = useRef(branchFiles);
-  branchFilesRef.current = branchFiles;
+  const workingFilesRef = useLatestRef(workingFiles);
+  const branchFilesRef = useLatestRef(branchFiles);
 
   // Refetch the current mode's file list and update the right per-mode state.
   // Returns the fetched list so callers can decide whether to recover from errors
@@ -162,7 +158,17 @@ export const useDiffViewerData = ({
       if (!response) setHasError(true);
     })();
     return () => controller.abort();
-  }, [open, cwd, refreshCount, compareMode, baseOverride, abortPatchFetches, refreshCurrentFiles]);
+  }, [
+    open,
+    cwd,
+    refreshCount,
+    compareMode,
+    baseOverride,
+    abortPatchFetches,
+    refreshCurrentFiles,
+    branchFilesRef,
+    workingFilesRef,
+  ]);
 
   // When the server signals the working tree may have changed, debounce and
   // re-fetch the current mode's file list so opening lands on current, pre-cached
@@ -195,7 +201,16 @@ export const useDiffViewerData = ({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [cwd, gitDirtyVersion, compareMode, baseOverride, open, refreshCurrentFiles]);
+  }, [
+    cwd,
+    gitDirtyVersion,
+    compareMode,
+    baseOverride,
+    open,
+    refreshCurrentFiles,
+    branchFilesRef,
+    workingFilesRef,
+  ]);
 
   // Push working-tree summaries back to the ambient indicator so it stays in sync
   // with the viewer's latest fetch instead of waiting on the throttled WebSocket push.
@@ -203,7 +218,7 @@ export const useDiffViewerData = ({
     if (workingFiles && onDiffSummaryUpdateRef.current) {
       onDiffSummaryUpdateRef.current(deriveDiffSummary(workingFiles, currentBranch));
     }
-  }, [workingFiles, currentBranch]);
+  }, [workingFiles, currentBranch, onDiffSummaryUpdateRef]);
 
   // Invalidate cached patches when the comparison mode or base changes —
   // patches from one mode are wrong for another.
@@ -276,7 +291,7 @@ export const useDiffViewerData = ({
           }));
         });
     },
-    [cwd, compareMode, baseOverride],
+    [cwd, compareMode, baseOverride, patchCacheRef, syntaxHighlightColorSchemeRef],
   );
 
   const getOrCreatePrefetchQueue = useCallback(() => {

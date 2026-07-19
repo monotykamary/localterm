@@ -103,13 +103,12 @@ export const WorktreeSettingsPanel = ({
     if (!cwd) return;
     setIsSaving(true);
     setSaveError(null);
-    const cleaned = openInDrafts
-      .map((entry) => ({
-        id: entry.id,
-        label: entry.label.trim(),
-        command: entry.command.trim(),
-      }))
-      .filter((entry) => entry.label && entry.command);
+    const cleaned: WorktreeOpenInCommand[] = [];
+    for (const entry of openInDrafts) {
+      const label = entry.label.trim();
+      const command = entry.command.trim();
+      if (label && command) cleaned.push({ id: entry.id, label, command });
+    }
     const shouldUpdateIncludeFile =
       isRepo && (includeFile !== null || includeContent.trim() !== "");
     const [updatedConfig, updatedIncludeFile] = await Promise.all([

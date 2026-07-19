@@ -242,7 +242,17 @@ export const useTerminalSettings = ({
     return () => {
       for (const unsubscribe of unsubscribes) unsubscribe();
     };
-  }, []);
+  }, [
+    themeSettings.setActiveThemeId,
+    fontSettings.setActiveFontId,
+    fontSettings.setActiveNerdFontEnabled,
+    fontSettings.setActiveLigaturesEnabled,
+    fontSettings.setActiveMuteEmojiColors,
+    fontSettings.setActiveFontSize,
+    fontSettings.setActiveLineHeight,
+    themeSettings.setActiveCustomThemes,
+    fontSettings.setActiveCustomFontFamily,
+  ]);
 
   return {
     initialThemeIdRef: themeSettings.initialThemeIdRef,

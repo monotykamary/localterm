@@ -3,7 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XtermTerminal } from "@xterm/xterm";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { OnScreenKeyboard } from "@/components/on-screen-keyboard/on-screen-keyboard";
 import { useDaemonSettings } from "@/hooks/use-daemon-settings";
 import { useDeviceTier } from "@/hooks/use-device-tier";
@@ -552,13 +552,6 @@ export const Terminal = () => {
     setWorktreeCreateError,
     toolbarHoverTimeoutRef,
   });
-  toggleAutomationsRef.current = toggleAutomations;
-  openWorktreesRef.current = openWorktrees;
-  toggleWorktreesRef.current = toggleWorktrees;
-  toggleSessionsRef.current = toggleSessions;
-  togglePortsRef.current = togglePorts;
-  toggleSecretsRef.current = toggleSecrets;
-
   const openShellAt = useCallback((shellCwd: string, command?: string) => {
     window.open(buildNewTerminalTabUrl(shellCwd, command), "_blank", "noopener,noreferrer");
   }, []);
@@ -588,14 +581,10 @@ export const Terminal = () => {
     },
     [liveCwd, openShellAt],
   );
-  createWorktreeRef.current = createWorktree;
-
   const toggleCommandPalette = useCallback(() => {
     setIsActionsMenuOpen(false);
     setIsCommandPaletteOpen((previous) => !previous);
   }, []);
-  toggleCommandPaletteRef.current = toggleCommandPalette;
-
   const closeCommandPalette = useCallback(() => {
     setIsCommandPaletteOpen(false);
     refocusTerminalRef.current?.();
@@ -606,15 +595,11 @@ export const Terminal = () => {
     setIsActionsMenuOpen(false);
     setIsCommandPaletteOpen(false);
   }, [openSearch]);
-  openSearchOverlayRef.current = openSearchOverlay;
-
   const openDiffViewer = useCallback(() => {
     setIsDiffViewerOpen(true);
     setIsActionsMenuOpen(false);
     setIsCommandPaletteOpen(false);
   }, []);
-  openDiffViewerRef.current = openDiffViewer;
-
   // The mobile chevron is the sole toggle for the action toolbar now that the
   // diff/PR indicators open the diff viewer directly. A light tap haptic
   // confirms the press on devices that support navigator.vibrate.
@@ -726,7 +711,31 @@ export const Terminal = () => {
     }
     window.open(newShellUrl, "_blank", "noopener,noreferrer");
   }, [deviceTier, newShellUrl]);
-  openNewShellRef.current = openNewShell;
+  useLayoutEffect(() => {
+    toggleAutomationsRef.current = toggleAutomations;
+    openWorktreesRef.current = openWorktrees;
+    toggleWorktreesRef.current = toggleWorktrees;
+    toggleSessionsRef.current = toggleSessions;
+    togglePortsRef.current = togglePorts;
+    toggleSecretsRef.current = toggleSecrets;
+    createWorktreeRef.current = createWorktree;
+    toggleCommandPaletteRef.current = toggleCommandPalette;
+    openSearchOverlayRef.current = openSearchOverlay;
+    openDiffViewerRef.current = openDiffViewer;
+    openNewShellRef.current = openNewShell;
+  }, [
+    toggleAutomations,
+    openWorktrees,
+    toggleWorktrees,
+    toggleSessions,
+    togglePorts,
+    toggleSecrets,
+    createWorktree,
+    toggleCommandPalette,
+    openSearchOverlay,
+    openDiffViewer,
+    openNewShell,
+  ]);
 
   const isSessionOver = exitInfo !== null;
   const isDisconnected =
@@ -766,7 +775,7 @@ export const Terminal = () => {
       cancelled = true;
       if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
-  }, [shouldAutoReconnect]);
+  }, [shouldAutoReconnect, onScreenKeyboardOpenRef]);
 
   useEffect(() => {
     if (isModalOpen) {

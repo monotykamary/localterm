@@ -32,6 +32,7 @@ import {
   type DiffAnnotation,
 } from "@/utils/format-review-prompt";
 import { parseUnifiedDiff, type DiffLine } from "@/utils/parse-unified-diff";
+import { useLatestRef } from "@/utils/use-latest-ref";
 import {
   detectLangId,
   getCachedTokens,
@@ -202,11 +203,9 @@ export const useFileDiffPaneState = ({
   } = useMemo(() => buildRenderChunkWindow(renderChunks, renderLimit), [renderChunks, renderLimit]);
 
   const isDragging = drag !== null;
-  const isDraggingRef = useRef(isDragging);
-  isDraggingRef.current = isDragging;
+  const isDraggingRef = useLatestRef(isDragging);
   const dragRange = drag ? resolveDragRange(rangeIndex, drag.anchor, drag.focus) : null;
-  const dragRangeRef = useRef(dragRange);
-  dragRangeRef.current = dragRange;
+  const dragRangeRef = useLatestRef(dragRange);
 
   // Stable across renders so memoized rows bail out during the grow; identity is
   // gated on a ref instead of `isDragging` so starting a drag doesn't churn props.
@@ -214,11 +213,14 @@ export const useFileDiffPaneState = ({
     const target = diffLineTargetFor(line);
     if (target) setDrag({ anchor: target, focus: target });
   }, []);
-  const handleDragEnter = useCallback((line: DiffLine) => {
-    if (!isDraggingRef.current) return;
-    const target = diffLineTargetFor(line);
-    if (target) setDrag((previous) => (previous ? { ...previous, focus: target } : previous));
-  }, []);
+  const handleDragEnter = useCallback(
+    (line: DiffLine) => {
+      if (!isDraggingRef.current) return;
+      const target = diffLineTargetFor(line);
+      if (target) setDrag((previous) => (previous ? { ...previous, focus: target } : previous));
+    },
+    [isDraggingRef],
+  );
 
   // Reveal one more chunk per frame until the whole file is rendered. Wrapped in
   // a transition so streaming the tail never blocks pointer/scroll/keyboard input.
@@ -253,7 +255,7 @@ export const useFileDiffPaneState = ({
       window.removeEventListener("pointerup", commitDrag);
       window.removeEventListener("pointercancel", cancelDrag);
     };
-  }, [isDragging, filePath, onOpenEditor, dragCancelRef]);
+  }, [isDragging, filePath, onOpenEditor, dragCancelRef, dragRangeRef]);
 
   // Lines covered by the live drag, the just-committed editor range, or any saved
   // multiline annotation in this file.

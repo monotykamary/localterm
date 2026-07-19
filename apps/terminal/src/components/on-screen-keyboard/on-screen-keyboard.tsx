@@ -282,18 +282,19 @@ export const OnScreenKeyboard = ({
       for (const [keyId, entry] of keyHitRef.current) {
         const expandX = keyboardGap / 2;
         const expandY = keyboardRowGap / 2;
+        const { left, top, width, height } = entry.rect;
         if (
-          clientX < entry.rect.left - expandX ||
-          clientX > entry.rect.left + entry.rect.width + expandX ||
-          clientY < entry.rect.top - expandY ||
-          clientY > entry.rect.top + entry.rect.height + expandY
+          clientX < left - expandX ||
+          clientX > left + width + expandX ||
+          clientY < top - expandY ||
+          clientY > top + height + expandY
         )
           continue;
-        const cx = entry.rect.left + entry.rect.width / 2;
-        const cy = entry.rect.top + entry.rect.height / 2;
-        const dist = (clientX - cx) ** 2 + (clientY - cy) ** 2;
-        if (dist < bestDist) {
-          bestDist = dist;
+        const centerX = left + width / 2;
+        const centerY = top + height / 2;
+        const distance = (clientX - centerX) ** 2 + (clientY - centerY) ** 2;
+        if (distance < bestDist) {
+          bestDist = distance;
           best = { keyId, cell: entry.cell, rect: entry.rect };
         }
       }
@@ -301,11 +302,12 @@ export const OnScreenKeyboard = ({
       let fallback: Hit | null = null;
       let fallbackDist = Infinity;
       for (const [keyId, entry] of keyHitRef.current) {
-        const cx = entry.rect.left + entry.rect.width / 2;
-        const cy = entry.rect.top + entry.rect.height / 2;
-        const dist = (clientX - cx) ** 2 + (clientY - cy) ** 2;
-        if (dist < fallbackDist) {
-          fallbackDist = dist;
+        const { left, top, width, height } = entry.rect;
+        const centerX = left + width / 2;
+        const centerY = top + height / 2;
+        const distance = (clientX - centerX) ** 2 + (clientY - centerY) ** 2;
+        if (distance < fallbackDist) {
+          fallbackDist = distance;
           fallback = { keyId, cell: entry.cell, rect: entry.rect };
         }
       }

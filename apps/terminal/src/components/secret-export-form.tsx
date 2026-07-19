@@ -23,10 +23,14 @@ export const SecretExportForm = ({
   <div className="m-1.5 rounded-sm border border-border/40 bg-muted/20 p-2.5">
     <div className="flex flex-col gap-2">
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+        <label
+          htmlFor="localterm-secret-export-passphrase"
+          className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase"
+        >
           Passphrase
         </label>
         <Input
+          id="localterm-secret-export-passphrase"
           type="password"
           value={form.passphrase}
           autoFocus
@@ -37,10 +41,14 @@ export const SecretExportForm = ({
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+        <label
+          htmlFor="localterm-secret-export-confirm"
+          className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase"
+        >
           Confirm passphrase
         </label>
         <Input
+          id="localterm-secret-export-confirm"
           type="password"
           value={form.confirm}
           autoComplete="new-password"

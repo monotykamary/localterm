@@ -26,15 +26,25 @@ export const SecretEditForm = ({
     <div className="m-1.5 rounded-sm border border-border/40 bg-muted/20 p-2.5">
       <div className="flex flex-col gap-2">
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-            Name
-          </label>
+          {isEditing ? (
+            <span className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+              Name
+            </span>
+          ) : (
+            <label
+              htmlFor="localterm-secret-name"
+              className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase"
+            >
+              Name
+            </label>
+          )}
           {isEditing ? (
             <div className="flex h-7 items-center px-2 font-mono text-xs text-foreground">
               {form.originalName}
             </div>
           ) : (
             <Input
+              id="localterm-secret-name"
               value={form.name}
               name="localterm-secret-name"
               autoComplete="off"
@@ -56,10 +66,14 @@ export const SecretEditForm = ({
           )}
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+          <label
+            htmlFor="localterm-secret-envvar"
+            className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase"
+          >
             Environment variable
           </label>
           <Input
+            id="localterm-secret-envvar"
             value={form.envVar}
             autoFocus
             name="localterm-secret-envvar"
@@ -71,10 +85,14 @@ export const SecretEditForm = ({
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+          <label
+            htmlFor="localterm-secret-value"
+            className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase"
+          >
             {isEditing ? "New value (optional)" : "Value"}
           </label>
           <Input
+            id="localterm-secret-value"
             type="password"
             value={form.value}
             name="localterm-secret-value"

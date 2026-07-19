@@ -208,11 +208,9 @@ export const QrModal = ({
       return () => cancelAnimationFrame(frame);
     }
     setSettled(false);
-    if (mounted) {
-      const timer = window.setTimeout(() => setMounted(false), QR_MODAL_CLOSE_TRANSITION_MS);
-      return () => window.clearTimeout(timer);
-    }
-  }, [open]);
+    const timer = window.setTimeout(() => setMounted(false), QR_MODAL_CLOSE_TRANSITION_MS);
+    return () => window.clearTimeout(timer);
+  }, [open, liveSessionIdRef]);
 
   useEffect(() => {
     if (!open) return;

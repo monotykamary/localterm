@@ -26,9 +26,9 @@ export const SecretImportForm = ({
   <div className="m-1.5 rounded-sm border border-border/40 bg-muted/20 p-2.5">
     <div className="flex flex-col gap-2">
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+        <span className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
           Export file
-        </label>
+        </span>
         <label className="flex h-7 cursor-pointer items-center gap-2 rounded-sm border border-border/50 px-2 text-xs text-muted-foreground hover:text-foreground">
           <Upload className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate">{form.filename || "Choose file…"}</span>
@@ -44,10 +44,14 @@ export const SecretImportForm = ({
         </label>
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+        <label
+          htmlFor="localterm-secret-import-passphrase"
+          className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase"
+        >
           Passphrase
         </label>
         <Input
+          id="localterm-secret-import-passphrase"
           type="password"
           value={form.passphrase}
           autoComplete="current-password"
