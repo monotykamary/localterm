@@ -1,5 +1,11 @@
 # @monotykamary/pi-localterm
 
+## 0.3.2
+
+### Patch Changes
+
+- a385b1e: Emit OSC 9 completion notifications only after Pi settles, including delayed retries coordinated through pi-retry.
+
 ## 0.3.1
 
 ### Patch Changes
