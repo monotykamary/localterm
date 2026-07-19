@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.16
+
+### Patch Changes
+
+- edc5112: Add React Doctor as a standard project quality gate and fix blocking React correctness and accessibility diagnostics.
+  - @monotykamary/localterm-server@2.66.16
+
 ## 2.66.15
 
 ### Patch Changes
