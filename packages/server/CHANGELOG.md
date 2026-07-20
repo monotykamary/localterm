@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.66.18
+
+### Patch Changes
+
+- cf50d86: Bound Git, agent-session, WebSocket output, and compression work; share repository watchers across viewed sessions and skip viewerless Git metadata refreshes.
+
 ## 2.66.17
 
 ### Patch Changes

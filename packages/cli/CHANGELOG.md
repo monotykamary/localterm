@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.18
+
+### Patch Changes
+
+- Updated dependencies [cf50d86]
+  - @monotykamary/localterm-server@2.66.18
+
 ## 2.66.17
 
 ### Patch Changes
