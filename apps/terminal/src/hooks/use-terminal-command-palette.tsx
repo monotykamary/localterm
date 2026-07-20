@@ -103,6 +103,14 @@ export const useTerminalCommandPalette = ({
   const commandPaletteCommands = useMemo<CommandItem[]>(() => {
     return [
       {
+        id: "new-shell",
+        label: "Open new shell",
+        category: "Actions",
+        shortcut: formatKeyboardShortcut(keyboardShortcuts.newShell, isMac),
+        icon: <Plus className="size-3.5" />,
+        action: openNewShell,
+      },
+      {
         id: "find",
         label: "Find in terminal",
         category: "Actions",
@@ -167,14 +175,6 @@ export const useTerminalCommandPalette = ({
         action: () => {
           void createWorktree({}, true);
         },
-      },
-      {
-        id: "new-shell",
-        label: "Open new shell",
-        category: "Actions",
-        shortcut: formatKeyboardShortcut(keyboardShortcuts.newShell, isMac),
-        icon: <Plus className="size-3.5" />,
-        action: openNewShell,
       },
       {
         id: "font-size-up",
