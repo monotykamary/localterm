@@ -39,6 +39,13 @@ describe("keyboard shortcuts", () => {
     expect(formatKeyboardShortcut(MAC_KEYBOARD_SHORTCUT_DEFAULTS.worktrees, true)).toBe("⌘B");
   });
 
+  it("does not match or format an unassigned shortcut", () => {
+    expect(isConfiguredKeyboardShortcut(keyboardEvent({ key: "g", ctrlKey: true }), null)).toBe(
+      false,
+    );
+    expect(formatKeyboardShortcut(null, false)).toBeUndefined();
+  });
+
   it("captures modified keys and rejects bare typing", () => {
     expect(
       keyboardShortcutFromEvent(keyboardEvent({ key: "g", ctrlKey: true, shiftKey: true })),

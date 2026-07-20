@@ -1,4 +1,4 @@
-import { RotateCcw, X } from "lucide-react";
+import { RotateCcw, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,8 +9,8 @@ import {
 import { KEYBOARD_SHORTCUTS_MODAL_CLOSE_TRANSITION_MS } from "@/lib/constants";
 import {
   KEYBOARD_SHORTCUT_DEFINITIONS,
-  type KeyboardShortcut,
   type KeyboardShortcutAction,
+  type KeyboardShortcutBinding,
   type KeyboardShortcutMap,
 } from "@/lib/keyboard-shortcuts";
 import { cn } from "@/lib/utils";
@@ -22,7 +22,7 @@ interface KeyboardShortcutsModalProps {
   open: boolean;
   isMac: boolean;
   keyboardShortcuts: KeyboardShortcutMap;
-  onChange: (action: KeyboardShortcutAction, shortcut: KeyboardShortcut) => void;
+  onChange: (action: KeyboardShortcutAction, shortcut: KeyboardShortcutBinding) => void;
   onClose: () => void;
   onReset: () => void;
 }
@@ -177,7 +177,22 @@ export const KeyboardShortcutsModal = ({
                   >
                     {isRecording
                       ? "Press keys…"
-                      : formatKeyboardShortcut(keyboardShortcuts[definition.action], isMac)}
+                      : (formatKeyboardShortcut(keyboardShortcuts[definition.action], isMac) ??
+                        "Unassigned")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`clear ${definition.label} shortcut`}
+                    disabled={keyboardShortcuts[definition.action] === null}
+                    onClick={() => {
+                      onChange(definition.action, null);
+                      if (isRecording) setRecordingAction(null);
+                      setError(null);
+                    }}
+                  >
+                    <Trash2 />
                   </Button>
                 </div>
               );

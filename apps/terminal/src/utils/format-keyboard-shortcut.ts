@@ -1,6 +1,10 @@
-import type { KeyboardShortcut } from "@/lib/keyboard-shortcuts";
+import type { KeyboardShortcutBinding } from "@/lib/keyboard-shortcuts";
 
-export const formatKeyboardShortcut = (shortcut: KeyboardShortcut, isMac: boolean): string => {
+export const formatKeyboardShortcut = (
+  shortcut: KeyboardShortcutBinding,
+  isMac: boolean,
+): string | undefined => {
+  if (!shortcut) return undefined;
   const modifiers: string[] = [];
   if (shortcut.ctrlKey) modifiers.push(isMac ? "⌃" : "Ctrl");
   if (shortcut.altKey) modifiers.push(isMac ? "⌥" : "Alt");

@@ -1,9 +1,11 @@
-import type { KeyboardShortcut } from "@/lib/keyboard-shortcuts";
+import type { KeyboardShortcutBinding } from "@/lib/keyboard-shortcuts";
 
 export const areKeyboardShortcutsEqual = (
-  first: KeyboardShortcut,
-  second: KeyboardShortcut,
+  first: KeyboardShortcutBinding,
+  second: KeyboardShortcutBinding,
 ): boolean =>
+  first !== null &&
+  second !== null &&
   first.key.toLowerCase() === second.key.toLowerCase() &&
   first.altKey === second.altKey &&
   first.ctrlKey === second.ctrlKey &&

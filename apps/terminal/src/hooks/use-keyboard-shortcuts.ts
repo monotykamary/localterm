@@ -4,13 +4,14 @@ import {
   NON_MAC_KEYBOARD_SHORTCUT_DEFAULTS,
   type KeyboardShortcut,
   type KeyboardShortcutAction,
+  type KeyboardShortcutBinding,
   type KeyboardShortcutMap,
 } from "@/lib/keyboard-shortcuts";
 import { KEYBOARD_SHORTCUTS_STORAGE_KEY } from "@/lib/constants";
 
 interface UseKeyboardShortcutsResult {
   keyboardShortcuts: KeyboardShortcutMap;
-  setKeyboardShortcut: (action: KeyboardShortcutAction, shortcut: KeyboardShortcut) => void;
+  setKeyboardShortcut: (action: KeyboardShortcutAction, shortcut: KeyboardShortcutBinding) => void;
   resetKeyboardShortcuts: () => void;
 }
 
@@ -33,6 +34,16 @@ const isKeyboardShortcut = (value: unknown): value is KeyboardShortcut => {
 const defaultsForPlatform = (isMac: boolean): KeyboardShortcutMap =>
   isMac ? MAC_KEYBOARD_SHORTCUT_DEFAULTS : NON_MAC_KEYBOARD_SHORTCUT_DEFAULTS;
 
+const keyboardShortcutFromStored = (
+  stored: object,
+  action: KeyboardShortcutAction,
+  fallback: KeyboardShortcutBinding,
+): KeyboardShortcutBinding => {
+  if (!(action in stored)) return fallback;
+  const shortcut = stored[action];
+  return shortcut === null || isKeyboardShortcut(shortcut) ? shortcut : fallback;
+};
+
 const loadKeyboardShortcuts = (isMac: boolean): KeyboardShortcutMap => {
   const defaults = defaultsForPlatform(isMac);
   try {
@@ -41,43 +52,24 @@ const loadKeyboardShortcuts = (isMac: boolean): KeyboardShortcutMap => {
     const stored: unknown = JSON.parse(raw);
     if (typeof stored !== "object" || stored === null) return defaults;
     return {
-      automations:
-        "automations" in stored && isKeyboardShortcut(stored.automations)
-          ? stored.automations
-          : defaults.automations,
-      commandPalette:
-        "commandPalette" in stored && isKeyboardShortcut(stored.commandPalette)
-          ? stored.commandPalette
-          : defaults.commandPalette,
-      createWorktree:
-        "createWorktree" in stored && isKeyboardShortcut(stored.createWorktree)
-          ? stored.createWorktree
-          : defaults.createWorktree,
-      devPorts:
-        "devPorts" in stored && isKeyboardShortcut(stored.devPorts)
-          ? stored.devPorts
-          : defaults.devPorts,
-      find: "find" in stored && isKeyboardShortcut(stored.find) ? stored.find : defaults.find,
-      gitDiff:
-        "gitDiff" in stored && isKeyboardShortcut(stored.gitDiff)
-          ? stored.gitDiff
-          : defaults.gitDiff,
-      newShell:
-        "newShell" in stored && isKeyboardShortcut(stored.newShell)
-          ? stored.newShell
-          : defaults.newShell,
-      secrets:
-        "secrets" in stored && isKeyboardShortcut(stored.secrets)
-          ? stored.secrets
-          : defaults.secrets,
-      sessions:
-        "sessions" in stored && isKeyboardShortcut(stored.sessions)
-          ? stored.sessions
-          : defaults.sessions,
-      worktrees:
-        "worktrees" in stored && isKeyboardShortcut(stored.worktrees)
-          ? stored.worktrees
-          : defaults.worktrees,
+      automations: keyboardShortcutFromStored(stored, "automations", defaults.automations),
+      commandPalette: keyboardShortcutFromStored(
+        stored,
+        "commandPalette",
+        defaults.commandPalette,
+      ),
+      createWorktree: keyboardShortcutFromStored(
+        stored,
+        "createWorktree",
+        defaults.createWorktree,
+      ),
+      devPorts: keyboardShortcutFromStored(stored, "devPorts", defaults.devPorts),
+      find: keyboardShortcutFromStored(stored, "find", defaults.find),
+      gitDiff: keyboardShortcutFromStored(stored, "gitDiff", defaults.gitDiff),
+      newShell: keyboardShortcutFromStored(stored, "newShell", defaults.newShell),
+      secrets: keyboardShortcutFromStored(stored, "secrets", defaults.secrets),
+      sessions: keyboardShortcutFromStored(stored, "sessions", defaults.sessions),
+      worktrees: keyboardShortcutFromStored(stored, "worktrees", defaults.worktrees),
     };
   } catch {
     return defaults;
@@ -103,7 +95,7 @@ export const useKeyboardShortcuts = (isMac: boolean): UseKeyboardShortcutsResult
   }, [isMac]);
 
   const setKeyboardShortcut = useCallback(
-    (action: KeyboardShortcutAction, shortcut: KeyboardShortcut) => {
+    (action: KeyboardShortcutAction, shortcut: KeyboardShortcutBinding) => {
       setKeyboardShortcuts((previous) => {
         const next = { ...previous, [action]: shortcut };
         storeKeyboardShortcuts(next);

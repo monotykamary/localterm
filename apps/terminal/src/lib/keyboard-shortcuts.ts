@@ -6,17 +6,19 @@ export interface KeyboardShortcut {
   shiftKey: boolean;
 }
 
+export type KeyboardShortcutBinding = KeyboardShortcut | null;
+
 export interface KeyboardShortcutMap {
-  automations: KeyboardShortcut;
-  commandPalette: KeyboardShortcut;
-  createWorktree: KeyboardShortcut;
-  devPorts: KeyboardShortcut;
-  find: KeyboardShortcut;
-  gitDiff: KeyboardShortcut;
-  newShell: KeyboardShortcut;
-  secrets: KeyboardShortcut;
-  sessions: KeyboardShortcut;
-  worktrees: KeyboardShortcut;
+  automations: KeyboardShortcutBinding;
+  commandPalette: KeyboardShortcutBinding;
+  createWorktree: KeyboardShortcutBinding;
+  devPorts: KeyboardShortcutBinding;
+  find: KeyboardShortcutBinding;
+  gitDiff: KeyboardShortcutBinding;
+  newShell: KeyboardShortcutBinding;
+  secrets: KeyboardShortcutBinding;
+  sessions: KeyboardShortcutBinding;
+  worktrees: KeyboardShortcutBinding;
 }
 
 export type KeyboardShortcutAction = keyof KeyboardShortcutMap;

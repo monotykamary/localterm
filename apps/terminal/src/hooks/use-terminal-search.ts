@@ -13,7 +13,7 @@ import {
   SEARCH_ACTIVE_MATCH_BORDER_HEX,
   SEARCH_MATCH_BACKGROUND_HEX,
 } from "@/lib/constants";
-import type { KeyboardShortcut } from "@/lib/keyboard-shortcuts";
+import type { KeyboardShortcutBinding } from "@/lib/keyboard-shortcuts";
 import { isConfiguredKeyboardShortcut } from "@/utils/is-configured-keyboard-shortcut";
 
 interface SearchResultState {
@@ -22,7 +22,7 @@ interface SearchResultState {
 }
 
 interface UseTerminalSearchOptions {
-  findShortcut: KeyboardShortcut;
+  findShortcut: KeyboardShortcutBinding;
   refocusTerminalRef: RefObject<(() => void) | null>;
 }
 
