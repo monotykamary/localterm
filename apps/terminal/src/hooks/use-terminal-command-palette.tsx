@@ -4,6 +4,7 @@ import {
   FileDiff,
   FolderGit2,
   Key,
+  Keyboard,
   MonitorCog,
   Network,
   Plus,
@@ -14,6 +15,7 @@ import { useCallback, useMemo } from "react";
 import { type CommandItem } from "@/components/command-palette";
 import { type CaffeinateMode } from "@/components/keep-awake-menu";
 import { TERMINAL_FONT_SIZE_STEP_PX } from "@/lib/constants";
+import type { KeyboardShortcutMap } from "@/lib/keyboard-shortcuts";
 import {
   TERMINAL_CURSOR_STYLES,
   isTerminalCursorStyle,
@@ -22,6 +24,7 @@ import {
 import { TERMINAL_FONTS } from "@/lib/terminal-fonts";
 import { TERMINAL_THEMES } from "@/lib/terminal-themes";
 import { type CreateWorktreeOptions } from "@/utils/fetch-git-worktrees";
+import { formatKeyboardShortcut } from "@/utils/format-keyboard-shortcut";
 
 interface UseTerminalCommandPaletteOptions {
   activeCursorBlink: boolean;
@@ -48,7 +51,9 @@ interface UseTerminalCommandPaletteOptions {
   handleThemeChange: (themeId: string) => void;
   handleWorktreesOpenChange: (open: boolean) => void;
   isMac: boolean;
+  keyboardShortcuts: KeyboardShortcutMap;
   openDiffViewer: () => void;
+  openKeyboardShortcuts: () => void;
   openNewShell: () => void;
   openSearchOverlay: () => void;
   setPreviewCursorStyle: (cursorStyle: TerminalCursorStyle | null) => void;
@@ -86,7 +91,9 @@ export const useTerminalCommandPalette = ({
   handleThemeChange,
   handleWorktreesOpenChange,
   isMac,
+  keyboardShortcuts,
   openDiffViewer,
+  openKeyboardShortcuts,
   openNewShell,
   openSearchOverlay,
   setPreviewCursorStyle,
@@ -94,13 +101,12 @@ export const useTerminalCommandPalette = ({
   setPreviewThemeId,
 }: UseTerminalCommandPaletteOptions): UseTerminalCommandPaletteResult => {
   const commandPaletteCommands = useMemo<CommandItem[]>(() => {
-    const togglePrefix = isMac ? "⌘" : "Ctrl+";
     return [
       {
         id: "find",
         label: "Find in terminal",
         category: "Actions",
-        shortcut: `${togglePrefix}F`,
+        shortcut: formatKeyboardShortcut(keyboardShortcuts.find, isMac),
         icon: <Search className="size-3.5" />,
         action: openSearchOverlay,
       },
@@ -108,7 +114,7 @@ export const useTerminalCommandPalette = ({
         id: "git-diff",
         label: "View git diff",
         category: "Actions",
-        shortcut: `${togglePrefix}G`,
+        shortcut: formatKeyboardShortcut(keyboardShortcuts.gitDiff, isMac),
         icon: <FileDiff className="size-3.5" />,
         action: openDiffViewer,
       },
@@ -116,7 +122,7 @@ export const useTerminalCommandPalette = ({
         id: "automations",
         label: "Automations",
         category: "Actions",
-        shortcut: `${togglePrefix}J`,
+        shortcut: formatKeyboardShortcut(keyboardShortcuts.automations, isMac),
         icon: <CalendarClock className="size-3.5" />,
         action: () => handleAutomationsOpenChange(true),
       },
@@ -124,7 +130,7 @@ export const useTerminalCommandPalette = ({
         id: "worktrees",
         label: "Git worktrees",
         category: "Actions",
-        shortcut: `${togglePrefix}B`,
+        shortcut: formatKeyboardShortcut(keyboardShortcuts.worktrees, isMac),
         icon: <FolderGit2 className="size-3.5" />,
         action: () => handleWorktreesOpenChange(true),
       },
@@ -132,7 +138,7 @@ export const useTerminalCommandPalette = ({
         id: "sessions",
         label: "Sessions",
         category: "Actions",
-        shortcut: `${togglePrefix}I`,
+        shortcut: formatKeyboardShortcut(keyboardShortcuts.sessions, isMac),
         icon: <SquareTerminal className="size-3.5" />,
         action: () => handleSessionsOpenChange(true),
       },
@@ -140,7 +146,7 @@ export const useTerminalCommandPalette = ({
         id: "ports",
         label: "Dev ports",
         category: "Actions",
-        shortcut: `${togglePrefix}Shift+D`,
+        shortcut: formatKeyboardShortcut(keyboardShortcuts.devPorts, isMac),
         icon: <Network className="size-3.5" />,
         action: () => handlePortsOpenChange(true),
       },
@@ -148,7 +154,7 @@ export const useTerminalCommandPalette = ({
         id: "secrets",
         label: "Secrets",
         category: "Actions",
-        shortcut: `${togglePrefix}Shift+S`,
+        shortcut: formatKeyboardShortcut(keyboardShortcuts.secrets, isMac),
         icon: <Key className="size-3.5" />,
         action: () => handleSecretsOpenChange(true),
       },
@@ -156,7 +162,7 @@ export const useTerminalCommandPalette = ({
         id: "worktrees-create",
         label: "Create git worktree",
         category: "Actions",
-        shortcut: `${togglePrefix}Shift+B`,
+        shortcut: formatKeyboardShortcut(keyboardShortcuts.createWorktree, isMac),
         icon: <Plus className="size-3.5" />,
         action: () => {
           void createWorktree({}, true);
@@ -166,7 +172,7 @@ export const useTerminalCommandPalette = ({
         id: "new-shell",
         label: "Open new shell",
         category: "Actions",
-        shortcut: "Alt+T",
+        shortcut: formatKeyboardShortcut(keyboardShortcuts.newShell, isMac),
         icon: <Plus className="size-3.5" />,
         action: openNewShell,
       },
@@ -174,7 +180,7 @@ export const useTerminalCommandPalette = ({
         id: "font-size-up",
         label: "Increase font size",
         category: "Settings",
-        shortcut: `${togglePrefix}+`,
+        shortcut: isMac ? "⌘+" : "Ctrl++",
         icon: <MonitorCog className="size-3.5" />,
         action: () => handleFontSizeChange(activeFontSize + TERMINAL_FONT_SIZE_STEP_PX),
       },
@@ -182,9 +188,16 @@ export const useTerminalCommandPalette = ({
         id: "font-size-down",
         label: "Decrease font size",
         category: "Settings",
-        shortcut: `${togglePrefix}-`,
+        shortcut: isMac ? "⌘-" : "Ctrl+-",
         icon: <MonitorCog className="size-3.5" />,
         action: () => handleFontSizeChange(activeFontSize - TERMINAL_FONT_SIZE_STEP_PX),
+      },
+      {
+        id: "keyboard-shortcuts",
+        label: "Keyboard shortcuts",
+        category: "Settings",
+        icon: <Keyboard className="size-3.5" />,
+        action: openKeyboardShortcuts,
       },
       {
         id: "cursor-blink",
@@ -273,7 +286,9 @@ export const useTerminalCommandPalette = ({
     handleThemeChange,
     handleWorktreesOpenChange,
     isMac,
+    keyboardShortcuts,
     openDiffViewer,
+    openKeyboardShortcuts,
     openNewShell,
     openSearchOverlay,
   ]);

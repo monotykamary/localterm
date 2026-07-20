@@ -16,6 +16,7 @@ import { type CaffeinateMode } from "@/components/keep-awake-menu";
 import { TerminalOverlays } from "@/components/terminal-overlays";
 import { useGitBranchInfo } from "@/hooks/use-git-branch-info";
 import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useScreenWakeLock } from "@/hooks/use-screen-wake-lock";
 import { useTerminalCommandPalette } from "@/hooks/use-terminal-command-palette";
 import { useTerminalImagePaste } from "@/hooks/use-terminal-image-paste";
@@ -180,6 +181,7 @@ export const Terminal = () => {
   const [hasCopiedRestartCommand, setHasCopiedRestartCommand] = useState(false);
   const [isRetryingConnection, setIsRetryingConnection] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
   const toggleCommandPaletteRef = useRef<(() => void) | null>(null);
   const [isToolbarHovered, setIsToolbarHovered] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
@@ -279,6 +281,7 @@ export const Terminal = () => {
     isActionsMenuOpen ||
     isSettingsOpen ||
     isAutomationsOpen ||
+    isKeyboardShortcutsOpen ||
     isKeepAwakePopoverOpen ||
     isSessionsOpen ||
     isWorktreesOpen ||
@@ -294,6 +297,12 @@ export const Terminal = () => {
   const liveCwdRef = useRef<string | null>(null);
   const wsConnectedRef = useRef(false);
   const isMac = useMemo(detectIsMacPlatform, []);
+  const { keyboardShortcuts, setKeyboardShortcut, resetKeyboardShortcuts } =
+    useKeyboardShortcuts(isMac);
+  const keyboardShortcutsRef = useRef(keyboardShortcuts);
+  useLayoutEffect(() => {
+    keyboardShortcutsRef.current = keyboardShortcuts;
+  }, [keyboardShortcuts]);
   const {
     searchAddonRef,
     searchInputRef,
@@ -308,7 +317,7 @@ export const Terminal = () => {
     handleSearchInputChange,
     handleSearchKeyDown,
     matchLabel,
-  } = useTerminalSearch({ isMac, refocusTerminalRef });
+  } = useTerminalSearch({ findShortcut: keyboardShortcuts.find, refocusTerminalRef });
   // Keep-awake (caffeinate) is daemon-owned global state: the server is the
   // source of truth for the mode, the live process state, and the trigger
   // commands, and broadcasts changes to every tab. Seed `supported` from the
@@ -417,6 +426,7 @@ export const Terminal = () => {
       onScreenKeyboardOpenRef,
       sendInputRef,
       wsConnectedRef,
+      keyboardShortcutsRef,
     },
     actionRefs: {
       openNewShellRef,
@@ -600,6 +610,15 @@ export const Terminal = () => {
     setIsActionsMenuOpen(false);
     setIsCommandPaletteOpen(false);
   }, []);
+  const openKeyboardShortcuts = useCallback(() => {
+    setIsKeyboardShortcutsOpen(true);
+    setIsActionsMenuOpen(false);
+    setIsCommandPaletteOpen(false);
+  }, []);
+  const closeKeyboardShortcuts = useCallback(() => {
+    setIsKeyboardShortcutsOpen(false);
+    refocusTerminalRef.current?.();
+  }, []);
   // The mobile chevron is the sole toggle for the action toolbar now that the
   // diff/PR indicators open the diff viewer directly. A light tap haptic
   // confirms the press on devices that support navigator.vibrate.
@@ -781,6 +800,7 @@ export const Terminal = () => {
     if (isModalOpen) {
       setIsCommandPaletteOpen(false);
       setIsDiffViewerOpen(false);
+      setIsKeyboardShortcutsOpen(false);
       setIsAutomationsOpen(false);
       setIsWorktreesOpen(false);
     }
@@ -813,7 +833,9 @@ export const Terminal = () => {
     handleThemeChange,
     handleWorktreesOpenChange,
     isMac,
+    keyboardShortcuts,
     openDiffViewer,
+    openKeyboardShortcuts,
     openNewShell,
     openSearchOverlay,
     setPreviewCursorStyle,
@@ -1031,6 +1053,14 @@ export const Terminal = () => {
           onClose: closeCommandPalette,
           commands: commandPaletteCommands,
           onActiveItemChange: handleCommandPaletteHighlight,
+        }}
+        keyboardShortcutsModal={{
+          open: isKeyboardShortcutsOpen,
+          isMac,
+          keyboardShortcuts,
+          onChange: setKeyboardShortcut,
+          onClose: closeKeyboardShortcuts,
+          onReset: resetKeyboardShortcuts,
         }}
         diffViewer={{
           open: isDiffViewerOpen,

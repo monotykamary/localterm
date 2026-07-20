@@ -73,6 +73,7 @@ import {
   type TerminalControlMessageCallbacks,
 } from "@/lib/terminal-runtime/dispatch-terminal-control-message";
 
+import type { KeyboardShortcutMap } from "@/lib/keyboard-shortcuts";
 import { detectOutputCompressMode } from "@/utils/detect-output-compress-mode";
 
 import { installTerminalInputHandlers } from "@/utils/install-terminal-input-handlers";
@@ -148,6 +149,7 @@ interface TerminalRuntimeRefs {
   onScreenKeyboardOpenRef: CurrentRef<boolean>;
   sendInputRef: CurrentRef<((data: string) => void) | null>;
   wsConnectedRef: CurrentRef<boolean>;
+  keyboardShortcutsRef: CurrentRef<KeyboardShortcutMap>;
 }
 
 interface TerminalRuntimeActionRefs {
@@ -239,6 +241,7 @@ export const useTerminalRuntime = ({
     onScreenKeyboardOpenRef,
     sendInputRef,
     wsConnectedRef,
+    keyboardShortcutsRef,
   } = refs;
   const {
     openNewShellRef,
@@ -461,6 +464,7 @@ export const useTerminalRuntime = ({
       sendInput,
       getHasForegroundProcess: tabOutputActivity.getHasForegroundProcess,
       getKittyFlags,
+      getKeyboardShortcuts: () => keyboardShortcutsRef.current,
       getLocalEcho: () => localEchoRef.current,
       onOpenNewShell: () => openNewShellRef.current?.(),
       onToggleCommandPalette: () => toggleCommandPaletteRef.current?.(),

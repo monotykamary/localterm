@@ -68,6 +68,7 @@ export const FAVICON_READY_DEBOUNCE_MS = 750;
 export const FAVICON_DEAD_OPACITY = 0.35;
 
 export const COMMAND_PALETTE_CLOSE_TRANSITION_MS = 150;
+export const KEYBOARD_SHORTCUTS_MODAL_CLOSE_TRANSITION_MS = 150;
 // Shared max height for the top-anchored palette-style overlays (command
 // palette + sessions modal) so the two open at the same height and don't jump
 // when one replaces the other. 400px mirrors the original command-palette cap
@@ -283,6 +284,7 @@ export const SEARCH_ACTIVE_MATCH_BORDER_HEX = "#ff8080";
 // active; otherwise it renders like the other toolbar icons.
 export const CAFFEINATE_ACCENT_COLOR = "#c8956c";
 
+export const KEYBOARD_SHORTCUTS_STORAGE_KEY = "localterm:keyboard-shortcuts";
 export const TERMINAL_THEME_STORAGE_KEY = "localterm:terminal-theme-id";
 export const TERMINAL_FONT_STORAGE_KEY = "localterm:terminal-font-id";
 export const TERMINAL_FONT_SIZE_STORAGE_KEY = "localterm:terminal-font-size";

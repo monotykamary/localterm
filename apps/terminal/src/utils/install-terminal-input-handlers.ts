@@ -4,18 +4,10 @@ import {
   TERMINAL_BACK_TAB_SEQUENCE,
   TERMINAL_TAB_SEQUENCE,
 } from "@/lib/constants";
+import type { KeyboardShortcutMap } from "@/lib/keyboard-shortcuts";
 import type { LocalEcho } from "@/lib/local-echo";
 import { buildTerminalEditingOutput } from "@/utils/build-terminal-editing-output";
-import { isAutomationsShortcut } from "@/utils/is-automations-shortcut";
-import { isCommandPaletteShortcut } from "@/utils/is-command-palette-shortcut";
-import { isDiffViewerShortcut } from "@/utils/is-diff-viewer-shortcut";
-import { isFindShortcut } from "@/utils/is-find-shortcut";
-import { isNewTabShortcut } from "@/utils/is-new-tab-shortcut";
-import { isPortsShortcut } from "@/utils/is-ports-shortcut";
-import { isSecretsShortcut } from "@/utils/is-secrets-shortcut";
-import { isSessionsShortcut } from "@/utils/is-sessions-shortcut";
-import { isWorktreesCreateShortcut } from "@/utils/is-worktrees-create-shortcut";
-import { isWorktreesShortcut } from "@/utils/is-worktrees-shortcut";
+import { isConfiguredKeyboardShortcut } from "@/utils/is-configured-keyboard-shortcut";
 import { shouldSuppressAltBufferWheel } from "@/utils/should-suppress-alt-buffer-wheel";
 import { syncTerminalMouseWheelSensitivity } from "@/utils/sync-terminal-mouse-wheel-sensitivity";
 
@@ -25,6 +17,7 @@ interface InstallTerminalInputHandlersOptions {
   sendInput: (data: string) => void;
   getHasForegroundProcess: () => boolean;
   getKittyFlags: () => number;
+  getKeyboardShortcuts: () => KeyboardShortcutMap;
   getLocalEcho: () => LocalEcho | null;
   onOpenNewShell: () => void;
   onToggleCommandPalette: () => void;
@@ -44,6 +37,7 @@ export const installTerminalInputHandlers = ({
   sendInput,
   getHasForegroundProcess,
   getKittyFlags,
+  getKeyboardShortcuts,
   getLocalEcho,
   onOpenNewShell,
   onToggleCommandPalette,
@@ -80,70 +74,71 @@ export const installTerminalInputHandlers = ({
       return false;
     }
     if (event.key === "Tab" && (event.metaKey || event.ctrlKey)) return false;
-    if (isNewTabShortcut(event, isMac)) {
+    const keyboardShortcuts = getKeyboardShortcuts();
+    if (isConfiguredKeyboardShortcut(event, keyboardShortcuts.newShell)) {
       if (event.type === "keydown") {
         event.preventDefault();
         onOpenNewShell();
       }
       return false;
     }
-    if (isCommandPaletteShortcut(event, isMac)) {
+    if (isConfiguredKeyboardShortcut(event, keyboardShortcuts.commandPalette)) {
       if (event.type === "keydown") {
         event.preventDefault();
         onToggleCommandPalette();
       }
       return false;
     }
-    if (isAutomationsShortcut(event, isMac)) {
+    if (isConfiguredKeyboardShortcut(event, keyboardShortcuts.automations)) {
       if (event.type === "keydown") {
         event.preventDefault();
         onToggleAutomations();
       }
       return false;
     }
-    if (isDiffViewerShortcut(event, isMac)) {
+    if (isConfiguredKeyboardShortcut(event, keyboardShortcuts.gitDiff)) {
       if (event.type === "keydown") {
         event.preventDefault();
         onOpenDiffViewer();
       }
       return false;
     }
-    if (isWorktreesCreateShortcut(event, isMac)) {
+    if (isConfiguredKeyboardShortcut(event, keyboardShortcuts.createWorktree)) {
       if (event.type === "keydown") {
         event.preventDefault();
         onCreateWorktree();
       }
       return false;
     }
-    if (isWorktreesShortcut(event, isMac)) {
+    if (isConfiguredKeyboardShortcut(event, keyboardShortcuts.worktrees)) {
       if (event.type === "keydown") {
         event.preventDefault();
         onToggleWorktrees();
       }
       return false;
     }
-    if (isSessionsShortcut(event, isMac)) {
+    if (isConfiguredKeyboardShortcut(event, keyboardShortcuts.sessions)) {
       if (event.type === "keydown") {
         event.preventDefault();
         onToggleSessions();
       }
       return false;
     }
-    if (isPortsShortcut(event, isMac)) {
+    if (isConfiguredKeyboardShortcut(event, keyboardShortcuts.devPorts)) {
       if (event.type === "keydown") {
         event.preventDefault();
         onTogglePorts();
       }
       return false;
     }
-    if (isSecretsShortcut(event, isMac)) {
+    if (isConfiguredKeyboardShortcut(event, keyboardShortcuts.secrets)) {
       if (event.type === "keydown") {
         event.preventDefault();
         onToggleSecrets();
       }
       return false;
     }
-    if (isFindShortcut(event, isMac)) {
+    if (isConfiguredKeyboardShortcut(event, keyboardShortcuts.find)) {
       if (event.type === "keydown") {
         event.preventDefault();
         onOpenSearch();

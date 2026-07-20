@@ -13,7 +13,8 @@ import {
   SEARCH_ACTIVE_MATCH_BORDER_HEX,
   SEARCH_MATCH_BACKGROUND_HEX,
 } from "@/lib/constants";
-import { isFindShortcut } from "@/utils/is-find-shortcut";
+import type { KeyboardShortcut } from "@/lib/keyboard-shortcuts";
+import { isConfiguredKeyboardShortcut } from "@/utils/is-configured-keyboard-shortcut";
 
 interface SearchResultState {
   resultIndex: number;
@@ -21,7 +22,7 @@ interface SearchResultState {
 }
 
 interface UseTerminalSearchOptions {
-  isMac: boolean;
+  findShortcut: KeyboardShortcut;
   refocusTerminalRef: RefObject<(() => void) | null>;
 }
 
@@ -33,7 +34,10 @@ const SEARCH_DECORATION_OPTIONS = {
   activeMatchColorOverviewRuler: SEARCH_ACTIVE_MATCH_BORDER_HEX,
 };
 
-export const useTerminalSearch = ({ isMac, refocusTerminalRef }: UseTerminalSearchOptions) => {
+export const useTerminalSearch = ({
+  findShortcut,
+  refocusTerminalRef,
+}: UseTerminalSearchOptions) => {
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -90,7 +94,7 @@ export const useTerminalSearch = ({ isMac, refocusTerminalRef }: UseTerminalSear
 
   const handleSearchKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
-      if (isFindShortcut(event.nativeEvent, isMac)) {
+      if (isConfiguredKeyboardShortcut(event.nativeEvent, findShortcut)) {
         event.preventDefault();
         event.currentTarget.select();
         return;
@@ -109,7 +113,7 @@ export const useTerminalSearch = ({ isMac, refocusTerminalRef }: UseTerminalSear
         }
       }
     },
-    [closeSearch, findNextMatch, findPreviousMatch, isMac, searchQuery],
+    [closeSearch, findNextMatch, findPreviousMatch, findShortcut, searchQuery],
   );
 
   const matchLabel =
