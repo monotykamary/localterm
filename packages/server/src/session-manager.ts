@@ -471,7 +471,9 @@ export class SessionManager {
     owner: SessionOwner = null,
     windowId: string = "",
   ): ManagedSession | null {
-    return this.clientHub.attach(ws, id, owner, windowId);
+    const managed = this.clientHub.attach(ws, id, owner, windowId);
+    if (managed && managed.clients.size === 1) this.gitEventBridge.startWatcher(managed);
+    return managed;
   }
 
   async promote(ws: ClientSocket, replay: boolean, compress: CompressMode = null): Promise<void> {
@@ -501,7 +503,8 @@ export class SessionManager {
   }
 
   detach(ws: ClientSocket): void {
-    this.clientHub.detach(ws);
+    const managed = this.clientHub.detach(ws);
+    if (managed?.clients.size === 0) this.gitEventBridge.stopWatcher(managed);
   }
 
   kill(id: string, owner: SessionOwner = null): boolean {
@@ -733,7 +736,7 @@ export class SessionManager {
         ),
       );
     }
-    this.gitEventBridge.installWatcher(managed);
+    this.gitEventBridge.installWatcherListeners(managed);
   }
 
   private handleExit(managed: ManagedSession, code: number | null): void {

@@ -19,7 +19,7 @@ export class SessionGitEventBridge {
     });
   }
 
-  installWatcher(managed: ManagedSession): void {
+  installWatcherListeners(managed: ManagedSession): void {
     const session = managed.session;
     managed.gitWatcher.on("git-dirty", () => {
       const cwd = session.lastEmittedCwd;
@@ -34,12 +34,19 @@ export class SessionGitEventBridge {
         }
       });
     }
-    managed.gitWatcher.start(session.cwd);
+  }
+
+  startWatcher(managed: ManagedSession): void {
+    managed.gitWatcher.start(managed.session.lastEmittedCwd || managed.session.cwd);
+  }
+
+  stopWatcher(managed: ManagedSession): void {
+    managed.gitWatcher.stop();
   }
 
   handleCwdChange(managed: ManagedSession, cwd: string): void {
     managed.gitWatcher.stop();
-    managed.gitWatcher.start(cwd);
+    if (managed.clients.size > 0) managed.gitWatcher.start(cwd);
     this.clientHub.moveClientCoordinators(managed, cwd);
     if (!managed.automation) this.onSessionEvent("cwd", cwd);
   }

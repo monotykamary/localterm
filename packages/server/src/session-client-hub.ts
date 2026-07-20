@@ -335,9 +335,9 @@ export class SessionClientHub {
   // Detach a single client. If this was the last subscriber, arm the
   // no-clients grace timer: the PTY stays alive for SESSION_GRACE_MS so a
   // transient drop or a switch can re-attach, then is reaped if nobody does.
-  detach(ws: ClientSocket): void {
+  detach(ws: ClientSocket): ManagedSession | null {
     const entry = this.wsToClient.get(ws);
-    if (!entry) return;
+    if (!entry) return null;
     this.wsToClient.delete(ws);
     const managed = entry.session;
     const client = entry.client;
@@ -351,6 +351,7 @@ export class SessionClientHub {
     this.recomputeResize(managed);
     if (managed.clients.size === 0 && !managed.session.isExited) this.startGrace(managed);
     this.onSessionActivity();
+    return managed;
   }
 
   // Fan a control message out to every client currently viewing any session

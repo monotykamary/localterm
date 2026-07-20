@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { GitDiffWatcher } from "../src/git-diff-watcher.js";
 import { SessionManager } from "../src/session-manager.js";
 import type { ClientSocket } from "../src/utils/ws-socket.js";
 import type { ServerToClientMessage } from "../src/types.js";
@@ -88,6 +89,28 @@ describe("SessionManager no-clients grace", { tags: ["integration"] }, () => {
     expect(await pollFor(() => manager.size() === 0)).toBe(true);
     expect(spawned.session.isExited).toBe(true);
   }, 10_000);
+
+  it("runs recursive Git watchers only while a detached session has viewers", () => {
+    const startWatcher = vi.spyOn(GitDiffWatcher.prototype, "start").mockImplementation(() => {});
+    const stopWatcher = vi.spyOn(GitDiffWatcher.prototype, "stop").mockImplementation(() => {});
+    try {
+      manager = createManager(50);
+      const sessionId = manager.spawnDetached(shellInput, true);
+      expect(sessionId).not.toBeNull();
+      expect(startWatcher).not.toHaveBeenCalled();
+      if (!sessionId) return;
+
+      const viewer = createFakeSocket();
+      expect(manager.attach(viewer, sessionId)).not.toBeNull();
+      expect(startWatcher).toHaveBeenCalledOnce();
+
+      manager.detach(viewer);
+      expect(stopWatcher).toHaveBeenCalledOnce();
+    } finally {
+      startWatcher.mockRestore();
+      stopWatcher.mockRestore();
+    }
+  });
 
   it("groups attached clients by window id in clientProfiles", () => {
     manager = createManager(50);
