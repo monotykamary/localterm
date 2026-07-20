@@ -1,7 +1,6 @@
 import path from "node:path";
 import type { CaptureRenderer } from "./capture-renderer.js";
 import { SESSION_GRACE_MS, SESSION_PENDING_PROMOTE_TIMEOUT_MS } from "./constants.js";
-import { GitDiffWatcher } from "./git-diff-watcher.js";
 import type { GitMetadataCoordinator } from "./git-metadata-coordinator.js";
 import { Session } from "./session.js";
 import { SessionClientHub } from "./session-client-hub.js";
@@ -88,6 +87,8 @@ export interface ManagedClient {
   // and the scrollback replay (when requested) lands first.
   pendingControl: ServerToClientMessage[];
   pendingBytes: Uint8Array<ArrayBuffer>[];
+  pendingBytesLength: number;
+  pendingOverflowed: boolean;
   pendingTimer: NodeJS.Timeout | null;
   cols: number;
   rows: number;
@@ -125,7 +126,6 @@ export interface ManagedSession {
   outputBatchTimer: NodeJS.Timeout | null;
   synchronizedOutputEndDetector: SynchronizedOutputEndDetector;
   drainPollTimer: NodeJS.Timeout | null;
-  gitWatcher: GitDiffWatcher;
   // Last PTY output time + whether a foreground program is running, the inputs
   // to computeState(). Mirrors the client's favicon activity tracking so the
   // session list's row color and the grace reap decision read from the same
@@ -417,7 +417,6 @@ export class SessionManager {
       outputBatchTimer: null,
       synchronizedOutputEndDetector: createSynchronizedOutputEndDetector(),
       drainPollTimer: null,
-      gitWatcher: new GitDiffWatcher(),
       lastOutputAt: Date.now(),
       hasForeground: false,
       foregroundName: null,
@@ -736,7 +735,6 @@ export class SessionManager {
         ),
       );
     }
-    this.gitEventBridge.installWatcherListeners(managed);
   }
 
   private handleExit(managed: ManagedSession, code: number | null): void {

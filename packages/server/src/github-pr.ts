@@ -1,6 +1,7 @@
 import { Octokit } from "@octokit/rest";
 import {
   GIT_GITHUB_REQUEST_TIMEOUT_MS,
+  GIT_PR_CACHE_MAX_ENTRIES,
   GIT_PR_CACHE_TTL_MS,
   GIT_PR_FETCH_LIMIT,
 } from "./constants.js";
@@ -97,6 +98,28 @@ const prCacheByCwd = new Map<string, Map<string, PrCache>>();
 // round-trip instead of racing into two. Cleared on settle.
 const inflightDetectPr = new Map<string, Promise<ParsedPr | null>>();
 
+const prunePrCache = (): void => {
+  let entryCount = [...prCacheByCwd.values()].reduce((total, byBranch) => total + byBranch.size, 0);
+  while (entryCount > GIT_PR_CACHE_MAX_ENTRIES) {
+    let oldestCwd: string | undefined;
+    let oldestBranch: string | undefined;
+    let oldestBuiltAt = Number.POSITIVE_INFINITY;
+    for (const [cwd, byBranch] of prCacheByCwd) {
+      for (const [branch, cache] of byBranch) {
+        if (cache.builtAt >= oldestBuiltAt) continue;
+        oldestBuiltAt = cache.builtAt;
+        oldestCwd = cwd;
+        oldestBranch = branch;
+      }
+    }
+    if (oldestCwd === undefined || oldestBranch === undefined) return;
+    const byBranch = prCacheByCwd.get(oldestCwd);
+    byBranch?.delete(oldestBranch);
+    if (byBranch?.size === 0) prCacheByCwd.delete(oldestCwd);
+    entryCount -= 1;
+  }
+};
+
 export const readPrCache = (cwd: string, branch: string): ParsedPr | null | undefined => {
   const byBranch = prCacheByCwd.get(cwd);
   if (!byBranch) return undefined;
@@ -117,6 +140,7 @@ const writePrCache = (cwd: string, branch: string, pr: ParsedPr | null): void =>
     prCacheByCwd.set(cwd, byBranch);
   }
   byBranch.set(branch, { pr, builtAt: Date.now() });
+  prunePrCache();
 };
 
 const normalizeGraphqlPrState = (state: string): GitBranchPrState => {

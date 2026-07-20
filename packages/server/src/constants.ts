@@ -251,6 +251,8 @@ export const HOOKED_SHELL_NAMES = new Set(["zsh", "bash", "fish"]);
 export const WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES = 4 * 1024 * 1024;
 export const WS_OUTBOUND_RESUME_LOW_WATER_BYTES = 1 * 1024 * 1024;
 export const WS_OUTBOUND_DRAIN_POLL_MS = 50;
+export const WS_PENDING_CLIENT_MAX_BYTES = WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES;
+export const WS_PENDING_CLIENT_MAX_CONTROL_MESSAGES = 256;
 export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 
 // Output batch early-flush threshold. DEC synchronized-output redraws flush at
@@ -335,6 +337,7 @@ export const WS_OUTPUT_BROTLI = 0x02;
 export const WS_OUTPUT_BROTLI_CTX = 0x03;
 export const WS_OUTPUT_CTX_HEADER_BYTES = 5; // 0x03 + 4-byte LE raw size
 export const WS_OUTPUT_COMPRESS_THRESHOLD_BYTES = 256;
+export const WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES = 16 * 1024 * 1024;
 export const WS_OUTPUT_BROTLI_QUALITY = 6;
 export const WS_OUTPUT_GZIP_LEVEL = 3;
 
@@ -495,6 +498,8 @@ export const GIT_EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 // from the read prefix and drop their patch.
 export const GIT_MAX_UNTRACKED_FILES = 200;
 export const GIT_MAX_UNTRACKED_FILE_BYTES = 1 * 1024 * 1024;
+export const GIT_MAX_UNTRACKED_TOTAL_BYTES = 10 * 1024 * 1024;
+export const GIT_UNTRACKED_PATHS_MAX_BYTES = 4 * 1024 * 1024;
 // Binary sniff window: a NUL byte in the first 8KB marks a file as binary,
 // matching git's own heuristic (buffer_is_binary checks the first 8000 bytes).
 export const GIT_BINARY_SNIFF_BYTES = 8000;
@@ -511,14 +516,20 @@ export const GIT_DIRTY_THROTTLE_MS = 100;
 // Invalidated on a git-dirty signal; this TTL is the backstop for a missed
 // invalidation so a stale tree can't be served indefinitely.
 export const GIT_CACHE_TTL_MS = 5_000;
+export const GIT_DIFF_CACHE_MAX_ENTRIES = 16;
+export const GIT_DIFF_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 // How long a detected PR stays cached per (cwd, branch). PR state changes on
 // remote events (push/merge/retarget), not on local working-tree edits, so this
 // is deliberately longer than the diff cache TTL and is NOT invalidated by the
 // git-dirty signal. The branch is part of the cache key, so switching branches
 // naturally misses and refetches.
 export const GIT_PR_CACHE_TTL_MS = 60_000;
+export const GIT_PR_CACHE_MAX_ENTRIES = 256;
 export const GIT_PR_FETCH_LIMIT = 30;
 export const GIT_GITHUB_REQUEST_TIMEOUT_MS = 8_000;
+export const GITHUB_TOKEN_CACHE_TTL_MS = 5 * 60 * 1000;
+export const GITHUB_TOKEN_CACHE_MAX_ENTRIES = 64;
+export const GITHUB_HOSTS_FILE_MAX_BYTES = 1 * 1024 * 1024;
 
 // "Branch" diff mode compares the working tree against a base branch (via
 // merge-base). The GitHub REST API is consulted to discover the current branch's
@@ -530,10 +541,13 @@ export const GIT_MAX_REF_LENGTH = 255;
 // Cap the branch list returned for the base-branch picker so a repo with
 // thousands of remote refs can't bloat the response.
 export const GIT_MAX_BRANCHES = 500;
+export const GIT_WATCHER_MAX_REFS = 10_000;
 // Safety ceiling on a single git subprocess: kills a hung invocation (a
 // pathological repo, or git blocked on something GIT_TERMINAL_PROMPT=0 didn't
 // suppress) so the daemon's event loop can't be held indefinitely.
 export const GIT_SPAWN_TIMEOUT_MS = 30_000;
+export const GIT_SPAWN_MAX_STDOUT_BYTES = 16 * 1024 * 1024;
+export const GIT_SPAWN_MAX_STDERR_BYTES = 1 * 1024 * 1024;
 
 // Per-repo worktree preferences (~/.localterm/worktree-configs/<repo-id>.json):
 // the setup script to run in each fresh worktree, the custom "Open in…"
@@ -689,6 +703,7 @@ export const MAX_AUTOMATION_FINDINGS_LENGTH = 8000;
 // transcript and hide thinking behind a toggle). The array branch is bounded
 // by entry count here; the agent runner bounds total bytes to the value below.
 export const MAX_AUTOMATION_LOG_LENGTH = 65536;
+export const AUTOMATION_CUSTOM_HARNESS_CAPTURE_BYTES = MAX_AUTOMATION_LOG_LENGTH;
 // Defensive cap on the number of structured log entries per agent run.
 export const MAX_AUTOMATION_LOG_ENTRIES = 500;
 // Truncated tool result text stored in a structured log entry (tool calls can
@@ -703,6 +718,10 @@ export const MAX_AUTOMATION_TOOL_INPUT_LENGTH = 200;
 // transcript returned over the API (which isn't stored in our file).
 export const AUTOMATION_SESSION_TOOL_MAX_LINES = 2000;
 export const AUTOMATION_SESSION_TOOL_MAX_BYTES = 50_000;
+export const AUTOMATION_SESSION_MAX_LINE_BYTES = 2 * 1024 * 1024;
+export const AUTOMATION_SESSION_MAX_ENTRIES = 10_000;
+export const AUTOMATION_SESSION_MAX_RETAINED_BYTES = 16 * 1024 * 1024;
+export const AUTOMATION_SESSION_MAX_PENDING_TOOL_CALLS = 1_000;
 // Cap on the per-run `changedFiles` list (git status diff before/after). A
 // sprawling run won't blow up the history file.
 export const MAX_AUTOMATION_CHANGED_FILES = 64;
@@ -714,6 +733,12 @@ export const AUTOMATION_AGENT_SESSIONS_DIRNAME = "agent-sessions";
 // model that never stops) is killed and marked failed rather than leaking a
 // process and a "running" run forever.
 export const AUTOMATION_AGENT_RUN_TIMEOUT_MS = 10 * 60 * 1000;
+export const AUTOMATION_AGENT_FORCE_KILL_DELAY_MS = 3_000;
+export const AUTOMATION_AGENT_COMPACT_TIMEOUT_MS = 60_000;
+export const AUTOMATION_AGENT_COMPACT_STDERR_BYTES = 4 * 1024;
+export const AUTOMATION_AGENT_COMPACT_ERROR_PREVIEW_LENGTH = 500;
+export const AGENT_SKILL_CACHE_TTL_MS = 5 * 60 * 1000;
+export const AGENT_SKILL_CACHE_MAX_ENTRIES = 64;
 
 export const WS_READY_STATE_OPEN = 1;
 export const WS_CLOSE_POLICY_VIOLATION = 1008;

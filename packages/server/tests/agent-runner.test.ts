@@ -9,6 +9,12 @@ import {
   runAgent,
   __resetAgentModelCache,
 } from "../src/agent-runner.js";
+import {
+  AUTOMATION_CUSTOM_HARNESS_CAPTURE_BYTES,
+  AUTOMATION_SESSION_MAX_ENTRIES,
+  AUTOMATION_SESSION_MAX_LINE_BYTES,
+  MAX_AUTOMATION_LOG_LENGTH,
+} from "../src/constants.js";
 
 // A fake `pi --mode rpc`: reads JSONL commands on stdin, logs each to
 // $LOCALTERM_FAKE_PI_LOG (if set), and responds to `prompt`/`compact`/etc. with
@@ -263,6 +269,25 @@ describe("runAgent (custom harness)", { tags: ["integration"] }, () => {
     expect(result.exitCode).toBe(0);
     expect(result.findings).toBe("out: do thing");
     expect(result.log).toContain("out: do thing");
+  });
+
+  it("bounds noisy custom harness output before building the stored log", async () => {
+    const command = `${JSON.stringify(process.execPath)} -e 'process.stdout.write("x".repeat(${AUTOMATION_CUSTOM_HARNESS_CAPTURE_BYTES * 2}))'`;
+    const result = await runAgent(
+      piRequest({
+        cwd: tmpDir,
+        runner: {
+          kind: "agent",
+          prompt: "x",
+          sessionMode: "fresh",
+          harness: { kind: "custom", command },
+        },
+      }),
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.log).toHaveLength(MAX_AUTOMATION_LOG_LENGTH);
+    expect(result.log).toContain("log truncated");
   });
 
   it("marks a non-zero custom command exit as failed", async () => {
@@ -610,6 +635,28 @@ describe("readAgentSession", () => {
       "user",
       "assistant",
     ]);
+  });
+
+  it("retains only the bounded tail and skips oversized JSONL records", async () => {
+    const sessionLines = Array.from({ length: AUTOMATION_SESSION_MAX_ENTRIES + 5 }, (_, index) =>
+      JSON.stringify({
+        type: "message",
+        message: { role: "user", content: [{ type: "text", text: `entry-${index}` }] },
+      }),
+    );
+    const file = writeSession("bounded.jsonl", [
+      "x".repeat(AUTOMATION_SESSION_MAX_LINE_BYTES + 1),
+      ...sessionLines,
+    ]);
+
+    const entries = await readAgentSession(file);
+
+    expect(entries).toHaveLength(AUTOMATION_SESSION_MAX_ENTRIES);
+    expect(entries[0]).toEqual({ type: "user", text: "entry-5" });
+    expect(entries.at(-1)).toEqual({
+      type: "user",
+      text: `entry-${AUTOMATION_SESSION_MAX_ENTRIES + 4}`,
+    });
   });
 
   it("returns an empty list for a missing session file (fresh mode / no runs)", async () => {

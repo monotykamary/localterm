@@ -3,6 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import {
+  GITHUB_HOSTS_FILE_MAX_BYTES,
+  GITHUB_TOKEN_CACHE_MAX_ENTRIES,
+  GITHUB_TOKEN_CACHE_TTL_MS,
+} from "../constants.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -60,7 +65,9 @@ const isPlainToken = (value: string): boolean =>
 
 const readHostsYmlToken = (hostname: string): string | null => {
   try {
-    const content = fs.readFileSync(path.join(os.homedir(), ".config", "gh", "hosts.yml"), "utf8");
+    const hostsFile = path.join(os.homedir(), ".config", "gh", "hosts.yml");
+    if (fs.statSync(hostsFile).size > GITHUB_HOSTS_FILE_MAX_BYTES) return null;
+    const content = fs.readFileSync(hostsFile, "utf8");
     const tokenPattern = new RegExp(
       `^${hostname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\\s*[\\s\\S]*?oauth_token:\\s*["']?([^"':\\s]+)`,
       "m",
@@ -73,8 +80,6 @@ const readHostsYmlToken = (hostname: string): string | null => {
   }
 };
 
-const KEYCHAIN_CACHE_TTL_MS = 5 * 60 * 1000;
-
 interface CachedToken {
   token: string;
   expiresAt: number;
@@ -82,22 +87,40 @@ interface CachedToken {
 
 const keychainCache = new Map<string, CachedToken>();
 
+const cacheToken = (hostname: string, token: string): void => {
+  keychainCache.delete(hostname);
+  keychainCache.set(hostname, {
+    token,
+    expiresAt: Date.now() + GITHUB_TOKEN_CACHE_TTL_MS,
+  });
+  while (keychainCache.size > GITHUB_TOKEN_CACHE_MAX_ENTRIES) {
+    const oldestHostname = keychainCache.keys().next().value;
+    if (oldestHostname === undefined) break;
+    keychainCache.delete(oldestHostname);
+  }
+};
+
 export const resolveGithubToken = async (hostname = "github.com"): Promise<string | null> => {
   const envToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (envToken && isPlainToken(envToken)) return envToken;
 
   const cached = keychainCache.get(hostname);
-  if (cached && cached.expiresAt > Date.now()) return cached.token;
+  if (cached && cached.expiresAt > Date.now()) {
+    keychainCache.delete(hostname);
+    keychainCache.set(hostname, cached);
+    return cached.token;
+  }
+  keychainCache.delete(hostname);
 
   const fileToken = readHostsYmlToken(hostname);
-  if (fileToken) return fileToken;
+  if (fileToken) {
+    cacheToken(hostname, fileToken);
+    return fileToken;
+  }
 
   const keychainToken = await readKeychainToken(hostname);
   if (keychainToken) {
-    keychainCache.set(hostname, {
-      token: keychainToken,
-      expiresAt: Date.now() + KEYCHAIN_CACHE_TTL_MS,
-    });
+    cacheToken(hostname, keychainToken);
     return keychainToken;
   }
 

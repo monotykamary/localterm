@@ -1,4 +1,8 @@
-import type { CompressMode } from "@monotykamary/localterm-server/protocol";
+import {
+  MAX_OUTPUT_BYTES,
+  WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES,
+  type CompressMode,
+} from "@monotykamary/localterm-server/protocol";
 
 import {
   WS_OUTPUT_BROTLI,
@@ -12,6 +16,7 @@ import { decompressFrame } from "@/utils/decompress-frame";
 
 interface CreateTerminalOutputSessionOptions {
   onOutput: (bytes: Uint8Array) => void;
+  onOverflow: () => void;
   onReplay: (chunks: Uint8Array[], onComplete: () => void) => void;
   onReplayComplete: () => void;
 }
@@ -19,6 +24,7 @@ interface CreateTerminalOutputSessionOptions {
 export interface TerminalOutputSession {
   beginSession: () => void;
   beginReplay: () => void;
+  dispose: () => void;
   finishReplay: () => void;
   handleBinaryMessage: (data: ArrayBuffer) => void;
   isSuppressingOutput: () => boolean;
@@ -27,6 +33,7 @@ export interface TerminalOutputSession {
 
 export const createTerminalOutputSession = ({
   onOutput,
+  onOverflow,
   onReplay,
   onReplayComplete,
 }: CreateTerminalOutputSessionOptions): TerminalOutputSession => {
@@ -37,6 +44,8 @@ export const createTerminalOutputSession = ({
   // a prior PTY's frame still in the queue would otherwise land in the new
   // PTY (after terminal.reset()).
   let decompressQueue: Promise<void> = Promise.resolve();
+  let decompressQueueGeneration = 0;
+  let queuedBytes = 0;
   let ptyGeneration = 0;
   // The server's chosen compress mode (from the {compress} frame on promote),
   // NOT the client's advertisement. null = raw (no header) — either a no-
@@ -47,30 +56,93 @@ export const createTerminalOutputSession = ({
   // frame decompresses as a delta.
   let contextDecompressor: ReturnType<typeof createContextDecompressor> | null = null;
   let inReplay = false;
+  let replayBytes = 0;
   let replayChunks: Uint8Array[] = [];
   let suppressOutput = false;
+  let disposed = false;
 
-  const enqueueDecompress = (task: () => Promise<void> | void): void => {
-    decompressQueue = decompressQueue.then(task).catch((error: unknown) => {
-      console.warn("[localterm] output decompress error", error);
-    });
-  };
-
-  const releaseContextDecompressor = () => {
+  const releaseContextDecompressor = (): void => {
     if (contextDecompressor !== null) {
       void contextDecompressor.release();
       contextDecompressor = null;
     }
   };
 
-  const flushReplay = () => {
-    const chunks = replayChunks;
+  const resetDecompressQueue = (): void => {
+    decompressQueueGeneration += 1;
+    decompressQueue = Promise.resolve();
+    queuedBytes = 0;
+  };
+
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    ptyGeneration += 1;
+    resetDecompressQueue();
+    releaseContextDecompressor();
     inReplay = false;
+    replayBytes = 0;
+    replayChunks = [];
+    suppressOutput = false;
+  };
+
+  const overflow = (): void => {
+    if (disposed) return;
+    try {
+      onOverflow();
+    } finally {
+      dispose();
+    }
+  };
+
+  const enqueueDecompress = (bytes: number, task: () => Promise<void> | void): void => {
+    if (disposed) return;
+    if (queuedBytes + bytes > WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES) {
+      overflow();
+      return;
+    }
+    const queueGenerationAtEnqueue = decompressQueueGeneration;
+    queuedBytes += bytes;
+    decompressQueue = decompressQueue
+      .then(async () => {
+        if (disposed || decompressQueueGeneration !== queueGenerationAtEnqueue) return;
+        await task();
+      })
+      .catch((error: unknown) => {
+        if (!disposed && decompressQueueGeneration === queueGenerationAtEnqueue) {
+          console.warn("[localterm] output decompress error", error);
+          overflow();
+        }
+      })
+      .finally(() => {
+        if (decompressQueueGeneration === queueGenerationAtEnqueue) {
+          queuedBytes = Math.max(0, queuedBytes - bytes);
+        }
+      });
+  };
+
+  const retainReplayChunk = (bytes: Uint8Array): boolean => {
+    if (replayBytes + bytes.byteLength > WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES) {
+      overflow();
+      return false;
+    }
+    replayChunks.push(bytes);
+    replayBytes += bytes.byteLength;
+    return true;
+  };
+
+  const flushReplay = (): void => {
+    if (disposed) return;
+    const chunks = replayChunks;
+    const generationAtFlush = ptyGeneration;
+    inReplay = false;
+    replayBytes = 0;
     replayChunks = [];
     if (chunks.length === 0) {
       suppressOutput = false;
     } else {
       onReplay(chunks, () => {
+        if (disposed || generationAtFlush !== ptyGeneration) return;
         suppressOutput = false;
         onReplayComplete();
       });
@@ -79,7 +151,9 @@ export const createTerminalOutputSession = ({
 
   return {
     beginSession: () => {
+      if (disposed) return;
       ptyGeneration += 1;
+      resetDecompressQueue();
       // A new session frame is a fresh attach: reset the negotiated compress
       // mode (the server sends a new {compress} frame on promote) and release
       // the prior PTY's persistent Brotli decompressor (its LZ77 context is
@@ -91,30 +165,44 @@ export const createTerminalOutputSession = ({
       // is moot now, and an unbalanced window would leave onData suppressed
       // (a dead terminal). Re-opened below if this attach wants a replay.
       inReplay = false;
+      replayBytes = 0;
       replayChunks = [];
       suppressOutput = false;
     },
     beginReplay: () => {
+      if (disposed) return;
       inReplay = true;
       suppressOutput = true;
+      replayBytes = 0;
       replayChunks = [];
     },
+    dispose,
     finishReplay: () => {
+      if (disposed) return;
       // Compressed replay frames are decompressed async (the per-socket
       // queue); the flush must wait for them or it'd write an incomplete
       // block. Raw mode (no compression) flushes inline — the frames
       // arrived synchronously and the flush must land before the next
       // (inline) live frame reads `inReplay`.
       if (negotiatedCompressMode === null) flushReplay();
-      else enqueueDecompress(flushReplay);
+      else enqueueDecompress(0, flushReplay);
     },
     handleBinaryMessage: (messageData) => {
+      if (disposed) return;
       const data = new Uint8Array(messageData);
+      if (data.byteLength > WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES) {
+        overflow();
+        return;
+      }
       if (negotiatedCompressMode === null) {
         // Raw passthrough (no compression — a no-DecompressionStream browser,
-        // or an old server that never sent a {compress} frame): no header byte.
+        // or an old server that never sent {compress} frame): no header byte.
+        if (data.byteLength > MAX_OUTPUT_BYTES) {
+          overflow();
+          return;
+        }
         if (inReplay) {
-          replayChunks.push(data);
+          retainReplayChunk(data);
           return;
         }
         onOutput(data);
@@ -130,16 +218,23 @@ export const createTerminalOutputSession = ({
       // the replay frames' decompresses. Capture the PTY generation so a
       // {session} switch drops a prior PTY's frame still mid-decompress.
       const generationAtEnqueue = ptyGeneration;
-      enqueueDecompress(async () => {
+      enqueueDecompress(data.byteLength, async () => {
         const header = data[0];
         let bytes: Uint8Array;
         if (header === WS_OUTPUT_BROTLI_CTX) {
+          if (data.byteLength < WS_OUTPUT_CTX_HEADER_BYTES) return;
           const rawSize = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(
             1,
             true,
           );
+          if (rawSize <= 0 || rawSize > MAX_OUTPUT_BYTES) {
+            overflow();
+            return;
+          }
+          const decompressor = contextDecompressor;
+          if (!decompressor) return;
           const compressed = data.subarray(WS_OUTPUT_CTX_HEADER_BYTES);
-          bytes = await contextDecompressor!.decompress(compressed, rawSize);
+          bytes = await decompressor.decompress(compressed, rawSize);
         } else {
           const payload = data.subarray(1);
           if (header === WS_OUTPUT_BROTLI) bytes = await decompressFrame("br", payload);
@@ -147,11 +242,15 @@ export const createTerminalOutputSession = ({
           else if (header === WS_OUTPUT_RAW) bytes = payload;
           else return;
         }
-        if (ptyGeneration !== generationAtEnqueue) return;
+        if (bytes.byteLength > MAX_OUTPUT_BYTES) {
+          overflow();
+          return;
+        }
+        if (disposed || ptyGeneration !== generationAtEnqueue) return;
         if (inReplay) {
           // Buffer the DECOMPRESSED bytes; replay-end writes them as one
           // suppressed block (dropping xterm's stale query responses).
-          replayChunks.push(bytes);
+          retainReplayChunk(bytes);
           return;
         }
         onOutput(bytes);
@@ -159,12 +258,15 @@ export const createTerminalOutputSession = ({
     },
     isSuppressingOutput: () => suppressOutput,
     setCompressMode: (mode) => {
+      if (disposed) return;
       // The server's chosen compress mode, sent on promote BEFORE the
       // scrollback replay so the client knows how to parse the compressed
       // replay frames. Drives the binary handler (NOT COMPRESS_MODE — that's
       // the client's advertisement). An old server that doesn't know "br-ctx"
       // never sends this frame, so negotiatedCompressMode stays null and the
       // binary handler reads frames as raw (no header) — graceful degrade.
+      ptyGeneration += 1;
+      resetDecompressQueue();
       negotiatedCompressMode = mode;
       releaseContextDecompressor();
       if (mode === "br-ctx") contextDecompressor = createContextDecompressor();

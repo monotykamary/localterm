@@ -7,7 +7,7 @@ import {
   WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES,
   WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
 } from "./constants.js";
-import type { ManagedSession } from "./session-manager.js";
+import type { ManagedClient, ManagedSession } from "./session-manager.js";
 import { SessionOutputTransport } from "./session-output-transport.js";
 import { getBufferedAmount } from "./utils/ws-socket.js";
 import { stripAnsi } from "./utils/strip-ansi.js";
@@ -115,7 +115,7 @@ export class SessionOutputCoordinator {
     if (managed.session.isPaused) return;
     for (const client of managed.clients) {
       if (client.pending) continue;
-      if (getBufferedAmount(client.ws) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES) {
+      if (this.clientBacklogBytes(client) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES) {
         managed.session.pause();
         this.ensureDrainPoll(managed);
         return;
@@ -133,7 +133,7 @@ export class SessionOutputCoordinator {
       let allLow = true;
       for (const client of managed.clients) {
         if (client.pending) continue;
-        if (getBufferedAmount(client.ws) > WS_OUTBOUND_RESUME_LOW_WATER_BYTES) {
+        if (this.clientBacklogBytes(client) > WS_OUTBOUND_RESUME_LOW_WATER_BYTES) {
           allLow = false;
           break;
         }
@@ -144,6 +144,10 @@ export class SessionOutputCoordinator {
       }
     }, WS_OUTBOUND_DRAIN_POLL_MS);
     managed.drainPollTimer.unref?.();
+  }
+
+  private clientBacklogBytes(client: ManagedClient): number {
+    return getBufferedAmount(client.ws) + (client.brotliEncoder?.queuedBytes() ?? 0);
   }
 
   stopDrainPoll(managed: ManagedSession): void {

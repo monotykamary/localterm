@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
-import { GIT_DIRTY_THROTTLE_MS } from "./constants.js";
+import { GIT_DIRTY_THROTTLE_MS, GIT_WATCHER_MAX_REFS } from "./constants.js";
 import { Throttle } from "./utils/throttle.js";
 
 export interface GitDirResult {
@@ -99,26 +99,33 @@ export const buildGitSnapshot = (gitDir: string): GitSnapshot | null => {
   if (!directoryExists(gitDir)) return null;
   const refsDir = path.join(gitDir, "refs");
   const refs = new Map<string, string>();
-  const walk = (dir: string) => {
-    let entries: fs.Dirent[];
+  const walk = (dirPath: string): void => {
+    if (refs.size >= GIT_WATCHER_MAX_REFS) return;
+    let directory: fs.Dir;
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      directory = fs.opendirSync(dirPath);
     } catch {
       return;
     }
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(fullPath);
-      } else {
-        try {
-          const sha = fs.readFileSync(fullPath, "utf8").trim();
-          const relPath = path.relative(refsDir, fullPath);
-          refs.set(relPath, sha);
-        } catch {
-          /* ref file deleted between readdir and read */
+    try {
+      while (refs.size < GIT_WATCHER_MAX_REFS) {
+        const entry = directory.readSync();
+        if (!entry) break;
+        const fullPath = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+          walk(fullPath);
+        } else {
+          try {
+            const sha = fs.readFileSync(fullPath, "utf8").trim();
+            const relativePath = path.relative(refsDir, fullPath);
+            refs.set(relativePath, sha);
+          } catch {
+            continue;
+          }
         }
       }
+    } finally {
+      directory.closeSync();
     }
   };
   walk(refsDir);

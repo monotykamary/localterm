@@ -8,6 +8,8 @@ import {
   GIT_MAX_TOTAL_PATCH_BYTES,
   GIT_MAX_UNTRACKED_FILE_BYTES,
   GIT_MAX_UNTRACKED_FILES,
+  GIT_MAX_UNTRACKED_TOTAL_BYTES,
+  GIT_UNTRACKED_PATHS_MAX_BYTES,
 } from "./constants.js";
 import {
   getCurrentBranch,
@@ -46,6 +48,7 @@ interface UntrackedFile {
   lines: number;
   content: string | null;
   truncated: boolean;
+  bytesRead: number;
 }
 
 const WORKING_OPTIONS: GitDiffOptions = { mode: "working" };
@@ -116,40 +119,77 @@ const resolveEffectiveBaseRef = async (
   return runGitText(cwd, ["rev-parse", "--verify", baseRef]);
 };
 
-const readUntrackedFile = async (cwd: string, filePath: string): Promise<UntrackedFile | null> => {
+const readUntrackedFile = async (
+  cwd: string,
+  filePath: string,
+  remainingBytes: number,
+  includeContent: boolean,
+): Promise<UntrackedFile | null> => {
   const absolutePath = path.join(cwd, filePath);
   try {
     const stat = await fsPromises.stat(absolutePath);
     if (!stat.isFile()) return null;
-    const bytesToRead = Math.min(stat.size, GIT_MAX_UNTRACKED_FILE_BYTES);
-    const buffer = Buffer.alloc(bytesToRead);
-    const handle = await fsPromises.open(absolutePath, "r");
-    try {
-      const { buffer: readBuffer } = await handle.read(buffer, 0, bytesToRead, 0);
-      const sniffEnd = Math.min(readBuffer.length, GIT_BINARY_SNIFF_BYTES);
-      const binary = readBuffer.subarray(0, sniffEnd).includes(0);
-      const truncated = stat.size > GIT_MAX_UNTRACKED_FILE_BYTES;
-      const content = binary ? null : truncated ? null : readBuffer.toString("utf8");
-      const lines = binary ? 0 : content ? countLines(content) : 0;
-      return { path: filePath, binary, lines, content, truncated };
-    } finally {
-      await handle.close();
+    const bytesToRead = Math.min(
+      stat.size,
+      GIT_MAX_UNTRACKED_FILE_BYTES,
+      Math.max(0, remainingBytes),
+    );
+    let readBuffer = Buffer.alloc(0);
+    if (bytesToRead > 0) {
+      const buffer = Buffer.allocUnsafe(bytesToRead);
+      const handle = await fsPromises.open(absolutePath, "r");
+      try {
+        const result = await handle.read(buffer, 0, bytesToRead, 0);
+        readBuffer = buffer.subarray(0, result.bytesRead);
+      } finally {
+        await handle.close();
+      }
     }
+    const sniffEnd = Math.min(readBuffer.length, GIT_BINARY_SNIFF_BYTES);
+    const binary = readBuffer.subarray(0, sniffEnd).includes(0);
+    const truncated = stat.size > readBuffer.length;
+    const decoded = binary ? null : readBuffer.toString("utf8");
+    const content = includeContent && !truncated ? decoded : null;
+    const lines = binary || decoded === null ? 0 : countLines(decoded);
+    return {
+      path: filePath,
+      binary,
+      lines,
+      content,
+      truncated,
+      bytesRead: readBuffer.length,
+    };
   } catch {
     return null;
   }
 };
 
-const collectUntrackedFiles = async (cwd: string): Promise<UntrackedFile[]> => {
-  const result = await runGit(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]);
-  if (result.exitCode !== 0) return [];
-  const paths = result.stdout.toString("utf8").split("\0").filter(Boolean);
+const collectUntrackedFiles = async (
+  cwd: string,
+  includeContent: boolean,
+): Promise<UntrackedFile[]> => {
+  const result = await runGit(cwd, ["ls-files", "--others", "--exclude-standard", "-z"], {
+    maxStdoutBytes: GIT_UNTRACKED_PATHS_MAX_BYTES,
+  });
+  if (result.exitCode !== 0 && !result.stdoutTruncated) return [];
+
+  const paths: string[] = [];
+  let pathStart = 0;
+  while (paths.length < GIT_MAX_UNTRACKED_FILES) {
+    const separator = result.stdout.indexOf(0, pathStart);
+    if (separator < 0) break;
+    const filePath = result.stdout.subarray(pathStart, separator).toString("utf8");
+    if (filePath) paths.push(filePath);
+    pathStart = separator + 1;
+  }
 
   const files: UntrackedFile[] = [];
+  let remainingBytes = GIT_MAX_UNTRACKED_TOTAL_BYTES;
   for (const filePath of paths) {
-    if (files.length >= GIT_MAX_UNTRACKED_FILES) break;
-    const file = await readUntrackedFile(cwd, filePath);
-    if (file) files.push(file);
+    const file = await readUntrackedFile(cwd, filePath, remainingBytes, includeContent);
+    if (!file) continue;
+    files.push(file);
+    remainingBytes = Math.max(0, remainingBytes - file.bytesRead);
   }
   return files;
 };
@@ -184,14 +224,24 @@ const buildDiffCache = async (cwd: string, baseRef: string): Promise<DiffCache |
       "-z",
       baseRef,
     ]),
-    runGit(cwd, ["-c", "core.quotepath=false", "diff", DIFF_RENAME_FLAG, "--patch", baseRef]),
+    runGit(cwd, ["-c", "core.quotepath=false", "diff", DIFF_RENAME_FLAG, "--patch", baseRef], {
+      maxStdoutBytes: GIT_MAX_TOTAL_PATCH_BYTES,
+    }),
   ]);
-  if (numstatRes.exitCode !== 0 || patchRes.exitCode !== 0) return null;
+  if (
+    numstatRes.exitCode !== 0 ||
+    nameStatusRes.exitCode !== 0 ||
+    (patchRes.exitCode !== 0 && !patchRes.stdoutTruncated)
+  ) {
+    return null;
+  }
 
   const numstat = parseNumstatZ(numstatRes.stdout.toString("utf8"));
   const statuses = parseNameStatusZ(nameStatusRes.stdout.toString("utf8"));
-  const patchesByPath = indexPatchesByPath(patchRes.stdout.toString("utf8"));
-  const untracked = await collectUntrackedFiles(cwd);
+  const patchesByPath = patchRes.stdoutTruncated
+    ? new Map<string, string>()
+    : indexPatchesByPath(patchRes.stdout.toString("utf8"));
+  const untracked = await collectUntrackedFiles(cwd, true);
 
   const fileMeta: GitDiffFileMeta[] = [];
   const filePatchByPath = new Map<string, string | null>();
@@ -215,15 +265,16 @@ const buildDiffCache = async (cwd: string, baseRef: string): Promise<DiffCache |
       binaries += 1;
     } else {
       const rawPatch = patchesByPath.get(entry.path) ?? null;
+      const rawPatchBytes = rawPatch === null ? 0 : Buffer.byteLength(rawPatch, "utf8");
       if (
         rawPatch === null ||
-        rawPatch.length > GIT_MAX_PATCH_BYTES_PER_FILE ||
-        totalPatchBytes + rawPatch.length > GIT_MAX_TOTAL_PATCH_BYTES
+        rawPatchBytes > GIT_MAX_PATCH_BYTES_PER_FILE ||
+        totalPatchBytes + rawPatchBytes > GIT_MAX_TOTAL_PATCH_BYTES
       ) {
         patchOmitted = true;
       } else {
         patchText = rawPatch;
-        totalPatchBytes += rawPatch.length;
+        totalPatchBytes += rawPatchBytes;
       }
       additions += entry.additions;
       deletions += entry.deletions;
@@ -250,13 +301,14 @@ const buildDiffCache = async (cwd: string, baseRef: string): Promise<DiffCache |
         : buildUntrackedPatch(file.content);
     let patchOmitted = file.truncated;
     if (patch !== null) {
+      const patchBytes = Buffer.byteLength(patch, "utf8");
       if (
-        patch.length > GIT_MAX_PATCH_BYTES_PER_FILE ||
-        totalPatchBytes + patch.length > GIT_MAX_TOTAL_PATCH_BYTES
+        patchBytes > GIT_MAX_PATCH_BYTES_PER_FILE ||
+        totalPatchBytes + patchBytes > GIT_MAX_TOTAL_PATCH_BYTES
       ) {
         patchOmitted = true;
       } else {
-        totalPatchBytes += patch.length;
+        totalPatchBytes += patchBytes;
       }
     }
 
@@ -292,6 +344,7 @@ const buildDiffCache = async (cwd: string, baseRef: string): Promise<DiffCache |
     filePatchByPath,
     fileBinaryByPath,
     filePatchOmittedByPath,
+    retainedBytes: totalPatchBytes,
     builtAt: Date.now(),
   };
 };
@@ -353,7 +406,7 @@ export const getGitDiffSummary = async (
       deletions += entry.deletions;
     }
 
-    const untracked = await collectUntrackedFiles(cwd);
+    const untracked = await collectUntrackedFiles(cwd, false);
     for (const file of untracked) {
       fileCount += 1;
       if (file.binary) {
@@ -454,7 +507,7 @@ const getGitDiffFilePatchFromWorkingTree = async (
     const truncated = stat.size > GIT_MAX_UNTRACKED_FILE_BYTES;
     const content = truncated ? null : buffer.toString("utf8");
     const patch = truncated || content === null ? null : buildUntrackedPatch(content);
-    if (patch !== null && patch.length > GIT_MAX_PATCH_BYTES_PER_FILE) {
+    if (patch !== null && Buffer.byteLength(patch, "utf8") > GIT_MAX_PATCH_BYTES_PER_FILE) {
       return { patch: null, patchOmitted: true, binary: false };
     }
     return { patch, patchOmitted: truncated, binary: false };

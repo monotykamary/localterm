@@ -93,9 +93,11 @@ describe("SessionManager no-clients grace", { tags: ["integration"] }, () => {
   it("runs recursive Git watchers only while a detached session has viewers", () => {
     const startWatcher = vi.spyOn(GitDiffWatcher.prototype, "start").mockImplementation(() => {});
     const stopWatcher = vi.spyOn(GitDiffWatcher.prototype, "stop").mockImplementation(() => {});
+    const repositoryDir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-watcher-"));
+    fs.mkdirSync(path.join(repositoryDir, ".git"));
     try {
       manager = createManager(50);
-      const sessionId = manager.spawnDetached(shellInput, true);
+      const sessionId = manager.spawnDetached({ ...shellInput, cwd: repositoryDir }, true);
       expect(sessionId).not.toBeNull();
       expect(startWatcher).not.toHaveBeenCalled();
       if (!sessionId) return;
@@ -107,6 +109,35 @@ describe("SessionManager no-clients grace", { tags: ["integration"] }, () => {
       manager.detach(viewer);
       expect(stopWatcher).toHaveBeenCalledOnce();
     } finally {
+      manager?.disposeAll();
+      fs.rmSync(repositoryDir, { recursive: true, force: true });
+      startWatcher.mockRestore();
+      stopWatcher.mockRestore();
+    }
+  });
+
+  it("shares one recursive Git watcher across viewed sessions in the same repository", () => {
+    const startWatcher = vi.spyOn(GitDiffWatcher.prototype, "start").mockImplementation(() => {});
+    const stopWatcher = vi.spyOn(GitDiffWatcher.prototype, "stop").mockImplementation(() => {});
+    const repositoryDir = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-watcher-shared-"));
+    fs.mkdirSync(path.join(repositoryDir, ".git"));
+    try {
+      manager = createManager(50);
+      const firstViewer = createFakeSocket();
+      const secondViewer = createFakeSocket();
+      const first = manager.spawnAndAttach(firstViewer, { ...shellInput, cwd: repositoryDir });
+      const second = manager.spawnAndAttach(secondViewer, { ...shellInput, cwd: repositoryDir });
+      expect(first).not.toBeNull();
+      expect(second).not.toBeNull();
+      expect(startWatcher).toHaveBeenCalledOnce();
+
+      manager.detach(firstViewer);
+      expect(stopWatcher).not.toHaveBeenCalled();
+      manager.detach(secondViewer);
+      expect(stopWatcher).toHaveBeenCalledOnce();
+    } finally {
+      manager?.disposeAll();
+      fs.rmSync(repositoryDir, { recursive: true, force: true });
       startWatcher.mockRestore();
       stopWatcher.mockRestore();
     }

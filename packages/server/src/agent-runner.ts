@@ -13,9 +13,18 @@ import {
   truncateToolInput,
   truncateToolResult,
 } from "./agent-log-utils.js";
-import { AUTOMATION_AGENT_RUN_TIMEOUT_MS } from "./constants.js";
+import {
+  AUTOMATION_AGENT_COMPACT_ERROR_PREVIEW_LENGTH,
+  AUTOMATION_AGENT_COMPACT_STDERR_BYTES,
+  AUTOMATION_AGENT_COMPACT_TIMEOUT_MS,
+  AUTOMATION_AGENT_FORCE_KILL_DELAY_MS,
+  AUTOMATION_AGENT_RUN_TIMEOUT_MS,
+  AUTOMATION_CUSTOM_HARNESS_CAPTURE_BYTES,
+  AUTOMATION_SESSION_MAX_PENDING_TOOL_CALLS,
+} from "./constants.js";
 import { resolvePiAndPath } from "./pi-binary-resolver.js";
 import { RpcClient } from "./pi-rpc-client.js";
+import { appendBoundedBufferText } from "./utils/append-bounded-buffer-text.js";
 import type { AgentHarnessConfig, AgentLogEntry, AutomationRunner } from "./types.js";
 
 export { __resetAgentModelCache, listAgentModels } from "./agent-models.js";
@@ -195,7 +204,16 @@ const runPi = async (request: AgentRunRequest, piBinaryPath?: string): Promise<A
             };
             if (block.type === "tool_use" || block.type === "toolCall") {
               const formatted = truncateToolInput(formatToolInput(block.arguments ?? block.input));
-              if (formatted) toolInputById.set(String(block.id ?? ""), formatted);
+              const toolCallId = String(block.id ?? "");
+              if (formatted && toolCallId) {
+                toolInputById.delete(toolCallId);
+                toolInputById.set(toolCallId, formatted);
+                while (toolInputById.size > AUTOMATION_SESSION_MAX_PENDING_TOOL_CALLS) {
+                  const oldestToolCallId = toolInputById.keys().next().value;
+                  if (oldestToolCallId === undefined) break;
+                  toolInputById.delete(oldestToolCallId);
+                }
+              }
             }
           }
         }
@@ -207,7 +225,9 @@ const runPi = async (request: AgentRunRequest, piBinaryPath?: string): Promise<A
     } else if (event.type === "tool_execution_end") {
       const result = event.result as { content?: unknown } | null;
       const text = truncateToolResult(extractAssistantText(result as { content?: unknown } | null));
-      const input = toolInputById.get(String(event.toolCallId ?? ""));
+      const toolCallId = String(event.toolCallId ?? "");
+      const input = toolInputById.get(toolCallId);
+      toolInputById.delete(toolCallId);
       logEntries.push({
         type: "tool",
         name: String(event.toolName ?? "tool"),
@@ -335,6 +355,11 @@ const runCustom = async (
   };
   let stdout = "";
   let stderr = "";
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  let stdoutTruncated = false;
+  let stderrTruncated = false;
+
   let killed = false;
   let exitCode: number | null = 0;
   let spawnFailed = false;
@@ -347,17 +372,33 @@ const runCustom = async (
       windowsHide: true,
     }) as ChildProcess;
     child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
+      const captured = appendBoundedBufferText(
+        stdout,
+        stdoutBytes,
+        chunk,
+        AUTOMATION_CUSTOM_HARNESS_CAPTURE_BYTES,
+      );
+      stdout = captured.text;
+      stdoutBytes = captured.bytes;
+      stdoutTruncated ||= captured.truncated;
     });
     child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
+      const captured = appendBoundedBufferText(
+        stderr,
+        stderrBytes,
+        chunk,
+        AUTOMATION_CUSTOM_HARNESS_CAPTURE_BYTES,
+      );
+      stderr = captured.text;
+      stderrBytes = captured.bytes;
+      stderrTruncated ||= captured.truncated;
     });
     const timer = setTimeout(() => {
       killed = true;
       child.kill("SIGTERM");
       setTimeout(() => {
         if (!child.killed) child.kill("SIGKILL");
-      }, 3000).unref?.();
+      }, AUTOMATION_AGENT_FORCE_KILL_DELAY_MS).unref?.();
     }, AUTOMATION_AGENT_RUN_TIMEOUT_MS);
     timer.unref?.();
     child.on("close", (code, signal) => {
@@ -374,8 +415,12 @@ const runCustom = async (
     });
   });
   const changedFiles = computeChangedFiles(before, request.cwd);
-  const findings = truncateFindings(stdout.length > 0 ? stdout : stderr);
-  const log = truncateLog(stdout + (stderr.length > 0 ? `\n--- stderr ---\n${stderr}` : ""));
+  const stdoutCapture = stdoutTruncated ? `${stdout}\n…[capture truncated]` : stdout;
+  const stderrCapture = stderrTruncated ? `${stderr}\n…[capture truncated]` : stderr;
+  const findings = truncateFindings(stdoutCapture.length > 0 ? stdoutCapture : stderrCapture);
+  const log = truncateLog(
+    stdoutCapture + (stderrCapture.length > 0 ? `\n--- stderr ---\n${stderrCapture}` : ""),
+  );
   if (spawnFailed) exitCode = 1;
   return { exitCode, findings, log, changedFiles };
 };
@@ -398,14 +443,22 @@ const compactCustom = async (
       cwd: request.cwd,
       env,
       shell: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
     }) as ChildProcess;
     let stderr = "";
+    let stderrBytes = 0;
     child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
+      const captured = appendBoundedBufferText(
+        stderr,
+        stderrBytes,
+        chunk,
+        AUTOMATION_AGENT_COMPACT_STDERR_BYTES,
+      );
+      stderr = captured.text;
+      stderrBytes = captured.bytes;
     });
-    const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
+    const timer = setTimeout(() => child.kill("SIGKILL"), AUTOMATION_AGENT_COMPACT_TIMEOUT_MS);
     timer.unref?.();
     child.on("close", (code) => {
       clearTimeout(timer);
@@ -414,7 +467,9 @@ const compactCustom = async (
         message:
           code === 0
             ? undefined
-            : `compact command exited ${String(code)}${stderr ? `: ${stderr.slice(0, 500)}` : ""}`,
+            : `compact command exited ${String(code)}${
+                stderr ? `: ${stderr.slice(0, AUTOMATION_AGENT_COMPACT_ERROR_PREVIEW_LENGTH)}` : ""
+              }`,
       });
     });
     child.on("error", (error) => {

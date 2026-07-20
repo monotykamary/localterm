@@ -406,6 +406,8 @@ export const WS_OUTPUT_GZIP = 0x01;
 export const WS_OUTPUT_BROTLI = 0x02;
 export const WS_OUTPUT_BROTLI_CTX = 0x03;
 export const WS_OUTPUT_CTX_HEADER_BYTES = 5;
+export const SYNTAX_TOKEN_CACHE_MAX_FILES = 32;
+export const AGENT_SKILL_CACHE_MAX_CWDS = 64;
 
 // How often the terminal polls the daemon's cached update check (the daemon
 // refreshes it once per UPDATE_CHECK_INTERVAL_MS on its own; this cadence just

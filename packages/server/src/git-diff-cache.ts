@@ -1,4 +1,8 @@
-import { GIT_CACHE_TTL_MS } from "./constants.js";
+import {
+  GIT_CACHE_TTL_MS,
+  GIT_DIFF_CACHE_MAX_BYTES,
+  GIT_DIFF_CACHE_MAX_ENTRIES,
+} from "./constants.js";
 import type { GitDiffFileMeta, GitDiffMode, GitDiffSummary } from "./types.js";
 
 // Diff cache. A single full diff pass (one `git diff --numstat/-z`, one
@@ -14,6 +18,7 @@ export interface DiffCache {
   filePatchByPath: Map<string, string | null>;
   fileBinaryByPath: Map<string, boolean>;
   filePatchOmittedByPath: Map<string, boolean>;
+  retainedBytes: number;
   builtAt: number;
 }
 
@@ -22,6 +27,33 @@ export interface DiffCache {
 const diffCacheByCwd = new Map<string, Map<string, DiffCache>>();
 
 const comparisonKey = (mode: GitDiffMode, base: string | null): string => `${mode}:${base ?? ""}`;
+
+const pruneDiffCache = (): void => {
+  while (true) {
+    let entryCount = 0;
+    let retainedBytes = 0;
+    let oldestCwd: string | undefined;
+    let oldestComparison: string | undefined;
+    let oldestBuiltAt = Number.POSITIVE_INFINITY;
+    for (const [cwd, byComparison] of diffCacheByCwd) {
+      for (const [comparison, cache] of byComparison) {
+        entryCount += 1;
+        retainedBytes += cache.retainedBytes;
+        if (cache.builtAt >= oldestBuiltAt) continue;
+        oldestBuiltAt = cache.builtAt;
+        oldestCwd = cwd;
+        oldestComparison = comparison;
+      }
+    }
+    if (entryCount <= GIT_DIFF_CACHE_MAX_ENTRIES && retainedBytes <= GIT_DIFF_CACHE_MAX_BYTES) {
+      return;
+    }
+    if (oldestCwd === undefined || oldestComparison === undefined) return;
+    const byComparison = diffCacheByCwd.get(oldestCwd);
+    byComparison?.delete(oldestComparison);
+    if (byComparison?.size === 0) diffCacheByCwd.delete(oldestCwd);
+  }
+};
 
 export const readDiffCache = (
   cwd: string,
@@ -52,6 +84,7 @@ export const writeDiffCache = (
     diffCacheByCwd.set(cwd, byComparison);
   }
   byComparison.set(comparisonKey(mode, base), cache);
+  pruneDiffCache();
 };
 
 export const invalidateGitDiffCache = (cwd: string): void => {

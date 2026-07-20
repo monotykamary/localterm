@@ -82,6 +82,7 @@ import { registerTerminalKittyKeyboardProtocol } from "@/utils/register-terminal
 
 import {
   MAX_INPUT_BYTES,
+  WS_CLOSE_BACKPRESSURE,
   type ClientToServerMessage,
 } from "@monotykamary/localterm-server/protocol";
 
@@ -538,8 +539,9 @@ export const useTerminalRuntime = ({
     localEchoRef.current = localEcho;
 
     let activeOutputSession: TerminalOutputSession | null = null;
-    const createOutputSession = () =>
+    const createOutputSession = (onOverflow: () => void) =>
       createTerminalOutputSession({
+        onOverflow,
         onOutput: (bytes) => {
           outputBatcher.pushBytes(localEcho.hasPending() ? localEcho.reconcile(bytes) : bytes);
           tabOutputActivity.noteOutputActivity();
@@ -650,7 +652,15 @@ export const useTerminalRuntime = ({
         }),
       );
       socket = nextSocket;
-      const outputSession = createOutputSession();
+      activeOutputSession?.dispose();
+      const outputSession = createOutputSession(() => {
+        if (socket !== nextSocket) return;
+        try {
+          nextSocket.close(WS_CLOSE_BACKPRESSURE, "output processing backlog");
+        } catch {
+          return;
+        }
+      });
       activeOutputSession = outputSession;
 
       nextSocket.binaryType = "arraybuffer";
@@ -796,6 +806,8 @@ export const useTerminalRuntime = ({
       });
 
       nextSocket.addEventListener("close", (event) => {
+        outputSession.dispose();
+        if (activeOutputSession === outputSession) activeOutputSession = null;
         if (socket !== nextSocket) return;
         socket = null;
         wsConnectedRef.current = false;
@@ -848,6 +860,8 @@ export const useTerminalRuntime = ({
         window.clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      activeOutputSession?.dispose();
+      activeOutputSession = null;
       try {
         socket?.close();
       } catch {
@@ -932,6 +946,8 @@ export const useTerminalRuntime = ({
       window.removeEventListener("pointerdown", handlePointerDown, true);
       observer.disconnect();
       terminalTouchInteractions.dispose();
+      activeOutputSession?.dispose();
+      activeOutputSession = null;
       try {
         socket?.close();
       } catch {

@@ -1,5 +1,6 @@
 import { createHighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "@shikijs/engine-javascript";
+import { SYNTAX_TOKEN_CACHE_MAX_FILES } from "@/lib/constants";
 
 export interface SyntaxToken {
   content: string;
@@ -119,7 +120,13 @@ const storeCachedTokens = (
   const fileCache =
     tokenCache.get(filePath) ?? new Map<SyntaxHighlightColorScheme, TokenCacheEntry>();
   fileCache.set(colorScheme, entry);
+  tokenCache.delete(filePath);
   tokenCache.set(filePath, fileCache);
+  while (tokenCache.size > SYNTAX_TOKEN_CACHE_MAX_FILES) {
+    const oldestFilePath = tokenCache.keys().next().value;
+    if (oldestFilePath === undefined) break;
+    tokenCache.delete(oldestFilePath);
+  }
 };
 
 export const detectLangId = (filePath: string): string | null => {

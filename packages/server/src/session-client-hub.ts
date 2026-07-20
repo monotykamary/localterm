@@ -153,6 +153,8 @@ export class SessionClientHub {
       pending: true,
       pendingControl: [],
       pendingBytes: [],
+      pendingBytesLength: 0,
+      pendingOverflowed: false,
       pendingTimer: null,
       cols: 0,
       rows: 0,
@@ -222,7 +224,7 @@ export class SessionClientHub {
     const entry = this.wsToClient.get(ws);
     if (!entry) return;
     const client = entry.client;
-    if (!client.pending) return;
+    if (!client.pending || client.pendingOverflowed) return;
     if (client.pendingTimer !== null) {
       clearTimeout(client.pendingTimer);
       client.pendingTimer = null;
@@ -246,18 +248,24 @@ export class SessionClientHub {
     if (replay) {
       await this.outputTransport.sendScrollback(ws, entry.session, client);
     }
+    if (client.pendingOverflowed) return;
     // Tell the client the replay bytes have all landed so it can write them as
     // one suppressed block (dropping xterm's responses to the stale query
     // requests in the ring buffer). Sent on every promote — even when the
     // snapshot was empty or replay wasn't requested — so the client always
     // exits its suppressed-replay window and never deadlocks on a slow link.
     this.sendControl(ws, { type: "replay-end" });
-    for (const payload of client.pendingControl) this.sendControl(ws, payload);
+    for (const payload of client.pendingControl) {
+      if (client.pendingOverflowed) return;
+      this.sendControl(ws, payload);
+    }
     for (const bytes of client.pendingBytes) {
+      if (client.pendingOverflowed) return;
       await this.outputTransport.sendOutputFrame(ws, bytes, client);
     }
     client.pendingControl = [];
     client.pendingBytes = [];
+    client.pendingBytesLength = 0;
     client.pending = false;
     // Re-push the ambient git-diff summary to the now-live client so a summary
     // pushed while pending (and wiped by the client's cwd-driven null-reset on
@@ -451,6 +459,7 @@ export class SessionClientHub {
       }
       client.pendingControl = [];
       client.pendingBytes = [];
+      client.pendingBytesLength = 0;
       if (client.coordinator) {
         client.coordinator.remove(client.ws);
         this.releaseCoordinator(client.coordinator);
@@ -472,6 +481,7 @@ export class SessionClientHub {
     }
     client.pendingControl = [];
     client.pendingBytes = [];
+    client.pendingBytesLength = 0;
     if (client.coordinator) {
       client.coordinator.remove(client.ws);
       this.releaseCoordinator(client.coordinator);
@@ -501,6 +511,10 @@ export class SessionClientHub {
   // tab observed (a merge on GitHub) reaches siblings sharing the directory.
   // Non-creating: a cwd with no subscribers has no coordinator, and allocating
   // one here would orphan it (it never enters the attach/detach release path).
+  signalCoordinatorForCwd(cwd: string): void {
+    this.coordinatorsByCwd.get(path.resolve(cwd))?.signal();
+  }
+
   broadcastGitBranchPr(cwd: string, pr: GitBranchPr | null): void {
     this.coordinatorsByCwd.get(path.resolve(cwd))?.broadcastPr(pr);
   }

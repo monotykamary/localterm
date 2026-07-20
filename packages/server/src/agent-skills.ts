@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "n
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import matter from "gray-matter";
+import { AGENT_SKILL_CACHE_MAX_ENTRIES, AGENT_SKILL_CACHE_TTL_MS } from "./constants.js";
 import type { AgentSkillInfo } from "./types.js";
 
 type SkillSource = AgentSkillInfo["source"];
@@ -17,7 +18,6 @@ interface DiscoveredSkill extends AgentSkillInfo {
 
 // The skill list rarely changes, so cache it per cwd for a few minutes; the
 // first call scans the filesystem, later calls reuse the cache.
-const SKILL_CACHE_TTL_MS = 5 * 60 * 1000;
 const skillCache = new Map<string, { at: number; skills: AgentSkillInfo[] }>();
 
 const DISABLE_MODEL_INVOCATION_KEY = "disable-model-invocation";
@@ -167,9 +167,19 @@ const discoverSkills = (cwd: string): AgentSkillInfo[] => {
 
 export const listAgentSkills = (cwd: string): AgentSkillInfo[] => {
   const cached = skillCache.get(cwd);
-  if (cached && Date.now() - cached.at < SKILL_CACHE_TTL_MS) return cached.skills;
+  if (cached && Date.now() - cached.at < AGENT_SKILL_CACHE_TTL_MS) {
+    skillCache.delete(cwd);
+    skillCache.set(cwd, cached);
+    return cached.skills;
+  }
   const skills = discoverSkills(cwd);
+  skillCache.delete(cwd);
   skillCache.set(cwd, { at: Date.now(), skills });
+  while (skillCache.size > AGENT_SKILL_CACHE_MAX_ENTRIES) {
+    const oldestCwd = skillCache.keys().next().value;
+    if (oldestCwd === undefined) break;
+    skillCache.delete(oldestCwd);
+  }
   return skills;
 };
 

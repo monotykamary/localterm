@@ -1,5 +1,6 @@
 import type { AgentSkillInfo } from "@monotykamary/localterm-server/protocol";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { AGENT_SKILL_CACHE_MAX_CWDS } from "@/lib/constants";
 
 // SWR (stale-while-revalidate) store for the agent skill list, keyed by the
 // automation's cwd (project skills differ per directory). The first call
@@ -35,7 +36,13 @@ const revalidate = async (cwd: string): Promise<void> => {
         new URL(`/api/agent-skills?${params.toString()}`, window.location.href),
       );
       const body = response.ok ? ((await response.json()) as { skills?: AgentSkillInfo[] }) : null;
+      cache.delete(cwd);
       cache.set(cwd, body?.skills ?? []);
+      while (cache.size > AGENT_SKILL_CACHE_MAX_CWDS) {
+        const oldestCwd = cache.keys().next().value;
+        if (oldestCwd === undefined) break;
+        cache.delete(oldestCwd);
+      }
       notify();
     } catch {
       // keep the stale cache (or empty) on failure
