@@ -8,6 +8,8 @@ export const DEFAULT_SHELL_FALLBACK = "/bin/sh";
 export const TERM_TYPE = "xterm-256color";
 export const COLORTERM_VALUE = "truecolor";
 export const LOCALTERM_VALUE = "1";
+// launchd omits locale variables; pbcopy otherwise treats UTF-8 terminal text as MacRoman.
+export const DEFAULT_MACOS_PTY_LOCALE = "C.UTF-8";
 
 // Base PATH for user shells (PTYs, "Open in…"). They set up their own PATH via
 // rc files like any login shell, so they must not inherit the daemon's baked
