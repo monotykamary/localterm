@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.66.17
+
+### Patch Changes
+
+- 71739d8: Stop detached PTY sessions from creating recursive Git watchers until a viewer attaches, and release the watcher when the final viewer detaches.
+
 ## 2.66.16
 
 ## 2.66.15
