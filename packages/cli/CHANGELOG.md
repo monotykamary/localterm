@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.19
+
+### Patch Changes
+
+- 24de365: Add configurable terminal keyboard shortcuts and avoid Ctrl+B for Git worktrees by default on Windows and Linux.
+  - @monotykamary/localterm-server@2.66.19
+
 ## 2.66.18
 
 ### Patch Changes
