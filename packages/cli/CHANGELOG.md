@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.21
+
+### Patch Changes
+
+- Allow keyboard shortcuts to be cleared and make Open new shell the command palette default.
+  - @monotykamary/localterm-server@2.66.21
+
 ## 2.66.20
 
 ### Patch Changes
