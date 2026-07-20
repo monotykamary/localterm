@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.66.20
+
+### Patch Changes
+
+- 771af2d: Default macOS PTYs to a UTF-8 locale when launchd provides none, preventing locale-sensitive clipboard tools from turning copied Unicode text into MacRoman mojibake.
+
 ## 2.66.19
 
 ## 2.66.18

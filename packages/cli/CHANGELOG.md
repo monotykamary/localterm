@@ -1,5 +1,12 @@
 # localterm
 
+## 2.66.20
+
+### Patch Changes
+
+- Updated dependencies [771af2d]
+  - @monotykamary/localterm-server@2.66.20
+
 ## 2.66.19
 
 ### Patch Changes
