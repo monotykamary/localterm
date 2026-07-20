@@ -14,6 +14,25 @@ vi.mock("../../src/utils/fetch-git-diff", () => ({
   fetchGitDiffFilePatch: vi.fn(),
 }));
 
+vi.mock("../../src/utils/syntax-highlight", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/utils/syntax-highlight")>();
+  return {
+    ...actual,
+    tokenizeDiffLines: vi.fn<typeof actual.tokenizeDiffLines>(
+      async (_filePath, lines, _languageId, colorScheme) =>
+        lines.map((line) => ({
+          tokens: [
+            {
+              content: line,
+              color: colorScheme === "dark" ? "rgb(255, 255, 255)" : "rgb(0, 0, 0)",
+              fontStyle: 0,
+            },
+          ],
+        })),
+    ),
+  };
+});
+
 class StubResizeObserver {
   private callback: ResizeObserverCallback;
 

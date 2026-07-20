@@ -34,8 +34,11 @@ const isKeyboardShortcut = (value: unknown): value is KeyboardShortcut => {
 const defaultsForPlatform = (isMac: boolean): KeyboardShortcutMap =>
   isMac ? MAC_KEYBOARD_SHORTCUT_DEFAULTS : NON_MAC_KEYBOARD_SHORTCUT_DEFAULTS;
 
+const isStoredKeyboardShortcuts = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
 const keyboardShortcutFromStored = (
-  stored: object,
+  stored: Record<string, unknown>,
   action: KeyboardShortcutAction,
   fallback: KeyboardShortcutBinding,
 ): KeyboardShortcutBinding => {
@@ -50,19 +53,11 @@ const loadKeyboardShortcuts = (isMac: boolean): KeyboardShortcutMap => {
     const raw = localStorage.getItem(KEYBOARD_SHORTCUTS_STORAGE_KEY);
     if (!raw) return defaults;
     const stored: unknown = JSON.parse(raw);
-    if (typeof stored !== "object" || stored === null) return defaults;
+    if (!isStoredKeyboardShortcuts(stored)) return defaults;
     return {
       automations: keyboardShortcutFromStored(stored, "automations", defaults.automations),
-      commandPalette: keyboardShortcutFromStored(
-        stored,
-        "commandPalette",
-        defaults.commandPalette,
-      ),
-      createWorktree: keyboardShortcutFromStored(
-        stored,
-        "createWorktree",
-        defaults.createWorktree,
-      ),
+      commandPalette: keyboardShortcutFromStored(stored, "commandPalette", defaults.commandPalette),
+      createWorktree: keyboardShortcutFromStored(stored, "createWorktree", defaults.createWorktree),
       devPorts: keyboardShortcutFromStored(stored, "devPorts", defaults.devPorts),
       find: keyboardShortcutFromStored(stored, "find", defaults.find),
       gitDiff: keyboardShortcutFromStored(stored, "gitDiff", defaults.gitDiff),
