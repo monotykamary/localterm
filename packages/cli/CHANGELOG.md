@@ -1,5 +1,13 @@
 # localterm
 
+## 2.66.24
+
+### Patch Changes
+
+- Remove unused public exports and align dead-code analysis with runtime entry points.
+- Updated dependencies
+  - @monotykamary/localterm-server@2.66.24
+
 ## 2.66.23
 
 ### Patch Changes
