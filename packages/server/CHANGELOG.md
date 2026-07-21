@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.66.23
+
+### Patch Changes
+
+- d97a014: Render Kitty images directly from their original pixels at device resolution and preserve their aspect ratio within the terminal-cell placement.
+
 ## 2.66.22
 
 ### Patch Changes
