@@ -35,7 +35,8 @@ overrides:
   "@fontsource/geist-mono": "5.2.7"
 
 patchedDependencies:
-  # Remove after the device-resolution renderer from xtermjs/xterm.js#5775 ships.
+  # Remove after the device-resolution renderer from xtermjs/xterm.js#5775 and
+  # preserve-original resizing from xtermjs/xterm.js#5861 ship.
   "@xterm/addon-image@0.10.0-beta.287": patches/@xterm__addon-image@0.10.0-beta.287.patch
   "@xterm/addon-webgl@0.20.0-beta.286": patches/@xterm__addon-webgl@0.20.0-beta.286.patch
   "node-pty@1.1.0": "patches/node-pty@1.1.0.patch"
