@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "vite": false,
   "vitest": { "config": [] },
-  "ignoreBinaries": ["pmset", "ps", "xattr", "codesign", "lsof", "osascript"],
+  "ignoreBinaries": ["pmset", "ps", "xattr", "lsof", "osascript"],
   "ignoreDependencies": [
     "vitest",
     "@voidzero-dev/vite-plus-core",
@@ -11,17 +11,22 @@
   ],
   "ignoreWorkspaces": ["apps/harness", "apps/harness/alpha-mask"],
   "ignoreIssues": {
+    "apps/harness/light-theme-rendering/main.mjs": ["unresolved"],
     "apps/terminal/src/lib/constants.ts": ["duplicates"],
     "packages/server/src/constants.ts": ["duplicates"],
     "packages/server/src/schemas.ts": ["duplicates"]
   },
   "workspaces": {
     ".": {
-      "entry": ["vite.config.ts"],
       "ignore": ["harness/**"]
     },
     "apps/terminal": {
-      "entry": ["src/main.tsx", "vite.config.ts", "vitest.config.ts", "tests/setup.ts"],
+      "entry": [
+        "src/main.tsx",
+        "vitest.config.ts",
+        "doctor.config.ts",
+        "tests/setup.ts"
+      ],
       "ignore": [
         "src/components/ui/**",
         "scripts/sw-template.js",

@@ -13,6 +13,4 @@ export {
   getGitDiffSummary,
 } from "./git-diff-service.js";
 export { getGitBranchPr, listGithubRemoteSlugs, setPrFetcher } from "./github-pr.js";
-export type { NumstatEntry } from "./git-diff-parser.js";
 export type { GitDiffOptions } from "./git-diff-service.js";
-export type { PrFetcher } from "./github-pr.js";

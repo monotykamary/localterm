@@ -13,7 +13,7 @@ export interface PatchEntry {
   data?: GitDiffFilePatch;
 }
 
-export interface FileListScrollOptions {
+interface FileListScrollOptions {
   align?: "start" | "center" | "end" | "auto";
   behavior?: ScrollBehavior;
 }

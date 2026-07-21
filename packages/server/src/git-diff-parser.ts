@@ -1,6 +1,6 @@
 import type { GitDiffFileStatus } from "./types.js";
 
-export interface NumstatEntry {
+interface NumstatEntry {
   path: string;
   oldPath: string | null;
   additions: number;

@@ -19,7 +19,7 @@ import { reportCdpAvailability, setupTailscaleServe } from "./install-service-se
 
 const execFileAsync = promisify(execFile);
 
-export interface SystemdUnitContentInput {
+interface SystemdUnitContentInput {
   port: number;
   host: string;
   // Absolute node binary that runs the daemon (process.execPath at install).

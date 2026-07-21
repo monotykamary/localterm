@@ -256,7 +256,7 @@ export const TOOLTIP_SIDE_OFFSET_PX = 8;
 
 export const NUMBER_STEPPER_SCRUB_PIXELS_PER_STEP = 5;
 
-export const ENTER_KEY_CODE = 13;
+const ENTER_KEY_CODE = 13;
 export const TERMINAL_ESCAPE_SEQUENCE = String.fromCharCode(27);
 export const TERMINAL_TAB_SEQUENCE = "\t";
 export const TERMINAL_BACK_TAB_SEQUENCE = TERMINAL_ESCAPE_SEQUENCE + "[Z";

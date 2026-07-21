@@ -15,7 +15,7 @@ import { groupTriageRuns } from "@/utils/group-triage-runs";
 import { runStatusBadge } from "@/utils/run-status-badge";
 
 const TRIAGE_FILTERS = ["all", "unread", "failed", "skipped"] as const;
-export type TriageFilter = (typeof TRIAGE_FILTERS)[number];
+type TriageFilter = (typeof TRIAGE_FILTERS)[number];
 
 interface AutomationRecentRun {
   automation: AutomationWithNextRun;

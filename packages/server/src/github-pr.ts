@@ -41,7 +41,7 @@ interface PrCache {
   builtAt: number;
 }
 
-export interface PrFetcher {
+interface PrFetcher {
   list(slug: string, branch: string, state: string, perPage: number): Promise<PrApiData[]>;
 }
 
@@ -78,7 +78,7 @@ interface GraphqlPrResponse {
   repository: GraphqlRepository | null;
 }
 
-export interface GithubRemote {
+interface GithubRemote {
   name: string;
   slug: string;
   owner: string;

@@ -10,7 +10,7 @@ import { runInstallMac, runUninstallMac } from "./install-launchd.js";
 import { runInstallLinux, runUninstallLinux } from "./install-systemd.js";
 
 export { buildPlistContent } from "./install-launchd.js";
-export { buildSystemdUnitContent, type SystemdUnitContentInput } from "./install-systemd.js";
+export { buildSystemdUnitContent } from "./install-systemd.js";
 
 const execFileAsync = promisify(execFile);
 

@@ -1709,8 +1709,8 @@ export const authSessionSchema = z.object({
 // reopen them via CDP on the next start. `owner` is null in single-authority
 // mode; a string under an identity provider. `savedAt` bounds crash recovery
 // (the manifest is the last flushed snapshot, not the exact stop-time state).
-export const workspaceTabSchema = z.object({ cwd: z.string(), shell: z.string() }).strict();
-export const workspaceEntrySchema = z
+const workspaceTabSchema = z.object({ cwd: z.string(), shell: z.string() }).strict();
+const workspaceEntrySchema = z
   .object({
     owner: z.string().nullable(),
     windowId: z.string(),
