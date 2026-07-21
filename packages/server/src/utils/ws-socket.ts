@@ -1,5 +1,5 @@
 // Minimal view of a client WebSocket the session manager and route layer share.
-// Matches the WSContext shape from @hono/node-ws (the `ws` from onOpen) closely
+// Matches Hono's WSContext shape (the `ws` from onOpen) closely
 // enough to call send/close and read the underlying socket's buffered amount
 // for flow control, without taking a hard dependency on that package's types.
 export interface ClientSocket {

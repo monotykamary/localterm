@@ -60,7 +60,7 @@
   "devDependencies": {
     "@types/node": "^26.1.1",
     "typescript": "^7.0.2",
-    "vite-plus": "^0.2.4"
+    "vite-plus": "^0.2.5"
   },
   "engines": {
     "node": ">=22"

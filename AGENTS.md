@@ -6,6 +6,7 @@
 - MUST: Keep all types in the global scope.
 - MUST: Use arrow functions over function declarations
   - Carve-out: vendored generated files under `apps/*/src/components/ui/**` and `apps/*/src/lib/utils.ts` are managed by the shadcn CLI (`shadcn add --diff`) and must keep upstream form (named `function` declarations) so smart-merge upgrades stay diffable.
+  - Carve-out: synchronous top-level numeric calculation helpers should use named function declarations so FreeRange can analyze them.
 - MUST: Default to NO comments. Only add a comment when the user explicitly asks, or when the "why" is truly non-obvious - browser quirks, platform bugs, performance tradeoffs, fragile internal patching, or counter-intuitive design decisions. Never add comments that restate what the code does or what a well-named function/variable already conveys. When in doubt, leave the comment out.
   - Do not delete descriptive comments >3 lines without confirming with the user
 - MUST: Use kebab-case for files
@@ -54,6 +55,7 @@ The other end-of-task checks:
 ```bash
 pnpm run doctor:react
 pnpm lint
+pnpm run lint:range
 pnpm typecheck
 pnpm format
 ```
@@ -84,5 +86,6 @@ See root `package.json` scripts for the full list. Quick reference:
 - **Build**: `pnpm build`
 - **Dev watch**: `pnpm dev`
 - **Lint dead code**: `pnpm lint:dead` (runs `knip` to find unused files, exports, and dependencies)
+- **Analyze numeric ranges**: `pnpm run lint:range` (runs FreeRange across the root TypeScript project graph)
 - **Audit changed React code**: `pnpm run doctor:react:changed`
 - **Audit all React code (end of task only)**: `pnpm run doctor:react`

@@ -3,10 +3,10 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { serve, type ServerType } from "@hono/node-server";
-import { createNodeWebSocket } from "@hono/node-ws";
+import { serve, type ServerType, upgradeWebSocket } from "@hono/node-server";
 import { Hono } from "hono";
 import open from "open";
+import { WebSocketServer } from "ws";
 import { AutomationRunTracker } from "./automation-run-tracker.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
@@ -82,6 +82,7 @@ import {
   WS_HEARTBEAT_GRACE_MS,
   WS_HEARTBEAT_INTERVAL_MS,
   WS_HEARTBEAT_TIMEOUT_MS,
+  WS_MAX_INBOUND_PAYLOAD_BYTES,
   WS_READY_STATE_OPEN,
   AUTH_SECRET_FILENAME,
   AUTH_COOKIE_NAME,
@@ -2185,8 +2186,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     "*",
     createNetworkPolicyMiddleware(host, () => publicOrigin),
   );
-  const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app });
-  wss.options.maxPayload = 256 * 1024;
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: WS_MAX_INBOUND_PAYLOAD_BYTES,
+  });
   // Output compression is application-level (per-frame brotli/gzip with a 1-byte
   // header on the binary output frames), NOT permessage-deflate: browsers never
   // advertise Sec-WebSocket-Extensions: permessage-deflate on a WebSocket, so a
@@ -3340,6 +3343,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
         fetch: app.fetch,
         hostname: host,
         port,
+        websocket: { server: wss },
       },
       () => {
         const addr = node.address();
@@ -3363,8 +3367,6 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       ),
     );
   }
-  injectWebSocket(httpServer);
-
   automationScheduler.on("due", (automation) => {
     tryLaunch(automation, "schedule");
   });

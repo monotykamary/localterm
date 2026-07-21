@@ -30,6 +30,32 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+  freerange:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Analyze numeric ranges
+        run: pnpm run lint:range
+
   typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -13,6 +13,7 @@ minimumReleaseAgeExclude:
   - deslop-js@0.8.1
   - oxlint-plugin-react-doctor@0.8.1
   - react-doctor@0.8.1
+  - "@chenglou/freerange@0.0.1"
 
 onlyBuiltDependencies:
   - "@parcel/watcher"
