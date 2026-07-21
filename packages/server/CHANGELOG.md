@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.66.22
+
+### Patch Changes
+
+- 21deb44: Migrate Node WebSockets to Hono Node Server 2's supported built-in API, refresh dependencies, and add FreeRange numeric analysis to the project quality checks.
+
 ## 2.66.21
 
 ## 2.66.20
