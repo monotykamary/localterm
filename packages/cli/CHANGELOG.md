@@ -1,5 +1,18 @@
 # localterm
 
+## 2.67.0
+
+### Minor Changes
+
+- 772bd33: Add the Tokyo Night Day built-in theme — folke/tokyonight.nvim's light "day"
+  variant of the Tokyo Night family — and expose it through the Herdr theme-name
+  resolver so a matching Herdr config selects it.
+
+### Patch Changes
+
+- Updated dependencies [772bd33]
+  - @monotykamary/localterm-server@2.67.0
+
 ## 2.66.24
 
 ### Patch Changes
