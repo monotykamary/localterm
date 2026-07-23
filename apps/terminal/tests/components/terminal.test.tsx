@@ -1432,6 +1432,30 @@ describe("Terminal theme picker", () => {
     expect(seededTheme?.background).toBe("#282a36");
   });
 
+  it("seeds xterm with the configured light theme when system detection is enabled", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+    installFakeLocalStorage({
+      "localterm:terminal-theme-id": "auto",
+      "localterm:terminal-light-theme-id": "tokyo-night-day",
+      "localterm:terminal-dark-theme-id": "dracula",
+    });
+    render(<Terminal />);
+    const seededTheme = fakeXterms[0]?.getOptions().theme as { background?: string } | undefined;
+    expect(seededTheme?.background).toBe("#e1e2e7");
+  });
+
   it("falls back to the default theme when the stored id is unknown", () => {
     installFakeLocalStorage({ "localterm:terminal-theme-id": "totally-made-up" });
     render(<Terminal />);
@@ -1449,6 +1473,8 @@ describe("Terminal theme picker", () => {
       fakeWebSockets[0]?.fireMessage({
         type: "themes",
         activeThemeId: "dracula",
+        lightThemeId: "github-light",
+        darkThemeId: "dracula",
         customThemes: [],
         initialized: true,
       });
@@ -1469,6 +1495,8 @@ describe("Terminal theme picker", () => {
       fakeWebSockets[0]?.fireMessage({
         type: "themes",
         activeThemeId: "github-light",
+        lightThemeId: "github-light",
+        darkThemeId: "vesper",
         customThemes: [],
         initialized: true,
       });

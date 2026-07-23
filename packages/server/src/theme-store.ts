@@ -3,7 +3,10 @@ import path from "node:path";
 import { MAX_CUSTOM_THEMES, THEMES_FILE_VERSION } from "./constants.js";
 import { themesFileSchema } from "./schemas.js";
 import {
+  DEFAULT_DARK_TERMINAL_THEME_ID,
+  DEFAULT_LIGHT_TERMINAL_THEME_ID,
   DEFAULT_TERMINAL_THEME_ID,
+  AUTO_THEME_ID,
   isBuiltinThemeId,
   type TerminalTheme,
 } from "./terminal-themes.js";
@@ -19,6 +22,8 @@ interface ThemeStoreOptions {
 // hand-edited file) falls back to the default rather than rendering nothing.
 export class ThemeStore {
   private activeThemeId: string = DEFAULT_TERMINAL_THEME_ID;
+  private lightThemeId: string = DEFAULT_LIGHT_TERMINAL_THEME_ID;
+  private darkThemeId: string = DEFAULT_DARK_TERMINAL_THEME_ID;
   private customThemes: TerminalTheme[] = [];
   private initialized = false;
   private readonly filePath: string;
@@ -49,6 +54,14 @@ export class ThemeStore {
     return this.activeThemeId;
   }
 
+  getLightThemeId(): string {
+    return this.lightThemeId;
+  }
+
+  getDarkThemeId(): string {
+    return this.darkThemeId;
+  }
+
   // Add an imported theme. Returns the stored theme, or null if the cap is
   // reached (callers surface `capacity`). Duplicates by name are allowed (each
   // import mints a fresh id), matching the browser's prior append behavior.
@@ -65,6 +78,8 @@ export class ThemeStore {
     if (index === -1) return false;
     this.customThemes.splice(index, 1);
     if (this.activeThemeId === id) this.activeThemeId = DEFAULT_TERMINAL_THEME_ID;
+    if (this.lightThemeId === id) this.lightThemeId = DEFAULT_LIGHT_TERMINAL_THEME_ID;
+    if (this.darkThemeId === id) this.darkThemeId = DEFAULT_DARK_TERMINAL_THEME_ID;
     this.persist();
     return true;
   }
@@ -77,19 +92,32 @@ export class ThemeStore {
     return id;
   }
 
+  setSystemThemes(lightThemeId: string, darkThemeId: string): void {
+    this.lightThemeId = lightThemeId;
+    this.darkThemeId = darkThemeId;
+    this.persist();
+  }
+
   // One-time migration from the browser's legacy localStorage state. Only acts
   // on a fresh (never-persisted) store so a later call from a second tab (or a
   // re-opened browser) can't clobber state the CLI or another tab already wrote.
   // Preserves the incoming custom theme ids so the active id still resolves.
   // Returns true when it adopted the payload, false when the store was already
   // initialized (the caller re-reads the current state either way).
-  migrate(activeThemeId: string, customThemes: readonly TerminalTheme[]): boolean {
+  migrate(
+    activeThemeId: string,
+    customThemes: readonly TerminalTheme[],
+    lightThemeId = DEFAULT_LIGHT_TERMINAL_THEME_ID,
+    darkThemeId = DEFAULT_DARK_TERMINAL_THEME_ID,
+  ): boolean {
     if (this.initialized) return false;
     this.customThemes = customThemes.slice(0, MAX_CUSTOM_THEMES).map((theme) => ({
       ...theme,
       colors: { ...theme.colors },
     }));
     this.activeThemeId = this.sanitizeActiveId(activeThemeId);
+    this.lightThemeId = this.sanitizeSystemThemeId(lightThemeId, DEFAULT_LIGHT_TERMINAL_THEME_ID);
+    this.darkThemeId = this.sanitizeSystemThemeId(darkThemeId, DEFAULT_DARK_TERMINAL_THEME_ID);
     this.persist();
     return true;
   }
@@ -115,6 +143,14 @@ export class ThemeStore {
     }
     this.customThemes = parsed.data.customThemes as TerminalTheme[];
     this.activeThemeId = this.sanitizeActiveId(parsed.data.activeThemeId);
+    this.lightThemeId = this.sanitizeSystemThemeId(
+      parsed.data.lightThemeId,
+      DEFAULT_LIGHT_TERMINAL_THEME_ID,
+    );
+    this.darkThemeId = this.sanitizeSystemThemeId(
+      parsed.data.darkThemeId,
+      DEFAULT_DARK_TERMINAL_THEME_ID,
+    );
     this.initialized = true;
   }
 
@@ -126,12 +162,20 @@ export class ThemeStore {
     return DEFAULT_TERMINAL_THEME_ID;
   }
 
+  private sanitizeSystemThemeId(id: string | undefined, fallbackId: string): string {
+    if (!id || id === AUTO_THEME_ID) return fallbackId;
+    if (isBuiltinThemeId(id) || this.customThemes.some((theme) => theme.id === id)) return id;
+    return fallbackId;
+  }
+
   private persist(): void {
     this.initialized = true;
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const payload = {
       version: THEMES_FILE_VERSION,
       activeThemeId: this.activeThemeId,
+      lightThemeId: this.lightThemeId,
+      darkThemeId: this.darkThemeId,
       customThemes: this.customThemes,
     };
     const tmpPath = `${this.filePath}.tmp`;

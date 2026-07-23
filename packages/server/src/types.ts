@@ -92,6 +92,7 @@ import type {
   themeResponseSchema,
   importThemeInputSchema,
   setActiveThemeInputSchema,
+  setSystemThemesInputSchema,
   migrateThemesInputSchema,
   fontsResponseSchema,
   updateFontsInputSchema,
@@ -156,6 +157,7 @@ export type ThemesResponse = z.infer<typeof themesResponseSchema>;
 export type ThemeResponse = z.infer<typeof themeResponseSchema>;
 export type ImportThemeInput = z.infer<typeof importThemeInputSchema>;
 export type SetActiveThemeInput = z.infer<typeof setActiveThemeInputSchema>;
+export type SetSystemThemesInput = z.infer<typeof setSystemThemesInputSchema>;
 export type MigrateThemesInput = z.infer<typeof migrateThemesInputSchema>;
 
 export type FontsResponse = z.infer<typeof fontsResponseSchema>;

@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { ThemeStore } from "../src/theme-store.js";
-import { DEFAULT_TERMINAL_THEME_ID } from "../src/terminal-themes.js";
+import {
+  DEFAULT_DARK_TERMINAL_THEME_ID,
+  DEFAULT_LIGHT_TERMINAL_THEME_ID,
+  DEFAULT_TERMINAL_THEME_ID,
+} from "../src/terminal-themes.js";
 
 const themeFile = (stateDirectory: string): string => path.join(stateDirectory, "themes.json");
 
@@ -31,6 +35,8 @@ describe("ThemeStore", () => {
   it("defaults to the built-in default theme + no customs + uninitialized", () => {
     const store = new ThemeStore({ filePath: themeFile(stateDirectory) });
     expect(store.getActive()).toBe(DEFAULT_TERMINAL_THEME_ID);
+    expect(store.getLightThemeId()).toBe(DEFAULT_LIGHT_TERMINAL_THEME_ID);
+    expect(store.getDarkThemeId()).toBe(DEFAULT_DARK_TERMINAL_THEME_ID);
     expect(store.list()).toEqual([]);
     expect(store.isInitialized()).toBe(false);
   });
@@ -47,14 +53,17 @@ describe("ThemeStore", () => {
     expect(reloaded.isInitialized()).toBe(true);
   });
 
-  it("deletes a custom theme and resets the active id when it was active", () => {
+  it("deletes a custom theme and resets every selection that used it", () => {
     const store = new ThemeStore({ filePath: themeFile(stateDirectory) });
     store.add(customTheme("custom-1"));
     store.setActive("custom-1");
+    store.setSystemThemes("custom-1", "custom-1");
     expect(store.getActive()).toBe("custom-1");
 
     expect(store.delete("custom-1")).toBe(true);
     expect(store.getActive()).toBe(DEFAULT_TERMINAL_THEME_ID);
+    expect(store.getLightThemeId()).toBe(DEFAULT_LIGHT_TERMINAL_THEME_ID);
+    expect(store.getDarkThemeId()).toBe(DEFAULT_DARK_TERMINAL_THEME_ID);
     expect(store.list()).toEqual([]);
     expect(store.delete("custom-1")).toBe(false);
   });
@@ -66,6 +75,15 @@ describe("ThemeStore", () => {
     store.add(customTheme("custom-1"));
     store.setActive("custom-1");
     expect(store.getActive()).toBe("custom-1");
+  });
+
+  it("stores separate light and dark theme selections", () => {
+    const store = new ThemeStore({ filePath: themeFile(stateDirectory) });
+    store.setSystemThemes("github-light", "dracula");
+
+    const reloaded = new ThemeStore({ filePath: themeFile(stateDirectory) });
+    expect(reloaded.getLightThemeId()).toBe("github-light");
+    expect(reloaded.getDarkThemeId()).toBe("dracula");
   });
 
   it("sanitizes a stale active id (a deleted custom) back to the default on load", () => {

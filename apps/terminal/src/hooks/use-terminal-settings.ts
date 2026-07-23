@@ -66,6 +66,8 @@ import {
   subscribeStoredTerminalScrollback,
 } from "@/utils/stored-terminal-scrollback";
 import { subscribeStoredTerminalThemeId } from "@/utils/stored-terminal-theme-id";
+import { subscribeStoredTerminalLightThemeId } from "@/utils/stored-terminal-light-theme-id";
+import { subscribeStoredTerminalDarkThemeId } from "@/utils/stored-terminal-dark-theme-id";
 import { subscribeStoredCustomThemes } from "@/utils/stored-custom-themes";
 
 interface UseTerminalSettingsParams {
@@ -220,6 +222,8 @@ export const useTerminalSettings = ({
   useEffect(() => {
     const unsubscribes = [
       subscribeStoredTerminalThemeId(themeSettings.setActiveThemeId),
+      subscribeStoredTerminalLightThemeId(themeSettings.setActiveLightThemeId),
+      subscribeStoredTerminalDarkThemeId(themeSettings.setActiveDarkThemeId),
       subscribeStoredTerminalFontId(fontSettings.setActiveFontId),
       subscribeStoredNerdFontEnabled(fontSettings.setActiveNerdFontEnabled),
       subscribeStoredLigaturesEnabled(fontSettings.setActiveLigaturesEnabled),
@@ -255,8 +259,7 @@ export const useTerminalSettings = ({
   ]);
 
   return {
-    initialThemeIdRef: themeSettings.initialThemeIdRef,
-    initialCustomThemesRef: themeSettings.initialCustomThemesRef,
+    initialEffectiveThemeRef: themeSettings.initialEffectiveThemeRef,
     initialFontIdRef: fontSettings.initialFontIdRef,
     initialCustomFontFamilyRef: fontSettings.initialCustomFontFamilyRef,
     initialNerdFontEnabledRef: fontSettings.initialNerdFontEnabledRef,
@@ -269,6 +272,9 @@ export const useTerminalSettings = ({
     initialScrollOnUserInputRef,
     activeLocalEchoRef,
     activeThemeId: themeSettings.activeThemeId,
+    activeLightThemeId: themeSettings.activeLightThemeId,
+    activeDarkThemeId: themeSettings.activeDarkThemeId,
+    systemThemeEnabled: themeSettings.systemThemeEnabled,
     activeFontId: fontSettings.activeFontId,
     activeNerdFontEnabled: fontSettings.activeNerdFontEnabled,
     activeLigaturesEnabled: fontSettings.activeLigaturesEnabled,
@@ -292,6 +298,9 @@ export const useTerminalSettings = ({
     setPreviewFontId: fontSettings.setPreviewFontId,
     setPreviewCursorStyle,
     handleThemeChange: themeSettings.handleThemeChange,
+    handleSystemThemeEnabledChange: themeSettings.handleSystemThemeEnabledChange,
+    handleLightThemeChange: themeSettings.handleLightThemeChange,
+    handleDarkThemeChange: themeSettings.handleDarkThemeChange,
     handleFontChange: fontSettings.handleFontChange,
     handleNerdFontEnabledChange: fontSettings.handleNerdFontEnabledChange,
     handleLigaturesEnabledChange: fontSettings.handleLigaturesEnabledChange,

@@ -26,12 +26,14 @@ export const fetchThemes = async (signal?: AbortSignal): Promise<ThemesResponse 
 export const migrateThemes = async (
   activeThemeId: string,
   customThemes: readonly TerminalTheme[],
+  lightThemeId: string,
+  darkThemeId: string,
 ): Promise<ThemesResponse | null> => {
   try {
     const response = await fetch(new URL(`${THEMES_ENDPOINT}/migrate`, window.location.href), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ activeThemeId, customThemes }),
+      body: JSON.stringify({ activeThemeId, customThemes, lightThemeId, darkThemeId }),
     });
     if (!response.ok) return null;
     const parsed = themesResponseSchema.safeParse(await response.json());
@@ -76,6 +78,22 @@ export const setActiveTheme = async (id: string): Promise<boolean> => {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
+export const setSystemThemes = async (
+  lightThemeId: string,
+  darkThemeId: string,
+): Promise<boolean> => {
+  try {
+    const response = await fetch(new URL(`${THEMES_ENDPOINT}/system`, window.location.href), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lightThemeId, darkThemeId }),
     });
     return response.ok;
   } catch {

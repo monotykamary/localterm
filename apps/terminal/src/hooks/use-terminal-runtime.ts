@@ -28,7 +28,7 @@ import {
   findTerminalFontById,
 } from "@/lib/terminal-fonts";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
-import { findTerminalThemeById, type TerminalTheme } from "@/lib/terminal-themes";
+import type { TerminalTheme } from "@/lib/terminal-themes";
 import { awaitFontReady } from "@/utils/await-font-ready";
 import {
   captureTerminalScrollAnchor,
@@ -174,8 +174,7 @@ interface TerminalRuntimeActionRefs {
 }
 
 interface TerminalRuntimeInitialSettings {
-  initialThemeIdRef: CurrentRef<string>;
-  initialCustomThemesRef: CurrentRef<TerminalTheme[]>;
+  initialEffectiveThemeRef: CurrentRef<TerminalTheme>;
   initialFontIdRef: CurrentRef<string>;
   initialCustomFontFamilyRef: CurrentRef<string>;
   initialNerdFontEnabledRef: CurrentRef<boolean>;
@@ -262,8 +261,7 @@ export const useTerminalRuntime = ({
     qrPeerAttachedRef,
   } = actionRefs;
   const {
-    initialThemeIdRef,
-    initialCustomThemesRef,
+    initialEffectiveThemeRef,
     initialFontIdRef,
     initialCustomFontFamilyRef,
     initialNerdFontEnabledRef,
@@ -333,10 +331,7 @@ export const useTerminalRuntime = ({
       initialFontIdRef.current === CUSTOM_FONT_ID
         ? buildCustomTerminalFont(initialCustomFontFamilyRef.current)
         : findTerminalFontById(initialFontIdRef.current);
-    const initialTheme = findTerminalThemeById(
-      initialThemeIdRef.current,
-      initialCustomThemesRef.current,
-    );
+    const initialTheme = initialEffectiveThemeRef.current;
     void awaitFontReady(initialFont).then(() => {
       if (disposed) return;
       const liveTerminal = terminalRef.current;

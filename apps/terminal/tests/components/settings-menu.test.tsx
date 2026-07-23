@@ -31,11 +31,17 @@ interface SettingsMenuHarnessProps {
   initialScrollback?: number;
   initialScrollOnUserInput?: boolean;
   initialThemeId?: string;
+  initialLightThemeId?: string;
+  initialDarkThemeId?: string;
+  initialSystemThemeEnabled?: boolean;
   initialFontId?: string;
   initialLigaturesEnabled?: boolean;
   initialMuteEmojiColors?: boolean;
   initialDefaultCwd?: string;
   onThemeChange?: (id: string) => void;
+  onLightThemeChange?: (id: string) => void;
+  onDarkThemeChange?: (id: string) => void;
+  onSystemThemeEnabledChange?: (enabled: boolean) => void;
   onThemePreview?: (id: string | null) => void;
   customThemes?: TerminalTheme[];
   onImportTheme?: (file: File) => Promise<string | null>;
@@ -88,12 +94,18 @@ const renderSettingsMenu = ({
   initialScrollback = DEFAULT_TERMINAL_SCROLLBACK_LINES,
   initialScrollOnUserInput = DEFAULT_TERMINAL_SCROLL_ON_USER_INPUT,
   initialThemeId = "vesper",
+  initialLightThemeId = "github-light",
+  initialDarkThemeId = "vesper",
+  initialSystemThemeEnabled = false,
   initialFontId = "geist-mono",
   initialLigaturesEnabled = false,
   initialMuteEmojiColors = DEFAULT_MUTE_EMOJI_COLORS,
   initialDefaultCwd = "",
   initialDefaultShell = "",
   onThemeChange = () => {},
+  onLightThemeChange = () => {},
+  onDarkThemeChange = () => {},
+  onSystemThemeEnabledChange = () => {},
   onThemePreview,
   customThemes = [],
   onImportTheme = async () => null,
@@ -139,7 +151,13 @@ const renderSettingsMenu = ({
     <TooltipProvider delay={0}>
       <SettingsMenu
         themeId={initialThemeId}
+        lightThemeId={initialLightThemeId}
+        darkThemeId={initialDarkThemeId}
+        systemThemeEnabled={initialSystemThemeEnabled}
         onThemeChange={onThemeChange}
+        onLightThemeChange={onLightThemeChange}
+        onDarkThemeChange={onDarkThemeChange}
+        onSystemThemeEnabledChange={onSystemThemeEnabledChange}
         onThemePreview={onThemePreview}
         customThemes={customThemes}
         onImportTheme={onImportTheme}

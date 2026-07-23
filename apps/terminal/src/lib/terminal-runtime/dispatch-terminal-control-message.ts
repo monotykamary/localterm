@@ -23,6 +23,8 @@ interface TerminalPtySize {
 
 interface TerminalThemesState {
   activeThemeId: string;
+  lightThemeId: string;
+  darkThemeId: string;
   customThemes: readonly TerminalTheme[];
 }
 
@@ -82,6 +84,8 @@ export const dispatchTerminalControlMessage = (
   } else if (message.type === "themes") {
     callbacks.applyThemesState({
       activeThemeId: message.activeThemeId,
+      lightThemeId: message.lightThemeId,
+      darkThemeId: message.darkThemeId,
       customThemes: message.customThemes,
     });
   } else if (message.type === "fonts") {

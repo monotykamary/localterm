@@ -286,6 +286,8 @@ export const CAFFEINATE_ACCENT_COLOR = "#c8956c";
 
 export const KEYBOARD_SHORTCUTS_STORAGE_KEY = "localterm:keyboard-shortcuts";
 export const TERMINAL_THEME_STORAGE_KEY = "localterm:terminal-theme-id";
+export const TERMINAL_LIGHT_THEME_STORAGE_KEY = "localterm:terminal-light-theme-id";
+export const TERMINAL_DARK_THEME_STORAGE_KEY = "localterm:terminal-dark-theme-id";
 export const TERMINAL_FONT_STORAGE_KEY = "localterm:terminal-font-id";
 export const TERMINAL_FONT_SIZE_STORAGE_KEY = "localterm:terminal-font-size";
 export const TERMINAL_LINE_HEIGHT_STORAGE_KEY = "localterm:terminal-line-height";

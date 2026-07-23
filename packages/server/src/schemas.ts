@@ -1956,6 +1956,8 @@ export const themesFileSchema = z
   .object({
     version: z.literal(THEMES_FILE_VERSION),
     activeThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    lightThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH).optional(),
+    darkThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH).optional(),
     customThemes: z.array(storedThemeSchema).max(MAX_CUSTOM_THEMES),
   })
   .strict();
@@ -1977,9 +1979,18 @@ export const setActiveThemeInputSchema = z
   .object({ id: z.string().min(1).max(MAX_THEME_ID_LENGTH) })
   .strict();
 
+export const setSystemThemesInputSchema = z
+  .object({
+    lightThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    darkThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+  })
+  .strict();
+
 export const themesResponseSchema = z
   .object({
     activeThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    lightThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    darkThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
     customThemes: z.array(storedThemeSchema).max(MAX_CUSTOM_THEMES),
     initialized: z.boolean(),
   })
@@ -1994,6 +2005,8 @@ export const themeResponseSchema = z.object({ theme: storedThemeSchema }).strict
 export const migrateThemesInputSchema = z
   .object({
     activeThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    lightThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH).optional(),
+    darkThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH).optional(),
     customThemes: z.array(storedThemeSchema).max(MAX_CUSTOM_THEMES),
   })
   .strict();
@@ -2066,6 +2079,8 @@ const themesMessageSchema = z
   .object({
     type: z.literal("themes"),
     activeThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    lightThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
+    darkThemeId: z.string().min(1).max(MAX_THEME_ID_LENGTH),
     customThemes: z.array(storedThemeSchema).max(MAX_CUSTOM_THEMES),
     initialized: z.boolean(),
   })

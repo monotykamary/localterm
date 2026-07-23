@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AUTO_THEME_ID,
+  DEFAULT_DARK_TERMINAL_THEME_ID,
+  DEFAULT_LIGHT_TERMINAL_THEME_ID,
   DEFAULT_TERMINAL_THEME_ID,
   findTerminalThemeById,
   resolveAutoTheme,
@@ -11,48 +13,74 @@ import {
   importTheme,
   migrateThemes,
   setActiveTheme as pushActiveTheme,
+  setSystemThemes as pushSystemThemes,
   deleteTheme as removeRemoteTheme,
 } from "@/utils/fetch-themes";
 import { loadStoredCustomThemes, storeCustomThemes } from "@/utils/stored-custom-themes";
 import { loadStoredTerminalThemeId, storeTerminalThemeId } from "@/utils/stored-terminal-theme-id";
+import {
+  loadStoredTerminalLightThemeId,
+  storeTerminalLightThemeId,
+} from "@/utils/stored-terminal-light-theme-id";
+import {
+  loadStoredTerminalDarkThemeId,
+  storeTerminalDarkThemeId,
+} from "@/utils/stored-terminal-dark-theme-id";
 import { generateExtendedPalette } from "@/utils/generate-extended-palette";
 import { useLatestRef } from "@/utils/use-latest-ref";
 
 interface TerminalThemesState {
   activeThemeId: string;
+  lightThemeId: string;
+  darkThemeId: string;
   customThemes: readonly TerminalTheme[];
 }
 
 export const useTerminalThemeSettings = () => {
-  const initialThemeIdRef = useRef<string>(loadStoredTerminalThemeId());
-  const initialCustomThemesRef = useRef<TerminalTheme[]>(loadStoredCustomThemes());
-  const [activeThemeId, setActiveThemeId] = useState<string>(initialThemeIdRef.current);
+  const [activeThemeId, setActiveThemeId] = useState(loadStoredTerminalThemeId);
+  const [activeLightThemeId, setActiveLightThemeId] = useState(loadStoredTerminalLightThemeId);
+  const [activeDarkThemeId, setActiveDarkThemeId] = useState(loadStoredTerminalDarkThemeId);
+  const [activeCustomThemes, setActiveCustomThemes] = useState(loadStoredCustomThemes);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
-  const effectiveThemeId = previewThemeId ?? activeThemeId;
-  const [activeCustomThemes, setActiveCustomThemes] = useState<TerminalTheme[]>(
-    initialCustomThemesRef.current,
+  const [initialEffectiveTheme] = useState<TerminalTheme>(() =>
+    activeThemeId === AUTO_THEME_ID
+      ? resolveAutoTheme(
+          typeof window !== "undefined" &&
+            Boolean(window.matchMedia?.("(prefers-color-scheme: dark)").matches),
+          activeLightThemeId,
+          activeDarkThemeId,
+          activeCustomThemes,
+        )
+      : findTerminalThemeById(activeThemeId, activeCustomThemes),
   );
+  const initialEffectiveThemeRef = useRef(initialEffectiveTheme);
   // The daemon is the source of truth for the active theme + the custom library
   // (~/.localterm/themes.json); localStorage is a cache for instant initial
   // render. These refs mirror the state so the stable `applyThemesState` (called
   // from the WS dispatcher) reads the latest without re-creating per change.
   const activeThemeIdRef = useLatestRef(activeThemeId);
   const activeCustomThemesRef = useLatestRef(activeCustomThemes);
-  // The host's color-scheme drives the "Auto (system)" theme: VESPER when dark,
-  // the light default when light. Updated live via matchMedia so a desktop
-  // switch re-resolves without a reload (a Linux GTK color-scheme change).
+  // The host color scheme selects the configured light or dark theme and updates
+  // live when the desktop appearance changes.
   const [prefersDark, setPrefersDark] = useState<boolean>(
     typeof window !== "undefined" && window.matchMedia
       ? window.matchMedia("(prefers-color-scheme: dark)").matches
       : true,
   );
-  const effectiveTheme = useMemo(
-    () =>
-      effectiveThemeId === AUTO_THEME_ID
-        ? resolveAutoTheme(prefersDark)
-        : findTerminalThemeById(effectiveThemeId, activeCustomThemes),
-    [effectiveThemeId, prefersDark, activeCustomThemes],
-  );
+  const effectiveTheme = useMemo(() => {
+    if (previewThemeId) return findTerminalThemeById(previewThemeId, activeCustomThemes);
+    if (activeThemeId !== AUTO_THEME_ID) {
+      return findTerminalThemeById(activeThemeId, activeCustomThemes);
+    }
+    return resolveAutoTheme(prefersDark, activeLightThemeId, activeDarkThemeId, activeCustomThemes);
+  }, [
+    previewThemeId,
+    activeThemeId,
+    activeLightThemeId,
+    activeDarkThemeId,
+    prefersDark,
+    activeCustomThemes,
+  ]);
   const effectiveThemeWithExtendedPalette = useMemo(
     () => ({
       ...effectiveTheme.colors,
@@ -67,6 +95,35 @@ export const useTerminalThemeSettings = () => {
     storeTerminalThemeId(nextThemeId);
     void pushActiveTheme(nextThemeId);
   }, []);
+
+  const handleSystemThemeEnabledChange = useCallback(
+    (enabled: boolean) => {
+      handleThemeChange(
+        enabled ? AUTO_THEME_ID : prefersDark ? activeDarkThemeId : activeLightThemeId,
+      );
+    },
+    [handleThemeChange, prefersDark, activeDarkThemeId, activeLightThemeId],
+  );
+
+  const handleLightThemeChange = useCallback(
+    (nextThemeId: string) => {
+      setActiveLightThemeId(nextThemeId);
+      setPreviewThemeId(null);
+      storeTerminalLightThemeId(nextThemeId);
+      void pushSystemThemes(nextThemeId, activeDarkThemeId);
+    },
+    [activeDarkThemeId],
+  );
+
+  const handleDarkThemeChange = useCallback(
+    (nextThemeId: string) => {
+      setActiveDarkThemeId(nextThemeId);
+      setPreviewThemeId(null);
+      storeTerminalDarkThemeId(nextThemeId);
+      void pushSystemThemes(activeLightThemeId, nextThemeId);
+    },
+    [activeLightThemeId],
+  );
 
   // Import a theme from a file: JSON (TerminalTheme/bare-colors) or iTerm
   // .itermcolors. The daemon parses (one parser, shared with `localterm theme
@@ -100,10 +157,22 @@ export const useTerminalThemeSettings = () => {
         setActiveThemeId(DEFAULT_TERMINAL_THEME_ID);
         storeTerminalThemeId(DEFAULT_TERMINAL_THEME_ID);
       }
+      const nextLightThemeId =
+        activeLightThemeId === id ? DEFAULT_LIGHT_TERMINAL_THEME_ID : activeLightThemeId;
+      const nextDarkThemeId =
+        activeDarkThemeId === id ? DEFAULT_DARK_TERMINAL_THEME_ID : activeDarkThemeId;
+      if (nextLightThemeId !== activeLightThemeId) {
+        setActiveLightThemeId(nextLightThemeId);
+        storeTerminalLightThemeId(nextLightThemeId);
+      }
+      if (nextDarkThemeId !== activeDarkThemeId) {
+        setActiveDarkThemeId(nextDarkThemeId);
+        storeTerminalDarkThemeId(nextDarkThemeId);
+      }
       if (previewThemeId === id) setPreviewThemeId(null);
       void removeRemoteTheme(id);
     },
-    [activeCustomThemes, activeThemeId, previewThemeId],
+    [activeCustomThemes, activeThemeId, activeLightThemeId, activeDarkThemeId, previewThemeId],
   );
 
   // The daemon is the source of truth for the active theme id + the custom-theme
@@ -125,6 +194,10 @@ export const useTerminalThemeSettings = () => {
         setActiveThemeId(state.activeThemeId);
         storeTerminalThemeId(state.activeThemeId);
       }
+      setActiveLightThemeId(state.lightThemeId);
+      storeTerminalLightThemeId(state.lightThemeId);
+      setActiveDarkThemeId(state.darkThemeId);
+      storeTerminalDarkThemeId(state.darkThemeId);
       const local = activeCustomThemesRef.current;
       const serverIds = new Set(state.customThemes.map((theme) => theme.id));
       const customsDiffer =
@@ -146,7 +219,12 @@ export const useTerminalThemeSettings = () => {
     const data = await fetchThemes();
     if (data === null) return; // daemon down / non-2xx → keep the cache
     if (!data.initialized) {
-      await migrateThemes(loadStoredTerminalThemeId(), loadStoredCustomThemes());
+      await migrateThemes(
+        loadStoredTerminalThemeId(),
+        loadStoredCustomThemes(),
+        loadStoredTerminalLightThemeId(),
+        loadStoredTerminalDarkThemeId(),
+      );
       return;
     }
     applyThemesState(data);
@@ -166,16 +244,23 @@ export const useTerminalThemeSettings = () => {
   }, []);
 
   return {
-    initialThemeIdRef,
-    initialCustomThemesRef,
+    initialEffectiveThemeRef,
     activeThemeId,
+    activeLightThemeId,
+    activeDarkThemeId,
+    systemThemeEnabled: activeThemeId === AUTO_THEME_ID,
     activeCustomThemes,
     effectiveTheme,
     effectiveThemeWithExtendedPalette,
     setActiveThemeId,
+    setActiveLightThemeId,
+    setActiveDarkThemeId,
     setActiveCustomThemes,
     setPreviewThemeId,
     handleThemeChange,
+    handleSystemThemeEnabledChange,
+    handleLightThemeChange,
+    handleDarkThemeChange,
     handleImportTheme,
     handleDeleteCustomTheme,
     applyThemesState,

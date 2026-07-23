@@ -119,7 +119,7 @@ import { ThemeStore } from "./theme-store.js";
 import { HerdrThemeSync } from "./herdr-theme-sync.js";
 import { FontStore } from "./font-store.js";
 import { parseImportedTheme } from "./theme-parser.js";
-import { isBuiltinThemeId, BUILTIN_THEME_IDS } from "./terminal-themes.js";
+import { AUTO_THEME_ID, isBuiltinThemeId, BUILTIN_THEME_IDS } from "./terminal-themes.js";
 import { isBuiltinFontId } from "./terminal-fonts.js";
 import { regenerateShims } from "./secret-shims.js";
 import { encryptSecretExport, decryptSecretExport } from "./secret-export.js";
@@ -151,6 +151,7 @@ import {
   processSetInputSchema,
   importThemeInputSchema,
   setActiveThemeInputSchema,
+  setSystemThemesInputSchema,
   migrateThemesInputSchema,
   updateFontsInputSchema,
   migrateFontsInputSchema,
@@ -1178,6 +1179,8 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   api.get("/themes", (context) =>
     context.json({
       activeThemeId: themeStore.getActive(),
+      lightThemeId: themeStore.getLightThemeId(),
+      darkThemeId: themeStore.getDarkThemeId(),
       customThemes: themeStore.list(),
       initialized: themeStore.isInitialized(),
     }),
@@ -1189,10 +1192,17 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   api.post("/themes/migrate", async (context) => {
     const parsed = migrateThemesInputSchema.safeParse(await readJsonBody(context));
     if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
-    themeStore.migrate(parsed.data.activeThemeId, parsed.data.customThemes);
+    themeStore.migrate(
+      parsed.data.activeThemeId,
+      parsed.data.customThemes,
+      parsed.data.lightThemeId,
+      parsed.data.darkThemeId,
+    );
     broadcastThemes();
     return context.json({
       activeThemeId: themeStore.getActive(),
+      lightThemeId: themeStore.getLightThemeId(),
+      darkThemeId: themeStore.getDarkThemeId(),
       customThemes: themeStore.list(),
       initialized: themeStore.isInitialized(),
     });
@@ -1244,6 +1254,20 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     const activeThemeId = themeStore.setActive(id);
     broadcastThemes();
     return context.json({ activeThemeId });
+  });
+
+  api.put("/themes/system", async (context) => {
+    const parsed = setSystemThemesInputSchema.safeParse(await readJsonBody(context));
+    if (!parsed.success) return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+    const { lightThemeId, darkThemeId } = parsed.data;
+    const isValidThemeId = (id: string) =>
+      id !== AUTO_THEME_ID && (isBuiltinThemeId(id) || Boolean(themeStore.get(id)));
+    if (!isValidThemeId(lightThemeId) || !isValidThemeId(darkThemeId)) {
+      return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    }
+    themeStore.setSystemThemes(lightThemeId, darkThemeId);
+    broadcastThemes();
+    return context.json({ lightThemeId, darkThemeId });
   });
 
   // Terminal fonts: the active font id + the user-entered custom family + the
@@ -2502,6 +2526,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     const payload: ServerToClientMessage = {
       type: "themes",
       activeThemeId: themeStore.getActive(),
+      lightThemeId: themeStore.getLightThemeId(),
+      darkThemeId: themeStore.getDarkThemeId(),
       customThemes: themeStore.list(),
       initialized: themeStore.isInitialized(),
     };

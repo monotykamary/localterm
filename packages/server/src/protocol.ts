@@ -156,6 +156,7 @@ export {
   themeResponseSchema,
   importThemeInputSchema,
   setActiveThemeInputSchema,
+  setSystemThemesInputSchema,
   migrateThemesInputSchema,
   fontsResponseSchema,
   updateFontsInputSchema,

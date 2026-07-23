@@ -32,7 +32,13 @@ import { cn } from "@/lib/utils";
 
 interface SettingsMenuProps {
   themeId: string;
+  lightThemeId: string;
+  darkThemeId: string;
+  systemThemeEnabled: boolean;
   onThemeChange: (themeId: string) => void;
+  onLightThemeChange: (themeId: string) => void;
+  onDarkThemeChange: (themeId: string) => void;
+  onSystemThemeEnabledChange: (enabled: boolean) => void;
   onThemePreview?: (themeId: string | null) => void;
   customThemes: TerminalTheme[];
   onImportTheme: (file: File) => Promise<string | null>;
@@ -95,7 +101,13 @@ interface SettingsMenuProps {
 
 export const SettingsMenu = ({
   themeId,
+  lightThemeId,
+  darkThemeId,
+  systemThemeEnabled,
   onThemeChange,
+  onLightThemeChange,
+  onDarkThemeChange,
+  onSystemThemeEnabledChange,
   onThemePreview,
   customThemes,
   onImportTheme,
@@ -304,7 +316,13 @@ export const SettingsMenu = ({
 
                     <ThemeSettingsSection
                       themeId={themeId}
+                      lightThemeId={lightThemeId}
+                      darkThemeId={darkThemeId}
+                      systemThemeEnabled={systemThemeEnabled}
                       onThemeChange={onThemeChange}
+                      onLightThemeChange={onLightThemeChange}
+                      onDarkThemeChange={onDarkThemeChange}
+                      onSystemThemeEnabledChange={onSystemThemeEnabledChange}
                       onThemePreview={onThemePreview}
                       customThemes={customThemes}
                       onDeleteTheme={onDeleteTheme}

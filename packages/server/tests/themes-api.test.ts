@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { createServer, type RunningServer } from "../src/index.js";
-import { DEFAULT_TERMINAL_THEME_ID } from "../src/terminal-themes.js";
+import {
+  DEFAULT_DARK_TERMINAL_THEME_ID,
+  DEFAULT_LIGHT_TERMINAL_THEME_ID,
+  DEFAULT_TERMINAL_THEME_ID,
+} from "../src/terminal-themes.js";
 
 const JSON_THEME = JSON.stringify({
   name: "Mine",
@@ -51,6 +55,8 @@ describe("/api/themes", () => {
     const body = await response.json();
     expect(body).toMatchObject({
       activeThemeId: DEFAULT_TERMINAL_THEME_ID,
+      lightThemeId: DEFAULT_LIGHT_TERMINAL_THEME_ID,
+      darkThemeId: DEFAULT_DARK_TERMINAL_THEME_ID,
       customThemes: [],
       initialized: false,
     });
@@ -125,6 +131,19 @@ describe("/api/themes", () => {
     });
     expect(response.ok).toBe(true);
     expect((await response.json()).activeThemeId).toBe("auto");
+  });
+
+  it("updates the light and dark themes used by system detection", async () => {
+    const response = await fetch(`${themesUrl()}/system`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lightThemeId: "solarized-light", darkThemeId: "dracula" }),
+    });
+    expect(response.ok).toBe(true);
+
+    const state = await (await fetch(themesUrl())).json();
+    expect(state.lightThemeId).toBe("solarized-light");
+    expect(state.darkThemeId).toBe("dracula");
   });
 
   it("deletes a custom theme and resets the active id when it was active", async () => {

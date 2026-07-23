@@ -5,6 +5,7 @@ import {
   importTheme,
   migrateThemes,
   setActiveTheme,
+  setSystemThemes,
 } from "../../src/utils/fetch-themes";
 
 const jsonResponse = (body: unknown, status = 200): Response =>
@@ -22,6 +23,8 @@ describe("fetch-themes", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({
         activeThemeId: "dracula",
+        lightThemeId: "github-light",
+        darkThemeId: "dracula",
         customThemes: [{ id: "custom-1", name: "Mine", source: "imported", colors: {} }],
         initialized: true,
       }),
@@ -31,6 +34,8 @@ describe("fetch-themes", () => {
     expect(String(fetchSpy.mock.calls[0][0])).toMatch(/\/api\/themes$/);
     expect(state).toEqual({
       activeThemeId: "dracula",
+      lightThemeId: "github-light",
+      darkThemeId: "dracula",
       customThemes: [{ id: "custom-1", name: "Mine", source: "imported", colors: {} }],
       initialized: true,
     });
@@ -78,6 +83,18 @@ describe("fetch-themes", () => {
     expect(fetchSpy.mock.calls[0][1]).toEqual(expect.objectContaining({ method: "PUT" }));
   });
 
+  it("setSystemThemes PUTs both theme ids", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({}));
+    expect(await setSystemThemes("github-light", "dracula")).toBe(true);
+    expect(String(fetchSpy.mock.calls[0][0])).toMatch(/\/api\/themes\/system$/);
+    expect(fetchSpy.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ lightThemeId: "github-light", darkThemeId: "dracula" }),
+      }),
+    );
+  });
+
   it("deleteTheme returns the new active id on 200", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ activeThemeId: "vesper" }));
     expect(await deleteTheme("custom-1")).toBe("vesper");
@@ -89,14 +106,24 @@ describe("fetch-themes", () => {
   });
 
   it("migrateThemes posts the browser state and returns the result", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        jsonResponse({ activeThemeId: "dracula", customThemes: [], initialized: true }),
-      );
-    const state = await migrateThemes("dracula", []);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        activeThemeId: "dracula",
+        lightThemeId: "github-light",
+        darkThemeId: "dracula",
+        customThemes: [],
+        initialized: true,
+      }),
+    );
+    const state = await migrateThemes("dracula", [], "github-light", "dracula");
     expect(String(fetchSpy.mock.calls[0][0])).toMatch(/\/api\/themes\/migrate$/);
     expect(fetchSpy.mock.calls[0][1]).toEqual(expect.objectContaining({ method: "POST" }));
-    expect(state).toEqual({ activeThemeId: "dracula", customThemes: [], initialized: true });
+    expect(state).toEqual({
+      activeThemeId: "dracula",
+      lightThemeId: "github-light",
+      darkThemeId: "dracula",
+      customThemes: [],
+      initialized: true,
+    });
   });
 });

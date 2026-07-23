@@ -1,11 +1,12 @@
 import { TERMINAL_THEME_STORAGE_KEY } from "@/lib/constants";
-import { findTerminalThemeById } from "@/lib/terminal-themes";
+import { AUTO_THEME_ID, findTerminalThemeById } from "@/lib/terminal-themes";
 import { createStringLookupStoredSetting } from "@/utils/create-stored-setting";
 import { loadStoredCustomThemes } from "@/utils/stored-custom-themes";
 
 const setting = createStringLookupStoredSetting(
   TERMINAL_THEME_STORAGE_KEY,
-  (raw) => findTerminalThemeById(raw, loadStoredCustomThemes()).id,
+  (raw) =>
+    raw === AUTO_THEME_ID ? AUTO_THEME_ID : findTerminalThemeById(raw, loadStoredCustomThemes()).id,
   (id) => id,
 );
 

@@ -666,18 +666,12 @@ export const TERMINAL_THEMES: TerminalTheme[] = [
 ];
 
 export const DEFAULT_TERMINAL_THEME_ID: string = VESPER.id;
+export const DEFAULT_DARK_TERMINAL_THEME_ID: string = VESPER.id;
+export const DEFAULT_LIGHT_TERMINAL_THEME_ID: string = GITHUB_LIGHT.id;
 
-// The light theme the "Auto (system)" entry resolves to when the desktop is in
-// a light color-scheme. The dark default is VESPER (DEFAULT_TERMINAL_THEME_ID).
-export const LIGHT_DEFAULT_TERMINAL_THEME_ID: string = GITHUB_LIGHT.id;
-
-// A pseudo-theme id: not a real TerminalTheme (no colors) — the caller resolves
-// it to the dark or light default from the host's prefers-color-scheme so a
-// Linux desktop's GTK color-scheme setting drives the terminal appearance.
+// A pseudo-theme id resolved by the browser to the user's selected light or
+// dark theme based on the host color scheme.
 export const AUTO_THEME_ID = "auto";
-
-export const resolveAutoTheme = (prefersDark: boolean): TerminalTheme =>
-  prefersDark ? VESPER : GITHUB_LIGHT;
 
 // The set of ids a user can select as the active theme: the built-ins plus the
 // "auto" pseudo-id. Custom (imported) themes are added by the caller. Used by
@@ -706,3 +700,10 @@ export const findTerminalThemeById = (
     VESPER
   );
 };
+
+export const resolveAutoTheme = (
+  prefersDark: boolean,
+  lightThemeId = DEFAULT_LIGHT_TERMINAL_THEME_ID,
+  darkThemeId = DEFAULT_DARK_TERMINAL_THEME_ID,
+  customThemes: readonly TerminalTheme[] = [],
+): TerminalTheme => findTerminalThemeById(prefersDark ? darkThemeId : lightThemeId, customThemes);

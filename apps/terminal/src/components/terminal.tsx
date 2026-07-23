@@ -107,8 +107,7 @@ export const Terminal = () => {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const webglAddonRef = useRef<WebglAddon | null>(null);
   const {
-    initialThemeIdRef,
-    initialCustomThemesRef,
+    initialEffectiveThemeRef,
     initialFontIdRef,
     initialCustomFontFamilyRef,
     initialNerdFontEnabledRef,
@@ -121,6 +120,9 @@ export const Terminal = () => {
     initialScrollOnUserInputRef,
     activeLocalEchoRef,
     activeThemeId,
+    activeLightThemeId,
+    activeDarkThemeId,
+    systemThemeEnabled,
     activeFontId,
     activeNerdFontEnabled,
     activeLigaturesEnabled,
@@ -144,6 +146,9 @@ export const Terminal = () => {
     setPreviewFontId,
     setPreviewCursorStyle,
     handleThemeChange,
+    handleSystemThemeEnabledChange,
+    handleLightThemeChange,
+    handleDarkThemeChange,
     handleFontChange,
     handleNerdFontEnabledChange,
     handleLigaturesEnabledChange,
@@ -447,8 +452,7 @@ export const Terminal = () => {
       qrPeerAttachedRef,
     },
     initialSettings: {
-      initialThemeIdRef,
-      initialCustomThemesRef,
+      initialEffectiveThemeRef,
       initialFontIdRef,
       initialCustomFontFamilyRef,
       initialNerdFontEnabledRef,
@@ -962,7 +966,13 @@ export const Terminal = () => {
           }}
           settingsMenu={{
             themeId: activeThemeId,
+            lightThemeId: activeLightThemeId,
+            darkThemeId: activeDarkThemeId,
+            systemThemeEnabled,
             onThemeChange: handleThemeChange,
+            onLightThemeChange: handleLightThemeChange,
+            onDarkThemeChange: handleDarkThemeChange,
+            onSystemThemeEnabledChange: handleSystemThemeEnabledChange,
             onThemePreview: setPreviewThemeId,
             customThemes: activeCustomThemes,
             onImportTheme: handleImportTheme,
