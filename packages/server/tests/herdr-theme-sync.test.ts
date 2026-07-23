@@ -73,6 +73,8 @@ describe("Herdr theme utilities", () => {
     expect(resolveHerdrThemeId("catppuccin")).toBe("catppuccin-mocha");
     expect(resolveHerdrThemeId("Gruvbox Dark")).toBe("gruvbox-dark");
     expect(resolveHerdrThemeId("one_dark")).toBe("one-dark-pro");
+    expect(resolveHerdrThemeId("Tokyo Night Day")).toBe("tokyo-night-day");
+    expect(resolveHerdrThemeId("tokyonight-day")).toBe("tokyo-night-day");
     expect(resolveHerdrThemeId("terminal")).toBeNull();
     expect(resolveHerdrThemeId("rose-pine")).toBeNull();
   });

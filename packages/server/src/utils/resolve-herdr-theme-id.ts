@@ -11,6 +11,9 @@ export const resolveHerdrThemeId = (themeName: string): string | null => {
     case "tokyo-night":
     case "tokyonight":
       return "tokyo-night";
+    case "tokyo-night-day":
+    case "tokyonight-day":
+      return "tokyo-night-day";
     case "dracula":
       return "dracula";
     case "nord":

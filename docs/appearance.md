@@ -1,6 +1,6 @@
 # Appearance (themes & fonts)
 
-localterm ships 19 built-in themes (16 dark + 3 light) and 11 bundled fonts,
+localterm ships 20 built-in themes (16 dark + 4 light) and 11 bundled fonts,
 all of which work fully offline. You can also import your own theme (JSON or an
 iTerm `.itermcolors` file) and use any system-installed font family. The active
 theme and font style LocalTerm overlays and modals as well as the xterm surface,
@@ -17,7 +17,7 @@ active semantic and ANSI colors.
 Open **Settings → Theme** to pick from the built-ins:
 
 - **Dark:** Vesper (default), Ayu Mirage, Catppuccin Frappe/Macchiato/Mocha, Dracula, GitHub Dark, Gruvbox Dark (Medium), Monokai, Night Owl, Nord, One Dark Pro, Solarized Dark, SynthWave '84, Tokyo Night, Tokyo Night Storm.
-- **Light:** GitHub Light, Solarized Light, Catppuccin Latte.
+- **Light:** GitHub Light, Solarized Light, Catppuccin Latte, Tokyo Night Day.
 - **Auto (system):** resolves to the dark default (Vesper) or the light default (GitHub Light) from your desktop's color-scheme, and re-resolves live when you switch — so a Linux GTK light/dark toggle flips the terminal without a reload.
 
 ### Importing a theme
