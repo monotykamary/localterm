@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.68.0
+
+### Minor Changes
+
+- 65f9aed: Add system appearance detection with independently configurable light and dark terminal themes, persisted through the daemon and synchronized across open tabs.
+
 ## 2.67.0
 
 ### Minor Changes
