@@ -1,5 +1,12 @@
 # localterm
 
+## 2.68.1
+
+### Patch Changes
+
+- aab2d57: Keep secrets and process modal search and form state stable while editing.
+  - @monotykamary/localterm-server@2.68.1
+
 ## 2.68.0
 
 ### Minor Changes
