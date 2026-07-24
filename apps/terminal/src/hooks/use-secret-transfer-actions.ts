@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { downloadTextFile } from "@/utils/download-text-file";
 import { exportSecrets, importSecrets } from "@/utils/fetch-secrets";
 
@@ -125,17 +125,19 @@ export const useSecretTransferActions = (
     setExportForm(null);
   };
 
-  const reset = () => {
+  const cancelExport = useCallback(() => setExportForm(null), []);
+  const cancelImport = useCallback(() => setImportForm(null), []);
+  const reset = useCallback(() => {
     setExportForm(null);
     setExportError(null);
     setImportForm(null);
     setImportError(null);
-  };
+  }, []);
 
-  const closeForms = () => {
+  const closeForms = useCallback(() => {
     setExportForm(null);
     setImportForm(null);
-  };
+  }, []);
 
   return {
     exportForm,
@@ -148,8 +150,8 @@ export const useSecretTransferActions = (
     startImport,
     updateExportForm: setExportForm,
     updateImportForm: setImportForm,
-    cancelExport: () => setExportForm(null),
-    cancelImport: () => setImportForm(null),
+    cancelExport,
+    cancelImport,
     handleImportFile,
     importAll,
     exportAll,

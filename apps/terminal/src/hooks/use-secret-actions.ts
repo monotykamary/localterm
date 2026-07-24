@@ -1,5 +1,5 @@
 import type { SecretEntryResponse } from "@monotykamary/localterm-server/protocol";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { deleteSecret, putSecret } from "@/utils/fetch-secrets";
 import { deriveSecretName } from "@/utils/derive-secret-name";
 
@@ -111,11 +111,13 @@ export const useSecretActions = (refresh: () => Promise<void>): SecretActions =>
     void confirmDelete(name);
   };
 
-  const reset = () => {
+  const cancelForm = useCallback(() => setForm(null), []);
+  const reset = useCallback(() => {
     setForm(null);
     setFormError(null);
     setArmedDeleteName(null);
-  };
+  }, []);
+  const clearArmedDelete = useCallback(() => setArmedDeleteName(null), []);
 
   return {
     form,
@@ -126,10 +128,10 @@ export const useSecretActions = (refresh: () => Promise<void>): SecretActions =>
     startAdd,
     startEdit,
     updateForm: setForm,
-    cancelForm: () => setForm(null),
+    cancelForm,
     save,
     handleTrashClick,
     reset,
-    clearArmedDelete: () => setArmedDeleteName(null),
+    clearArmedDelete,
   };
 };

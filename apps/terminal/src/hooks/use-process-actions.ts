@@ -1,5 +1,5 @@
 import type { Process } from "@monotykamary/localterm-server/protocol";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { deleteProcess, putProcess } from "@/utils/fetch-processes";
 
 // A process's name is the shim filename and the identity the delete cascade
@@ -90,11 +90,13 @@ export const useProcessActions = (refresh: () => Promise<void>): ProcessActions 
     void confirmDelete(name);
   };
 
-  const reset = () => {
+  const cancelForm = useCallback(() => setForm(null), []);
+  const reset = useCallback(() => {
     setForm(null);
     setFormError(null);
     setArmedDeleteName(null);
-  };
+  }, []);
+  const clearArmedDelete = useCallback(() => setArmedDeleteName(null), []);
 
   return {
     form,
@@ -105,10 +107,10 @@ export const useProcessActions = (refresh: () => Promise<void>): ProcessActions 
     startAdd,
     startEdit,
     updateForm: setForm,
-    cancelForm: () => setForm(null),
+    cancelForm,
     save,
     handleTrashClick,
     reset,
-    clearArmedDelete: () => setArmedDeleteName(null),
+    clearArmedDelete,
   };
 };
