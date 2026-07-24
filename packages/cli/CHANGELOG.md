@@ -1,5 +1,12 @@
 # localterm
 
+## 2.68.3
+
+### Patch Changes
+
+- d4e0473: Allow every `localterm session` command to accept the short IDs printed by `session ls`, resolving unique prefixes and reporting ambiguous matches before making a session request.
+  - @monotykamary/localterm-server@2.68.3
+
 ## 2.68.2
 
 ### Patch Changes
