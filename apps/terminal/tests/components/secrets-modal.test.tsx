@@ -29,6 +29,14 @@ describe("SecretsModal", () => {
 
   afterEach(cleanup);
 
+  it("focuses the search input when opened", async () => {
+    render(<SecretsModal open onClose={() => {}} />);
+
+    const searchInput = await screen.findByRole("textbox", { name: "search secrets" });
+
+    await vi.waitFor(() => expect(document.activeElement).toBe(searchInput));
+  });
+
   it("preserves the search query after rerendering", async () => {
     render(<SecretsModal open onClose={() => {}} />);
 

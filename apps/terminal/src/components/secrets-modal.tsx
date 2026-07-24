@@ -62,13 +62,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
       transferActions.reset();
       processActions.reset();
       setSearch("");
-      const frame = requestAnimationFrame(() => {
-        setSettled(true);
-        // Falls back to the panel when the search bar isn't rendered (error state).
-        if (searchInputRef.current) searchInputRef.current.focus();
-        else panelRef.current?.focus();
-      });
-      return () => cancelAnimationFrame(frame);
+      return;
     }
     setSettled(false);
     secretActions.clearArmedDelete();
@@ -85,6 +79,16 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
     transferActions.closeForms,
     processActions.clearArmedDelete,
   ]);
+
+  useEffect(() => {
+    if (!open || !mounted) return;
+    const frame = requestAnimationFrame(() => {
+      setSettled(true);
+      if (searchInputRef.current) searchInputRef.current.focus();
+      else panelRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, mounted]);
 
   const secrets = useMemo(() => resources.secrets ?? [], [resources.secrets]);
   const filteredSecrets = useMemo(() => {
