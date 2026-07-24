@@ -1,5 +1,12 @@
 # localterm
 
+## 2.68.4
+
+### Patch Changes
+
+- 45ca98f: Prevent long-running TUIs from displaying stale or corrupted glyphs when the WebGL texture atlas reaches its GPU page capacity.
+  - @monotykamary/localterm-server@2.68.4
+
 ## 2.68.3
 
 ### Patch Changes
