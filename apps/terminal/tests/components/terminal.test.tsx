@@ -1810,10 +1810,6 @@ describe("Terminal scroll preservation through hot-swaps", () => {
 });
 
 describe("Terminal live preview", () => {
-  beforeEach(() => {
-    vi.useRealTimers();
-  });
-
   const openThemeSelect = () => {
     fireEvent.click(screen.getByLabelText("terminal settings"));
     fireEvent.click(screen.getByLabelText("select theme"));
@@ -1829,12 +1825,12 @@ describe("Terminal live preview", () => {
     fireEvent.click(screen.getByLabelText("select cursor style"));
   };
 
-  it("hovering a theme item swaps terminal.options.theme to that theme", async () => {
+  it("hovering a theme item swaps terminal.options.theme to that theme", () => {
     installFakeLocalStorage();
     render(<Terminal />);
     openThemeSelect();
 
-    const draculaItem = await screen.findByText("Dracula");
+    const draculaItem = screen.getByText("Dracula");
     act(() => {
       fireEvent.pointerEnter(draculaItem);
     });
@@ -1843,12 +1839,12 @@ describe("Terminal live preview", () => {
     expect(previewedTheme?.background).toBe("#282a36");
   });
 
-  it("closing the outer popover while hovering reverts terminal.options.theme to the committed value", async () => {
+  it("closing the outer popover while hovering reverts terminal.options.theme to the committed value", () => {
     installFakeLocalStorage();
     render(<Terminal />);
     openThemeSelect();
 
-    const draculaItem = await screen.findByText("Dracula");
+    const draculaItem = screen.getByText("Dracula");
     act(() => {
       fireEvent.pointerEnter(draculaItem);
     });
@@ -1865,23 +1861,22 @@ describe("Terminal live preview", () => {
     render(<Terminal />);
     openFontSelect();
 
-    const jetbrainsItem = await screen.findByText("JetBrains Mono");
+    const jetbrainsItem = screen.getByText("JetBrains Mono");
     act(() => {
       fireEvent.pointerEnter(jetbrainsItem);
     });
+    await act(async () => {});
 
-    await vi.waitFor(() => {
-      const previewedFontFamily = fakeXterms[0]?.getOptions().fontFamily;
-      expect(previewedFontFamily).toContain("JetBrains Mono");
-    });
+    const previewedFontFamily = fakeXterms[0]?.getOptions().fontFamily;
+    expect(previewedFontFamily).toContain("JetBrains Mono");
   });
 
-  it("hovering a cursor style item swaps terminal.options.cursorStyle to that style", async () => {
+  it("hovering a cursor style item swaps terminal.options.cursorStyle to that style", () => {
     installFakeLocalStorage();
     render(<Terminal />);
     openCursorStyleSelect();
 
-    const barItem = await screen.findByText("Bar");
+    const barItem = screen.getByText("Bar");
     act(() => {
       fireEvent.pointerEnter(barItem);
     });
@@ -1889,12 +1884,12 @@ describe("Terminal live preview", () => {
     expect(fakeXterms[0]?.getOptions().cursorStyle).toBe("bar");
   });
 
-  it("closing the outer popover while hovering reverts terminal.options.cursorStyle to the committed value", async () => {
+  it("closing the outer popover while hovering reverts terminal.options.cursorStyle to the committed value", () => {
     installFakeLocalStorage();
     render(<Terminal />);
     openCursorStyleSelect();
 
-    const barItem = await screen.findByText("Bar");
+    const barItem = screen.getByText("Bar");
     act(() => {
       fireEvent.pointerEnter(barItem);
     });
