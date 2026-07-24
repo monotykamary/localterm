@@ -13,8 +13,7 @@ export const resolveSessionId = async (idOrPrefix: string): Promise<string | nul
   const response = await fetchSessionApi("/sessions", {});
   if (!response) return null;
 
-  const body: SessionIdListResponse = await response.json();
-  const { sessions } = body;
+  const { sessions } = (await response.json()) as SessionIdListResponse;
   const exactSession = sessions.find((session) => session.id === idOrPrefix);
   if (exactSession) return exactSession.id;
 
