@@ -105,9 +105,10 @@ const unescapeKeys = (raw: string): string => {
 
 const secondsToMs = (seconds: number): number => seconds * MILLISECONDS_PER_SECOND;
 
-const withResolvedSessionId = <CommandArguments extends unknown[]>(
-  runCommand: (id: string, ...commandArguments: CommandArguments) => Promise<void>,
-) =>
+const withResolvedSessionId =
+  <CommandArguments extends unknown[]>(
+    runCommand: (id: string, ...commandArguments: CommandArguments) => Promise<void>,
+  ) =>
   async (idOrPrefix: string, ...commandArguments: CommandArguments): Promise<void> => {
     const id = await resolveSessionId(idOrPrefix);
     if (!id) return;

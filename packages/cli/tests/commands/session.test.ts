@@ -21,9 +21,8 @@ vi.mock("../../src/utils/portless.js", async () => {
   };
 });
 
-const { runSessionAttach, runSessionCapture, runSessionCurrent } = await import(
-  "../../src/commands/session.js"
-);
+const { runSessionAttach, runSessionCapture, runSessionCurrent } =
+  await import("../../src/commands/session.js");
 
 const SESSION_ID = "413bc0c9-5eec-4857-9dc8-7d38e19936a9";
 const SHORT_ID = SESSION_ID.slice(0, 8);
