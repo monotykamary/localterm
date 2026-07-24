@@ -120,9 +120,10 @@ localterm session pin <id>
 localterm session unpin <id>
 ```
 
-`--json` emits a stable machine shape; without it, commands print human tables
-or confirmation lines. `new` prints the session id (or the full object with
-`--json`).
+`session ls` and `session new` display eight-character ID prefixes in human output.
+Every CLI `<id>` accepts a unique prefix and resolves it to the full UUID; ambiguous
+prefixes are rejected with their matches. REST requests still require the full UUID.
+`--json` emits stable machine shapes containing the full IDs.
 
 ### Self-reference: which session am I in?
 

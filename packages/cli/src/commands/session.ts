@@ -10,6 +10,14 @@ import {
 import { daemonBaseUrl, daemonFetch, reportDaemonDown } from "../utils/daemon-api.js";
 import { shortSessionId } from "../utils/short-session-id.js";
 import { fetchSessionApi } from "./session-api.js";
+import { resolveSessionId } from "./resolve-session-id.js";
+import {
+  runSessionMouseClick as runMouseClick,
+  runSessionMouseDrag as runMouseDrag,
+  runSessionMouseMove as runMouseMove,
+  runSessionMouseScroll as runMouseScroll,
+  runSessionMouseState as runMouseState,
+} from "./session-mouse.js";
 import { resolveDaemonUrl } from "../utils/portless.js";
 import { readPort } from "../state.js";
 
@@ -96,6 +104,15 @@ const unescapeKeys = (raw: string): string => {
 };
 
 const secondsToMs = (seconds: number): number => seconds * MILLISECONDS_PER_SECOND;
+
+const withResolvedSessionId = <CommandArguments extends unknown[]>(
+  runCommand: (id: string, ...commandArguments: CommandArguments) => Promise<void>,
+) =>
+  async (idOrPrefix: string, ...commandArguments: CommandArguments): Promise<void> => {
+    const id = await resolveSessionId(idOrPrefix);
+    if (!id) return;
+    await runCommand(id, ...commandArguments);
+  };
 
 const renderExecResult = (result: ExecResult, json: boolean): void => {
   if (json) {
@@ -485,21 +502,19 @@ const runAttach = async (id: string): Promise<void> => {
 export const runSessionList = runList;
 export const runSessionCurrent = runCurrent;
 export const runSessionNew = runNew;
-export const runSessionKill = runKill;
-export const runSessionSendKeys = runSendKeys;
-export const runSessionCapture = runCapture;
-export const runSessionExec = runExec;
-export const runSessionResize = runResize;
-export const runSessionRename = runRename;
-export const runSessionPin = runSetPin;
-export const runSessionAttach = runAttach;
-export const runSessionPress = runPress;
-export const runSessionWait = runWait;
-export {
-  runSessionMouseClick,
-  runSessionMouseDrag,
-  runSessionMouseMove,
-  runSessionMouseScroll,
-  runSessionMouseState,
-} from "./session-mouse.js";
+export const runSessionKill = withResolvedSessionId(runKill);
+export const runSessionSendKeys = withResolvedSessionId(runSendKeys);
+export const runSessionCapture = withResolvedSessionId(runCapture);
+export const runSessionExec = withResolvedSessionId(runExec);
+export const runSessionResize = withResolvedSessionId(runResize);
+export const runSessionRename = withResolvedSessionId(runRename);
+export const runSessionPin = withResolvedSessionId(runSetPin);
+export const runSessionAttach = withResolvedSessionId(runAttach);
+export const runSessionPress = withResolvedSessionId(runPress);
+export const runSessionWait = withResolvedSessionId(runWait);
+export const runSessionMouseClick = withResolvedSessionId(runMouseClick);
+export const runSessionMouseDrag = withResolvedSessionId(runMouseDrag);
+export const runSessionMouseMove = withResolvedSessionId(runMouseMove);
+export const runSessionMouseScroll = withResolvedSessionId(runMouseScroll);
+export const runSessionMouseState = withResolvedSessionId(runMouseState);
 export const runOneShotExec = runOneShotExecImpl;
