@@ -17,7 +17,7 @@ const installedPatchedAddonPath = join(addonDirectory, "lib/addon-webgl.mjs");
 const patchedAddonPath = process.env.PATCHED_ADDON_PATH
   ? resolve(process.env.PATCHED_ADDON_PATH)
   : installedPatchedAddonPath;
-const patchPath = join(repositoryRoot, "patches/@xterm__addon-webgl@0.20.0-beta.286.patch");
+const patchPath = join(repositoryRoot, "patches/@xterm__addon-webgl@0.20.0-beta.290.patch");
 const [installedPatchedAddonSource, patchSource] = await Promise.all([
   readFile(installedPatchedAddonPath, "utf8"),
   readFile(patchPath, "utf8"),

@@ -2,7 +2,7 @@
 
 A standalone reproducer for the intermittent "every glyph renders semibold/bold"
 bug in the patched `@xterm/addon-webgl` alpha-mask renderer
-(`patches/@xterm__addon-webgl@0.20.0-beta.286.patch`). It loads the **real**
+(`patches/@xterm__addon-webgl@0.20.0-beta.290.patch`). It loads the **real**
 patched addon + `@xterm/xterm` + Geist Mono, spawns many terminals sharing the
 module-level atlas cache (`acquireTextureAtlas` → global `e0`), and measures the
 rendered glyph ink coverage from each terminal's WebGL canvas to classify the
@@ -20,6 +20,8 @@ weight as `~400 (normal)` / `~700 (bold)` / `heavier` / `lighter`.
   inherited-weight leak source).
 - A **positive control** forces `fontWeight: "bold"` to prove the detector can
   see 700-weight rendering (it can — ratio 1.136 vs 400).
+- A forced four-page atlas limit and repeated unique-glyph flood verifies that
+  eviction keeps atlas pages within the renderer's GPU texture capacity.
 
 ## Run
 
@@ -49,6 +51,9 @@ control → cold (no font preload / no `fonts.ready`) → warm → safe-repeat �
 - `dims:` line shows `charWidth`/`charHeight`/`rootFontWeight` — if
   `rootFontWeight` is not `400`, an ancestor sets a heavy weight.
 - The `clearTextureAtlas` heal block shows whether eviction+rebuild recovers.
+- `atlas capacity passed` requires at least one eviction, no renderer errors, a
+  page count that never exceeds the allocated GPU textures, and unchanged
+  sentinel pixels after the evictions.
 
 ## Status on this machine
 

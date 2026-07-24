@@ -125,8 +125,9 @@ const run = async () => {
         });
         document.getElementById('autoscan').click();
         await done;
+        const atlasCapacity = await window.__runAtlasCapacityProbe();
         const entries = [...logEl.querySelectorAll('span')].map((span) => span.textContent);
-        return { log: entries.join('\\n'), report: window.__scanReport ?? [] };
+        return { log: entries.join('\\n'), report: window.__scanReport ?? [], atlasCapacity };
       })()
     `;
     const result = await cdp.send("Runtime.evaluate", {
@@ -134,15 +135,24 @@ const run = async () => {
       awaitPromise: true,
       returnByValue: true,
     });
+    if (result.exceptionDetails) {
+      throw new Error(
+        result.exceptionDetails.exception?.description ?? result.exceptionDetails.text,
+      );
+    }
     const value = result?.result?.value ?? {};
     console.log("\n===== HARNESS LOG =====");
     console.log(value.log ?? "(no log)");
     console.log("\n===== SCAN REPORT =====");
     for (const entry of value.report ?? []) console.log(JSON.stringify(entry));
+    console.log("\n===== ATLAS CAPACITY =====");
+    console.log(JSON.stringify(value.atlasCapacity ?? null));
     const boldTabs = (value.log ?? "").match(/\bBOLD\b/g)?.length ?? 0;
+    const didAtlasCapacityPass = value.atlasCapacity?.passed === true;
     console.log(
-      `\nVERDICT: ${boldTabs > 0 ? "BOLDENING REPRODUCED" : "no boldening detected"} (${boldTabs} bold tab-measurements)`,
+      `\nVERDICT: ${boldTabs > 0 ? "BOLDENING REPRODUCED" : "no boldening detected"} (${boldTabs} bold tab-measurements); atlas capacity ${didAtlasCapacityPass ? "passed" : "failed"}`,
     );
+    if (boldTabs > 0 || !didAtlasCapacityPass) process.exitCode = 1;
   } catch (error) {
     console.error("driver error:", error.message ?? error);
     process.exitCode = 2;

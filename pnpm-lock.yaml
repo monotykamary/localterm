@@ -11,7 +11,7 @@ overrides:
 
 patchedDependencies:
   '@xterm/addon-image@0.10.0-beta.287': 0f9b102a6ad3a1baec614261cff1e699a949b3cf7faddc45fc0222c7892b6b5a
-  '@xterm/addon-webgl@0.20.0-beta.286': 4cd23e11b08b90df34e35bcb6e4357df5fe976ecf3f07ae541416012e3db2e7b
+  '@xterm/addon-webgl@0.20.0-beta.290': 67cc5ea7a7ed2ac39416529e43053ba64cdd1a119d86d925b2b93a3d2ead692d
   node-pty@1.1.0: 055369749ed898a53d1d3c2b69c380d70a244e8d869a1df14bf514e4ae000556
 
 importers:
@@ -119,31 +119,31 @@ importers:
         version: 3.14.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@xterm/addon-clipboard':
         specifier: 0.3.0-beta.287
-        version: 0.3.0-beta.287(@xterm/xterm@6.1.0-beta.287)
+        version: 0.3.0-beta.287(@xterm/xterm@6.1.0-beta.291)
       '@xterm/addon-fit':
         specifier: 0.12.0-beta.287
-        version: 0.12.0-beta.287(@xterm/xterm@6.1.0-beta.287)
+        version: 0.12.0-beta.287(@xterm/xterm@6.1.0-beta.291)
       '@xterm/addon-image':
         specifier: 0.10.0-beta.287
-        version: 0.10.0-beta.287(patch_hash=0f9b102a6ad3a1baec614261cff1e699a949b3cf7faddc45fc0222c7892b6b5a)(@xterm/xterm@6.1.0-beta.287)
+        version: 0.10.0-beta.287(patch_hash=0f9b102a6ad3a1baec614261cff1e699a949b3cf7faddc45fc0222c7892b6b5a)(@xterm/xterm@6.1.0-beta.291)
       '@xterm/addon-progress':
         specifier: 0.3.0-beta.287
-        version: 0.3.0-beta.287(@xterm/xterm@6.1.0-beta.287)
+        version: 0.3.0-beta.287(@xterm/xterm@6.1.0-beta.291)
       '@xterm/addon-search':
         specifier: 0.17.0-beta.287
-        version: 0.17.0-beta.287(@xterm/xterm@6.1.0-beta.287)
+        version: 0.17.0-beta.287(@xterm/xterm@6.1.0-beta.291)
       '@xterm/addon-unicode-graphemes':
         specifier: 0.5.0-beta.287
-        version: 0.5.0-beta.287(@xterm/xterm@6.1.0-beta.287)
+        version: 0.5.0-beta.287(@xterm/xterm@6.1.0-beta.291)
       '@xterm/addon-web-links':
         specifier: 0.13.0-beta.287
-        version: 0.13.0-beta.287(@xterm/xterm@6.1.0-beta.287)
+        version: 0.13.0-beta.287(@xterm/xterm@6.1.0-beta.291)
       '@xterm/addon-webgl':
-        specifier: 0.20.0-beta.286
-        version: 0.20.0-beta.286(patch_hash=4cd23e11b08b90df34e35bcb6e4357df5fe976ecf3f07ae541416012e3db2e7b)(@xterm/xterm@6.1.0-beta.287)
+        specifier: 0.20.0-beta.290
+        version: 0.20.0-beta.290(patch_hash=67cc5ea7a7ed2ac39416529e43053ba64cdd1a119d86d925b2b93a3d2ead692d)(@xterm/xterm@6.1.0-beta.291)
       '@xterm/xterm':
-        specifier: 6.1.0-beta.287
-        version: 6.1.0-beta.287
+        specifier: 6.1.0-beta.291
+        version: 6.1.0-beta.291
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -3149,16 +3149,16 @@ packages:
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.287
 
-  '@xterm/addon-webgl@0.20.0-beta.286':
-    resolution: {integrity: sha512-Nvk9Jic7OCXtL1lS1/Ryurkpd2VElO7PCBOf+DEB3ODs9yU+F31sJwQD+LIdZ6GAJ+Atp7LuWHjSNhRv/xSY0w==}
+  '@xterm/addon-webgl@0.20.0-beta.290':
+    resolution: {integrity: sha512-vHQCXsBp3rDermQSBCtN75U26DmoWI6SbCQ0oRjkuJR4r1B6SIyJBXuWPhHAXkCs86+iaStuafAdQDNO73cGWA==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.287
+      '@xterm/xterm': ^6.1.0-beta.291
 
   '@xterm/headless@6.1.0-beta.287':
     resolution: {integrity: sha512-3Jjh1uM9r+euj8Qosm/9SuZIVIZKMMus/Ekk9Spav842WVoFH3F1APTeHl3VynHNi1uHdEbb6QrnHzKA/iJlBQ==}
 
-  '@xterm/xterm@6.1.0-beta.287':
-    resolution: {integrity: sha512-3aOHVlxlRVb3tOHI4b/z2O/OsRnqpW5u0qq8OqpqbwLVTbUhThmQ7mBKaehGdbsmcCCBTP1cBwhG0qcvuOjowA==}
+  '@xterm/xterm@6.1.0-beta.291':
+    resolution: {integrity: sha512-Q6IjxogKIu7fBkXHcn4vQhfHvtwhIv/NN8LR0knCAxPA06/jXuHwreqX9Y/4zvzj7m8u6OBndOJDCUAxLmRfQQ==}
 
   '@yuku-codegen/binding-darwin-arm64@0.5.48':
     resolution: {integrity: sha512-yo96Oef12WzqnphInfz/eexVse3+kWgfGS5g2S3rFS3dcGn1ENW9xLFDZUP9rh+yP76DOq38wBoFi1+I9+6qBg==}
@@ -8715,41 +8715,41 @@ snapshots:
   '@voidzero-dev/vite-plus-win32-x64-msvc@0.2.5':
     optional: true
 
-  '@xterm/addon-clipboard@0.3.0-beta.287(@xterm/xterm@6.1.0-beta.287)':
+  '@xterm/addon-clipboard@0.3.0-beta.287(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.287
+      '@xterm/xterm': 6.1.0-beta.291
 
-  '@xterm/addon-fit@0.12.0-beta.287(@xterm/xterm@6.1.0-beta.287)':
+  '@xterm/addon-fit@0.12.0-beta.287(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.287
+      '@xterm/xterm': 6.1.0-beta.291
 
-  '@xterm/addon-image@0.10.0-beta.287(patch_hash=0f9b102a6ad3a1baec614261cff1e699a949b3cf7faddc45fc0222c7892b6b5a)(@xterm/xterm@6.1.0-beta.287)':
+  '@xterm/addon-image@0.10.0-beta.287(patch_hash=0f9b102a6ad3a1baec614261cff1e699a949b3cf7faddc45fc0222c7892b6b5a)(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.287
+      '@xterm/xterm': 6.1.0-beta.291
 
-  '@xterm/addon-progress@0.3.0-beta.287(@xterm/xterm@6.1.0-beta.287)':
+  '@xterm/addon-progress@0.3.0-beta.287(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.287
+      '@xterm/xterm': 6.1.0-beta.291
 
-  '@xterm/addon-search@0.17.0-beta.287(@xterm/xterm@6.1.0-beta.287)':
+  '@xterm/addon-search@0.17.0-beta.287(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.287
+      '@xterm/xterm': 6.1.0-beta.291
 
-  '@xterm/addon-unicode-graphemes@0.5.0-beta.287(@xterm/xterm@6.1.0-beta.287)':
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.287(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.287
+      '@xterm/xterm': 6.1.0-beta.291
 
-  '@xterm/addon-web-links@0.13.0-beta.287(@xterm/xterm@6.1.0-beta.287)':
+  '@xterm/addon-web-links@0.13.0-beta.287(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.287
+      '@xterm/xterm': 6.1.0-beta.291
 
-  '@xterm/addon-webgl@0.20.0-beta.286(patch_hash=4cd23e11b08b90df34e35bcb6e4357df5fe976ecf3f07ae541416012e3db2e7b)(@xterm/xterm@6.1.0-beta.287)':
+  '@xterm/addon-webgl@0.20.0-beta.290(patch_hash=67cc5ea7a7ed2ac39416529e43053ba64cdd1a119d86d925b2b93a3d2ead692d)(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.287
+      '@xterm/xterm': 6.1.0-beta.291
 
   '@xterm/headless@6.1.0-beta.287': {}
 
-  '@xterm/xterm@6.1.0-beta.287': {}
+  '@xterm/xterm@6.1.0-beta.291': {}
 
   '@yuku-codegen/binding-darwin-arm64@0.5.48':
     optional: true

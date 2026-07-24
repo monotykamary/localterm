@@ -12,6 +12,21 @@ const PROMPT_ROW = "\u001b[32m$\u001b[0m mmvmvmmvmvmmvmvmmv";
 const INK_RATIO_BOLD_THRESHOLD = 1.1; // Geist 700 is ~1.16x ink of 400
 const WEIGHT_MATCH_TOLERANCE = 0.04; // |ink-ref|/ref within 4% => classified
 const SPAWN_GAP_MS = 25;
+const ATLAS_CAPACITY_PAGE_LIMIT = 4;
+const ATLAS_CAPACITY_TEXTURE_SIZE_PX = 512;
+const ATLAS_CAPACITY_CHUNKS = 8;
+const ATLAS_CAPACITY_GLYPHS_PER_CHUNK = 919;
+const ATLAS_CAPACITY_COLUMNS = 80;
+const ATLAS_CAPACITY_ROWS = 24;
+const ATLAS_CAPACITY_HOLDER_WIDTH_PX = 800;
+const ATLAS_CAPACITY_HOLDER_HEIGHT_PX = 480;
+const WIDE_GLYPH_CELL_COLUMNS = 2;
+const RGBA_CHANNEL_COUNT = 4;
+const CJK_BASE_CODEPOINT = 0x4e00;
+const CJK_CODEPOINT_RANGE = 0x9fff - CJK_BASE_CODEPOINT;
+const ATLAS_PIXEL_CHANNEL_TOLERANCE = 2;
+const ATLAS_SENTINEL_TEXT =
+  "!#$%&()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`abcdefghijklmnopqrstuvwxyz";
 
 const deckEl = document.getElementById("deck");
 const logEl = document.getElementById("log");
@@ -95,11 +110,16 @@ const classifyWeight = (inkRatio) => {
 // for the zsh prompt), green's luma weight (0.587) makes covered pixels render
 // lighter/flattened instead of at full coverage. A resize/font swap rebuilds
 // the atlas white and "fixes" it. This probe classifies covered pixels.
+const getRenderer = (terminal) =>
+  terminal._core?._renderService?._renderer?.value ?? terminal._core?._renderService?._renderer;
+
 const inspectAtlas = (terminal) => {
-  const renderer = terminal._core?._renderService?._renderer;
+  const renderer = getRenderer(terminal);
   if (!renderer) return { hasRenderer: false };
   const atlasCanvas =
-    renderer.textureAtlas ?? renderer._glyphRenderer?.value?._atlas?.pages?.[0]?.canvas;
+    renderer.textureAtlas ??
+    renderer._charAtlas?.pages?.[0]?.canvas ??
+    renderer._glyphRenderer?.value?._atlas?.pages?.[0]?.canvas;
   if (!atlasCanvas) return { hasRenderer: true, atlas: false };
   const width = Math.min(atlasCanvas.width, 256);
   const height = Math.min(atlasCanvas.height, 64);
@@ -365,7 +385,7 @@ const spawnBatch = async () => {
     boldCount > 0 ? "bad" : "good",
   );
   appendLog(
-    `shared atlas cache: terminal._glRenderer? ${terminals[0]?.terminal?._core?._renderService?._renderer?._glyphRenderer?.value?._atlas ? "yes" : "?"}`,
+    `shared atlas cache: ${getRenderer(terminals[0]?.terminal)?._charAtlas ? "yes" : "?"}`,
     "muted",
   );
 };
@@ -375,7 +395,7 @@ const clearAtlasOnAll = () => {
     try {
       entry.terminal.clearTextureAtlas?.();
       // xterm core path used by the app:
-      entry.terminal._core?._renderService?._renderer?.clearTextureAtlas?.();
+      getRenderer(entry.terminal)?.clearTextureAtlas?.();
     } catch (error) {
       appendLog(`clearAtlas error: ${error.message}`, "bad");
     }
@@ -389,7 +409,7 @@ const resizeNudge = () => {
     // Trigger the same handleResize -> _refreshCharAtlas path a real CSS resize
     // would, without changing the atlas config key.
     try {
-      entry.terminal._core?._renderService?._renderer?.handleResize?.(COLS, ROWS);
+      getRenderer(entry.terminal)?.handleResize?.(COLS, ROWS);
     } catch (error) {
       appendLog(`resize error: ${error.message}`, "bad");
     }
@@ -546,6 +566,154 @@ const autoScan = async () => {
 
   appendLog("\nAUTOSCAN DONE", "muted");
 };
+
+const runAtlasCapacityProbe = async () => {
+  disposeAll();
+  const holder = document.createElement("div");
+  holder.style.cssText = `position:fixed;left:0;top:0;width:${ATLAS_CAPACITY_HOLDER_WIDTH_PX}px;height:${ATLAS_CAPACITY_HOLDER_HEIGHT_PX}px;opacity:0;pointer-events:none`;
+  document.body.appendChild(holder);
+  const waitForFrames = () =>
+    new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const createTerminal = () => {
+    const terminal = new Terminal({
+      cols: ATLAS_CAPACITY_COLUMNS,
+      rows: ATLAS_CAPACITY_ROWS,
+      scrollback: 0,
+      cursorBlink: false,
+      fontFamily: FONT_FAMILY,
+      fontSize: FONT_SIZE,
+    });
+    terminal.open(holder);
+    const webgl = new WebglAddon({ preserveDrawingBuffer: true });
+    terminal.loadAddon(webgl);
+    return { terminal, webgl };
+  };
+  const probe = createTerminal();
+  await waitForFrames();
+  const probeAtlas = getRenderer(probe.terminal)?._charAtlas;
+  if (!probeAtlas) throw new Error("WebGL atlas unavailable");
+  const atlasConstructor = probeAtlas.constructor;
+  const originalPageLimit = atlasConstructor.maxAtlasPages;
+  const originalTextureSize = atlasConstructor.maxTextureSize;
+  probe.terminal.dispose();
+  holder.replaceChildren();
+  atlasConstructor.maxAtlasPages = ATLAS_CAPACITY_PAGE_LIMIT;
+  atlasConstructor.maxTextureSize = ATLAS_CAPACITY_TEXTURE_SIZE_PX;
+
+  const errors = [];
+  const handleError = (event) =>
+    errors.push(event.error?.message ?? event.message ?? String(event));
+  window.addEventListener("error", handleError);
+  let active;
+  let removalDisposable;
+  let maximumPages = 0;
+  let removals = 0;
+  let textureCapacity = 0;
+  let changedPixels = null;
+  let maximumPixelDifference = null;
+  try {
+    active = createTerminal();
+    removalDisposable = active.webgl.onRemoveTextureAtlasCanvas(() => {
+      removals += 1;
+    });
+    await waitForFrames();
+    const renderer = getRenderer(active.terminal);
+    const atlas = renderer?._charAtlas;
+    const atlasTextures = renderer?._glyphRenderer?.value?._atlasTextures;
+    if (!atlas || !atlasTextures) throw new Error("WebGL renderer internals unavailable");
+    textureCapacity = atlasTextures.length;
+    const canvas = [...holder.querySelectorAll(".xterm-screen canvas")].find((candidate) => {
+      try {
+        return Boolean(candidate.getContext("webgl2"));
+      } catch {
+        return false;
+      }
+    });
+    const webglContext = canvas?.getContext("webgl2");
+    if (!canvas || !webglContext) throw new Error("WebGL canvas unavailable");
+    const capturePixels = () => {
+      webglContext.finish();
+      const pixels = new Uint8Array(canvas.width * canvas.height * RGBA_CHANNEL_COUNT);
+      webglContext.readPixels(
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+        webglContext.RGBA,
+        webglContext.UNSIGNED_BYTE,
+        pixels,
+      );
+      return pixels;
+    };
+    const renderSentinel = async () => {
+      let output = "\x1b[?25l\x1b[H\x1b[2J\x1b[0m";
+      for (let rowIndex = 0; rowIndex < ATLAS_CAPACITY_ROWS; rowIndex += 1) {
+        output += `\x1b[${rowIndex + 1};1H${ATLAS_SENTINEL_TEXT}`;
+      }
+      await new Promise((resolve) => active.terminal.write(output, resolve));
+      active.terminal.refresh(0, active.terminal.rows - 1);
+      await waitForFrames();
+      return capturePixels();
+    };
+    const sentinelBeforeFlood = await renderSentinel();
+    let codepointOffset = 0;
+    for (let chunkIndex = 0; chunkIndex < ATLAS_CAPACITY_CHUNKS; chunkIndex += 1) {
+      let output = "\x1b[H\x1b[2J";
+      for (let glyphIndex = 0; glyphIndex < ATLAS_CAPACITY_GLYPHS_PER_CHUNK; glyphIndex += 1) {
+        output += String.fromCodePoint(
+          CJK_BASE_CODEPOINT + ((codepointOffset + glyphIndex) % CJK_CODEPOINT_RANGE),
+        );
+        if ((glyphIndex + 1) % (ATLAS_CAPACITY_COLUMNS / WIDE_GLYPH_CELL_COLUMNS) === 0)
+          output += "\r\n";
+      }
+      codepointOffset += ATLAS_CAPACITY_GLYPHS_PER_CHUNK;
+      await new Promise((resolve) => active.terminal.write(output, resolve));
+      await waitForFrames();
+      maximumPages = Math.max(maximumPages, atlas.pages.length);
+      if (errors.length > 0 || maximumPages > textureCapacity) break;
+    }
+    if (errors.length === 0 && maximumPages <= textureCapacity) {
+      const sentinelAfterFlood = await renderSentinel();
+      changedPixels = 0;
+      maximumPixelDifference = 0;
+      for (
+        let pixelIndex = 0;
+        pixelIndex < sentinelBeforeFlood.length;
+        pixelIndex += RGBA_CHANNEL_COUNT
+      ) {
+        let didPixelChange = false;
+        for (let channelIndex = 0; channelIndex < RGBA_CHANNEL_COUNT; channelIndex += 1) {
+          const channelDifference = Math.abs(
+            sentinelBeforeFlood[pixelIndex + channelIndex] -
+              sentinelAfterFlood[pixelIndex + channelIndex],
+          );
+          maximumPixelDifference = Math.max(maximumPixelDifference, channelDifference);
+          if (channelDifference > ATLAS_PIXEL_CHANNEL_TOLERANCE) didPixelChange = true;
+        }
+        if (didPixelChange) changedPixels += 1;
+      }
+    }
+  } finally {
+    removalDisposable?.dispose();
+    active?.terminal.dispose();
+    atlasConstructor.maxAtlasPages = originalPageLimit;
+    atlasConstructor.maxTextureSize = originalTextureSize;
+    window.removeEventListener("error", handleError);
+    holder.remove();
+  }
+  return {
+    passed:
+      errors.length === 0 && maximumPages <= textureCapacity && removals > 0 && changedPixels === 0,
+    errors,
+    maximumPages,
+    textureCapacity,
+    removals,
+    changedPixels,
+    maximumPixelDifference,
+  };
+};
+
+window.__runAtlasCapacityProbe = runAtlasCapacityProbe;
 
 document.getElementById("spawn").addEventListener("click", () => void spawnBatch());
 document.getElementById("dispose").addEventListener("click", () => {
