@@ -1,5 +1,12 @@
 # localterm
 
+## 2.68.2
+
+### Patch Changes
+
+- 9a73a8d: Restore initial focus to the secrets and processes modal search field.
+  - @monotykamary/localterm-server@2.68.2
+
 ## 2.68.1
 
 ### Patch Changes
