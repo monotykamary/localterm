@@ -359,10 +359,19 @@ export const DiffViewer = ({
       additions: totals.additions,
       deletions: totals.deletions,
       binaryCount: totals.binaries,
+      isLoading: displayFileList === null,
       previousConfigIndex: headerConfigIndex,
     });
     return result;
-  }, [headerWidth, pr, isBranchMode, effectiveBaseLabel, totals, headerConfigIndex]);
+  }, [
+    headerWidth,
+    pr,
+    isBranchMode,
+    effectiveBaseLabel,
+    totals,
+    displayFileList,
+    headerConfigIndex,
+  ]);
 
   useLayoutEffect(() => {
     setHeaderConfigIndex(headerLayout.configIndex);
@@ -440,7 +449,7 @@ export const DiffViewer = ({
             ))}
           </div>
           {isBranchMode ? (
-            <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <div className="flex min-w-0 shrink items-center gap-1.5 text-xs text-muted-foreground">
               <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
               {headerLayout.showVs ? <span className="shrink-0">vs</span> : null}
               <select
@@ -449,7 +458,7 @@ export const DiffViewer = ({
                 disabled={branchInfo === null}
                 onChange={(event) => setBaseOverride(event.target.value || null)}
                 style={{ width: headerLayout.selectWidthPx || undefined }}
-                className="shrink-0 rounded-md border border-border/60 bg-background px-1.5 py-0.5 font-mono text-xs text-foreground outline-none focus-visible:border-ring disabled:opacity-50 [&>option]:bg-popover [&>option]:text-foreground"
+                className="min-w-0 shrink rounded-md border border-border/60 bg-background px-1.5 py-0.5 font-mono text-xs text-foreground outline-none focus-visible:border-ring disabled:opacity-50 [&>option]:bg-popover [&>option]:text-foreground"
               >
                 {branchInfo === null ? (
                   <option value="">Loading…</option>
@@ -465,48 +474,52 @@ export const DiffViewer = ({
               </select>
             </div>
           ) : null}
-          {pr ? (
+          {pr && headerLayout.showPr ? (
             <DiffViewerPrBadge
               pr={pr}
               currentBranch={branchInfo?.currentBranch ?? null}
               hideTitle={!headerLayout.prShowTitle}
             />
           ) : null}
-          <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
-            <span className={DIFF_ADDITIONS_CLASSES}>+{totals.additions.toLocaleString()}</span>{" "}
-            <span className={DIFF_DELETIONS_CLASSES}>−{totals.deletions.toLocaleString()}</span>
-            {totals.binaries > 0 && headerLayout.showBinaryCount ? (
-              <span className="text-muted-foreground/70"> · {totals.binaries} binary</span>
-            ) : null}
-          </span>
-          {displayFileList === null ? (
+          {headerLayout.showStats ? (
+            <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+              <span className={DIFF_ADDITIONS_CLASSES}>+{totals.additions.toLocaleString()}</span>{" "}
+              <span className={DIFF_DELETIONS_CLASSES}>−{totals.deletions.toLocaleString()}</span>
+              {totals.binaries > 0 && headerLayout.showBinaryCount ? (
+                <span className="text-muted-foreground/70"> · {totals.binaries} binary</span>
+              ) : null}
+            </span>
+          ) : null}
+          {displayFileList === null && headerLayout.showStats ? (
             <Spinner className="size-3.5" aria-label="loading diff" />
           ) : null}
           <div className="ml-auto flex items-center gap-1">
-            <div
-              role="radiogroup"
-              aria-label="diff layout"
-              className="flex items-center rounded-md border border-border/60 p-0.5"
-            >
-              {DIFF_VIEW_MODES.map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  role="radio"
-                  aria-checked={viewMode === mode}
-                  onClick={() => handleViewModeChange(mode)}
-                  className={cn(
-                    "rounded-sm px-2 py-0.5 text-xs transition-colors",
-                    headerLayout.layoutLabels === "full" && "capitalize",
-                    viewMode === mode
-                      ? "bg-foreground/10 text-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {headerLayout.layoutLabels === "full" ? mode : mode[0].toUpperCase()}
-                </button>
-              ))}
-            </div>
+            {headerLayout.showLayoutSelector ? (
+              <div
+                role="radiogroup"
+                aria-label="diff layout"
+                className="flex items-center rounded-md border border-border/60 p-0.5"
+              >
+                {DIFF_VIEW_MODES.map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="radio"
+                    aria-checked={viewMode === mode}
+                    onClick={() => handleViewModeChange(mode)}
+                    className={cn(
+                      "rounded-sm px-2 py-0.5 text-xs transition-colors",
+                      headerLayout.layoutLabels === "full" && "capitalize",
+                      viewMode === mode
+                        ? "bg-foreground/10 text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {headerLayout.layoutLabels === "full" ? mode : mode[0].toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {headerLayout.showRefresh ? (
               <Button
                 variant="ghost"

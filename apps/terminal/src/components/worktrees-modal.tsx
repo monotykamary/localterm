@@ -174,16 +174,19 @@ export const WorktreesModal = ({
         style={{ maxHeight: `min(100%, ${WORKTREES_MODAL_MAX_HEIGHT_REM}rem)` }}
       >
         <header className="flex shrink-0 items-center gap-3 border-b border-border/40 px-4 py-2.5">
-          <FolderGit2 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <h2 className="shrink-0 text-sm font-medium text-foreground">Worktrees</h2>
+          <FolderGit2
+            className="size-4 shrink-0 text-muted-foreground max-sm:hidden"
+            aria-hidden="true"
+          />
+          <h2 className="shrink-0 text-sm font-medium text-foreground max-sm:hidden">Worktrees</h2>
           {view === "list" && data && isRepo ? (
-            <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+            <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground max-sm:hidden">
               {worktrees.length}
             </span>
           ) : null}
           {view === "list" && data && isRepo && data.displayBaseDir ? (
             <span
-              className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground/60"
+              className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground/60 max-sm:hidden"
               title={data.displayBaseDir}
             >
               {data.displayBaseDir}
@@ -203,7 +206,7 @@ export const WorktreesModal = ({
                   onClick={() => void resources.refresh()}
                   aria-label="refresh worktrees"
                   title="refresh"
-                  className="hover:text-foreground"
+                  className="hover:text-foreground max-sm:hidden"
                 >
                   <RefreshCw />
                 </Button>
@@ -215,7 +218,7 @@ export const WorktreesModal = ({
                     disabled={sweepInFlight}
                     aria-label="sweep stale worktrees"
                     title="sweep stale worktrees"
-                    className="hover:text-foreground"
+                    className="hover:text-foreground max-sm:hidden"
                   >
                     {sweepInFlight ? (
                       <Spinner className="size-3.5" aria-label="sweeping" />

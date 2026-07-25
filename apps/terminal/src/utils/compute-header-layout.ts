@@ -1,4 +1,5 @@
 import { prepareWithSegments, measureNaturalWidth } from "@chenglou/pretext";
+import { DIFF_VIEWER_BRANCH_SELECT_MIN_WIDTH_PX } from "@/lib/constants";
 
 const SANS_12PX = "12px system-ui, -apple-system, sans-serif";
 const SANS_MEDIUM_14PX = "500 14px system-ui, -apple-system, sans-serif";
@@ -93,23 +94,22 @@ const statsFullWidth = (additions: number, deletions: number, binaryCount: numbe
   return min + measureTextWidth(binText, MONO_12PX);
 };
 
-const branchAreaMinWidth = (branchName: string | null): number =>
-  ICON_14_PX +
-  GAP_1_5_PX +
-  measureTextWidth(branchName ?? "", MONO_12PX) +
-  SELECT_PADDING_PX +
-  SELECT_CHEVRON_PX;
+const branchSelectNaturalWidth = (branchName: string | null): number =>
+  measureTextWidth(branchName ?? "", MONO_12PX) + SELECT_PADDING_PX + SELECT_CHEVRON_PX;
 
-const branchAreaFullWidth = (branchName: string | null): number =>
-  S.vs + GAP_1_5_PX + branchAreaMinWidth(branchName);
+const branchAreaWidth = (selectWidth: number, showVs: boolean): number =>
+  ICON_14_PX + GAP_1_5_PX + selectWidth + (showVs ? S.vs + GAP_1_5_PX : 0);
 
 interface HeaderLayout {
   showTitle: boolean;
   compareLabels: "full" | "abbreviated";
   showVs: boolean;
+  showPr: boolean;
   prShowTitle: boolean;
   layoutLabels: "full" | "abbreviated";
   showBinaryCount: boolean;
+  showStats: boolean;
+  showLayoutSelector: boolean;
   showRefresh: boolean;
   headerGap: number;
   headerPadding: number;
@@ -117,6 +117,8 @@ interface HeaderLayout {
 
 export interface HeaderLayoutResult extends HeaderLayout {
   selectWidthPx: number;
+  requiredWidthPx: number;
+  fitsAvailableWidth: boolean;
   configIndex: number;
 }
 
@@ -128,11 +130,28 @@ export interface HeaderLayoutParams {
   additions: number;
   deletions: number;
   binaryCount: number;
+  isLoading: boolean;
   previousConfigIndex?: number;
 }
 
+const COMPACT_LAYOUT = {
+  showTitle: false,
+  compareLabels: "abbreviated",
+  showVs: false,
+  showPr: true,
+  prShowTitle: false,
+  layoutLabels: "abbreviated",
+  showBinaryCount: false,
+  showStats: true,
+  showLayoutSelector: true,
+  showRefresh: false,
+  headerGap: GAP_2_PX,
+  headerPadding: HEADER_PAD_COMPACT_PX,
+} satisfies HeaderLayout;
+
 const LAYOUT_CONFIGS: HeaderLayout[] = [
   {
+    ...COMPACT_LAYOUT,
     showTitle: true,
     compareLabels: "full",
     showVs: true,
@@ -144,71 +163,46 @@ const LAYOUT_CONFIGS: HeaderLayout[] = [
     headerPadding: HEADER_PAD_FULL_PX,
   },
   {
+    ...COMPACT_LAYOUT,
     showTitle: true,
     compareLabels: "full",
     showVs: true,
     prShowTitle: true,
-    layoutLabels: "abbreviated",
     showBinaryCount: true,
     showRefresh: true,
     headerGap: GAP_3_PX,
     headerPadding: HEADER_PAD_FULL_PX,
   },
   {
+    ...COMPACT_LAYOUT,
     showTitle: true,
     compareLabels: "full",
     showVs: true,
-    prShowTitle: false,
-    layoutLabels: "abbreviated",
     showBinaryCount: true,
     showRefresh: true,
     headerGap: GAP_3_PX,
     headerPadding: HEADER_PAD_FULL_PX,
   },
   {
+    ...COMPACT_LAYOUT,
     showTitle: true,
     compareLabels: "full",
-    showVs: false,
-    prShowTitle: false,
-    layoutLabels: "abbreviated",
     showBinaryCount: true,
     showRefresh: true,
     headerGap: GAP_3_PX,
     headerPadding: HEADER_PAD_FULL_PX,
   },
   {
+    ...COMPACT_LAYOUT,
     showTitle: true,
-    compareLabels: "abbreviated",
-    showVs: false,
-    prShowTitle: false,
-    layoutLabels: "abbreviated",
-    showBinaryCount: false,
     showRefresh: true,
-    headerGap: GAP_2_PX,
     headerPadding: HEADER_PAD_FULL_PX,
   },
-  {
-    showTitle: false,
-    compareLabels: "abbreviated",
-    showVs: false,
-    prShowTitle: false,
-    layoutLabels: "abbreviated",
-    showBinaryCount: false,
-    showRefresh: true,
-    headerGap: GAP_2_PX,
-    headerPadding: HEADER_PAD_COMPACT_PX,
-  },
-  {
-    showTitle: false,
-    compareLabels: "abbreviated",
-    showVs: false,
-    prShowTitle: false,
-    layoutLabels: "abbreviated",
-    showBinaryCount: false,
-    showRefresh: false,
-    headerGap: GAP_2_PX,
-    headerPadding: HEADER_PAD_COMPACT_PX,
-  },
+  { ...COMPACT_LAYOUT, showRefresh: true },
+  COMPACT_LAYOUT,
+  { ...COMPACT_LAYOUT, showStats: false },
+  { ...COMPACT_LAYOUT, showStats: false, showLayoutSelector: false },
+  { ...COMPACT_LAYOUT, showPr: false, showStats: false, showLayoutSelector: false },
 ];
 
 // The header is a flex row with gap-{N}:
@@ -226,15 +220,21 @@ const computeConfigWidth = (
   prFullWidth: number,
   statMin: number,
   statFull: number,
+  isLoading: boolean,
 ): number => {
   const leftElements: number[] = [];
   if (config.showTitle) leftElements.push(S.changesTitle);
   leftElements.push(config.compareLabels === "full" ? COMPARE_FULL_WIDTH : COMPARE_ABBR_WIDTH);
   if (isBranchMode) leftElements.push(config.showVs ? branchFullWidth : branchMinWidth);
-  if (isPr) leftElements.push(config.prShowTitle ? prFullWidth : prMinWidth);
-  leftElements.push(config.showBinaryCount ? statFull : statMin);
+  if (isPr && config.showPr) {
+    leftElements.push(config.prShowTitle ? prFullWidth : prMinWidth);
+  }
+  if (config.showStats) leftElements.push(config.showBinaryCount ? statFull : statMin);
+  if (isLoading && config.showStats) leftElements.push(ICON_14_PX);
 
-  const rightDiv = rightDivWidth(config.layoutLabels, config.showRefresh);
+  const rightDiv = config.showLayoutSelector
+    ? rightDivWidth(config.layoutLabels, config.showRefresh)
+    : BUTTON_ICON_SM_PX;
 
   // left items + right div = (leftCount + 1) flex items → leftCount gaps
   const leftCount = leftElements.length;
@@ -253,6 +253,7 @@ export const computeHeaderLayout = (params: HeaderLayoutParams): HeaderLayoutRes
     additions,
     deletions,
     binaryCount,
+    isLoading,
     previousConfigIndex,
   } = params;
 
@@ -262,28 +263,78 @@ export const computeHeaderLayout = (params: HeaderLayoutParams): HeaderLayoutRes
     const selectWidthPx = isBranchMode
       ? measureTextWidth(selectedBranch ?? "", MONO_12PX) + SELECT_PADDING_PX + SELECT_CHEVRON_PX
       : 0;
-    return { ...LAYOUT_CONFIGS[0], configIndex: 0, selectWidthPx };
+    return {
+      ...LAYOUT_CONFIGS[0],
+      configIndex: 0,
+      selectWidthPx,
+      requiredWidthPx: 0,
+      fitsAvailableWidth: true,
+    };
   }
 
   const prTitleWidth = pr?.title ? measureTextWidth(pr.title, MONO_11PX) : null;
   const prMinWidth = pr ? badgeMinWidth(pr.number, pr.state) : 0;
   const prFullWidth =
-    pr && prTitleWidth !== null ? badgeFullWidth(pr.number, pr.state, prTitleWidth) : 0;
+    pr && prTitleWidth !== null ? badgeFullWidth(pr.number, pr.state, prTitleWidth) : prMinWidth;
 
-  const branchMinWidth = isBranchMode ? branchAreaMinWidth(selectedBranch) : 0;
-  const branchFullWidth = isBranchMode ? branchAreaFullWidth(selectedBranch) : 0;
+  const naturalSelectWidth = branchSelectNaturalWidth(selectedBranch);
+  const branchMinWidth = isBranchMode
+    ? branchAreaWidth(DIFF_VIEWER_BRANCH_SELECT_MIN_WIDTH_PX, false)
+    : 0;
+  const branchFullWidth = isBranchMode
+    ? branchAreaWidth(DIFF_VIEWER_BRANCH_SELECT_MIN_WIDTH_PX, true)
+    : 0;
 
   const statMin = statsMinWidth(additions, deletions);
   const statFull = statsFullWidth(additions, deletions, binaryCount);
 
   const prevIndex = previousConfigIndex ?? 0;
 
-  const selectWidthPx = isBranchMode
-    ? measureTextWidth(selectedBranch ?? "", MONO_12PX) + SELECT_PADDING_PX + SELECT_CHEVRON_PX
-    : 0;
+  const buildResult = (config: HeaderLayout, configIndex: number): HeaderLayoutResult => {
+    const minimumRequiredWidth = computeConfigWidth(
+      config,
+      isBranchMode,
+      branchMinWidth,
+      branchFullWidth,
+      Boolean(pr),
+      prMinWidth,
+      prFullWidth,
+      statMin,
+      statFull,
+      isLoading,
+    );
+    const selectWidthPx = isBranchMode
+      ? Math.min(
+          naturalSelectWidth,
+          DIFF_VIEWER_BRANCH_SELECT_MIN_WIDTH_PX +
+            Math.max(0, availableWidth - minimumRequiredWidth),
+        )
+      : 0;
+    const selectedBranchMinWidth = isBranchMode ? branchAreaWidth(selectWidthPx, false) : 0;
+    const selectedBranchFullWidth = isBranchMode ? branchAreaWidth(selectWidthPx, true) : 0;
+    const requiredWidthPx = computeConfigWidth(
+      config,
+      isBranchMode,
+      selectedBranchMinWidth,
+      selectedBranchFullWidth,
+      Boolean(pr),
+      prMinWidth,
+      prFullWidth,
+      statMin,
+      statFull,
+      isLoading,
+    );
+    return {
+      ...config,
+      configIndex,
+      selectWidthPx,
+      requiredWidthPx,
+      fitsAvailableWidth: requiredWidthPx <= availableWidth,
+    };
+  };
 
-  for (let i = 0; i < LAYOUT_CONFIGS.length; i++) {
-    const config = LAYOUT_CONFIGS[i];
+  for (let index = 0; index < LAYOUT_CONFIGS.length; index++) {
+    const config = LAYOUT_CONFIGS[index];
     const configWidth = computeConfigWidth(
       config,
       isBranchMode,
@@ -294,13 +345,14 @@ export const computeHeaderLayout = (params: HeaderLayoutParams): HeaderLayoutRes
       prFullWidth,
       statMin,
       statFull,
+      isLoading,
     );
 
     if (configWidth <= availableWidth) {
       // Hysteresis: when shrinking, switch freely. When growing, stay in the
       // previous (more compact) config until there's enough margin.
-      if (i >= prevIndex) {
-        return { ...config, configIndex: i, selectWidthPx };
+      if (index >= prevIndex) {
+        return buildResult(config, index);
       }
       const prevConfig = LAYOUT_CONFIGS[prevIndex];
       const prevConfigWidth = computeConfigWidth(
@@ -313,14 +365,15 @@ export const computeHeaderLayout = (params: HeaderLayoutParams): HeaderLayoutRes
         prFullWidth,
         statMin,
         statFull,
+        isLoading,
       );
       if (availableWidth >= prevConfigWidth + HYSTERESIS_PX) {
-        return { ...config, configIndex: i, selectWidthPx };
+        return buildResult(config, index);
       }
-      return { ...prevConfig, configIndex: prevIndex, selectWidthPx };
+      return buildResult(prevConfig, prevIndex);
     }
   }
 
   const last = LAYOUT_CONFIGS[LAYOUT_CONFIGS.length - 1];
-  return { ...last, configIndex: LAYOUT_CONFIGS.length - 1, selectWidthPx };
+  return buildResult(last, LAYOUT_CONFIGS.length - 1);
 };
