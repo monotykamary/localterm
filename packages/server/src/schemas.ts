@@ -1372,6 +1372,14 @@ const automationStoredShape = {
   // subprocess for agent), never returned over HTTP. Defaults to [] so
   // pre-existing v3 files load unchanged.
   requestedSecrets: z.array(secretNameSchema).max(MAX_AUTOMATION_REQUESTED_SECRETS).default([]),
+  // When true, the resolved secret values are redacted from the run's captured
+  // output log before it is stored or served, so a value a command echoes to
+  // the PTY (printenv, a config dump) never reaches the automation's result
+  // log. Opt-in: the daemon holds the resolved values for the run's life to
+  // match them, a bounded departure from "values never in daemon memory", so
+  // the user chooses it per automation. Defaults false so pre-existing files
+  // load unchanged. No-op without requestedSecrets (nothing to redact).
+  redactOutput: z.boolean().default(false),
   runCount: z.number().int().nonnegative(),
   lifecycle: automationLifecycleSchema,
   runs: z.array(automationRunRecordSchema).max(AUTOMATION_RUN_HISTORY_SCHEMA_MAX),
@@ -1500,6 +1508,7 @@ export const createAutomationInputSchema = z
     limit: automationRunLimitSchema.optional(),
     closeOnFinish: z.boolean().optional(),
     requestedSecrets: z.array(secretNameSchema).max(MAX_AUTOMATION_REQUESTED_SECRETS).optional(),
+    redactOutput: z.boolean().optional(),
   })
   .strict();
 
@@ -1513,6 +1522,7 @@ export const updateAutomationInputSchema = z
     limit: automationRunLimitSchema.optional(),
     closeOnFinish: z.boolean().optional(),
     requestedSecrets: z.array(secretNameSchema).max(MAX_AUTOMATION_REQUESTED_SECRETS).optional(),
+    redactOutput: z.boolean().optional(),
   })
   .strict();
 

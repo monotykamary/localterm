@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { CaptureRenderer } from "./capture-renderer.js";
 import { SESSION_GRACE_MS, SESSION_PENDING_PROMOTE_TIMEOUT_MS } from "./constants.js";
+import { redactText } from "./utils/redact-output.js";
 import type { GitMetadataCoordinator } from "./git-metadata-coordinator.js";
 import { Session } from "./session.js";
 import { SessionClientHub } from "./session-client-hub.js";
@@ -31,6 +32,12 @@ import type { WorkspaceEntry } from "./workspace-store.js";
 export interface AutomationContext {
   automationId: string;
   runId: string;
+  // Resolved secret values to redact from the run's captured output log at
+  // exit. Empty when the automation did not opt into redactOutput (the common
+  // case — values are not held in the daemon). When non-empty, the values were
+  // resolved from the backend at launch and live on the session for the run's
+  // duration only.
+  redactValues: readonly string[];
 }
 
 // The synchronous command-and-capture primitive (the tmux send-keys +
@@ -726,14 +733,13 @@ export class SessionManager {
     session.on("exit", (code: number | null) => this.handleExit(managed, code));
     const automation = managed.automation;
     if (automation) {
-      session.on("automation-exit", (exitCode: number) =>
-        this.hooks.onAutomationExit(
-          automation.automationId,
-          automation.runId,
-          exitCode,
-          managed.automationLog,
-        ),
-      );
+      session.on("automation-exit", (exitCode: number) => {
+        const log =
+          automation.redactValues.length > 0
+            ? redactText(managed.automationLog, automation.redactValues)
+            : managed.automationLog;
+        this.hooks.onAutomationExit(automation.automationId, automation.runId, exitCode, log);
+      });
     }
   }
 

@@ -188,6 +188,15 @@ export const MAX_SECRET_EXPORT_PASSPHRASE_LENGTH = 4096;
 // default is 18; the noble pure-JS scrypt makes each export ~1-2s, acceptable
 // for a one-time bulk export of all secrets. Tests inject a lower factor.
 export const SECRET_EXPORT_SCRYPT_WORK_FACTOR = 18;
+// Minimum byte length a secret value must reach before it is redacted from a
+// captured output log. Below this, exact-value substring replacement would
+// clobber ordinary output (a 2-3 char value matches everywhere). Values are
+// user-designated secrets, so no entropy gate — only a length floor.
+export const REDACTION_MIN_VALUE_LENGTH = 4;
+// The token substituted for each redacted secret occurrence. A single fixed
+// character avoids leaking the value's length, which a multi-char or
+// length-matched mask would reveal.
+export const REDACTION_MASK = "*";
 // `security` is always at /usr/bin/security on darwin; baking the absolute path
 // into the generated shim means the shim doesn't depend on PATH lookup.
 export const SECURITY_BINARY_PATH = "/usr/bin/security";

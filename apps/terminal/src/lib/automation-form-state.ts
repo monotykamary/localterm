@@ -17,4 +17,5 @@ export interface AutomationFormState {
   limitMax: number;
   closeOnFinish: boolean;
   requestedSecrets: string[];
+  redactOutput: boolean;
 }

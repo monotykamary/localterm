@@ -66,6 +66,7 @@ const migrateV1Automation = (v1: AutomationV1): Automation => {
     limit: { kind: "forever" },
     closeOnFinish: false,
     requestedSecrets: [],
+    redactOutput: false,
     runCount: 0,
     lifecycle: "active",
     runs,
@@ -84,6 +85,7 @@ const migrateV2Automation = (v2: AutomationV2): Automation => {
     trigger: { kind: "schedule", schedule },
     runner: { kind: "shell", command },
     requestedSecrets: [],
+    redactOutput: false,
   };
 };
 
@@ -93,7 +95,7 @@ const migrateV2Automation = (v2: AutomationV2): Automation => {
 // for v3 runs that lack them, so `runs` carries over unchanged.
 const migrateV3Automation = (v3: AutomationV3): Automation => {
   const { command, ...rest } = v3;
-  return { ...rest, runner: { kind: "shell", command } };
+  return { ...rest, runner: { kind: "shell", command }, redactOutput: false };
 };
 
 // Repair in place any stored state the current v4 schema no longer accepts:
@@ -194,6 +196,7 @@ export class AutomationStore {
       limit: input.limit ?? { kind: "forever" },
       closeOnFinish: input.closeOnFinish ?? false,
       requestedSecrets: input.requestedSecrets ?? [],
+      redactOutput: input.redactOutput ?? false,
       runCount: 0,
       lifecycle: "active",
       runs: [],
@@ -225,6 +228,7 @@ export class AutomationStore {
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
       ...(patch.closeOnFinish !== undefined ? { closeOnFinish: patch.closeOnFinish } : {}),
       ...(patch.requestedSecrets !== undefined ? { requestedSecrets: patch.requestedSecrets } : {}),
+      ...(patch.redactOutput !== undefined ? { redactOutput: patch.redactOutput } : {}),
       limit,
       lifecycle,
       updatedAt: Date.now(),

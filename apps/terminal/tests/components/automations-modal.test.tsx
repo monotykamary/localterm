@@ -52,6 +52,7 @@ const automation = (overrides: Partial<AutomationWithNextRun> = {}): AutomationW
   limit: { kind: "forever" },
   closeOnFinish: false,
   requestedSecrets: [],
+  redactOutput: false,
   runCount: 0,
   lifecycle: "active",
   runs: [],
@@ -326,6 +327,7 @@ describe("AutomationsModal", () => {
         limit: { kind: "forever" },
         closeOnFinish: false,
         requestedSecrets: [],
+        redactOutput: false,
       });
     });
   });

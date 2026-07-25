@@ -171,6 +171,21 @@ describe("AutomationStore", () => {
     expect(reloaded.get(automation.id)?.closeOnFinish).toBe(false);
   });
 
+  it("honors redactOutput on create, toggles it on update, and persists it", () => {
+    const store = new AutomationStore(filePath);
+    const automation = store.create({ ...createInput, redactOutput: true });
+    expect(automation.redactOutput).toBe(true);
+
+    const updated = store.update(automation.id, { redactOutput: false });
+    expect(updated?.redactOutput).toBe(false);
+    // An update that omits redactOutput leaves it untouched.
+    const renamed = store.update(automation.id, { name: "renamed" });
+    expect(renamed?.redactOutput).toBe(false);
+
+    const reloaded = new AutomationStore(filePath);
+    expect(reloaded.get(automation.id)?.redactOutput).toBe(false);
+  });
+
   it("defaults closeOnFinish to false when absent from a persisted v3 file", () => {
     // A file written before closeOnFinish existed has no such field.
     fs.writeFileSync(

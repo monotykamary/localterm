@@ -15,6 +15,7 @@ const makeAutomation = (id: string, name = id): AutomationWithNextRun => ({
   limit: { kind: "forever" },
   closeOnFinish: false,
   requestedSecrets: [],
+  redactOutput: false,
   runCount: 0,
   lifecycle: "active",
   runs: [],

@@ -23,6 +23,19 @@ export const SECRET_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 export const PROCESS_NAME_PATTERN = /^[A-Za-z0-9_.+-]+$/;
 export const ENV_VAR_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 
+// Minimum byte length a secret value must reach before it is redacted from the
+// agent's bash-tool output. Below this, exact-value substring replacement would
+// clobber ordinary command output (a 2-3 char value matches everywhere).
+// Mirrors localterm-server's REDACTION_MIN_VALUE_LENGTH so the two packages
+// (deliberately decoupled — the extension runs inside pi, not the daemon) stay
+// in lockstep.
+export const REDACTION_MIN_VALUE_LENGTH = 4;
+
+// The token substituted for each redacted secret occurrence. A single fixed
+// character avoids leaking the value's length. Mirrors localterm-server's
+// REDACTION_MASK.
+export const REDACTION_MASK = "*";
+
 // Mirror localterm-server's MAX_NOTIFICATION_LENGTH: the daemon slices any
 // OSC 9 body past this many UTF-16 code units, which can split a surrogate
 // pair. We cap the body ourselves before framing so the emitted sequence is

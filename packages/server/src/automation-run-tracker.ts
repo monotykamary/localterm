@@ -33,6 +33,17 @@ export class AutomationRunTracker {
     run.env = env;
   }
 
+  // Attach the resolved secret VALUES a run opted into redacting from its
+  // captured output. Mirrors setEnv's lifecycle: no-op once claimed/expired,
+  // consumed by claim() which threads them onto the session's automation
+  // context. Only set when the automation opted into redactOutput, so a run
+  // that didn't never holds values here.
+  setRedactionValues(runId: string, values: readonly string[]): void {
+    const run = this.pendingRuns.get(runId);
+    if (!run) return;
+    run.redactionValues = values;
+  }
+
   sweepExpired(now: number = Date.now()): PendingAutomationRun[] {
     const expired: PendingAutomationRun[] = [];
     for (const run of this.pendingRuns.values()) {

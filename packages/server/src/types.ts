@@ -127,6 +127,11 @@ export interface PendingAutomationRun {
   // empty/undefined until then. Carried on the run (not resolved at claim
   // time) because the WS `onOpen` spawn path is synchronous.
   env?: Record<string, string>;
+  // Resolved secret VALUES (the values of `env`) carried from launch to claim
+  // when the automation opted into output redaction. Threaded onto the session's
+  // automation context so the exit path can redact them from the captured log.
+  // Undefined when redaction is off (no opt-in → no values held).
+  redactionValues?: readonly string[];
 }
 
 export type ClientToServerMessage = z.infer<typeof clientToServerMessageSchema>;

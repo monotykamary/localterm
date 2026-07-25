@@ -420,6 +420,22 @@ export const AutomationForm = ({
           are resolved from the Keychain into the run’s environment and never travel over the
           network. A secret deleted after you select it is skipped at run time.
         </span>
+        {form.runner.runnerType === "shell" && secrets !== null && secrets.length > 0 ? (
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="flex flex-col">
+              Redact secret values from output
+              <span className="text-[10px] text-muted-foreground/60">
+                Replaces injected secret values with * in the run’s captured output log, so a
+                command that prints them (printenv, a config dump) never leaks into the result.
+              </span>
+            </span>
+            <Switch
+              aria-label="redact secret values from output"
+              checked={form.redactOutput}
+              onCheckedChange={(redactOutput) => onChange({ ...form, redactOutput })}
+            />
+          </div>
+        ) : null}
       </FormSection>
 
       {saveError ? (

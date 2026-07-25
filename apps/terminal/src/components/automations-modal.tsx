@@ -97,6 +97,7 @@ const emptyForm = (defaultCwd: string | null): AutomationFormState => ({
   limitMax: AUTOMATION_RUN_LIMIT_DEFAULT_COUNT,
   closeOnFinish: false,
   requestedSecrets: [],
+  redactOutput: false,
 });
 
 const formForAutomation = (automation: AutomationWithNextRun): AutomationFormState => {
@@ -117,6 +118,7 @@ const formForAutomation = (automation: AutomationWithNextRun): AutomationFormSta
       automation.limit.kind === "count" ? automation.limit.max : AUTOMATION_RUN_LIMIT_DEFAULT_COUNT,
     closeOnFinish: automation.closeOnFinish,
     requestedSecrets: automation.requestedSecrets,
+    redactOutput: automation.redactOutput,
   };
 };
 
@@ -406,6 +408,7 @@ export const AutomationsModal = ({
           : ({ kind: "forever" } as const),
       closeOnFinish: form.closeOnFinish,
       requestedSecrets: form.requestedSecrets,
+      redactOutput: form.redactOutput,
     };
     const saved = form.id ? await updateAutomation(form.id, input) : await createAutomation(input);
     setIsSaving(false);

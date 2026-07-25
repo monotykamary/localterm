@@ -2739,6 +2739,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           secretBackend,
         );
         automationRunTracker.setEnv(run.runId, secretEnv);
+        if (automation.redactOutput) {
+          automationRunTracker.setRedactionValues(run.runId, Object.values(secretEnv));
+        }
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`failed to resolve secrets for automation "${automation.name}": ${message}`);
@@ -3144,7 +3147,11 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               }
             }
             const automation: AutomationContext | undefined = claimedRun
-              ? { automationId: claimedRun.automationId, runId: claimedRun.runId }
+              ? {
+                  automationId: claimedRun.automationId,
+                  runId: claimedRun.runId,
+                  redactValues: claimedRun.redactionValues ?? [],
+                }
               : undefined;
             const spawned = registry.spawnAndAttach(
               ws,
