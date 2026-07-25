@@ -1,5 +1,12 @@
 # localterm
 
+## 2.69.1
+
+### Patch Changes
+
+- f958806: Keep modal controls readable with progressive disclosure and bounded dynamic text, including long branch, secret, process, and worktree names. Add a deterministic Pretext-backed width audit so adversarial labels fail the test suite before they reach the UI.
+  - @monotykamary/localterm-server@2.69.1
+
 ## 2.69.0
 
 ### Patch Changes
