@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.70.0
+
+### Minor Changes
+
+- dbc65e2: Add first-class Helium browser support to localterm's CDP integration. The daemon now detects Helium's verified user-data directory on macOS, Linux, and Windows, can open `chrome://inspect` in Helium, and reports the browser as Helium instead of relying on generic fallback behavior.
+
 ## 2.69.1
 
 ## 2.69.0
