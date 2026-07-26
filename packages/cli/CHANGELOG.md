@@ -1,5 +1,12 @@
 # localterm
 
+## 2.70.2
+
+### Patch Changes
+
+- 17263e4: Render automation thinking traces as muted Markdown and reliably apply the selected Pi model and thinking level before each agent prompt, including resumed threads.
+  - @monotykamary/localterm-server@2.70.2
+
 ## 2.70.1
 
 ### Patch Changes
