@@ -59,6 +59,7 @@ interface AmbientToolbarDisplayProps {
   shouldEnablePointerEvents: boolean;
   shouldShowAmbientToolbar: boolean;
   shouldShowGitMetadata: boolean;
+  shouldShowHoverDeadzone: boolean;
   shouldShowToolbarHandle: boolean;
 }
 
@@ -123,6 +124,13 @@ export const AmbientActionSearchToolbar = ({
       onMouseEnter={display.isTouchDevice ? undefined : actions.onMouseEnter}
       onMouseLeave={display.isTouchDevice ? undefined : actions.onMouseLeave}
     >
+      {display.shouldShowHoverDeadzone ? (
+        <div
+          aria-hidden="true"
+          data-terminal-actions-hover-deadzone
+          className="absolute top-full right-0 h-full w-full"
+        />
+      ) : null}
       <div
         aria-hidden="true"
         className={cn(

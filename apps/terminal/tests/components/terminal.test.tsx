@@ -755,6 +755,20 @@ describe("Terminal overlay input routing", () => {
     vi.useRealTimers();
   });
 
+  it("adds an overlay-sized deadzone below the hovered desktop toolbar", () => {
+    render(<Terminal />);
+    const toolbarArea = screen.getByRole("toolbar", { name: "terminal actions" }).parentElement;
+
+    expect(document.querySelector("[data-terminal-actions-hover-deadzone]")).toBeNull();
+
+    if (toolbarArea) fireEvent.mouseEnter(toolbarArea);
+
+    const deadzone = document.querySelector("[data-terminal-actions-hover-deadzone]");
+    expect(deadzone?.className).toContain("top-full");
+    expect(deadzone?.className).toContain("h-full");
+    expect(deadzone?.className).toContain("w-full");
+  });
+
   it("keeps the search overlay clickable while open even when the toolbar is not hovered", () => {
     // Regression: the overlay wrapper went pointer-events-none once the hover
     // hide-timer fired, so the still-visible find input could not be clicked

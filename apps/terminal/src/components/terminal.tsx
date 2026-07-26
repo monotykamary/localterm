@@ -376,6 +376,7 @@ export const Terminal = () => {
     : isToolbarVisible || hasToolbarIndicator;
   const shouldShowGitMetadata = !isHerdrForeground || shouldShowAmbientToolbar;
   const shouldEnableAmbientToolbarPointerEvents = shouldShowAmbientToolbar || isSearchOpen;
+  const shouldShowHoverDeadzone = !isTouchDevice && isToolbarHovered;
   const shouldShowToolbarHandle =
     !isTouchDevice && !isToolbarVisible && !isSearchOpen && !hasToolbarIndicator;
 
@@ -924,6 +925,7 @@ export const Terminal = () => {
             shouldEnablePointerEvents: shouldEnableAmbientToolbarPointerEvents,
             shouldShowAmbientToolbar,
             shouldShowGitMetadata,
+            shouldShowHoverDeadzone,
             shouldShowToolbarHandle,
           }}
           actions={{
