@@ -154,6 +154,35 @@ describe("runAgent (pi harness)", { tags: ["integration"] }, () => {
     }
   });
 
+  it("applies the selected model over RPC before prompting a resumed thread", async () => {
+    const logPath = path.join(tmpDir, "rpc.log");
+    await runAgent(
+      piRequest({
+        cwd: tmpDir,
+        piBinaryPath: pi,
+        runner: {
+          kind: "agent",
+          prompt: "wake",
+          sessionMode: "thread",
+          model: "anthropic/claude-haiku-4-5",
+          harness: { kind: "pi", extensions: true, skills: true, contextFiles: true },
+        },
+        sessionFile: path.join(tmpDir, "sessions", "a.jsonl"),
+        env: { LOCALTERM_FAKE_PI_LOG: logPath },
+      }),
+    );
+
+    const commands = fs
+      .readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(commands).toEqual([
+      { type: "set_model", provider: "anthropic", modelId: "claude-haiku-4-5" },
+      { type: "prompt", message: "wake", id: "prompt" },
+    ]);
+  });
+
   it("passes --session <path> for a thread run and creates the session dir", async () => {
     const sessionFile = path.join(tmpDir, "sessions", "a.jsonl");
     await runAgent(

@@ -111,8 +111,10 @@ const renderLogEntry = (
         </span>
         {entry.thinking ? (
           <>
-            <div className="whitespace-pre-wrap break-words italic text-muted-foreground">
-              {entry.thinking}
+            <div className="italic text-muted-foreground">
+              <Markdown cwd={cwd} onOpenFile={onOpenFile} muted>
+                {entry.thinking}
+              </Markdown>
             </div>
             <BlankLine />
           </>

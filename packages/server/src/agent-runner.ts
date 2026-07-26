@@ -18,6 +18,7 @@ import {
   AUTOMATION_AGENT_COMPACT_STDERR_BYTES,
   AUTOMATION_AGENT_COMPACT_TIMEOUT_MS,
   AUTOMATION_AGENT_FORCE_KILL_DELAY_MS,
+  AUTOMATION_AGENT_RPC_COMMAND_TIMEOUT_MS,
   AUTOMATION_AGENT_RUN_TIMEOUT_MS,
   AUTOMATION_CUSTOM_HARNESS_CAPTURE_BYTES,
   AUTOMATION_SESSION_MAX_PENDING_TOOL_CALLS,
@@ -25,6 +26,7 @@ import {
 import { resolvePiAndPath } from "./pi-binary-resolver.js";
 import { RpcClient } from "./pi-rpc-client.js";
 import { appendBoundedBufferText } from "./utils/append-bounded-buffer-text.js";
+import { sendRpcCommand } from "./utils/send-rpc-command.js";
 import type { AgentHarnessConfig, AgentLogEntry, AutomationRunner } from "./types.js";
 
 export { __resetAgentModelCache, listAgentModels } from "./agent-models.js";
@@ -143,6 +145,46 @@ const runPi = async (request: AgentRunRequest, piBinaryPath?: string): Promise<A
   });
 
   const logEntries: AgentLogEntry[] = [{ type: "user", text: runner.prompt }];
+  const modelSeparatorIndex = runner.model?.indexOf("/") ?? -1;
+  if (runner.model && modelSeparatorIndex > 0 && modelSeparatorIndex < runner.model.length - 1) {
+    const modelResult = await sendRpcCommand(
+      client,
+      {
+        type: "set_model",
+        provider: runner.model.slice(0, modelSeparatorIndex),
+        modelId: runner.model.slice(modelSeparatorIndex + 1),
+      },
+      AUTOMATION_AGENT_RPC_COMMAND_TIMEOUT_MS,
+    );
+    if (!modelResult.success) {
+      const message = `Failed to select model ${runner.model}: ${modelResult.error ?? "unknown error"}`;
+      client.close();
+      return {
+        exitCode: 1,
+        findings: message,
+        log: [...logEntries, { type: "assistant", text: message }],
+        changedFiles: computeChangedFiles(before, request.cwd),
+      };
+    }
+  }
+  if (runner.thinking) {
+    const thinkingResult = await sendRpcCommand(
+      client,
+      { type: "set_thinking_level", level: runner.thinking },
+      AUTOMATION_AGENT_RPC_COMMAND_TIMEOUT_MS,
+    );
+    if (!thinkingResult.success) {
+      const message = `Failed to select thinking level ${runner.thinking}: ${thinkingResult.error ?? "unknown error"}`;
+      client.close();
+      return {
+        exitCode: 1,
+        findings: message,
+        log: [...logEntries, { type: "assistant", text: message }],
+        changedFiles: computeChangedFiles(before, request.cwd),
+      };
+    }
+  }
+
   let lastAssistantText = "";
   let lastErrorMessage = "";
   let errored = false;

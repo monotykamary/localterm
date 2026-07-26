@@ -244,7 +244,7 @@ describe("AutomationsModal", () => {
         {
           type: "assistant",
           text: "**assistant response**",
-          thinking: "assistant thinking",
+          thinking: "**assistant thinking**",
         },
         { type: "tool", name: "read", input: "src/app.ts", text: "tool output" },
       ],
@@ -268,7 +268,9 @@ describe("AutomationsModal", () => {
 
     expect((await screen.findByText("user request")).className).toContain("text-foreground/90");
     expect(screen.getByText("assistant response").className).toContain("text-foreground");
-    expect(screen.getByText("assistant thinking").className).toContain("text-muted-foreground");
+    const thinking = screen.getByText("assistant thinking");
+    expect(thinking.tagName).toBe("STRONG");
+    expect(thinking.closest(".text-muted-foreground")).not.toBeNull();
     expect(screen.getByText("read").className).toContain("text-[var(--localterm-green)]");
     expect(screen.getByText("tool output").className).toContain("text-foreground/80");
   });

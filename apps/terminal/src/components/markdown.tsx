@@ -2,6 +2,7 @@ import { type Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useMemo } from "react";
+import { cn } from "@/lib/utils";
 import { isLikelyRelativePath } from "@/utils/is-likely-relative-path";
 
 // Markdown renderer for the agent log. Headings stay pi-like: bold, same size
@@ -15,6 +16,7 @@ const HEADING_CLASS = "font-semibold text-foreground";
 
 interface MarkdownProps {
   readonly children: string;
+  readonly muted?: boolean;
   // When both are supplied, inline-code spans that look like repo-relative
   // file paths render as clickable preview triggers instead of plain code.
   readonly cwd?: string;
@@ -121,10 +123,15 @@ const useMarkdownComponents = (
     };
   }, [cwd, onOpenFile]);
 
-export const Markdown = ({ children, cwd, onOpenFile }: MarkdownProps) => {
+export const Markdown = ({ children, cwd, onOpenFile, muted = false }: MarkdownProps) => {
   const components = useMarkdownComponents(cwd, onOpenFile);
   return (
-    <div className="flex flex-col gap-[1lh] [&>*]:min-w-0 whitespace-normal break-words">
+    <div
+      className={cn(
+        "flex flex-col gap-[1lh] [&>*]:min-w-0 whitespace-normal break-words",
+        muted && "text-muted-foreground [&_*]:!text-inherit",
+      )}
+    >
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {children}
       </ReactMarkdown>

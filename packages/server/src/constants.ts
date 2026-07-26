@@ -744,6 +744,7 @@ export const AUTOMATION_AGENT_SESSIONS_DIRNAME = "agent-sessions";
 // model that never stops) is killed and marked failed rather than leaking a
 // process and a "running" run forever.
 export const AUTOMATION_AGENT_RUN_TIMEOUT_MS = 10 * 60 * 1000;
+export const AUTOMATION_AGENT_RPC_COMMAND_TIMEOUT_MS = 10_000;
 export const AUTOMATION_AGENT_FORCE_KILL_DELAY_MS = 3_000;
 export const AUTOMATION_AGENT_COMPACT_TIMEOUT_MS = 60_000;
 export const AUTOMATION_AGENT_COMPACT_STDERR_BYTES = 4 * 1024;
