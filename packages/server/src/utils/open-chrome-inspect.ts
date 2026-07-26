@@ -61,6 +61,7 @@ const LINUX_BROWSER_BINARIES: Readonly<Record<string, readonly string[]>> = {
   "Microsoft Edge": ["microsoft-edge", "microsoft-edge-stable"],
   Brave: ["brave-browser", "brave"],
   Dia: ["dia"],
+  Helium: ["helium"],
   Vivaldi: ["vivaldi"],
   Opera: ["opera", "opera-stable"],
   Aside: ["aside"],

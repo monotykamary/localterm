@@ -61,7 +61,7 @@ Enable remote debugging by launching your browser with
 `open -na "Google Chrome" --args --remote-debugging-port=9222`), or by toggling
 "Discover network targets" in `chrome://inspect`. localterm auto-detects any
 debug-enabled Chromium in a known user-data dir (Chrome, Chromium, Edge, Brave,
-Arc, Vivaldi, Opera, Comet, Dia, **Aside**, Canary) by reading its
+Arc, Vivaldi, Opera, Comet, Dia, **Helium**, Aside, Canary) by reading its
 `DevToolsActivePort` file, most-recently-launched first.
 
 **Dia on macOS.** Dia is the only Chromium browser that gates the debugging

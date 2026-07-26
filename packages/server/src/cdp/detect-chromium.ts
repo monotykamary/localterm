@@ -42,6 +42,7 @@ export const getBrowserCandidates = (
   if (platform === "darwin") {
     const base = `${home}/Library/Application Support`;
     push("Dia", `${base}/Dia/User Data`);
+    push("Helium", `${base}/net.imput.helium`);
     push("Google Chrome", `${base}/Google/Chrome`);
     push("Chromium", `${base}/Chromium`);
     push("Microsoft Edge", `${base}/Microsoft Edge`);
@@ -55,6 +56,7 @@ export const getBrowserCandidates = (
   } else if (platform === "linux") {
     const cfg = `${home}/.config`;
     push("Dia", `${cfg}/dia`);
+    push("Helium", `${cfg}/net.imput.helium`);
     push("Google Chrome", `${cfg}/google-chrome`);
     push("Chromium", `${cfg}/chromium`);
     push("Microsoft Edge", `${cfg}/microsoft-edge`);
@@ -66,6 +68,7 @@ export const getBrowserCandidates = (
   } else if (platform === "win32") {
     const local = process.env.LOCALAPPDATA ?? `${home}\\AppData\\Local`;
     push("Dia", `${local}\\Dia\\User Data`);
+    push("Helium", `${local}\\imput\\Helium\\User Data`);
     push("Aside", `${local}\\Aside`);
     push("Google Chrome", `${local}\\Google\\Chrome\\User Data`);
     push("Chromium", `${local}\\Chromium\\User Data`);

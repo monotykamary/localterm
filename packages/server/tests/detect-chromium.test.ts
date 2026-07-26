@@ -28,6 +28,23 @@ describe("getBrowserCandidates", () => {
     });
   });
 
+  it("includes Helium's user-data dir on every supported platform", () => {
+    expect(getBrowserCandidates("/Users/me", "darwin")).toContainEqual({
+      name: "Helium",
+      profileDir: "/Users/me/Library/Application Support/net.imput.helium",
+    });
+    expect(getBrowserCandidates("/home/me", "linux")).toContainEqual({
+      name: "Helium",
+      profileDir: "/home/me/.config/net.imput.helium",
+    });
+    const windowsHome = "C:\\Users\\me";
+    const windowsLocalAppData = process.env.LOCALAPPDATA ?? `${windowsHome}\\AppData\\Local`;
+    expect(getBrowserCandidates(windowsHome, "win32")).toContainEqual({
+      name: "Helium",
+      profileDir: `${windowsLocalAppData}\\imput\\Helium\\User Data`,
+    });
+  });
+
   it("includes Aside's user-data dir (Aside exposes CDP on an ephemeral port like 52860)", () => {
     const mac = getBrowserCandidates("/Users/me", "darwin");
     expect(mac).toContainEqual({
