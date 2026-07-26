@@ -1,5 +1,12 @@
 # localterm
 
+## 2.70.1
+
+### Patch Changes
+
+- 829da6a: Keep the top-right ambient action overlay open when Helium hides its hover-triggered address bar by extending the active hover area below the visible toolbar.
+  - @monotykamary/localterm-server@2.70.1
+
 ## 2.70.0
 
 ### Minor Changes
