@@ -1,5 +1,12 @@
 # localterm
 
+## 2.70.4
+
+### Patch Changes
+
+- d7b95c4: Keep the concealed terminal toolbar accessible in borderless browser windows by extending its hover target below native top-edge hit zones.
+  - @monotykamary/localterm-server@2.70.4
+
 ## 2.70.3
 
 ### Patch Changes
