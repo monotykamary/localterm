@@ -755,6 +755,19 @@ describe("Terminal overlay input routing", () => {
     vi.useRealTimers();
   });
 
+  it("reveals the desktop toolbar from the handle area below the viewport edge", () => {
+    render(<Terminal />);
+    const toolbar = screen.getByRole("toolbar", { name: "terminal actions" });
+    const handle = document.querySelector("[data-terminal-actions-toolbar-handle]");
+
+    expect(handle?.className).toContain("h-3");
+    expect(toolbar.className).toContain("opacity-0");
+
+    if (handle) fireEvent.mouseEnter(handle);
+
+    expect(toolbar.className).toContain("opacity-100");
+  });
+
   it("adds an overlay-sized deadzone below the hovered desktop toolbar", () => {
     render(<Terminal />);
     const toolbarArea = screen.getByRole("toolbar", { name: "terminal actions" }).parentElement;

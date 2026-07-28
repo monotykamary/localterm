@@ -133,13 +133,16 @@ export const AmbientActionSearchToolbar = ({
       ) : null}
       <div
         aria-hidden="true"
+        data-terminal-actions-toolbar-handle
         className={cn(
-          "mr-0.5 h-[2px] w-5 rounded-full bg-muted-foreground/25 transition-opacity duration-150",
+          "mr-0.5 -mb-2.5 flex h-3 w-5 items-start transition-opacity duration-150",
           display.shouldShowToolbarHandle
             ? "pointer-events-auto opacity-100"
             : "pointer-events-none opacity-0",
         )}
-      />
+      >
+        <div className="h-[2px] w-full rounded-full bg-muted-foreground/25" />
+      </div>
       {!display.isSearchOpen && (
         <div
           ref={toolbarRef}
