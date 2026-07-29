@@ -138,6 +138,20 @@ export const FONTS_FILENAME = "fonts.json";
 export const FONTS_FILE_VERSION = 1;
 export const SECRETS_SHIMS_DIRNAME = "shims";
 export const LOCALTERM_STATE_DIRNAME = ".localterm";
+// Stable per-user ZDOTDIR holding localterm's zsh hook .zshrc. This replaces
+// the per-session temp dir (deleted at session cleanup): rc-level `exec`
+// shell wrappers (iris, auto-attach tmux) respawn shells that re-find this
+// hook through the inherited ZDOTDIR, and those wrappers can outlive the
+// spawning tab (a tmux server, an iris wrapper) — a deleted temp dir would
+// leave their shells sourcing nothing, since zsh does not fall back to $HOME
+// when ZDOTDIR points at a missing dir.
+export const ZSH_HOOK_DIRNAME = "zdot";
+// The zsh hook shadows rc-level `exec` so exec'd wrappers re-inherit the hook
+// dir (see shell-hook-builder). Guarded wrappers (iris's IRIS_PID, tmux's
+// $TMUX) stop re-exec'ing once their respawned shell replays the hook; an
+// unguarded wrapper would loop forever, so past this depth the shadow refuses
+// the exec — degrading to a hooked, wrapper-less shell instead of spinning.
+export const ZSH_EXEC_SHADOW_MAX_DEPTH = 4;
 // Subdir of the state dir holding one activity-signal file per watched
 // program. The program's PATH shim overwrites its file (named for the program)
 // with the shell's $PWD after the real binary exits, and the daemon's
@@ -216,6 +230,7 @@ export const PTY_ENV_DENYLIST = [
   "LOCALTERM_DAEMON_CHILD",
   "LOCALTERM_INITIAL_COMMAND",
   "LOCALTERM_SESSION_ID",
+  "__LOCALTERM_EXEC_DEPTH",
   "TERM_PROGRAM",
   "TERM_PROGRAM_VERSION",
   "TERM_SESSION_ID",

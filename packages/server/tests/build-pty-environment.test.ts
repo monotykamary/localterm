@@ -1,6 +1,12 @@
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import { buildPtyEnvironment } from "../src/build-pty-environment.js";
-import { DEFAULT_MACOS_PTY_LOCALE } from "../src/constants.js";
+import {
+  DEFAULT_MACOS_PTY_LOCALE,
+  LOCALTERM_STATE_DIRNAME,
+  ZSH_HOOK_DIRNAME,
+} from "../src/constants.js";
 
 interface BuildTestEnvironmentOptions {
   inheritedEnvironment?: NodeJS.ProcessEnv;
@@ -62,5 +68,49 @@ describe("buildPtyEnvironment", () => {
     const environment = buildTestEnvironment({ platform: "linux" });
 
     expect(environment.LANG).toBeUndefined();
+  });
+});
+
+describe("stale localterm hook dirs in inherited ZDOTDIR", () => {
+  const localtermZshHookDir = path.join(os.homedir(), LOCALTERM_STATE_DIRNAME, ZSH_HOOK_DIRNAME);
+
+  it("recovers the user's real zdotdir over an inherited stable-hook ZDOTDIR", () => {
+    const environment = buildTestEnvironment({
+      inheritedEnvironment: {
+        ZDOTDIR: localtermZshHookDir,
+        __LOCALTERM_ORIG_ZDOTDIR: "/real/zdot",
+      },
+    });
+
+    expect(environment.__LOCALTERM_ORIG_ZDOTDIR).toBe("/real/zdot");
+    expect(environment.ZDOTDIR).toBeUndefined();
+  });
+
+  it("drops an inherited stable-hook ZDOTDIR when no original is recorded", () => {
+    const environment = buildTestEnvironment({
+      inheritedEnvironment: { ZDOTDIR: localtermZshHookDir },
+    });
+
+    expect(environment.__LOCALTERM_ORIG_ZDOTDIR).toBeUndefined();
+    expect(environment.ZDOTDIR).toBeUndefined();
+  });
+
+  it("still recognizes legacy per-session temp hook dirs", () => {
+    const environment = buildTestEnvironment({
+      inheritedEnvironment: {
+        ZDOTDIR: "/var/folders/xx/T/localterm-zdot-123-456",
+        __LOCALTERM_ORIG_ZDOTDIR: "/real/zdot",
+      },
+    });
+
+    expect(environment.__LOCALTERM_ORIG_ZDOTDIR).toBe("/real/zdot");
+  });
+
+  it("passes a legitimate user ZDOTDIR through as the original", () => {
+    const environment = buildTestEnvironment({
+      inheritedEnvironment: { ZDOTDIR: "/custom/dots" },
+    });
+
+    expect(environment.__LOCALTERM_ORIG_ZDOTDIR).toBe("/custom/dots");
   });
 });

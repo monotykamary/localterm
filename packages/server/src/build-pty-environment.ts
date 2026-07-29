@@ -1,9 +1,13 @@
+import os from "node:os";
+import path from "node:path";
 import {
   COLORTERM_VALUE,
   DEFAULT_MACOS_PTY_LOCALE,
+  LOCALTERM_STATE_DIRNAME,
   LOCALTERM_VALUE,
   PTY_ENV_DENYLIST,
   TERM_TYPE,
+  ZSH_HOOK_DIRNAME,
 } from "./constants.js";
 import type { SpawnPtyInput } from "./types.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
@@ -23,14 +27,18 @@ export const buildPtyEnvironment = ({
 }: BuildPtyEnvironmentOptions): Record<string, string> => {
   const environment: Record<string, string> = {};
   const deniedEnvironmentVariables = new Set(PTY_ENV_DENYLIST);
-  const isLocaltermPath = (value: string) => /localterm-(?:zdot|bash)-/.test(value);
   // The daemon may inherit a stale ZDOTDIR / __LOCALTERM_ORIG_ZDOTDIR from
-  // its login-shell wrapper — the previous session set ZDOTDIR to a temp
-  // hook dir and the plist's `zsh -l -c` re-sources that hook .zshrc. Strip
-  // any value that points to a localterm temp dir; pass through a legitimate
-  // user-set ZDOTDIR (e.g. dotfiles managed via custom ZDOTDIR). ZDOTDIR
-  // takes priority over __LOCALTERM_ORIG_ZDOTDIR because it reflects the
-  // user's current environment.
+  // its login-shell wrapper — the previous session set ZDOTDIR to localterm's
+  // zsh hook dir and the plist's `zsh -l -c` re-sources that hook .zshrc.
+  // Strip any value that points at a localterm-owned hook path (the stable
+  // per-user dir, or a legacy per-session temp dir): treating the hook dir as
+  // a user ZDOTDIR would make the generated hook source itself. Pass through
+  // a legitimate user-set ZDOTDIR (e.g. dotfiles managed via custom ZDOTDIR).
+  // ZDOTDIR takes priority over __LOCALTERM_ORIG_ZDOTDIR because it reflects
+  // the user's current environment.
+  const stableZshHookDir = path.join(os.homedir(), LOCALTERM_STATE_DIRNAME, ZSH_HOOK_DIRNAME);
+  const isLocaltermPath = (value: string) =>
+    /localterm-(?:zdot|bash)-/.test(value) || value === stableZshHookDir;
   const inheritedZdotdir = inheritedEnvironment.ZDOTDIR;
   const inheritedOriginalZdotdir = inheritedEnvironment.__LOCALTERM_ORIG_ZDOTDIR;
   const userZdotdirFromEnvironment =
