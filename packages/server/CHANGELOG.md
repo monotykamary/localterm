@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.70.5
+
+### Patch Changes
+
+- zsh sessions no longer break when the user's rc files `exec` a shell wrapper (iris, auto-attach tmux): the generated hook shadows `exec` while sourcing rc files so wrapper-respawned shells re-inherit localterm's hook ZDOTDIR and replay the hook inside the wrapper (secrets shims, osc7 cwd, fg/git signals), with a depth cap that degrades gracefully for unguarded wrappers. The zsh hook rc moved from a per-session temp dir to a stable per-user dir (`~/.localterm/zdot`) so wrappers that outlive the tab still re-source it.
+
 ## 2.70.4
 
 ## 2.70.3
