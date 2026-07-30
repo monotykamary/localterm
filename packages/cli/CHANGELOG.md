@@ -1,5 +1,12 @@
 # localterm
 
+## 2.70.6
+
+### Patch Changes
+
+- 895b32c: Update development dependencies while retaining Geist Mono 5.2.7 to preserve terminal ligature rendering.
+  - @monotykamary/localterm-server@2.70.6
+
 ## 2.70.5
 
 ### Patch Changes
