@@ -10,10 +10,7 @@ allowBuilds:
   protobufjs: true
 
 minimumReleaseAgeExclude:
-  - deslop-js@0.8.1
-  - oxlint-plugin-react-doctor@0.8.1
-  - react-doctor@0.8.1
-  - "@chenglou/freerange@0.0.1"
+  - react-doctor@0.9.2
 
 onlyBuiltDependencies:
   - "@parcel/watcher"
@@ -26,8 +23,8 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
-  vite: npm:@voidzero-dev/vite-plus-core@^0.2.2
-  "@voidzero-dev/vite-plus-core": "^0.2.4"
+  vite: npm:@voidzero-dev/vite-plus-core@^0.2.6
+  "@voidzero-dev/vite-plus-core": "^0.2.6"
   # Pinned: 5.2.8 bundles Geist 1.7.0, which collapses coding ligatures to a
   # single cell and breaks xterm rendering. Override locks the workspace to
   # 5.2.7 (Geist 1.401, multi-cell ligatures) so `pnpm update` cannot drift

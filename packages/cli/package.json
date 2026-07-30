@@ -58,9 +58,9 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.1.2",
     "typescript": "^7.0.2",
-    "vite-plus": "^0.2.5"
+    "vite-plus": "^0.2.6"
   },
   "engines": {
     "node": ">=22"

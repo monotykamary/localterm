@@ -34,12 +34,12 @@
   "devDependencies": {
     "@changesets/cli": "^2.31.1",
     "@chenglou/freerange": "^0.0.2",
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.1.2",
     "@voidzero-dev/vite-plus-core": "^0.2.6",
     "knip": "^6.29.0",
     "portless": "^0.15.4",
-    "react-doctor": "^0.9.1",
-    "turbo": "^2.10.6",
+    "react-doctor": "^0.9.2",
+    "turbo": "^2.10.7",
     "typescript": "^7.0.2",
     "vite-plus": "^0.2.6"
   },

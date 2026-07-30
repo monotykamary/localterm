@@ -21,6 +21,15 @@ beforeAll(() => {
   }
 });
 
+// jsdom has no canvas. Return a minimal 2D context so text-measurement
+// utilities get deterministic widths instead of logging "Not implemented"
+// once per call under jsdom 30.
+const measureText = (text: string) => ({ width: text.length * 6 });
+
+beforeAll(() => {
+  HTMLCanvasElement.prototype.getContext = (() => ({ measureText })) as never;
+});
+
 afterEach(() => {
   cleanup();
 });
