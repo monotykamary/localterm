@@ -8,6 +8,8 @@ export const DEFAULT_SHELL_FALLBACK = "/bin/sh";
 export const TERM_TYPE = "xterm-256color";
 export const COLORTERM_VALUE = "truecolor";
 export const LOCALTERM_VALUE = "1";
+export const DEFAULT_TERMINAL_BROWSER_DISPLAY_SCALE = 1;
+export const DEFAULT_TERMINAL_BROWSER_FRAME_BUDGET_MBPS = 12;
 // launchd omits locale variables; pbcopy otherwise treats UTF-8 terminal text as MacRoman.
 export const DEFAULT_MACOS_PTY_LOCALE = "C.UTF-8";
 

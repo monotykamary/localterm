@@ -4,6 +4,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { buildPtyEnvironment } from "../src/build-pty-environment.js";
 import {
   DEFAULT_MACOS_PTY_LOCALE,
+  DEFAULT_TERMINAL_BROWSER_DISPLAY_SCALE,
+  DEFAULT_TERMINAL_BROWSER_FRAME_BUDGET_MBPS,
   LOCALTERM_STATE_DIRNAME,
   ZSH_HOOK_DIRNAME,
 } from "../src/constants.js";
@@ -68,6 +70,36 @@ describe("buildPtyEnvironment", () => {
     const environment = buildTestEnvironment({ platform: "linux" });
 
     expect(environment.LANG).toBeUndefined();
+  });
+
+  it("configures terminal-browser for LocalTerm's pixel and throughput model", () => {
+    const environment = buildTestEnvironment({
+      inheritedEnvironment: {
+        TERMINAL_BROWSER_DISPLAY_SCALE: "",
+        TERMINAL_BROWSER_FRAME_BUDGET_MBPS: "",
+      },
+    });
+
+    expect(environment.TERMINAL_BROWSER_DISPLAY_SCALE).toBe(
+      String(DEFAULT_TERMINAL_BROWSER_DISPLAY_SCALE),
+    );
+    expect(environment.TERMINAL_BROWSER_FRAME_BUDGET_MBPS).toBe(
+      String(DEFAULT_TERMINAL_BROWSER_FRAME_BUDGET_MBPS),
+    );
+  });
+
+  it("preserves explicit terminal-browser rendering overrides", () => {
+    const displayScale = "1.5";
+    const frameBudgetMbps = "4";
+    const environment = buildTestEnvironment({
+      inputEnvironment: {
+        TERMINAL_BROWSER_DISPLAY_SCALE: displayScale,
+        TERMINAL_BROWSER_FRAME_BUDGET_MBPS: frameBudgetMbps,
+      },
+    });
+
+    expect(environment.TERMINAL_BROWSER_DISPLAY_SCALE).toBe(displayScale);
+    expect(environment.TERMINAL_BROWSER_FRAME_BUDGET_MBPS).toBe(frameBudgetMbps);
   });
 });
 

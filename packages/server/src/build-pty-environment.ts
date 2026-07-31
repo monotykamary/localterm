@@ -3,6 +3,8 @@ import path from "node:path";
 import {
   COLORTERM_VALUE,
   DEFAULT_MACOS_PTY_LOCALE,
+  DEFAULT_TERMINAL_BROWSER_DISPLAY_SCALE,
+  DEFAULT_TERMINAL_BROWSER_FRAME_BUDGET_MBPS,
   LOCALTERM_STATE_DIRNAME,
   LOCALTERM_VALUE,
   PTY_ENV_DENYLIST,
@@ -73,6 +75,14 @@ export const buildPtyEnvironment = ({
   environment.COLORTERM = COLORTERM_VALUE;
   environment.LOCALTERM = LOCALTERM_VALUE;
   environment.LOCALTERM_SESSION_ID = sessionId;
+  // terminal-browser otherwise treats xterm's CSS pixels as Retina device pixels,
+  // and its conservative inline transport cap leaves LocalTerm's backpressured path idle.
+  environment.TERMINAL_BROWSER_DISPLAY_SCALE ||= String(
+    DEFAULT_TERMINAL_BROWSER_DISPLAY_SCALE,
+  );
+  environment.TERMINAL_BROWSER_FRAME_BUDGET_MBPS ||= String(
+    DEFAULT_TERMINAL_BROWSER_FRAME_BUDGET_MBPS,
+  );
 
   return environment;
 };
