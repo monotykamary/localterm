@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.70.7
+
+### Patch Changes
+
+- 59770d1: Render terminal-browser with LocalTerm's CSS-pixel viewport and a higher inline frame budget for a desktop layout and smoother updates.
+
 ## 2.70.6
 
 ## 2.70.5
