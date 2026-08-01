@@ -8,6 +8,10 @@ import type { KittyPixelFrame } from "./kitty-apc-scanner.js";
 interface RelayState {
   pending: KittyPixelFrame | null;
   active: boolean;
+  // Bumped on cancel() so an in-flight read whose pixels belong to a screen the
+  // app has already left is dropped instead of landing after the client's
+  // overlay clear.
+  generation: number;
 }
 
 export const readPixelFrame = async (
@@ -40,7 +44,7 @@ export class KittyFrameFileRelay {
   push(managed: ManagedSession, frame: KittyPixelFrame, tmpdirRoot: string): void {
     let state = this.states.get(managed);
     if (!state) {
-      state = { pending: null, active: false };
+      state = { pending: null, active: false, generation: 0 };
       this.states.set(managed, state);
     }
     state.pending = frame;
@@ -48,6 +52,16 @@ export class KittyFrameFileRelay {
       state.active = true;
       void this.pump(managed, state, tmpdirRoot);
     }
+  }
+
+  // Drop the queued frame and invalidate in-flight reads — the app's screen
+  // content reset, so its pixels would overlay fresh main-buffer text if they
+  // arrived late.
+  cancel(managed: ManagedSession): void {
+    const state = this.states.get(managed);
+    if (!state) return;
+    state.pending = null;
+    state.generation++;
   }
 
   private async pump(
@@ -59,8 +73,9 @@ export class KittyFrameFileRelay {
       while (state.pending) {
         const frame = state.pending;
         state.pending = null;
+        const generation = state.generation;
         const pixels = await readPixelFrame(frame, tmpdirRoot);
-        if (pixels) {
+        if (pixels && state.generation === generation) {
           this.transport.broadcastPixelFrame(managed, frame.width, frame.height, pixels);
         }
       }

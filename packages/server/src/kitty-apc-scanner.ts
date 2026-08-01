@@ -21,6 +21,10 @@ export interface KittyApcScan {
   output: string;
   frames: KittyPixelFrame[];
   probes: KittyMediumProbe[];
+  // The app left the alternate screen (1049/1047/47) or hard-reset (ESC c) —
+  // any relayed pixel picture on screen is stale from this point on, so the
+  // client must clear its overlay.
+  screenReset: boolean;
 }
 
 const ESC = "\x1b";
@@ -28,6 +32,14 @@ const ESCAPE_START = ESC + "_";
 const ESCAPE_END = ESC + "\\";
 // The single final byte after ESC _ that identifies the kitty graphics protocol.
 const APC_FINAL_KITTY = 0x47; // 'G'
+
+// Screen-state transitions that invalidate an on-screen pixel picture: leaving
+// the alternate screen restores the pre-app main buffer (fresh content under
+// the overlay), and ESC c wipes the whole terminal state.
+const SCREEN_RESET_SEQUENCES = ["\x1b[?1049l", "\x1b[?1047l", "\x1b[?47l", "\x1bc"];
+// A reset sequence can straddle two PTY data events; carry enough of the
+// previous chunk's tail to match any of them across the boundary.
+const SCREEN_RESET_TAIL_BYTES = 7;
 
 interface KittyFields {
   [key: string]: string;
@@ -70,6 +82,7 @@ type Classification =
 // incomplete tail is buffered until its ESC \\ terminator lands.
 export class KittyApcScanner {
   private partial = "";
+  private resetTail = "";
 
   constructor(private readonly isAllowedPath: (name: string) => boolean) {}
 
@@ -79,6 +92,7 @@ export class KittyApcScanner {
     let output = "";
     const frames: KittyPixelFrame[] = [];
     const probes: KittyMediumProbe[] = [];
+    const screenReset = this.detectScreenReset(buffer);
     let from = 0;
     while (from < buffer.length) {
       const start = buffer.indexOf(ESCAPE_START, from);
@@ -107,7 +121,20 @@ export class KittyApcScanner {
       }
       from = after;
     }
-    return { output, frames, probes };
+    return { output, frames, probes, screenReset };
+  }
+
+  // Match reset sequences against the chunk plus the carried tail so a sequence
+  // split across PTY reads still trips. Each push yields a single flag: multiple
+  // resets in one push collapse, and a boundary match only fires on the later
+  // push (the earlier one merely prepared the tail).
+  private detectScreenReset(buffer: string): boolean {
+    const hay = this.resetTail + buffer;
+    this.resetTail = hay.slice(-SCREEN_RESET_TAIL_BYTES);
+    for (const sequence of SCREEN_RESET_SEQUENCES) {
+      if (hay.includes(sequence)) return true;
+    }
+    return false;
   }
 
   private classify(body: string): Classification {

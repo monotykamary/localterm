@@ -40,6 +40,9 @@ export class SessionOutputCoordinator {
   private readonly tmpdirRoot: string;
   private readonly realpathCache = new Map<string, string>();
   private readonly scanners = new WeakMap<ManagedSession, KittyApcScanner>();
+  // Sessions that have relayed at least one pixel frame since spawn — used to
+  // scope screen-reset clears to apps that actually own an on-screen picture.
+  private readonly frameSessions = new WeakSet<ManagedSession>();
 
   constructor({
     outputTransport,
@@ -123,6 +126,16 @@ export class SessionOutputCoordinator {
     const scan = this.scannerFor(managed).push(data);
     for (const probe of scan.probes) this.maybeAnswerProbe(managed, probe);
     for (const frame of scan.frames) this.frameRelay.push(managed, frame, this.tmpdirRoot);
+    if (scan.frames.length > 0) this.frameSessions.add(managed);
+    if (scan.screenReset && this.frameSessions.delete(managed)) {
+      // The frame-relaying app left the alt screen (or hard-reset): the main
+      // buffer content is back on screen, so any relayed picture still covering
+      // it on a client must be dropped. No-op if the session never framed. The
+      // relay is cancelled first so a read in flight can't re-land a stale
+      // frame after the clear.
+      this.frameRelay.cancel(managed);
+      this.outputTransport.broadcast(managed, { type: "pixel-frames-clear" });
+    }
     const output = scan.output;
     const didEndSynchronizedOutput = managed.synchronizedOutputEndDetector.push(output);
     managed.outputBatch += output;

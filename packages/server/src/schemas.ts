@@ -1592,6 +1592,13 @@ const compressMessageSchema = z
 // older clients, which drop it and keep legacy parsing.
 const binaryFramingMessageSchema = z.object({ type: z.literal("binary-framing") }).strict();
 
+// The app owning the session left the alt screen / hard-reset after relaying at
+// least one pixel frame: the terminal now shows main-buffer content that a
+// stale relayed picture would cover, so clients should drop their overlay.
+// Only sent when the session actually produced a pixel frame — a vim-style
+// alt-screen exit without frames is a no-op wasteful to signal.
+const pixelFramesClearMessageSchema = z.object({ type: z.literal("pixel-frames-clear") }).strict();
+
 // A second client just attached to this PTY (a mobile ingested a desktop's
 // share QR, or another tab joined via the session picker). Broadcast to the
 // existing subscribers at attach time — before the joiner is added — so a
@@ -2152,6 +2159,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   replayEndMessageSchema,
   compressMessageSchema,
   binaryFramingMessageSchema,
+  pixelFramesClearMessageSchema,
   peerAttachedMessageSchema,
   ptySizeMessageSchema,
 ]);

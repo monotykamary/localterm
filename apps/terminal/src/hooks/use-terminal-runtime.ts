@@ -797,6 +797,11 @@ export const useTerminalRuntime = ({
           // client carries a type byte, including raw output (0x00). This is
           // what makes relayed pixel frames (0x04) unambiguous on raw/loopback.
           outputSession.setBinaryFraming(true);
+        } else if (message.type === "pixel-frames-clear") {
+          // The frame-owning app restored the main screen (or the root process
+          // hard-reset the terminal): drop the overlay so fresh shell text is
+          // visible.
+          pixelFrameOverlay.clear();
         } else if (message.type === "replay-end") {
           // The server has finished sending the scrollback replay. Write the
           // buffered frames as one block with onData suppressed so xterm's
