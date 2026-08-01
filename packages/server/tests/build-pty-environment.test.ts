@@ -6,6 +6,7 @@ import {
   DEFAULT_MACOS_PTY_LOCALE,
   DEFAULT_TERMINAL_BROWSER_DISPLAY_SCALE,
   DEFAULT_TERMINAL_BROWSER_FRAME_BUDGET_MBPS,
+  DEFAULT_TERMINAL_BROWSER_FPS,
   LOCALTERM_STATE_DIRNAME,
   ZSH_HOOK_DIRNAME,
 } from "../src/constants.js";
@@ -77,6 +78,7 @@ describe("buildPtyEnvironment", () => {
       inheritedEnvironment: {
         TERMINAL_BROWSER_DISPLAY_SCALE: "",
         TERMINAL_BROWSER_FRAME_BUDGET_MBPS: "",
+        TERMINAL_BROWSER_FPS: "",
       },
     });
 
@@ -86,20 +88,24 @@ describe("buildPtyEnvironment", () => {
     expect(environment.TERMINAL_BROWSER_FRAME_BUDGET_MBPS).toBe(
       String(DEFAULT_TERMINAL_BROWSER_FRAME_BUDGET_MBPS),
     );
+    expect(environment.TERMINAL_BROWSER_FPS).toBe(String(DEFAULT_TERMINAL_BROWSER_FPS));
   });
 
   it("preserves explicit terminal-browser rendering overrides", () => {
     const displayScale = "1.5";
     const frameBudgetMbps = "4";
+    const fps = "90";
     const environment = buildTestEnvironment({
       inputEnvironment: {
         TERMINAL_BROWSER_DISPLAY_SCALE: displayScale,
         TERMINAL_BROWSER_FRAME_BUDGET_MBPS: frameBudgetMbps,
+        TERMINAL_BROWSER_FPS: fps,
       },
     });
 
     expect(environment.TERMINAL_BROWSER_DISPLAY_SCALE).toBe(displayScale);
     expect(environment.TERMINAL_BROWSER_FRAME_BUDGET_MBPS).toBe(frameBudgetMbps);
+    expect(environment.TERMINAL_BROWSER_FPS).toBe(fps);
   });
 });
 

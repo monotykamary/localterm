@@ -10,6 +10,11 @@ export const COLORTERM_VALUE = "truecolor";
 export const LOCALTERM_VALUE = "1";
 export const DEFAULT_TERMINAL_BROWSER_DISPLAY_SCALE = 1;
 export const DEFAULT_TERMINAL_BROWSER_FRAME_BUDGET_MBPS = 12;
+// terminal-browser clamps its cadence to the (display-reported) frame rate;
+// daemon-side windows report ~22Hz offscreen. 120 gives native smoothness on
+// 120Hz displays and enough overshoot to hold 60 on 60Hz clients — the relay
+// over localterm has been measured lossless well past 100 fps.
+export const DEFAULT_TERMINAL_BROWSER_FPS = 120;
 // launchd omits locale variables; pbcopy otherwise treats UTF-8 terminal text as MacRoman.
 export const DEFAULT_MACOS_PTY_LOCALE = "C.UTF-8";
 
