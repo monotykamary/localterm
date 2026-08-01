@@ -31,14 +31,14 @@ describe("pasted image session lifecycle", { tags: ["integration"] }, () => {
     manager?.disposeAll();
   });
 
-  it("reaps a session's paste dir when the session is killed", () => {
+  it("reaps a session's paste dir when the session is killed", async () => {
     manager = createManager();
     const socket = createFakeSocket();
     const spawned = manager.spawnAndAttach(socket, { shell: "/bin/sh", cwd: os.tmpdir() });
     expect(spawned).not.toBeNull();
     if (!spawned) return;
 
-    writePastedImage(spawned.id, new Uint8Array([0x89, 0x50, 0x4e, 0x47]), "png");
+    await writePastedImage(spawned.id, new Uint8Array([0x89, 0x50, 0x4e, 0x47]), "png");
     const dir = pasteImageDirForSession(spawned.id);
     expect(fs.existsSync(dir)).toBe(true);
 

@@ -261,6 +261,9 @@ export const MAX_OUTPUT_BYTES = 1 * 1024 * 1024;
 // raster while rejecting an accidental or hostile dump that would wedge the
 // multipart parse.
 export const MAX_IMAGE_UPLOAD_BYTES = 32 * 1024 * 1024;
+export const MAX_IMAGE_UPLOAD_MULTIPART_OVERHEAD_BYTES = 64 * 1024;
+export const MAX_IMAGE_UPLOAD_REQUEST_BYTES =
+  MAX_IMAGE_UPLOAD_BYTES + MAX_IMAGE_UPLOAD_MULTIPART_OVERHEAD_BYTES;
 export const MAX_FOREGROUND_LENGTH = 256;
 export const MAX_TITLE_LENGTH = 4 * 1024;
 export const MAX_NOTIFICATION_LENGTH = 1024;

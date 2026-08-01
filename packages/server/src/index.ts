@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { serve, type ServerType, upgradeWebSocket } from "@hono/node-server";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import open from "open";
 import { WebSocketServer } from "ws";
 import { AutomationRunTracker } from "./automation-run-tracker.js";
@@ -57,6 +58,7 @@ import {
   HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE,
   MAX_AUTOMATIONS,
   MAX_IMAGE_UPLOAD_BYTES,
+  MAX_IMAGE_UPLOAD_REQUEST_BYTES,
   MAX_PROCESSES,
   MAX_SECRETS,
   MS_PER_MINUTE,
@@ -1545,44 +1547,46 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
   // user's project tree. The sid is sanitized to a single path component so a
   // crafted ?sid can't escape the temp root; the image-type allowlist (no SVG /
   // text) and the byte cap are the other guards.
-  api.post("/upload-image", async (context) => {
-    const declaredLength = Number(context.req.header("content-length") ?? 0);
-    if (declaredLength > MAX_IMAGE_UPLOAD_BYTES) {
-      return context.json({ error: "too_large" }, HTTP_STATUS_PAYLOAD_TOO_LARGE);
-    }
-    const sessionId = context.req.query(SESSION_ID_QUERY_PARAM);
-    if (!sessionId || !isValidPasteSessionId(sessionId)) {
-      return context.json({ error: "invalid_session" }, HTTP_STATUS_BAD_REQUEST);
-    }
-    let form: Record<string, unknown> | null = null;
-    try {
-      form = (await context.req.parseBody()) as Record<string, unknown>;
-    } catch {
-      return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
-    }
-    const image = form?.image;
-    if (!(image instanceof File) || image.size === 0) {
-      return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
-    }
-    if (image.size > MAX_IMAGE_UPLOAD_BYTES) {
-      return context.json({ error: "too_large" }, HTTP_STATUS_PAYLOAD_TOO_LARGE);
-    }
-    const extension = extensionForImageContentType(image.type);
-    if (!extension) {
-      return context.json({ error: "unsupported_type" }, HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE);
-    }
-    let absolutePath: string;
-    try {
-      absolutePath = writePastedImage(
-        sessionId,
-        new Uint8Array(await image.arrayBuffer()),
-        extension,
-      );
-    } catch {
-      return context.json({ error: "write_failed" }, HTTP_STATUS_BAD_REQUEST);
-    }
-    return context.json({ path: absolutePath }, HTTP_STATUS_CREATED);
-  });
+  api.post(
+    "/upload-image",
+    bodyLimit({
+      maxSize: MAX_IMAGE_UPLOAD_REQUEST_BYTES,
+      onError: (context) => context.json({ error: "too_large" }, HTTP_STATUS_PAYLOAD_TOO_LARGE),
+    }),
+    async (context) => {
+      const sessionId = context.req.query(SESSION_ID_QUERY_PARAM);
+      if (!sessionId || !isValidPasteSessionId(sessionId)) {
+        return context.json({ error: "invalid_session" }, HTTP_STATUS_BAD_REQUEST);
+      }
+      let image: unknown;
+      try {
+        image = (await context.req.parseBody()).image;
+      } catch {
+        return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+      }
+      if (!(image instanceof File) || image.size === 0) {
+        return context.json({ error: "invalid_body" }, HTTP_STATUS_BAD_REQUEST);
+      }
+      if (image.size > MAX_IMAGE_UPLOAD_BYTES) {
+        return context.json({ error: "too_large" }, HTTP_STATUS_PAYLOAD_TOO_LARGE);
+      }
+      const extension = extensionForImageContentType(image.type);
+      if (!extension) {
+        return context.json({ error: "unsupported_type" }, HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE);
+      }
+      let absolutePath: string;
+      try {
+        absolutePath = await writePastedImage(
+          sessionId,
+          new Uint8Array(await image.arrayBuffer()),
+          extension,
+        );
+      } catch {
+        return context.json({ error: "write_failed" }, HTTP_STATUS_BAD_REQUEST);
+      }
+      return context.json({ path: absolutePath }, HTTP_STATUS_CREATED);
+    },
+  );
 
   const readJsonBody = async (context: { req: { json: () => Promise<unknown> } }) => {
     try {

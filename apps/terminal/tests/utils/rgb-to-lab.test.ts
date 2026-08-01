@@ -62,6 +62,17 @@ describe("RGB ↔ Lab round-trip", () => {
     expect(recovered.y).toBeCloseTo(xyz.y, 6);
     expect(recovered.z).toBeCloseTo(xyz.z, 6);
   });
+
+  it("keeps extreme finite Lab values finite", () => {
+    const xyz = labToXyz({
+      l: Number.MAX_VALUE,
+      a: -Number.MAX_VALUE,
+      b: Number.MAX_VALUE,
+    });
+    expect(Number.isFinite(xyz.x)).toBe(true);
+    expect(Number.isFinite(xyz.y)).toBe(true);
+    expect(Number.isFinite(xyz.z)).toBe(true);
+  });
 });
 
 describe("hexToLab / labToHex round-trip", () => {

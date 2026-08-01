@@ -1,12 +1,45 @@
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { MAX_IMAGE_UPLOAD_REQUEST_BYTES } from "../src/constants.js";
 import { createServer, type RunningServer } from "../src/index.js";
 import {
   deletePasteImagesForSession,
   pasteImageDirForSession,
 } from "../src/utils/paste-image-store.js";
+
+interface RawHttpResponse {
+  body: string;
+  statusCode: number;
+}
+
+const postWithDeclaredLength = (port: number, declaredLength: number): Promise<RawHttpResponse> =>
+  new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path: "/api/upload-image?sid=test-session-id",
+        method: "POST",
+        headers: {
+          "content-type": "multipart/form-data; boundary=localterm-test",
+          "content-length": String(declaredLength),
+        },
+      },
+      (response) => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => {
+          body += chunk;
+        });
+        response.on("end", () => resolve({ body, statusCode: response.statusCode ?? 0 }));
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
 
 describe("/api/upload-image", () => {
   let stateDirectory: string;
@@ -62,6 +95,13 @@ describe("/api/upload-image", () => {
     expect(fs.existsSync(dir)).toBe(true);
     deletePasteImagesForSession(sessionId);
     expect(fs.existsSync(dir)).toBe(false);
+  });
+
+  it("rejects an oversized multipart request before parsing its body", async () => {
+    const response = await postWithDeclaredLength(server.port, MAX_IMAGE_UPLOAD_REQUEST_BYTES + 1);
+
+    expect(response.statusCode).toBe(413);
+    expect(JSON.parse(response.body)).toEqual({ error: "too_large" });
   });
 
   it("rejects a non-image content type with 415 unsupported_type", async () => {

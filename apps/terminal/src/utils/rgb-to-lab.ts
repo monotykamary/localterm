@@ -14,6 +14,7 @@ const D65_Z = 1.08883;
 
 const LAB_CUBE_ROOT_THRESHOLD = 0.008856;
 const LAB_CUBE_ROOT_COEFFICIENT = 7.787;
+const LAB_NORMALIZED_CHANNEL_ABSOLUTE_MAX = 1e100;
 
 interface Rgb {
   r: number;
@@ -93,11 +94,15 @@ export const xyzToLab = (xyz: Xyz): Lab => {
   };
 };
 
-const labChannelToXyz = (fValue: number, whitePoint: number): number => {
-  const cubed = fValue * fValue * fValue;
-  if (cubed > CIE_EPSILON) return whitePoint * cubed;
-  return whitePoint * ((116 * fValue - 16) / CIE_KAPPA);
-};
+function labChannelToNormalizedXyz(fValue: number): number {
+  const boundedValue = Math.max(
+    -LAB_NORMALIZED_CHANNEL_ABSOLUTE_MAX,
+    Math.min(LAB_NORMALIZED_CHANNEL_ABSOLUTE_MAX, fValue),
+  );
+  const cubed = boundedValue * boundedValue * boundedValue;
+  if (cubed > CIE_EPSILON) return cubed;
+  return (116 * boundedValue - 16) / CIE_KAPPA;
+}
 
 export const labToXyz = (lab: Lab): Xyz => {
   const fY = (lab.l + 16) / 116;
@@ -105,9 +110,9 @@ export const labToXyz = (lab: Lab): Xyz => {
   const fZ = fY - lab.b / 200;
 
   return {
-    x: labChannelToXyz(fX, D65_X),
-    y: labChannelToXyz(fY, D65_Y),
-    z: labChannelToXyz(fZ, D65_Z),
+    x: D65_X * labChannelToNormalizedXyz(fX),
+    y: D65_Y * labChannelToNormalizedXyz(fY),
+    z: D65_Z * labChannelToNormalizedXyz(fZ),
   };
 };
 

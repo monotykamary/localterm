@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/toast";
 import { MAX_IMAGE_UPLOAD_BYTES } from "@monotykamary/localterm-server/protocol";
 import { PASTED_IMAGE_FEEDBACK_MS, PASTED_IMAGE_TOAST_ID } from "@/lib/constants";
 import { extractImageFromDataTransfer } from "@/utils/extract-image-from-data-transfer";
+import { normalizePastedImage } from "@/utils/normalize-pasted-image";
 import { shellQuoteArg } from "@/utils/shell-quote-arg";
 import { uploadPastedImage } from "@/utils/upload-pasted-image";
 
@@ -35,6 +36,7 @@ export const useTerminalImagePaste = ({
   const pasteImageFromBlobRef = useRef<((blob: Blob, filename: string) => Promise<void>) | null>(
     null,
   );
+  const uploadControllerRef = useRef<AbortController | null>(null);
 
   const showPastedImageNotice = useCallback(
     (notice: PastedImageNotice) => {
@@ -52,28 +54,43 @@ export const useTerminalImagePaste = ({
 
   const pasteImageFromBlob = useCallback(
     async (blob: Blob, filename: string) => {
-      const sessionId = liveSessionIdRef.current;
-      if (!blob.type.startsWith("image/")) {
-        showPastedImageNotice({ kind: "error", message: "Not an image" });
+      if (blob.size === 0) {
+        showPastedImageNotice({ kind: "error", message: "Image is empty" });
         return;
       }
-      if (blob.size > MAX_IMAGE_UPLOAD_BYTES) {
+      const image = normalizePastedImage(blob, filename);
+      if (!image) {
+        showPastedImageNotice({ kind: "error", message: "Unsupported image type" });
+        return;
+      }
+      if (image.blob.size > MAX_IMAGE_UPLOAD_BYTES) {
         showPastedImageNotice({ kind: "error", message: "Image too large" });
         return;
       }
+      const sessionId = liveSessionIdRef.current;
       if (!sessionId) {
         showPastedImageNotice({ kind: "error", message: "No session yet" });
         return;
       }
+
+      uploadControllerRef.current?.abort();
+      const uploadController = new AbortController();
+      uploadControllerRef.current = uploadController;
       showPastedImageNotice({ kind: "uploading", message: "Pasting image…" });
       try {
-        const absolutePath = await uploadPastedImage(sessionId, blob, filename);
+        const absolutePath = await uploadPastedImage(sessionId, image.blob, image.name, {
+          signal: uploadController.signal,
+        });
+        if (uploadControllerRef.current !== uploadController) return;
         pasteToTerminalRef.current?.(shellQuoteArg(absolutePath));
         const basename = absolutePath.split(/[/\\]/).pop() ?? absolutePath;
         showPastedImageNotice({ kind: "done", message: `Pasted ${basename}` });
       } catch (error) {
+        if (uploadControllerRef.current !== uploadController) return;
         const message = error instanceof Error ? error.message : "Upload failed";
         showPastedImageNotice({ kind: "error", message });
+      } finally {
+        if (uploadControllerRef.current === uploadController) uploadControllerRef.current = null;
       }
     },
     [liveSessionIdRef, pasteToTerminalRef, showPastedImageNotice],
@@ -82,6 +99,15 @@ export const useTerminalImagePaste = ({
   useEffect(() => {
     pasteImageFromBlobRef.current = pasteImageFromBlob;
   }, [pasteImageFromBlob]);
+
+  useEffect(() => {
+    return () => {
+      pasteImageFromBlobRef.current = null;
+      const uploadController = uploadControllerRef.current;
+      uploadControllerRef.current = null;
+      uploadController?.abort();
+    };
+  }, []);
 
   // The mobile entry point: open the system photo/file picker. A hidden
   // appended <input type=file> is the cross-platform path (iOS Safari blocks
@@ -128,18 +154,30 @@ export const useTerminalImagePaste = ({
       event.stopPropagation();
       void pasteImageFromBlobRef.current?.(image.blob, image.name);
     };
-    // Suppress the browser default (navigate to the dropped file) for ANY file
-    // drop so an accidental drop never leaves the terminal; only images upload.
+    // Suppress every browser drop default so a URL-backed image or unsupported
+    // file can never navigate the terminal tab away or reach xterm as garbage.
     const handleDrop = (event: DragEvent) => {
-      const image = extractImageFromDataTransfer(event.dataTransfer);
-      const hasFile = event.dataTransfer?.types?.includes("Files") ?? false;
-      if (!image && !hasFile) return;
       event.preventDefault();
       event.stopPropagation();
-      if (image) void pasteImageFromBlobRef.current?.(image.blob, image.name);
+      const dataTransfer = event.dataTransfer;
+      if (!dataTransfer) return;
+      const image = extractImageFromDataTransfer(dataTransfer);
+      if (image) {
+        void pasteImageFromBlobRef.current?.(image.blob, image.name);
+        return;
+      }
+      const hasFile =
+        Boolean(dataTransfer.files?.length) ||
+        Array.from(dataTransfer.types ?? []).includes("Files");
+      showPastedImageNotice({
+        kind: "error",
+        message: hasFile ? "Unsupported image type" : "Drop an image file instead",
+      });
     };
     const handleDragOver = (event: DragEvent) => {
-      if (event.dataTransfer?.types?.includes("Files")) event.preventDefault();
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
     };
     container.addEventListener("paste", handlePaste, true);
     container.addEventListener("drop", handleDrop, true);
@@ -149,7 +187,7 @@ export const useTerminalImagePaste = ({
       container.removeEventListener("drop", handleDrop, true);
       container.removeEventListener("dragover", handleDragOver);
     };
-  }, [containerRef]);
+  }, [containerRef, showPastedImageNotice]);
 
   return pickAndPasteImage;
 };

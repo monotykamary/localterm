@@ -259,7 +259,11 @@ export type {
 } from "./types.js";
 export { compileSchedule, compileScheduleAll } from "./utils/compile-schedule.js";
 export type { BrowserCandidate, DetectedBrowser } from "./cdp/detect-chromium.js";
-export { extensionForImageContentType, isImagePath } from "./utils/image-extensions.js";
+export {
+  extensionForImageContentType,
+  isImagePath,
+  pastedImageContentTypeForPath,
+} from "./utils/image-extensions.js";
 export type { ServerError, ServerErrorCode, ServerErrorKind } from "./errors.js";
 export type {
   AuthSession,

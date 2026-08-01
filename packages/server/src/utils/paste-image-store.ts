@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -20,16 +21,16 @@ export const isValidPasteSessionId = (sessionId: string): boolean =>
 export const pasteImageDirForSession = (sessionId: string): string =>
   path.join(PASTE_IMAGE_DIR_ROOT, sessionId);
 
-export const writePastedImage = (
+export const writePastedImage = async (
   sessionId: string,
   bytes: Uint8Array,
   extension: string,
-): string => {
-  const dir = pasteImageDirForSession(sessionId);
-  fs.mkdirSync(dir, { recursive: true });
+): Promise<string> => {
+  const directory = pasteImageDirForSession(sessionId);
+  await mkdir(directory, { recursive: true });
   const filename = `pasted-${Date.now()}-${randomUUID().slice(0, 8)}.${extension}`;
-  const absolutePath = path.join(dir, filename);
-  fs.writeFileSync(absolutePath, bytes);
+  const absolutePath = path.join(directory, filename);
+  await writeFile(absolutePath, bytes);
   return absolutePath;
 };
 
