@@ -10,6 +10,8 @@ import {
   WS_OUTPUT_CTX_HEADER_BYTES,
   WS_OUTPUT_GZIP,
   WS_OUTPUT_RAW,
+  WS_OUTPUT_TERMINAL_BROWSER_FRAME,
+  WS_OUTPUT_TERMINAL_BROWSER_FRAME_HEADER_BYTES,
 } from "@/lib/constants";
 import { createContextDecompressor } from "@/utils/create-context-decompressor";
 import { decompressFrame } from "@/utils/decompress-frame";
@@ -19,6 +21,7 @@ interface CreateTerminalOutputSessionOptions {
   onOverflow: () => void;
   onReplay: (chunks: Uint8Array[], onComplete: () => void) => void;
   onReplayComplete: () => void;
+  onTerminalBrowserFrame?: (width: number, height: number, rgba: Uint8Array) => void;
 }
 
 export interface TerminalOutputSession {
@@ -36,6 +39,7 @@ export const createTerminalOutputSession = ({
   onOverflow,
   onReplay,
   onReplayComplete,
+  onTerminalBrowserFrame,
 }: CreateTerminalOutputSessionOptions): TerminalOutputSession => {
   // Decompression is async (DecompressionStream), so serialize per socket:
   // frames must reach xterm in PTY order, and the replay-end flush must wait
@@ -190,6 +194,30 @@ export const createTerminalOutputSession = ({
     handleBinaryMessage: (messageData) => {
       if (disposed) return;
       const data = new Uint8Array(messageData);
+      // A relayed terminal-browser RGBA frame: the server only emits it once a
+      // compress mode is negotiated (so binary messages are always header-
+      // prefixed, making 0x04 unambiguous), and never during raw passthrough.
+      // Frames ride a separate WS channel: draw immediately, bypassing the
+      // decompression queue, replay buffering, and MAX_OUTPUT_BYTES.
+      if (negotiatedCompressMode !== null && data[0] === WS_OUTPUT_TERMINAL_BROWSER_FRAME) {
+        if (data.byteLength < WS_OUTPUT_TERMINAL_BROWSER_FRAME_HEADER_BYTES) return;
+        const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+        const width = view.getUint32(1, true);
+        const height = view.getUint32(5, true);
+        if (
+          width <= 0 ||
+          height <= 0 ||
+          width * height * 4 !== data.byteLength - WS_OUTPUT_TERMINAL_BROWSER_FRAME_HEADER_BYTES
+        ) {
+          return;
+        }
+        onTerminalBrowserFrame?.(
+          width,
+          height,
+          data.subarray(WS_OUTPUT_TERMINAL_BROWSER_FRAME_HEADER_BYTES),
+        );
+        return;
+      }
       if (data.byteLength > WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES) {
         overflow();
         return;

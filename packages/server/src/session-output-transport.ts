@@ -9,6 +9,7 @@ import {
   WS_OUTPUT_COMPRESS_THRESHOLD_BYTES,
   WS_OUTPUT_CTX_HEADER_BYTES,
   WS_OUTPUT_GZIP,
+  WS_OUTPUT_TERMINAL_BROWSER_FRAME,
   WS_OUTPUT_GZIP_LEVEL,
   WS_OUTPUT_RAW,
   WS_PENDING_CLIENT_MAX_BYTES,
@@ -206,6 +207,28 @@ export class SessionOutputTransport {
       ws,
       this.frameWithHeader(mode === "br" ? WS_OUTPUT_BROTLI : WS_OUTPUT_GZIP, compressed),
     );
+  }
+
+  broadcastTerminalBrowserFrame(
+    managed: ManagedSession,
+    width: number,
+    height: number,
+    rgba: Uint8Array<ArrayBuffer>,
+  ): void {
+    const frame = Buffer.allocUnsafe(9 + rgba.length);
+    frame[0] = WS_OUTPUT_TERMINAL_BROWSER_FRAME;
+    frame.writeUInt32LE(width, 1);
+    frame.writeUInt32LE(height, 5);
+    frame.set(rgba, 9);
+    for (const client of managed.clients) {
+      // Frame data must not ride the pending/replay buffer path (those bytes
+      // get written into xterm as terminal text), so skip attaching clients.
+      if (client.pending) continue;
+      // Raw-mode clients receive output as untyped bytes, where 0x04 is
+      // ordinary terminal data — they can't disambiguate, so skip them.
+      if (client.compressMode === null) continue;
+      this.sendOutputBytes(client.ws, frame);
+    }
   }
 
   broadcastBytes(managed: ManagedSession, bytes: Uint8Array<ArrayBuffer>): void {

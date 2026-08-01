@@ -1,3 +1,4 @@
+import os from "node:os";
 import {
   MAX_AUTOMATION_LOG_LENGTH,
   MAX_OUTPUT_BYTES,
@@ -9,6 +10,11 @@ import {
 } from "./constants.js";
 import type { ManagedClient, ManagedSession } from "./session-manager.js";
 import { SessionOutputTransport } from "./session-output-transport.js";
+import { TerminalBrowserFrameRelay } from "./terminal-browser-frame-relay.js";
+import {
+  isTerminalBrowserFramePath,
+  TerminalBrowserFrameScanner,
+} from "./terminal-browser-frame-scanner.js";
 import { getBufferedAmount } from "./utils/ws-socket.js";
 import { stripAnsi } from "./utils/strip-ansi.js";
 
@@ -22,6 +28,9 @@ export class SessionOutputCoordinator {
   private readonly outputTransport: SessionOutputTransport;
   private readonly noteOutputActivity: (pid: number) => void;
   private readonly onOutputActivity: () => void;
+  private readonly frameRelay: TerminalBrowserFrameRelay;
+  private readonly tmpdir = os.tmpdir();
+  private readonly frameScanner = new WeakMap<ManagedSession, TerminalBrowserFrameScanner>();
 
   constructor({
     outputTransport,
@@ -31,9 +40,22 @@ export class SessionOutputCoordinator {
     this.outputTransport = outputTransport;
     this.noteOutputActivity = noteOutputActivity;
     this.onOutputActivity = onOutputActivity;
+    this.frameRelay = new TerminalBrowserFrameRelay(outputTransport);
+  }
+
+  private scannerFor(managed: ManagedSession): TerminalBrowserFrameScanner {
+    let scanner = this.frameScanner.get(managed);
+    if (scanner) return scanner;
+    const tmpdir = this.tmpdir;
+    scanner = new TerminalBrowserFrameScanner((name) => isTerminalBrowserFramePath(name, tmpdir));
+    this.frameScanner.set(managed, scanner);
+    return scanner;
   }
 
   onSessionOutput(managed: ManagedSession, data: string): void {
+    for (const frame of this.scannerFor(managed).push(data)) {
+      this.frameRelay.push(managed, frame);
+    }
     const didEndSynchronizedOutput = managed.synchronizedOutputEndDetector.push(data);
     managed.outputBatch += data;
     managed.lastOutputAt = Date.now();
