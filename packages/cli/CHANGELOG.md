@@ -1,5 +1,13 @@
 # localterm
 
+## 2.72.4
+
+### Patch Changes
+
+- 3f5dec6: Make terminal image drops failure-safe: accept blank and nonstandard image MIME metadata, fall back to the dropped file list, block browser navigation for unsupported and URL-backed drops, cancel superseded uploads, time out stalled requests, bound multipart bodies, and write uploaded images without blocking the daemon. Keep pathological finite CIELAB inputs from overflowing theme color conversion.
+- Updated dependencies [3f5dec6]
+  - @monotykamary/localterm-server@2.72.4
+
 ## 2.72.3
 
 ### Patch Changes
