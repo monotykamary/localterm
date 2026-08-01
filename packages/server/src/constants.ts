@@ -368,20 +368,6 @@ export const WS_OUTPUT_COMPRESS_THRESHOLD_BYTES = 256;
 export const WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES = 16 * 1024 * 1024;
 export const WS_OUTPUT_BROTLI_QUALITY = 6;
 export const WS_OUTPUT_GZIP_LEVEL = 3;
-// Relayed terminal-browser frame wire header (0x04) and caps. After a client
-// negotiates a compress mode the server prefixes every binary output message
-// with a header byte (0x00–0x03), so 0x04 unambiguously tags a terminal-browser
-// RGBA frame (width/height u32LE + raw RGBA) rather than terminal text.
-export const WS_OUTPUT_TERMINAL_BROWSER_FRAME = 0x04;
-// Cap on a single relayed RGBA frame: 16M pixels (the xterm addon-image default
-// pixelLimit) × 4 bytes/px. Bounds the frame file we read and what we send over
-// the WS/loopback, so a runaway terminal-browser canvas can't balloon memory.
-export const MAX_TERMINAL_BROWSER_FRAME_PIXELS = 16 * 1024 * 1024;
-export const MAX_TERMINAL_BROWSER_FRAME_BYTES = 4 * MAX_TERMINAL_BROWSER_FRAME_PIXELS;
-// Upper bound on a single \x1b_G…\x1b\\ control chunk buffered while scanning for a
-// frame-transport sequence split across PTY data events (the payload is base64
-// of a short temp path). Past this we stop buffering instead of holding memory.
-export const MAX_TERMINAL_BROWSER_FRAME_STREAM_BYTES = 64 * 1024;
 
 // Heartbeat: send a WS ping every N ms; if no pong arrives within the timeout
 // we tear down the socket. Without this, half-open connections (laptop sleep,

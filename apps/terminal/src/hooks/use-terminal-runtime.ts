@@ -61,7 +61,6 @@ import { resolveResumeSession } from "@/utils/resolve-resume-session";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 
 import { createTerminalSurface } from "@/lib/terminal-runtime/create-terminal-surface";
-import { createTerminalBrowserFrameOverlay } from "@/lib/terminal-runtime/create-terminal-browser-frame-overlay";
 import {
   createTerminalOutputSession,
   type TerminalOutputSession,
@@ -386,11 +385,6 @@ export const useTerminalRuntime = ({
 
     terminalSurface.loadWebgl();
 
-    // Full-screen canvas that holds relayed terminal-browser RGBA frames. Lazily
-    // sized/created on the first frame; cleared when a session switch leaves
-    // terminal-browser, so a stale pixel screen never lingers over a new PTY.
-    const terminalBrowserFrameOverlay = createTerminalBrowserFrameOverlay(container);
-
     const kittyKeyboardProtocol = registerTerminalKittyKeyboardProtocol(terminal);
     const getKittyFlags = kittyKeyboardProtocol.getFlags;
 
@@ -557,7 +551,6 @@ export const useTerminalRuntime = ({
           }
         },
         onReplayComplete: updateScrollbar,
-        onTerminalBrowserFrame: terminalBrowserFrameOverlay.applyFrame,
       });
 
     let nextTerminalDataIsUserInput = false;
@@ -720,9 +713,6 @@ export const useTerminalRuntime = ({
           const sessionTransition = sessionLifecycle.handleSession(message.id);
           const { isSwitch, priorSessionId } = sessionTransition;
           outputSession.beginSession();
-          // A fresh PTY means the screen is no longer terminal-browser's; clear any
-          // stale pixel frame so it can't cover the new content.
-          terminalBrowserFrameOverlay.clear();
           localEcho.flush();
           // Drop the prior PTY's effective-viewport mask: the new PTY's size
           // arrives in its own `pty-size` frame, and until it does the mask
@@ -940,7 +930,6 @@ export const useTerminalRuntime = ({
       disposed = true;
       setTerminalReady(false);
       terminalScrollbar.dispose();
-      terminalBrowserFrameOverlay.dispose();
       kittyKeyboardProtocol.dispose();
       scrollbackPurgeDisposable.dispose();
       selectiveScrollbackPurgeDisposable.dispose();

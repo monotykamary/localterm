@@ -411,11 +411,6 @@ export const WS_OUTPUT_GZIP = 0x01;
 export const WS_OUTPUT_BROTLI = 0x02;
 export const WS_OUTPUT_BROTLI_CTX = 0x03;
 export const WS_OUTPUT_CTX_HEADER_BYTES = 5;
-// 0x04 tags a relayed terminal-browser RGBA frame (width/height u32LE + raw
-// RGBA). Only meaningful once a compress mode is negotiated (binary output is
-// then always header-prefixed), never in raw passthrough mode.
-export const WS_OUTPUT_TERMINAL_BROWSER_FRAME = 0x04;
-export const WS_OUTPUT_TERMINAL_BROWSER_FRAME_HEADER_BYTES = 9;
 export const SYNTAX_TOKEN_CACHE_MAX_FILES = 32;
 export const AGENT_SKILL_CACHE_MAX_CWDS = 64;
 

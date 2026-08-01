@@ -37,14 +37,6 @@ describe("buildPtyEnvironment", () => {
     expect(environment.LANG).toBe(DEFAULT_MACOS_PTY_LOCALE);
   });
 
-  it("forces terminal-browser into the kitty file frame transport", () => {
-    const environment = buildTestEnvironment({
-      inheritedEnvironment: { HOME: "/Users/tester" },
-    });
-
-    expect(environment.TERMINAL_BROWSER_FRAMES).toBe("file");
-  });
-
   it("treats empty locale variables as unconfigured", () => {
     const environment = buildTestEnvironment({
       inheritedEnvironment: { LANG: "", LC_ALL: "", LC_CTYPE: "" },

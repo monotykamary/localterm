@@ -81,11 +81,6 @@ export const buildPtyEnvironment = ({
   environment.TERMINAL_BROWSER_FRAME_BUDGET_MBPS ||= String(
     DEFAULT_TERMINAL_BROWSER_FRAME_BUDGET_MBPS,
   );
-  // Force terminal-browser's cheap frame transport (a kitty 'file' medium) so
-  // each frame is a tiny "transmit by name" escape instead of base64 RGBA inline.
-  // LocalTerm's daemon relays the named temp file over the WS (see
-  // terminal-browser-frame-relay); the browser can't read the host file itself.
-  environment.TERMINAL_BROWSER_FRAMES ||= "file";
 
   return environment;
 };
