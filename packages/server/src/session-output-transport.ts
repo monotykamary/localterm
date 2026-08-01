@@ -8,8 +8,10 @@ import {
   WS_OUTPUT_BROTLI_QUALITY,
   WS_OUTPUT_COMPRESS_THRESHOLD_BYTES,
   WS_OUTPUT_CTX_HEADER_BYTES,
+  WS_OUTPUT_FRAME_HEADER_BYTES,
   WS_OUTPUT_GZIP,
   WS_OUTPUT_GZIP_LEVEL,
+  WS_OUTPUT_PIXEL_FRAME,
   WS_OUTPUT_RAW,
   WS_PENDING_CLIENT_MAX_BYTES,
   WS_PENDING_CLIENT_MAX_CONTROL_MESSAGES,
@@ -183,7 +185,12 @@ export class SessionOutputTransport {
   ): Promise<void> {
     const mode = client.compressMode;
     if (mode === null) {
-      this.sendOutputBytes(ws, bytes);
+      // Framing-enabled clients always read a type byte, so raw output carries a
+      // 0x00 header. Legacy clients keep the untyped stream.
+      this.sendOutputBytes(
+        ws,
+        client.framingEnabled ? this.frameWithHeader(WS_OUTPUT_RAW, bytes) : bytes,
+      );
       return;
     }
     if (bytes.length < WS_OUTPUT_COMPRESS_THRESHOLD_BYTES) {
@@ -208,6 +215,27 @@ export class SessionOutputTransport {
     );
   }
 
+  broadcastPixelFrame(
+    managed: ManagedSession,
+    width: number,
+    height: number,
+    rgba: Uint8Array,
+  ): void {
+    // Frames are only deliverable over the always-on binary framing channel the
+    // client negotiated ({ready} binaryFraming + the {binary-framing} confirm).
+    // Pending attach and legacy clients keep their legacy byte stream; a frame
+    // for them lands on the next relay after they promote.
+    const frame = Buffer.allocUnsafe(WS_OUTPUT_FRAME_HEADER_BYTES + rgba.length);
+    frame[0] = WS_OUTPUT_PIXEL_FRAME;
+    frame.writeUInt32LE(width, 1);
+    frame.writeUInt32LE(height, 5);
+    frame.set(rgba, WS_OUTPUT_FRAME_HEADER_BYTES);
+    for (const client of managed.clients) {
+      if (client.pending || !client.framingEnabled) continue;
+      this.sendOutputBytes(client.ws, frame);
+    }
+  }
+
   broadcastBytes(managed: ManagedSession, bytes: Uint8Array<ArrayBuffer>): void {
     if (bytes.length === 0) return;
     const compressible = bytes.length >= WS_OUTPUT_COMPRESS_THRESHOLD_BYTES;
@@ -226,7 +254,10 @@ export class SessionOutputTransport {
       }
       const mode = client.compressMode;
       if (mode === null) {
-        this.sendOutputBytes(client.ws, bytes);
+        this.sendOutputBytes(
+          client.ws,
+          client.framingEnabled ? this.frameWithHeader(WS_OUTPUT_RAW, bytes) : bytes,
+        );
         continue;
       }
       if (!compressible) {

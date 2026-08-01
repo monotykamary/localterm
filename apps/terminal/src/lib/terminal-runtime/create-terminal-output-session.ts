@@ -5,10 +5,13 @@ import {
 } from "@monotykamary/localterm-server/protocol";
 
 import {
+  MAX_PIXEL_FRAME_PIXELS,
   WS_OUTPUT_BROTLI,
   WS_OUTPUT_BROTLI_CTX,
   WS_OUTPUT_CTX_HEADER_BYTES,
+  WS_OUTPUT_FRAME_HEADER_BYTES,
   WS_OUTPUT_GZIP,
+  WS_OUTPUT_PIXEL_FRAME,
   WS_OUTPUT_RAW,
 } from "@/lib/constants";
 import { createContextDecompressor } from "@/utils/create-context-decompressor";
@@ -19,6 +22,9 @@ interface CreateTerminalOutputSessionOptions {
   onOverflow: () => void;
   onReplay: (chunks: Uint8Array[], onComplete: () => void) => void;
   onReplayComplete: () => void;
+  // Relayed pixel frames (kitty file-medium RGBA relayed by the daemon) routed
+  // outside the terminal output path — never written into xterm.
+  onPixelFrame?: (width: number, height: number, rgba: Uint8Array) => void;
 }
 
 export interface TerminalOutputSession {
@@ -28,6 +34,11 @@ export interface TerminalOutputSession {
   finishReplay: () => void;
   handleBinaryMessage: (data: ArrayBuffer) => void;
   isSuppressingOutput: () => boolean;
+  // Always-on binary framing: every binary WS message from the server carries a
+  // 1-byte type header (0x00 raw output, 0x01–0x03 compressed output, 0x04
+  // pixel frame). Confirmed by the server via its {binary-framing} control
+  // message, only for clients that advertised it in {ready}.
+  setBinaryFraming: (enabled: boolean) => void;
   setCompressMode: (mode: CompressMode) => void;
 }
 
@@ -36,6 +47,7 @@ export const createTerminalOutputSession = ({
   onOverflow,
   onReplay,
   onReplayComplete,
+  onPixelFrame,
 }: CreateTerminalOutputSessionOptions): TerminalOutputSession => {
   // Decompression is async (DecompressionStream), so serialize per socket:
   // frames must reach xterm in PTY order, and the replay-end flush must wait
@@ -60,6 +72,10 @@ export const createTerminalOutputSession = ({
   let replayChunks: Uint8Array[] = [];
   let suppressOutput = false;
   let disposed = false;
+  // Server-confirmed always-on binary framing ({binary-framing} control). Raw
+  // loopback sessions rely on this to separate the pixel-frame channel from
+  // terminal output — without it a raw-mode message has no type byte.
+  let binaryFramingEnabled = false;
 
   const releaseContextDecompressor = (): void => {
     if (contextDecompressor !== null) {
@@ -194,7 +210,26 @@ export const createTerminalOutputSession = ({
         overflow();
         return;
       }
-      if (negotiatedCompressMode === null) {
+      // Pixel frames ride the always-on binary framing channel: messages whose
+      // first byte is a type header. They exceed ordinary output caps (validated
+      // against the pixel budget instead) and must never be written into xterm.
+      if (binaryFramingEnabled && data[0] === WS_OUTPUT_PIXEL_FRAME) {
+        if (data.byteLength < WS_OUTPUT_FRAME_HEADER_BYTES) return;
+        const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+        const width = view.getUint32(1, true);
+        const height = view.getUint32(5, true);
+        if (
+          width <= 0 ||
+          height <= 0 ||
+          width * height > MAX_PIXEL_FRAME_PIXELS ||
+          width * height * 4 !== data.byteLength - WS_OUTPUT_FRAME_HEADER_BYTES
+        ) {
+          return;
+        }
+        onPixelFrame?.(width, height, data.subarray(WS_OUTPUT_FRAME_HEADER_BYTES));
+        return;
+      }
+      if (negotiatedCompressMode === null && !binaryFramingEnabled) {
         // Raw passthrough (no compression — a no-DecompressionStream browser,
         // or an old server that never sent {compress} frame): no header byte.
         if (data.byteLength > MAX_OUTPUT_BYTES) {
@@ -257,6 +292,10 @@ export const createTerminalOutputSession = ({
       });
     },
     isSuppressingOutput: () => suppressOutput,
+    setBinaryFraming: (enabled) => {
+      if (disposed) return;
+      binaryFramingEnabled = enabled;
+    },
     setCompressMode: (mode) => {
       if (disposed) return;
       // The server's chosen compress mode, sent on promote BEFORE the

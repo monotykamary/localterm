@@ -368,6 +368,21 @@ export const WS_OUTPUT_COMPRESS_THRESHOLD_BYTES = 256;
 export const WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES = 16 * 1024 * 1024;
 export const WS_OUTPUT_BROTLI_QUALITY = 6;
 export const WS_OUTPUT_GZIP_LEVEL = 3;
+// Binary WS message type for a relayed pixel frame (kitty file-medium RGBA).
+// Only emitted on connections that negotiated always-on binary framing (the
+// client's {ready} advertises binaryFraming and the server confirms via the
+// {binary-framing} control message), where every binary message carries a
+// 1-byte type header — 0x00 raw output, 0x01–0x03 compressed output, 0x04
+// pixel frame — so raw-mode (loopback) sockets parse the same way.
+export const WS_OUTPUT_PIXEL_FRAME = 0x04;
+export const WS_OUTPUT_FRAME_HEADER_BYTES = 9;
+// 16M pixels (the xterm addon-image default pixelLimit) × 4 bytes/px bounds the
+// frame file the daemon reads and relays for one request.
+export const MAX_PIXEL_FRAME_PIXELS = 16 * 1024 * 1024;
+export const MAX_PIXEL_FRAME_BYTES = 4 * MAX_PIXEL_FRAME_PIXELS;
+// Upper bound on a single incompleted APC chunk buffered while scanning PTY
+// output for kitty graphics sequences split across PTY data events.
+export const MAX_APC_BUFFER_BYTES = 64 * 1024;
 
 // Heartbeat: send a WS ping every N ms; if no pong arrives within the timeout
 // we tear down the socket. Without this, half-open connections (laptop sleep,

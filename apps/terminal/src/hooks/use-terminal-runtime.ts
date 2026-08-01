@@ -61,6 +61,7 @@ import { resolveResumeSession } from "@/utils/resolve-resume-session";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 
 import { createTerminalSurface } from "@/lib/terminal-runtime/create-terminal-surface";
+import { createPixelFrameOverlay } from "@/lib/terminal-runtime/create-pixel-frame-overlay";
 import {
   createTerminalOutputSession,
   type TerminalOutputSession,
@@ -385,6 +386,12 @@ export const useTerminalRuntime = ({
 
     terminalSurface.loadWebgl();
 
+    // Full-screen canvas for relayed pixel frames (kitty file-medium apps like
+    // terminal-browser). Lazily sized/created on the first frame; cleared when
+    // a session switch leaves the frame source, so a stale pixel screen never
+    // lingers over a fresh PTY.
+    const pixelFrameOverlay = createPixelFrameOverlay(container);
+
     const kittyKeyboardProtocol = registerTerminalKittyKeyboardProtocol(terminal);
     const getKittyFlags = kittyKeyboardProtocol.getFlags;
 
@@ -551,6 +558,7 @@ export const useTerminalRuntime = ({
           }
         },
         onReplayComplete: updateScrollbar,
+        onPixelFrame: pixelFrameOverlay.applyFrame,
       });
 
     let nextTerminalDataIsUserInput = false;
@@ -713,6 +721,9 @@ export const useTerminalRuntime = ({
           const sessionTransition = sessionLifecycle.handleSession(message.id);
           const { isSwitch, priorSessionId } = sessionTransition;
           outputSession.beginSession();
+          // A fresh PTY means the screen no longer represents the previous frame
+          // source; clear any stale overlay picture so it can't cover new content.
+          pixelFrameOverlay.clear();
           localEcho.flush();
           // Drop the prior PTY's effective-viewport mask: the new PTY's size
           // arrives in its own `pty-size` frame, and until it does the mask
@@ -773,9 +784,19 @@ export const useTerminalRuntime = ({
             // block. Cleared in the replay-end handler.
             outputSession.beginReplay();
           }
-          send({ type: "ready", replay: wantsReplay, compress: COMPRESS_MODE });
+          send({
+            type: "ready",
+            replay: wantsReplay,
+            compress: COMPRESS_MODE,
+            binaryFraming: true,
+          });
         } else if (message.type === "compress") {
           outputSession.setCompressMode(message.mode);
+        } else if (message.type === "binary-framing") {
+          // Server confirmed always-on framing: every binary WS message to this
+          // client carries a type byte, including raw output (0x00). This is
+          // what makes relayed pixel frames (0x04) unambiguous on raw/loopback.
+          outputSession.setBinaryFraming(true);
         } else if (message.type === "replay-end") {
           // The server has finished sending the scrollback replay. Write the
           // buffered frames as one block with onData suppressed so xterm's
@@ -930,6 +951,7 @@ export const useTerminalRuntime = ({
       disposed = true;
       setTerminalReady(false);
       terminalScrollbar.dispose();
+      pixelFrameOverlay.dispose();
       kittyKeyboardProtocol.dispose();
       scrollbackPurgeDisposable.dispose();
       selectiveScrollbackPurgeDisposable.dispose();

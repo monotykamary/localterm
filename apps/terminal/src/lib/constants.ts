@@ -411,6 +411,13 @@ export const WS_OUTPUT_GZIP = 0x01;
 export const WS_OUTPUT_BROTLI = 0x02;
 export const WS_OUTPUT_BROTLI_CTX = 0x03;
 export const WS_OUTPUT_CTX_HEADER_BYTES = 5;
+// 0x04 tags a relayed pixel frame (kitty file-medium RGBA). Only parsed when the
+// server confirmed always-on binary framing (the {binary-framing} control
+// message), in which case every binary message carries a 1-byte type header.
+export const WS_OUTPUT_PIXEL_FRAME = 0x04;
+export const WS_OUTPUT_FRAME_HEADER_BYTES = 9;
+// Same cap as the daemon: 16M pixels × 4 bytes/px.
+export const MAX_PIXEL_FRAME_PIXELS = 16 * 1024 * 1024;
 export const SYNTAX_TOKEN_CACHE_MAX_FILES = 32;
 export const AGENT_SKILL_CACHE_MAX_CWDS = 64;
 

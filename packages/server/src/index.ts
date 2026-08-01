@@ -3278,7 +3278,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             // detected via DecompressionStream); the server compresses output
             // frames for it (or sends raw if null — a back-compat/no-support
             // client).
-            registry.promote(ws, parsed.data.replay, parsed.data.compress);
+            registry.promote(
+              ws,
+              parsed.data.replay,
+              parsed.data.compress,
+              parsed.data.binaryFraming,
+            );
           } else if (parsed.data.type === "caffeinate-mode") {
             caffeinateManager.setMode(parsed.data.mode);
           } else if (parsed.data.type === "caffeinate-commands") {

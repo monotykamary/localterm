@@ -560,6 +560,14 @@ const readyMessageSchema = z
     type: z.literal("ready"),
     replay: z.boolean(),
     compress: compressModeSchema.default(null),
+    // Advertises that the client can parse binary WS messages that ALWAYS carry
+    // a 1-byte type header — 0x00 raw output, 0x01—0x03 compressed output,
+    // 0x04 relayed pixel frame — even when compress is null (loopback raw). The
+    // server confirms with a {binary-framing} control message; without the
+    // advertisement it keeps legacy semantics (header only when a compress mode
+    // is negotiated), where raw output is untyped and 0x04 can't be
+    // distinguished from terminal bytes.
+    binaryFraming: z.boolean().default(false),
   })
   .strict();
 
@@ -1576,6 +1584,14 @@ const compressMessageSchema = z
   .object({ type: z.literal("compress"), mode: compressModeSchema })
   .strict();
 
+// Confirms always-on binary framing: the server will prefix every binary WS
+// message to this client with a 1-byte type header (0x00 raw output,
+// 0x01—0x03 compressed output, 0x04 relayed pixel frame) even when the
+// negotiated compress mode is null. Sent on promote right after {compress},
+// and only to clients that advertised binaryFraming in {ready}. Unknown to
+// older clients, which drop it and keep legacy parsing.
+const binaryFramingMessageSchema = z.object({ type: z.literal("binary-framing") }).strict();
+
 // A second client just attached to this PTY (a mobile ingested a desktop's
 // share QR, or another tab joined via the session picker). Broadcast to the
 // existing subscribers at attach time — before the joiner is added — so a
@@ -2135,6 +2151,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   cdpControlledMessageSchema,
   replayEndMessageSchema,
   compressMessageSchema,
+  binaryFramingMessageSchema,
   peerAttachedMessageSchema,
   ptySizeMessageSchema,
 ]);

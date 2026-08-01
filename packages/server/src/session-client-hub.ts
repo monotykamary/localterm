@@ -165,6 +165,7 @@ export class SessionClientHub {
       compressMode: null,
       brotliEncoder: null,
       terminalResponder: false,
+      framingEnabled: false,
     };
     coordinator.add(ws);
     managed.clients.add(client);
@@ -220,7 +221,12 @@ export class SessionClientHub {
   // lets the client flush whatever it buffered (the pending bytes that raced
   // ahead of the marker) and rejoin live fan-out. A client that didn't open the
   // window (a silent reattach, or a back-compat reader) treats it as a no-op.
-  async promote(ws: ClientSocket, replay: boolean, compress: CompressMode = null): Promise<void> {
+  async promote(
+    ws: ClientSocket,
+    replay: boolean,
+    compress: CompressMode = null,
+    binaryFraming = false,
+  ): Promise<void> {
     const entry = this.wsToClient.get(ws);
     if (!entry) return;
     const client = entry.client;
@@ -230,6 +236,7 @@ export class SessionClientHub {
       client.pendingTimer = null;
     }
     client.compressMode = compress;
+    client.framingEnabled = binaryFraming;
     this.ensureTerminalResponder(entry.session, client);
     // Reset the persistent Brotli encoder: a new promote is a fresh attach (a
     // PTY switch or reconnect), so the prior screen's LZ77 context is stale.
@@ -245,6 +252,11 @@ export class SessionClientHub {
     // that doesn't know "br-ctx" never sends this frame, so an old-server +
     // new-client pair degrades to raw (no header) instead of mis-parsing.
     this.sendControl(ws, { type: "compress", mode: compress });
+    // Confirm always-on binary framing (a type byte on every binary message,
+    // even raw) so raw/loopback clients can receive pixel frames (0x04). Only
+    // advertised-capable clients parse this; older clients get the legacy
+    // no-header raw stream.
+    if (binaryFraming) this.sendControl(ws, { type: "binary-framing" });
     if (replay) {
       await this.outputTransport.sendScrollback(ws, entry.session, client);
     }

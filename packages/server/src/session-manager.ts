@@ -114,6 +114,10 @@ export interface ManagedClient {
   compressMode: CompressMode;
   brotliEncoder: BrotliEncoder | null;
   terminalResponder: boolean;
+  // Client confirmed it can parse binary WS messages that always carry a 1-byte
+  // type header (0x00 raw, 0x01—0x03 compressed, 0x04 relayed pixel frame),
+  // even in raw/loopback mode. Set from its {ready} advertisement at promote.
+  framingEnabled: boolean;
 }
 
 export interface ManagedSession {
@@ -254,6 +258,9 @@ export class SessionManager {
       outputTransport: this.outputTransport,
       noteOutputActivity: (pid) => this.noteOutput(pid),
       onOutputActivity: () => this.hooks.onOutputActivity(),
+      // Medium probes are answered with the session owner's writeInput path so a
+      // multi-tenant daemon never crosses session boundaries.
+      writeInput: (managed, data) => this.writeInputById(managed.id, data, managed.owner),
     });
     this.shimsDir = options.shimsDir;
   }
@@ -482,8 +489,13 @@ export class SessionManager {
     return managed;
   }
 
-  async promote(ws: ClientSocket, replay: boolean, compress: CompressMode = null): Promise<void> {
-    return this.clientHub.promote(ws, replay, compress);
+  async promote(
+    ws: ClientSocket,
+    replay: boolean,
+    compress: CompressMode = null,
+    binaryFraming = false,
+  ): Promise<void> {
+    return this.clientHub.promote(ws, replay, compress, binaryFraming);
   }
 
   writeInput(ws: ClientSocket, data: string): void {
