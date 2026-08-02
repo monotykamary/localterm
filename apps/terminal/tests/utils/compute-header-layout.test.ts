@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { computeHeaderLayout } from "../../src/utils/compute-header-layout";
+
+vi.mock("@chenglou/pretext", () => ({
+  prepareWithSegments: (text: string) => text,
+  measureNaturalWidth: (text: string) => Array.from(text).length,
+}));
 
 const MINIMUM_AUDITED_HEADER_WIDTH_PX = 200;
 const MAXIMUM_AUDITED_HEADER_WIDTH_PX = 1280;
@@ -12,6 +17,7 @@ const ADVERSARIAL_BRANCH_NAMES = [
 ] as const;
 
 const assertLayoutsFit = (previousConfigIndex?: number) => {
+  const failures: string[] = [];
   for (
     let availableWidth = MINIMUM_AUDITED_HEADER_WIDTH_PX;
     availableWidth <= MAXIMUM_AUDITED_HEADER_WIDTH_PX;
@@ -35,11 +41,22 @@ const assertLayoutsFit = (previousConfigIndex?: number) => {
         previousConfigIndex,
       });
 
-      expect(layout.fitsAvailableWidth).toBe(true);
-      expect(layout.requiredWidthPx).toBeLessThanOrEqual(availableWidth);
-      expect(layout.selectWidthPx).toBeLessThan(availableWidth);
+      if (!layout.fitsAvailableWidth) {
+        failures.push(`${availableWidth}px ${selectedBranch}: layout does not fit`);
+      }
+      if (layout.requiredWidthPx > availableWidth) {
+        failures.push(
+          `${availableWidth}px ${selectedBranch}: requires ${layout.requiredWidthPx}px`,
+        );
+      }
+      if (layout.selectWidthPx >= availableWidth) {
+        failures.push(
+          `${availableWidth}px ${selectedBranch}: select uses ${layout.selectWidthPx}px`,
+        );
+      }
     }
   }
+  expect(failures).toEqual([]);
 };
 
 describe("computeHeaderLayout", () => {
