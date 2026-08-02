@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.72.5
+
+### Patch Changes
+
+- e1be8a9: Keep desktop notification clicks tied to the tab that emitted them, even when that tab switches sessions before the notification is clicked.
+
 ## 2.72.4
 
 ### Patch Changes
