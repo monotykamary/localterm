@@ -1,5 +1,13 @@
 # localterm
 
+## 2.72.7
+
+### Patch Changes
+
+- cb77a0b: Keep Pi's Option+Enter follow-up shortcut working after reattaching to a long-running session whose initial Kitty keyboard mode request has rolled out of LocalTerm's replay buffer.
+- Updated dependencies [cb77a0b]
+  - @monotykamary/localterm-server@2.72.7
+
 ## 2.72.6
 
 ### Patch Changes
