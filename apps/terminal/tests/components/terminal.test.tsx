@@ -193,6 +193,10 @@ vi.mock("@xterm/xterm", () => {
     private handle: FakeXtermHandle;
 
     parser = {
+      registerOscHandler: (
+        _identifier: number,
+        _callback: (data: string) => boolean | Promise<boolean>,
+      ) => ({ dispose: () => {} }),
       registerCsiHandler: (
         id: { prefix?: string; final: string },
         callback: (params: (number | number[])[]) => boolean | Promise<boolean>,
@@ -301,8 +305,11 @@ vi.mock("@xterm/addon-fit", () => {
 });
 
 vi.mock("@xterm/addon-clipboard", () => {
-  class FakeClipboardAddon {}
-  return { ClipboardAddon: FakeClipboardAddon };
+  class FakeBase64 {
+    encodeText = (data: string) => data;
+    decodeText = (data: string) => data;
+  }
+  return { Base64: FakeBase64 };
 });
 
 vi.mock("@xterm/addon-unicode-graphemes", () => {

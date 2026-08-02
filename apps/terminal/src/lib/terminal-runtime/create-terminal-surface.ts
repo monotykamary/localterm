@@ -1,4 +1,3 @@
-import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
 import { ProgressAddon } from "@xterm/addon-progress";
@@ -21,6 +20,7 @@ import type { TerminalTheme } from "@/lib/terminal-themes";
 import { generateExtendedPalette } from "@/utils/generate-extended-palette";
 import { getTerminalMinimumContrastRatio } from "@/utils/get-terminal-minimum-contrast-ratio";
 import { preserveTerminalMouseWheelMagnitude } from "@/utils/preserve-terminal-mouse-wheel-magnitude";
+import { registerTerminalClipboard } from "@/utils/register-terminal-clipboard";
 import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider";
 import { outputBatcher } from "@/utils/write-terminal-output";
 
@@ -104,7 +104,7 @@ export const createTerminalSurface = ({
   fitAddonRef.current = fitAddon;
   terminal.loadAddon(fitAddon);
   terminal.loadAddon(new WebLinksAddon());
-  terminal.loadAddon(new ClipboardAddon());
+  const clipboardDisposable = registerTerminalClipboard(terminal);
   terminal.loadAddon(new ImageAddon());
   terminal.loadAddon(new ProgressAddon());
   terminal.loadAddon(new UnicodeGraphemesAddon());
@@ -187,6 +187,7 @@ export const createTerminalSurface = ({
     dispose: () => {
       searchResultsDisposable.dispose();
       mouseWheelMagnitudeDisposable?.dispose();
+      clipboardDisposable.dispose();
       delete windowProperties[LOCALTERM_PANE_TEXT_PROPERTY];
       delete windowProperties[LOCALTERM_MOUSE_CELLS_PROPERTY];
       outputBatcher.detach();
