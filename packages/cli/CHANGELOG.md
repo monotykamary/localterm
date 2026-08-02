@@ -1,5 +1,13 @@
 # localterm
 
+## 2.72.6
+
+### Patch Changes
+
+- bb3e106: Keep OSC 52 clipboard reads and writes from pausing terminal output when browser clipboard access is denied or never settles.
+- Updated dependencies [bb3e106]
+  - @monotykamary/localterm-server@2.72.6
+
 ## 2.72.5
 
 ### Patch Changes
