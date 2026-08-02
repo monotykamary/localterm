@@ -51,6 +51,32 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+self.addEventListener("message", (event) => {
+  const data = event.data || {};
+  if (
+    data.type !== "show-session-notification" ||
+    typeof data.title !== "string" ||
+    typeof data.body !== "string" ||
+    typeof data.tag !== "string" ||
+    typeof data.sessionId !== "string" ||
+    typeof data.hasViewers !== "boolean" ||
+    !event.source?.id
+  ) {
+    return;
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      tag: data.tag,
+      data: {
+        sid: data.sessionId,
+        hasViewers: data.hasViewers,
+        sourceClientId: event.source.id,
+      },
+    }),
+  );
+});
+
 // Clicking a desktop notification the SW showed (via registration.showNotification
 // from the page) should open the emitting terminal. WindowClient.focus() — unlike
 // a main-thread window.focus() from a Notification onclick — is the API browsers
@@ -68,22 +94,27 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(
     (async () => {
       const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      const own = clients.filter((client) => client.url.startsWith(self.location.origin));
-      // Prefer a tab already viewing this session (its URL carries ?sid=<sid>),
-      // so the click just focuses it instead of opening another tab over it.
-      const onSession =
-        sid && own.find((client) => client.url.includes(`sid=${encodeURIComponent(sid)}`));
+      const own = clients.filter((client) => new URL(client.url).origin === self.location.origin);
+      const onSession = sid
+        ? own.find((client) => new URL(client.url).searchParams.get("sid") === sid)
+        : undefined;
       if (onSession) {
         await onSession.focus();
-        if (sid) onSession.postMessage({ type: "focus-session", sid });
+        onSession.postMessage({ type: "focus-session", sid });
         return;
       }
-      // No tab in this profile is on the session. If it's viewed elsewhere
-      // (another profile, or this profile's tab URL isn't synced yet), opening
-      // or switching a tab here would create a second client the SW can't
-      // replace — so just bring localterm forward instead.
       if (hasViewers) {
-        if (own[0]) await own[0].focus();
+        const sourceClient = data.sourceClientId
+          ? await self.clients.get(data.sourceClientId)
+          : undefined;
+        const target =
+          sourceClient && new URL(sourceClient.url).origin === self.location.origin
+            ? sourceClient
+            : own[0];
+        if (target) {
+          await target.focus();
+          if (sid && sourceClient) target.postMessage({ type: "focus-session", sid });
+        }
         return;
       }
       // Orphaned (no viewer anywhere): open a fresh tab seeded with ?sid= so it

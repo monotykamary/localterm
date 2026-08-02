@@ -2,6 +2,7 @@ import { NOTIFICATION_TAG_PREFIX, NOTIFICATION_TITLE } from "@/lib/constants";
 import type { TerminalTheme } from "@/lib/terminal-themes";
 import type { CaffeinateMode } from "@/components/keep-awake-menu";
 import { shouldSuppressSessionNotification } from "@/utils/should-suppress-session-notification";
+import { showServiceWorkerNotification } from "@/utils/show-service-worker-notification";
 import { SESSION_ID_QUERY_PARAM } from "@/utils/sync-session-id-query-param";
 import type {
   AutomationWithNextRun,
@@ -140,16 +141,15 @@ export const dispatchTerminalControlMessage = (
       ) {
         return true;
       }
-      const serviceWorker = navigator.serviceWorker;
-      if (serviceWorker?.controller) {
-        void serviceWorker.ready.then((registration) =>
-          registration.showNotification(NOTIFICATION_TITLE, {
-            body: message.body,
-            tag: `${NOTIFICATION_TAG_PREFIX}${sessionId}`,
-            data: { sid: sessionId, hasViewers: message.hasViewers },
-          }),
-        );
-      } else {
+      if (
+        !showServiceWorkerNotification({
+          body: message.body,
+          hasViewers: message.hasViewers,
+          sessionId,
+          tag: `${NOTIFICATION_TAG_PREFIX}${sessionId}`,
+          title: NOTIFICATION_TITLE,
+        })
+      ) {
         const notification = new Notification(message.body);
         notification.onclick = () => {
           window.focus();
