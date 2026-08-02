@@ -919,6 +919,39 @@ describe("Terminal modified Tab routing", () => {
     expect(fakeWebSockets[0]?.send).not.toHaveBeenCalled();
   });
 
+  it("clears a replayed Git summary when the session frame identifies a non-repo cwd", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireMessage({
+        type: "git-diff-summary",
+        summary: {
+          isRepo: true,
+          files: 2,
+          additions: 337,
+          deletions: 20,
+          binaries: 0,
+          branch: "main",
+        },
+      });
+    });
+    expect(screen.getByLabelText(/view git diff/i)).not.toBeNull();
+
+    act(() => {
+      fakeWebSockets[0]?.fireMessage({
+        type: "session",
+        shell: "/bin/zsh",
+        shellName: "zsh",
+        pid: 1,
+        cwd: "/current-non-repo",
+        title: "zsh",
+        foreground: null,
+      });
+    });
+
+    expect(screen.queryByLabelText(/view git diff/i)).toBeNull();
+  });
+
   it("restores Git metadata when herdr's slim hover handle is expanded", () => {
     render(<Terminal />);
     act(() => {

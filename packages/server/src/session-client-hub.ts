@@ -147,7 +147,9 @@ export class SessionClientHub {
     // itself. See peerAttachedMessageSchema for the frame's payload rationale.
     if (managed.clients.size > 0)
       this.outputTransport.broadcast(managed, { type: "peer-attached" });
-    const coordinator = this.coordinatorForCwd(managed.session.cwd);
+    const coordinator = this.coordinatorForCwd(
+      managed.session.lastEmittedCwd || managed.session.cwd,
+    );
     const client: ManagedClient = {
       ws,
       pending: true,

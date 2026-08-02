@@ -283,6 +283,7 @@ export const useTerminalRuntime = ({
     setConsecutiveFailures,
     setSessionInfo,
     setLiveCwd,
+    setGitDiffSummary,
     setForegroundProcess,
     setSearchResults,
   } = callbacks;
@@ -765,6 +766,7 @@ export const useTerminalRuntime = ({
             title: message.title,
             foreground: message.foreground,
           });
+          setGitDiffSummary(null);
           setLiveCwd(message.cwd);
           applyIncomingTitle(message.title);
           removeRunQueryParam();
