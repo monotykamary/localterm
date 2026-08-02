@@ -3,9 +3,11 @@ import { TerminalModeState } from "../../src/utils/terminal-mode-state.js";
 
 const ESC = "\x1b";
 
-describe("TerminalModeState.restorePrefix", () => {
+describe("TerminalModeState replay restoration", () => {
   it("is empty before any mode-set sequences are seen", () => {
-    expect(new TerminalModeState().restorePrefix()).toBe("");
+    const state = new TerminalModeState();
+    expect(state.restorePrefix()).toBe("");
+    expect(state.restoreReplay("output")).toBe("output");
   });
 
   it("restores alt-screen enter and mouse enable for a running TUI", () => {
@@ -68,5 +70,41 @@ describe("TerminalModeState.restorePrefix", () => {
     const state = new TerminalModeState();
     state.update(`some output${ESC}[?1049h${ESC}[?2004h${ESC}[?1006hmore output`);
     expect(state.restorePrefix()).toBe(`${ESC}[?1006h${ESC}[?1049h${ESC}[?2004h`);
+  });
+
+  it("reasserts a Kitty keyboard stack after the retained replay bytes", () => {
+    const state = new TerminalModeState();
+    state.update(`${ESC}[>7u${ESC}[>3u`);
+    expect(state.restoreReplay("recent output")).toBe(
+      `recent output${ESC}[<16u${ESC}[>7u${ESC}[>3u`,
+    );
+  });
+
+  it("tracks Kitty keyboard pops and set modes", () => {
+    const state = new TerminalModeState();
+    state.update(`${ESC}[=4u${ESC}[=2;2u${ESC}[=4;3u${ESC}[>7u${ESC}[>3u${ESC}[<1u`);
+    expect(state.restoreReplay("output")).toBe(`output${ESC}[<16u${ESC}[=2u${ESC}[>7u`);
+  });
+
+  it("tracks Kitty keyboard modes independently across screen buffers", () => {
+    const state = new TerminalModeState();
+    state.update(`${ESC}[>7u${ESC}[?1049h${ESC}[>3u`);
+    expect(state.restoreReplay("alternate")).toBe(`${ESC}[?1049halternate${ESC}[<16u${ESC}[>3u`);
+
+    state.update(`${ESC}[?1049l`);
+    expect(state.restoreReplay("main")).toBe(`main${ESC}[<16u${ESC}[>7u`);
+  });
+
+  it("tracks Kitty keyboard requests split across PTY chunks", () => {
+    const state = new TerminalModeState();
+    state.update(`${ESC}[>`);
+    state.update("7u");
+    expect(state.restoreReplay("output")).toBe(`output${ESC}[<16u${ESC}[>7u`);
+  });
+
+  it("clears tracked modes on a hard terminal reset", () => {
+    const state = new TerminalModeState();
+    state.update(`${ESC}[?1049h${ESC}[>7u${ESC}c`);
+    expect(state.restoreReplay("output")).toBe("output");
   });
 });

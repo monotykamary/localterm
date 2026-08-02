@@ -276,9 +276,11 @@ export const TERMINAL_DELETE_TO_LINE_START_SEQUENCE = String.fromCharCode(21);
 // the legacy bare control byte (which can't distinguish e.g. Enter vs Shift+Enter).
 export const KITTY_KEYBOARD_DISAMBIGUATE_FLAG = 1;
 export const KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG = 2;
-export const KITTY_KEYBOARD_SET_MODE_REPLACE = 1;
-export const KITTY_KEYBOARD_SET_MODE_OR = 2;
-export const KITTY_KEYBOARD_SET_MODE_AND_NOT = 3;
+export {
+  KITTY_KEYBOARD_SET_MODE_AND_NOT,
+  KITTY_KEYBOARD_SET_MODE_OR,
+  KITTY_KEYBOARD_SET_MODE_REPLACE,
+} from "@monotykamary/localterm-server/constants";
 
 export const SEARCH_MATCH_BACKGROUND_HEX = "#ffc79944";
 export const SEARCH_ACTIVE_MATCH_BACKGROUND_HEX = "#ffc799";

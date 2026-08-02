@@ -85,8 +85,8 @@ export class Session extends EventEmitter<SessionEvents> {
   // oldest chunks are dropped as new output arrives.
   private readonly scrollbackChunks: string[] = [];
   private scrollbackBytes = 0;
-  // Live DECSET/DECRST mode state (alt-screen, mouse, bracketed paste, cursor
-  // hide) updated from every PTY chunk. snapshotScrollback() prepends a
+  // Live terminal mode state (alt-screen, mouse, bracketed paste, cursor hide,
+  // Kitty keyboard) updated from every PTY chunk. snapshotScrollback() adds a
   // restore prefix from this so a switch into a long-running TUI re-enters the
   // alt screen and re-enables mouse even when the TUI's mode-set sequences
   // have scrolled out of the 256KB replay window — otherwise the wheel scrolls
@@ -317,9 +317,10 @@ export class Session extends EventEmitter<SessionEvents> {
   }
 
   // Concatenate the scrollback ring buffer for attach-time replay, prefixed
-  // with a restore of the PTY's live terminal modes (alt-screen, mouse,
-  // bracketed paste, cursor hide) so a switch into a long-running TUI re-enters
-  // the alt screen and re-enables mouse even when the TUI's mode-set sequences
+  // with a restore of the PTY's live DEC modes (alt-screen, mouse, bracketed
+  // paste, cursor hide) and suffixed with its Kitty keyboard stack. A switch
+  // into a long-running TUI therefore re-enters the alt screen and re-enables
+  // mouse even when the TUI's mode-set sequences
   // have scrolled out of the 256KB window — otherwise the wheel scrolls xterm's
   // scrollback instead of the TUI. Warm standalone DA1/DA2 requests never reach
   // the ring buffer: the TerminalQueryResponder removes and answers them live.
@@ -330,7 +331,7 @@ export class Session extends EventEmitter<SessionEvents> {
   // that covers any query, present or future. The join cost is paid here (read
   // time, cold switch path) not on the hot output path.
   snapshotScrollback(): string {
-    return this.modeState.restorePrefix() + this.scrollbackChunks.join("");
+    return this.modeState.restoreReplay(this.scrollbackChunks.join(""));
   }
 
   private appendScrollback(data: string): void {
