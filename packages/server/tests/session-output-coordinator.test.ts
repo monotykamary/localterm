@@ -14,8 +14,6 @@ import { createSynchronizedOutputEndDetector } from "../src/utils/create-synchro
 
 const ESC = "\x1b";
 const encode = (value: string) => Buffer.from(value).toString("base64");
-const flushAsync = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
-
 describe("SessionOutputCoordinator kitty file-medium handling", () => {
   const tmpdir = process.env.TMPDIR || os.tmpdir();
 
@@ -74,8 +72,7 @@ describe("SessionOutputCoordinator kitty file-medium handling", () => {
     const { managed } = makeSession(true);
     const { coordinator, writeInput } = makeCoordinator();
     const text = `${ESC}_Gi=300,a=q,t=f,f=32,s=1,v=1;${encode(probeFile)}${ESC}\\`;
-    coordinator.onSessionOutput(managed, text);
-    await flushAsync();
+    await coordinator.onSessionOutput(managed, text);
     expect(writeInput).toHaveBeenCalledTimes(1);
     expect(writeInput.mock.calls[0][1]).toBe(`${ESC}_Gi=300;OK${ESC}\\`);
     fs.rmSync(probeFile, { force: true });
@@ -87,8 +84,7 @@ describe("SessionOutputCoordinator kitty file-medium handling", () => {
     const { managed } = makeSession(false);
     const { coordinator, writeInput } = makeCoordinator();
     const text = `${ESC}_Gi=300,a=q,t=f,f=32,s=1,v=1;${encode(probeFile)}${ESC}\\`;
-    coordinator.onSessionOutput(managed, text);
-    await flushAsync();
+    await coordinator.onSessionOutput(managed, text);
     expect(writeInput).not.toHaveBeenCalled();
     fs.rmSync(probeFile, { force: true });
   });
@@ -99,8 +95,7 @@ describe("SessionOutputCoordinator kitty file-medium handling", () => {
     const { managed, sent } = makeSession(true);
     const { coordinator } = makeCoordinator();
     const text = `${ESC}_Ga=T,f=32,s=4,v=2,t=f,i=9,q=2;${encode(frameFile)}${ESC}\\`;
-    coordinator.onSessionOutput(managed, text);
-    await flushAsync();
+    await coordinator.onSessionOutput(managed, text);
     const frame = sent.find((bytes) => bytes[0] === WS_OUTPUT_PIXEL_FRAME);
     expect(frame).toBeDefined();
     if (!frame) throw new Error("missing frame");

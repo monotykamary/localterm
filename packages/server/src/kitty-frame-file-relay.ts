@@ -12,6 +12,7 @@ interface RelayState {
   // app has already left is dropped instead of landing after the client's
   // overlay clear.
   generation: number;
+  task: Promise<void> | null;
 }
 
 export const readPixelFrame = async (
@@ -41,17 +42,18 @@ export class KittyFrameFileRelay {
 
   constructor(private readonly transport: SessionOutputTransport) {}
 
-  push(managed: ManagedSession, frame: KittyPixelFrame, tmpdirRoot: string): void {
+  push(managed: ManagedSession, frame: KittyPixelFrame, tmpdirRoot: string): Promise<void> {
     let state = this.states.get(managed);
     if (!state) {
-      state = { pending: null, active: false, generation: 0 };
+      state = { pending: null, active: false, generation: 0, task: null };
       this.states.set(managed, state);
     }
     state.pending = frame;
     if (!state.active) {
       state.active = true;
-      void this.pump(managed, state, tmpdirRoot);
+      state.task = this.pump(managed, state, tmpdirRoot);
     }
+    return state.task ?? Promise.resolve();
   }
 
   // Drop the queued frame and invalidate in-flight reads — the app's screen
@@ -81,6 +83,7 @@ export class KittyFrameFileRelay {
       }
     } finally {
       state.active = false;
+      state.task = null;
     }
   }
 }

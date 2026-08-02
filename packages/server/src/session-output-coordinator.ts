@@ -97,9 +97,9 @@ export class SessionOutputCoordinator {
     return hasFramedViewer;
   }
 
-  private maybeAnswerProbe(managed: ManagedSession, probe: KittyMediumProbe): void {
-    if (!this.canRelayFrames(managed)) return;
-    void this.respondToProbe(managed, probe);
+  private maybeAnswerProbe(managed: ManagedSession, probe: KittyMediumProbe): Promise<void> | null {
+    if (!this.canRelayFrames(managed)) return null;
+    return this.respondToProbe(managed, probe);
   }
 
   private async respondToProbe(managed: ManagedSession, probe: KittyMediumProbe): Promise<void> {
@@ -119,13 +119,18 @@ export class SessionOutputCoordinator {
     );
   }
 
-  onSessionOutput(managed: ManagedSession, data: string): void {
+  async onSessionOutput(managed: ManagedSession, data: string): Promise<void> {
     // kitty file-medium sequences: probes are answered by the daemon (and
     // stripped so nothing else races a reply); named frame transmits pass
     // through while their pixels are relayed over the WS frame channel.
     const scan = this.scannerFor(managed).push(data);
-    for (const probe of scan.probes) this.maybeAnswerProbe(managed, probe);
-    for (const frame of scan.frames) this.frameRelay.push(managed, frame, this.tmpdirRoot);
+    const probeTasks = scan.probes
+      .map((probe) => this.maybeAnswerProbe(managed, probe))
+      .filter((task) => task !== null);
+    const frameTasks = scan.frames.map((frame) =>
+      this.frameRelay.push(managed, frame, this.tmpdirRoot),
+    );
+    const asyncTasks = Promise.all([...probeTasks, ...frameTasks]);
     if (scan.frames.length > 0) this.frameSessions.add(managed);
     if (scan.screenReset && this.frameSessions.delete(managed)) {
       // The frame-relaying app left the alt screen (or hard-reset): the main
@@ -156,6 +161,7 @@ export class SessionOutputCoordinator {
         managed.outputBatchTimer = null;
       }
       this.flushOutput(managed);
+      await asyncTasks;
       return;
     }
     // Without a synchronized-output boundary, reset the coalescing window on
@@ -173,6 +179,7 @@ export class SessionOutputCoordinator {
     // still gates the message rate there (unchanged).
     if (managed.outputBatchTimer !== null) {
       managed.outputBatchTimer.refresh();
+      await asyncTasks;
       return;
     }
     managed.outputBatchTimer = setTimeout(() => {
@@ -180,6 +187,7 @@ export class SessionOutputCoordinator {
       this.flushOutput(managed);
     }, OUTPUT_BATCH_WINDOW_MS);
     managed.outputBatchTimer.unref?.();
+    await asyncTasks;
   }
 
   // Accumulate ANSI-stripped PTY output for an automation shell run, keeping
