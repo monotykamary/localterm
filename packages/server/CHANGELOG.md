@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.72.8
+
+### Patch Changes
+
+- 0a6a3c6: Keep reattached browser tabs scoped to their shell's live directory so a cached Git diff summary from the session's original repository cannot flash in a non-repository tab.
+
 ## 2.72.7
 
 ### Patch Changes
