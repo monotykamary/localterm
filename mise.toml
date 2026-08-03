@@ -7,4 +7,4 @@
 # fewer node launch. On macOS that also avoids an extra Gatekeeper/syspolicyd
 # assessment of the large notarized node binary.
 [tools]
-"npm:pnpm" = "11.6.0"
+"npm:pnpm" = "11.20.0"
