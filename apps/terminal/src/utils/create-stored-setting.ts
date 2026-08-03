@@ -59,13 +59,13 @@ export const createNumericStoredSetting = (
 
 export const createBooleanStoredSetting = (
   key: string,
-  defaultValue: boolean,
+  defaultValue: boolean | (() => boolean),
 ): StoredSetting<boolean> => {
   const load = (): boolean => {
     const raw = loadRaw(key);
     if (raw === "true") return true;
     if (raw === "false") return false;
-    return defaultValue;
+    return typeof defaultValue === "function" ? defaultValue() : defaultValue;
   };
   return {
     load,

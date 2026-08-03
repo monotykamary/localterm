@@ -30,6 +30,10 @@ import { isTerminalScrollbackValue, TERMINAL_SCROLLBACK_PRESETS } from "@/lib/te
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
 import { cn } from "@/lib/utils";
 
+const CTRL_N_TAKEOVER_DESCRIPTION_ID = "ctrl-n-takeover-description";
+const CTRL_N_TAKEOVER_DESCRIPTION =
+  "Send the browser's new-window shortcut to the terminal instead (next-history in shells, next-line in Emacs). The browser only allows this while the tab is fullscreen, so turning this on enters fullscreen.";
+
 export interface SettingsCdpStatus {
   connected: boolean;
   browser?: string;
@@ -85,6 +89,14 @@ export interface CursorSettingsSectionProps {
 export interface TypingSettingsSectionProps {
   localEcho: boolean;
   onLocalEchoChange: (enabled: boolean) => void;
+}
+
+export interface KeyboardSettingsSectionProps {
+  floatingKeyboardButtonEnabled: boolean;
+  onFloatingKeyboardButtonChange: (enabled: boolean) => void;
+  ctrlNTakeoverEnabled: boolean;
+  onCtrlNTakeoverChange: (enabled: boolean) => void;
+  ctrlNTakeoverDisabledReason: string | null;
 }
 
 export interface ScrollbackSettingsSectionProps {
@@ -547,6 +559,57 @@ export const CursorSettingsSection = ({
           aria-label="toggle cursor blink"
           checked={cursorBlink}
           onCheckedChange={onCursorBlinkChange}
+        />
+      </div>
+    </Field>
+  );
+};
+
+export const KeyboardSettingsSection = ({
+  floatingKeyboardButtonEnabled,
+  onFloatingKeyboardButtonChange,
+  ctrlNTakeoverEnabled,
+  onCtrlNTakeoverChange,
+  ctrlNTakeoverDisabledReason,
+}: KeyboardSettingsSectionProps) => {
+  const ctrlNTakeoverDescription = ctrlNTakeoverDisabledReason ?? CTRL_N_TAKEOVER_DESCRIPTION;
+  return (
+    <Field orientation="vertical" className="gap-1.5">
+      <FieldLabel className={SETTINGS_SECTION_LABEL_CLASSES}>Keyboard</FieldLabel>
+      <div className="flex items-center justify-between gap-2">
+        <Tooltip>
+          <TooltipTrigger render={<span className={SETTINGS_ROW_LABEL_CLASSES} />}>
+            Floating keyboard button
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX} className="max-w-xs">
+            A button in the bottom-right corner that opens the on-screen keyboard manually — for
+            touchscreens that aren't the main input, where tapping the terminal doesn't summon it.
+          </TooltipContent>
+        </Tooltip>
+        <Switch
+          aria-label="toggle floating keyboard button"
+          checked={floatingKeyboardButtonEnabled}
+          onCheckedChange={onFloatingKeyboardButtonChange}
+        />
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <Tooltip>
+          <TooltipTrigger render={<span className={SETTINGS_ROW_LABEL_CLASSES} />}>
+            Take over Ctrl+N
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX} className="max-w-xs">
+            {ctrlNTakeoverDescription}
+          </TooltipContent>
+        </Tooltip>
+        <span id={CTRL_N_TAKEOVER_DESCRIPTION_ID} className="sr-only">
+          {ctrlNTakeoverDescription}
+        </span>
+        <Switch
+          aria-label="toggle Ctrl+N takeover"
+          aria-describedby={CTRL_N_TAKEOVER_DESCRIPTION_ID}
+          checked={ctrlNTakeoverEnabled}
+          disabled={ctrlNTakeoverDisabledReason !== null}
+          onCheckedChange={onCtrlNTakeoverChange}
         />
       </div>
     </Field>

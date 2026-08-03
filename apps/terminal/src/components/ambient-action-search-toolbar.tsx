@@ -50,6 +50,7 @@ interface AmbientActionSearchToolbarProps {
 }
 
 interface AmbientToolbarDisplayProps {
+  canUseOnScreenKeyboard: boolean;
   deviceTier: DeviceTier;
   isActionsMenuOpen: boolean;
   isOnScreenKeyboardOpen: boolean;
@@ -246,7 +247,7 @@ export const AmbientActionSearchToolbar = ({
                   <Command />
                 </Button>
               ) : null}
-              {display.deviceTier !== "desktop" ? (
+              {display.canUseOnScreenKeyboard ? (
                 <Button
                   variant="ghost"
                   size="icon-sm"

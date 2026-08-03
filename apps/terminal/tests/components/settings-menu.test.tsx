@@ -80,6 +80,11 @@ interface SettingsMenuHarnessProps {
   initialDefaultShell?: string;
   notificationsPermission?: NotificationPermission | "unsupported";
   onNotificationsPermissionRequest?: () => void;
+  initialFloatingKeyboardButtonEnabled?: boolean;
+  onFloatingKeyboardButtonChange?: (enabled: boolean) => void;
+  initialCtrlNTakeoverEnabled?: boolean;
+  onCtrlNTakeoverChange?: (enabled: boolean) => void;
+  ctrlNTakeoverDisabledReason?: string | null;
   sessionInfo?: TerminalSessionInfo | null;
   updateAvailable?: boolean;
   latestVersion?: string | null;
@@ -143,6 +148,11 @@ const renderSettingsMenu = ({
   detectedDefaultShell = "",
   notificationsPermission = "default",
   onNotificationsPermissionRequest = () => {},
+  initialFloatingKeyboardButtonEnabled = false,
+  onFloatingKeyboardButtonChange = () => {},
+  initialCtrlNTakeoverEnabled = false,
+  onCtrlNTakeoverChange = () => {},
+  ctrlNTakeoverDisabledReason = null,
   sessionInfo,
   updateAvailable = false,
   latestVersion = null,
@@ -211,6 +221,11 @@ const renderSettingsMenu = ({
         detectedDefaultShell={detectedDefaultShell}
         notificationsPermission={notificationsPermission}
         onNotificationsPermissionRequest={onNotificationsPermissionRequest}
+        floatingKeyboardButtonEnabled={initialFloatingKeyboardButtonEnabled}
+        onFloatingKeyboardButtonChange={onFloatingKeyboardButtonChange}
+        ctrlNTakeoverEnabled={initialCtrlNTakeoverEnabled}
+        onCtrlNTakeoverChange={onCtrlNTakeoverChange}
+        ctrlNTakeoverDisabledReason={ctrlNTakeoverDisabledReason}
         sessionInfo={sessionInfo}
         updateAvailable={updateAvailable}
         latestVersion={latestVersion}
@@ -220,6 +235,42 @@ const renderSettingsMenu = ({
 
 afterEach(() => {
   cleanup();
+});
+
+describe("SettingsMenu keyboard section", () => {
+  it("forwards floating keyboard button toggles", () => {
+    const onFloatingKeyboardButtonChange = vi.fn();
+    renderSettingsMenu({ onFloatingKeyboardButtonChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    fireEvent.click(screen.getByLabelText("toggle floating keyboard button"));
+
+    expect(onFloatingKeyboardButtonChange.mock.calls[0]?.[0]).toBe(true);
+  });
+
+  it("forwards Ctrl+N takeover toggles when the platform supports it", () => {
+    const onCtrlNTakeoverChange = vi.fn();
+    renderSettingsMenu({ onCtrlNTakeoverChange });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    fireEvent.click(screen.getByLabelText("toggle Ctrl+N takeover"));
+
+    expect(onCtrlNTakeoverChange.mock.calls[0]?.[0]).toBe(true);
+  });
+
+  it("disables the Ctrl+N takeover switch with an explanation when unsupported", () => {
+    renderSettingsMenu({
+      ctrlNTakeoverDisabledReason:
+        "Needs the Keyboard Lock API, which only Chrome and Edge provide.",
+    });
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+
+    const takeoverSwitch = screen.getByLabelText("toggle Ctrl+N takeover");
+
+    expect(takeoverSwitch.getAttribute("aria-disabled")).toBe("true");
+    const descriptionId = takeoverSwitch.getAttribute("aria-describedby") ?? "";
+    expect(document.getElementById(descriptionId)?.textContent).toContain("Keyboard Lock API");
+  });
 });
 
 describe("SettingsMenu trigger", () => {

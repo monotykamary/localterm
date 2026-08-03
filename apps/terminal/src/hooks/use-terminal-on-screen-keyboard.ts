@@ -14,7 +14,6 @@ import {
   TERMINAL_VIEWPORT_WIDTH_STABLE_PX,
 } from "@/lib/constants";
 import { ON_SCREEN_KEYBOARD_CONTROL_SELECTOR } from "@/lib/on-screen-keyboard-selectors";
-import type { DeviceTier } from "@/utils/detect-device-tier";
 import { detectIsAppleWebKit } from "@/utils/detect-is-apple-webkit";
 import { dismissSystemKeyboard } from "@/utils/dismiss-system-keyboard";
 import { suppressTerminalSystemKeyboard } from "@/utils/suppress-terminal-system-keyboard";
@@ -24,7 +23,7 @@ interface UseTerminalOnScreenKeyboardOptions {
   rootRef: RefObject<HTMLDivElement | null>;
   terminalRef: RefObject<XtermTerminal | null>;
   refocusTerminalRef: RefObject<(() => void) | null>;
-  deviceTier: DeviceTier;
+  canUseOnScreenKeyboard: boolean;
   isTouchDevice: boolean;
   setIsActionsMenuOpen: Dispatch<SetStateAction<boolean>>;
 }
@@ -34,7 +33,7 @@ export const useTerminalOnScreenKeyboard = ({
   rootRef,
   terminalRef,
   refocusTerminalRef,
-  deviceTier,
+  canUseOnScreenKeyboard,
   isTouchDevice,
   setIsActionsMenuOpen,
 }: UseTerminalOnScreenKeyboardOptions) => {
@@ -63,8 +62,8 @@ export const useTerminalOnScreenKeyboard = ({
   }, [dismissOnScreenKeyboard, openOnScreenKeyboard]);
 
   useEffect(() => {
-    if (deviceTier === "desktop") dismissOnScreenKeyboard();
-  }, [deviceTier, dismissOnScreenKeyboard]);
+    if (!canUseOnScreenKeyboard) closeOnScreenKeyboard();
+  }, [canUseOnScreenKeyboard, closeOnScreenKeyboard]);
 
   // Focus the terminal cursor whenever the on-screen keyboard opens. The
   // guarded helper textarea keeps the system keyboard suppressed, and re-focus

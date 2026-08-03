@@ -23,6 +23,8 @@ import {
   TERMINAL_DELETE_TO_LINE_START_SEQUENCE,
   KITTY_KEYBOARD_DISAMBIGUATE_FLAG,
   KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG,
+  CTRL_N_TAKEOVER_STORAGE_KEY,
+  KEYBOARD_FLOATING_BUTTON_STORAGE_KEY,
   LIGATURES_ENABLED_STORAGE_KEY,
   MUTE_EMOJI_COLORS_STORAGE_KEY,
   MOBILE_RESUME_STORAGE_KEY,
@@ -1156,6 +1158,147 @@ describe("Terminal on-screen keyboard arbitration", () => {
     expect(queryOnScreenKeyboard()).toBeNull();
     expect(document.activeElement).toBe(outsideInput);
     outsideInput.remove();
+  });
+});
+
+describe("Terminal floating keyboard button", () => {
+  const queryOnScreenKeyboard = () => document.querySelector("[data-on-screen-keyboard]");
+
+  const installHybridTouchMatchMedia = () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        matches: query === "(hover: hover), (pointer: fine)" || query === "(any-pointer: coarse)",
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+  };
+
+  beforeEach(() => {
+    vi.spyOn(window.history, "back").mockImplementation(() => {
+      window.history.replaceState(null, "");
+    });
+  });
+
+  it("shows by default on a hybrid touchscreen and toggles the keyboard", () => {
+    installHybridTouchMatchMedia();
+    installFakeLocalStorage();
+    render(<Terminal />);
+
+    expect(screen.getByLabelText("toggle on-screen keyboard")).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText("show on-screen keyboard"));
+    expect(queryOnScreenKeyboard()).not.toBeNull();
+
+    fireEvent.pointerDown(screen.getByLabelText("hide on-screen keyboard"));
+    expect(queryOnScreenKeyboard()).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText("hide on-screen keyboard"));
+    expect(queryOnScreenKeyboard()).toBeNull();
+  });
+
+  it("stays hidden by default without a touchscreen", () => {
+    installFakeLocalStorage();
+    render(<Terminal />);
+
+    expect(screen.queryByLabelText("show on-screen keyboard")).toBeNull();
+    expect(screen.queryByLabelText("toggle on-screen keyboard")).toBeNull();
+  });
+
+  it("respects an explicit opt-out on a hybrid touchscreen", () => {
+    installHybridTouchMatchMedia();
+    installFakeLocalStorage({ [KEYBOARD_FLOATING_BUTTON_STORAGE_KEY]: "false" });
+    render(<Terminal />);
+
+    expect(screen.queryByLabelText("show on-screen keyboard")).toBeNull();
+    expect(screen.getByLabelText("toggle on-screen keyboard")).not.toBeNull();
+  });
+
+  it("opens the on-screen keyboard on a mouse-only desktop once enabled", () => {
+    installFakeLocalStorage({ [KEYBOARD_FLOATING_BUTTON_STORAGE_KEY]: "true" });
+    render(<Terminal />);
+
+    fireEvent.click(screen.getByLabelText("show on-screen keyboard"));
+
+    expect(queryOnScreenKeyboard()).not.toBeNull();
+  });
+
+  it("adds the floating button when toggled on in settings", () => {
+    installFakeLocalStorage({ [KEYBOARD_FLOATING_BUTTON_STORAGE_KEY]: "false" });
+    render(<Terminal />);
+    expect(screen.queryByLabelText("show on-screen keyboard")).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    fireEvent.click(screen.getByLabelText("toggle floating keyboard button"));
+
+    expect(screen.getByLabelText("show on-screen keyboard")).not.toBeNull();
+    expect(localStorage.getItem(KEYBOARD_FLOATING_BUTTON_STORAGE_KEY)).toBe("true");
+  });
+});
+
+describe("Terminal Ctrl+N takeover", () => {
+  afterEach(() => {
+    cleanup();
+    Reflect.deleteProperty(navigator, "keyboard");
+    Reflect.deleteProperty(document.documentElement, "requestFullscreen");
+    Reflect.deleteProperty(document, "fullscreenElement");
+    Reflect.deleteProperty(document, "exitFullscreen");
+  });
+
+  it("activates the takeover from settings on a non-Mac with Keyboard Lock support", async () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    const lock = vi.fn<(keyCodes?: string[]) => Promise<void>>(() => Promise.resolve());
+    Object.defineProperty(navigator, "keyboard", {
+      configurable: true,
+      value: { lock, unlock: () => {} },
+    });
+    let fullscreenElement: Element | null = null;
+    const requestFullscreen = vi.fn(() => {
+      fullscreenElement = document.documentElement;
+      document.dispatchEvent(new Event("fullscreenchange"));
+      return Promise.resolve();
+    });
+    Object.defineProperty(document.documentElement, "requestFullscreen", {
+      configurable: true,
+      value: requestFullscreen,
+    });
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      get: () => fullscreenElement,
+    });
+    Object.defineProperty(document, "exitFullscreen", {
+      configurable: true,
+      value: vi.fn(() => {
+        fullscreenElement = null;
+        return Promise.resolve();
+      }),
+    });
+    installFakeLocalStorage();
+    render(<Terminal />);
+
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    fireEvent.click(screen.getByLabelText("toggle Ctrl+N takeover"));
+    await act(async () => {});
+
+    expect(requestFullscreen).toHaveBeenCalled();
+    expect(lock).toHaveBeenCalledWith(["KeyN"]);
+    expect(localStorage.getItem(CTRL_N_TAKEOVER_STORAGE_KEY)).toBe("true");
+  });
+
+  it("keeps the takeover switch disabled on macOS where Ctrl+N already passes through", () => {
+    installFakeLocalStorage();
+    render(<Terminal />);
+
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    const takeoverSwitch = screen.getByLabelText("toggle Ctrl+N takeover");
+
+    expect(takeoverSwitch.getAttribute("aria-disabled")).toBe("true");
   });
 });
 

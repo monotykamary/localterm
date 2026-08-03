@@ -9,9 +9,10 @@ import { useDaemonSettings } from "@/hooks/use-daemon-settings";
 import { useDeviceTier } from "@/hooks/use-device-tier";
 import { PR_STATE_ICONS, resolvePrDisplayState } from "@/lib/pr-state";
 import { Badge } from "@/components/ui/badge";
-import { ToastProvider, Toaster } from "@/components/ui/toast";
+import { ToastProvider, Toaster, useToast } from "@/components/ui/toast";
 import { AmbientActionSearchToolbar } from "@/components/ambient-action-search-toolbar";
 import { ConnectionStatusDialog } from "@/components/connection-status-dialog";
+import { KeyboardFloatingButton } from "@/components/keyboard-floating-button";
 import { type CaffeinateMode } from "@/components/keep-awake-menu";
 import { TerminalOverlays } from "@/components/terminal-overlays";
 import { useGitBranchInfo } from "@/hooks/use-git-branch-info";
@@ -21,6 +22,9 @@ import { useScreenWakeLock } from "@/hooks/use-screen-wake-lock";
 import { useTerminalCommandPalette } from "@/hooks/use-terminal-command-palette";
 import { useTerminalImagePaste } from "@/hooks/use-terminal-image-paste";
 import { useTerminalOnScreenKeyboard } from "@/hooks/use-terminal-on-screen-keyboard";
+import { useCtrlNTakeover } from "@/hooks/use-ctrl-n-takeover";
+import { useKeyboardAccessSettings } from "@/hooks/use-keyboard-access-settings";
+import { useTouchPresent } from "@/hooks/use-touch-present";
 import { useTerminalOverlayControls } from "@/hooks/use-terminal-overlay-controls";
 import { useTerminalRuntime, type TerminalExitInfo } from "@/hooks/use-terminal-runtime";
 import { useTerminalSearch } from "@/hooks/use-terminal-search";
@@ -29,6 +33,8 @@ import { useUpdateStatus } from "@/hooks/use-update-status";
 import { createGitWorktree, type CreateWorktreeOptions } from "@/utils/fetch-git-worktrees";
 import {
   COPY_FEEDBACK_MS,
+  CTRL_N_TAKEOVER_ERROR_FEEDBACK_MS,
+  CTRL_N_TAKEOVER_ERROR_TOAST_ID,
   DISCONNECT_MODAL_THRESHOLD_FAILURES,
   FALLBACK_TERMINAL_BACKGROUND_HEX,
   HAPTIC_TAP_MS,
@@ -44,6 +50,7 @@ import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
 import { triggerHapticFeedback } from "@/utils/haptic-feedback";
 
 import { detectIsMacPlatform } from "@/utils/detect-is-mac-platform";
+import { detectCtrlNTakeoverSupported } from "@/utils/detect-ctrl-n-takeover-supported";
 import { detectLikelyKeepAwakeSupported } from "@/utils/detect-likely-keep-awake-supported";
 import { shellQuoteArg } from "@/utils/shell-quote-arg";
 import { buildFileUrl } from "@/utils/build-file-url";
@@ -234,6 +241,15 @@ export const Terminal = () => {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const isTouchDevice = useMemo(() => isCoarsePointer(), []);
   const deviceTier = useDeviceTier();
+  const hasTouchscreen = useTouchPresent();
+  const {
+    floatingKeyboardButtonEnabled,
+    ctrlNTakeoverEnabled,
+    handleFloatingKeyboardButtonEnabledChange,
+    handleCtrlNTakeoverEnabledChange,
+  } = useKeyboardAccessSettings();
+  const canUseOnScreenKeyboard =
+    deviceTier !== "desktop" || hasTouchscreen || floatingKeyboardButtonEnabled;
   const sendInputRef = useRef<((data: string) => void) | null>(null);
   const {
     isOnScreenKeyboardOpen,
@@ -250,7 +266,7 @@ export const Terminal = () => {
     rootRef,
     terminalRef,
     refocusTerminalRef,
-    deviceTier,
+    canUseOnScreenKeyboard,
     isTouchDevice,
     setIsActionsMenuOpen,
   });
@@ -302,6 +318,36 @@ export const Terminal = () => {
   const liveCwdRef = useRef<string | null>(null);
   const wsConnectedRef = useRef(false);
   const isMac = useMemo(detectIsMacPlatform, []);
+  const toastManager = useToast();
+  const showCtrlNTakeoverError = useCallback(
+    (message: string) => {
+      toastManager.add({
+        id: CTRL_N_TAKEOVER_ERROR_TOAST_ID,
+        title: "Ctrl+N takeover unavailable",
+        description: message,
+        type: "destructive",
+        timeout: CTRL_N_TAKEOVER_ERROR_FEEDBACK_MS,
+      });
+    },
+    [toastManager],
+  );
+  const isCtrlNTakeoverSupported = detectCtrlNTakeoverSupported();
+  const activateCtrlNTakeover = useCtrlNTakeover({
+    enabled: ctrlNTakeoverEnabled && !isMac,
+    onError: showCtrlNTakeoverError,
+  });
+  const handleCtrlNTakeoverChange = useCallback(
+    (enabled: boolean) => {
+      if (enabled) activateCtrlNTakeover();
+      handleCtrlNTakeoverEnabledChange(enabled);
+    },
+    [activateCtrlNTakeover, handleCtrlNTakeoverEnabledChange],
+  );
+  const ctrlNTakeoverDisabledReason = isMac
+    ? "macOS browsers reserve Cmd+N instead, so Ctrl+N already reaches the terminal here."
+    : isCtrlNTakeoverSupported
+      ? null
+      : "Needs the Keyboard Lock and Fullscreen APIs available in supported Chromium browsers.";
   const { keyboardShortcuts, setKeyboardShortcut, resetKeyboardShortcuts } =
     useKeyboardShortcuts(isMac);
   const keyboardShortcutsRef = useRef(keyboardShortcuts);
@@ -916,6 +962,7 @@ export const Terminal = () => {
         <AmbientActionSearchToolbar
           toolbarRef={toolbarRef}
           display={{
+            canUseOnScreenKeyboard,
             deviceTier,
             isActionsMenuOpen,
             isOnScreenKeyboardOpen,
@@ -999,6 +1046,11 @@ export const Terminal = () => {
             onCursorStylePreview: setPreviewCursorStyle,
             cursorBlink: activeCursorBlink,
             onCursorBlinkChange: handleCursorBlinkChange,
+            floatingKeyboardButtonEnabled,
+            onFloatingKeyboardButtonChange: handleFloatingKeyboardButtonEnabledChange,
+            ctrlNTakeoverEnabled,
+            onCtrlNTakeoverChange: handleCtrlNTakeoverChange,
+            ctrlNTakeoverDisabledReason,
             localEcho: activeLocalEcho,
             onLocalEchoChange: handleLocalEchoChange,
             mobileResume: activeMobileResume,
@@ -1057,6 +1109,12 @@ export const Terminal = () => {
               : null
           }
         />
+        {floatingKeyboardButtonEnabled ? (
+          <KeyboardFloatingButton
+            isOnScreenKeyboardOpen={isOnScreenKeyboardOpen}
+            onToggle={toggleOnScreenKeyboard}
+          />
+        ) : null}
       </div>
 
       <TerminalOverlays
@@ -1150,7 +1208,7 @@ export const Terminal = () => {
       <ToastProvider>
         <Toaster />
       </ToastProvider>
-      {deviceTier !== "desktop" && isOnScreenKeyboardOpen ? (
+      {canUseOnScreenKeyboard && isOnScreenKeyboardOpen ? (
         <OnScreenKeyboard
           onInput={(data) => {
             sendInputRef.current?.(data);

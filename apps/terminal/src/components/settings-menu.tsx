@@ -5,6 +5,7 @@ import { FontSettingsSection } from "@/components/font-settings-section";
 import {
   AutomationBrowserSettingsSection,
   CursorSettingsSection,
+  KeyboardSettingsSection,
   LaunchSettingsSection,
   NotificationsSettingsSection,
   ScrollbackSettingsSection,
@@ -74,6 +75,11 @@ interface SettingsMenuProps {
   onCursorStylePreview?: (style: TerminalCursorStyle | null) => void;
   cursorBlink: boolean;
   onCursorBlinkChange: (blink: boolean) => void;
+  floatingKeyboardButtonEnabled: boolean;
+  onFloatingKeyboardButtonChange: (enabled: boolean) => void;
+  ctrlNTakeoverEnabled: boolean;
+  onCtrlNTakeoverChange: (enabled: boolean) => void;
+  ctrlNTakeoverDisabledReason: string | null;
   localEcho: boolean;
   onLocalEchoChange: (enabled: boolean) => void;
   scrollback: number;
@@ -143,6 +149,11 @@ export const SettingsMenu = ({
   onCursorStylePreview,
   cursorBlink,
   onCursorBlinkChange,
+  floatingKeyboardButtonEnabled,
+  onFloatingKeyboardButtonChange,
+  ctrlNTakeoverEnabled,
+  onCtrlNTakeoverChange,
+  ctrlNTakeoverDisabledReason,
   localEcho,
   onLocalEchoChange,
   scrollback,
@@ -399,6 +410,18 @@ export const SettingsMenu = ({
                       cursorBlink={cursorBlink}
                       onCursorBlinkChange={onCursorBlinkChange}
                     />
+
+                    <Separator className="bg-border/40" />
+
+                    <KeyboardSettingsSection
+                      floatingKeyboardButtonEnabled={floatingKeyboardButtonEnabled}
+                      onFloatingKeyboardButtonChange={onFloatingKeyboardButtonChange}
+                      ctrlNTakeoverEnabled={ctrlNTakeoverEnabled}
+                      onCtrlNTakeoverChange={onCtrlNTakeoverChange}
+                      ctrlNTakeoverDisabledReason={ctrlNTakeoverDisabledReason}
+                    />
+
+                    <Separator className="bg-border/40" />
 
                     <TypingSettingsSection
                       localEcho={localEcho}
