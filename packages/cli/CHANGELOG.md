@@ -1,5 +1,13 @@
 # localterm
 
+## 2.72.9
+
+### Patch Changes
+
+- ceec783: Add a touchscreen-aware floating on-screen-keyboard toggle and an opt-in Ctrl+N takeover for supported non-Mac browsers.
+- Updated dependencies [ceec783]
+  - @monotykamary/localterm-server@2.72.9
+
 ## 2.72.8
 
 ### Patch Changes
