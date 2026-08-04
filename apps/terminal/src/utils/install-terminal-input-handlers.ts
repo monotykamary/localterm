@@ -21,6 +21,7 @@ interface InstallTerminalInputHandlersOptions {
   getBackspaceSequence: () => string;
   getKeyboardShortcuts: () => KeyboardShortcutMap;
   getLocalEcho: () => LocalEcho | null;
+  onUserScroll: () => void;
   onOpenNewShell: () => void;
   onToggleCommandPalette: () => void;
   onToggleAutomations: () => void;
@@ -42,6 +43,7 @@ export const installTerminalInputHandlers = ({
   getBackspaceSequence,
   getKeyboardShortcuts,
   getLocalEcho,
+  onUserScroll,
   onOpenNewShell,
   onToggleCommandPalette,
   onToggleAutomations,
@@ -58,6 +60,13 @@ export const installTerminalInputHandlers = ({
     if (shouldSuppressAltBufferWheel(event, terminal)) {
       event.preventDefault();
       return false;
+    }
+    if (
+      event.deltaY !== 0 &&
+      terminal.buffer.active.type === "normal" &&
+      terminal.modes.mouseTrackingMode === "none"
+    ) {
+      onUserScroll();
     }
     return true;
   });

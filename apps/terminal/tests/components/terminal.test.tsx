@@ -56,6 +56,16 @@ interface FakeCsiHandlerEntry {
   callback: (params: (number | number[])[]) => boolean | Promise<boolean>;
 }
 
+interface FakeXtermBufferState {
+  baseY: number;
+  viewportY: number;
+  type: "normal";
+}
+
+interface FakeXtermModes {
+  mouseTrackingMode: "none";
+}
+
 interface FakeXtermHandle {
   customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null;
   customWheelEventHandler: ((event: WheelEvent) => boolean) | null;
@@ -180,7 +190,10 @@ vi.mock("@xterm/xterm", () => {
     rows = 24;
     unicode = { activeVersion: "11", register: () => {} };
     options: Record<string, unknown> = {};
-    buffer = { active: { baseY: 0, viewportY: 0 } };
+    buffer: { active: FakeXtermBufferState } = {
+      active: { baseY: 0, viewportY: 0, type: "normal" },
+    };
+    modes: FakeXtermModes = { mouseTrackingMode: "none" };
     scrollLines = vi.fn();
     scrollToBottom = vi.fn();
     selectAll = vi.fn();
@@ -231,7 +244,7 @@ vi.mock("@xterm/xterm", () => {
         },
         getOptions: () => this.options,
         setBufferState: ({ baseY, viewportY }) => {
-          this.buffer = { active: { baseY, viewportY } };
+          this.buffer = { active: { baseY, viewportY, type: "normal" } };
         },
         scrollLines: this.scrollLines,
         scrollToBottom: this.scrollToBottom,
@@ -2127,6 +2140,34 @@ describe("Terminal scroll preservation through hot-swaps", () => {
     expect(handle.invokeCsiHandler("?", "J", [3])).toBe(true);
     expect(handle.invokeCsiHandler(undefined, "J", [2])).toBe(false);
     expect(handle.invokeCsiHandler("?", "J", [2])).toBe(false);
+  });
+
+  it("does not restore an output anchor over an in-flight wheel scroll", () => {
+    render(<Terminal />);
+    const handle = fakeXterms[0];
+    if (!handle) throw new Error("xterm not constructed");
+    let writeCallback: (() => void) | undefined;
+    handle.setBufferState({ baseY: 100, viewportY: 70 });
+    handle.scrollLines.mockClear();
+    handle.scrollToBottom.mockClear();
+    handle.write.mockImplementation((_data: string, callback?: () => void) => {
+      handle.setBufferState({ baseY: 105, viewportY: 72 });
+      writeCallback = callback;
+    });
+
+    act(() => {
+      fakeWebSockets[0]?.fireMessage({ type: "output", data: "redraw" });
+    });
+    const wheelHandler = handle.customWheelEventHandler;
+    if (!wheelHandler) throw new Error("wheel handler not installed");
+    act(() => {
+      wheelHandler(new WheelEvent("wheel", { deltaY: -20 }));
+      handle.setBufferState({ baseY: 105, viewportY: 64 });
+      writeCallback?.();
+    });
+
+    expect(handle.scrollLines).not.toHaveBeenCalled();
+    expect(handle.scrollToBottom).not.toHaveBeenCalled();
   });
 
   it("does not force bottom scroll after output when the user is scrolled up", () => {

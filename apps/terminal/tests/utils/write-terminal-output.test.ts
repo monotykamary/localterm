@@ -7,7 +7,14 @@ import {
   OUTPUT_PENDING_WRITE_COMPACTION_THRESHOLD_WRITES,
   SYNCHRONIZED_OUTPUT_END_SEQUENCE,
 } from "../../src/lib/constants";
+import { createTerminalOutputScrollController } from "../../src/utils/create-terminal-output-scroll-controller";
 import { OutputBatcher } from "../../src/utils/write-terminal-output";
+
+interface OutputScrollBuffer {
+  baseY: number;
+  viewportY: number;
+  type: "normal";
+}
 
 interface FakeTerminalOptions {
   pendingRenderFrameId?: number;
@@ -103,6 +110,76 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("OutputBatcher viewport anchoring", () => {
+  const createViewportHarness = (baseY: number, viewportY: number, deferWrite: boolean) => {
+    const buffer: OutputScrollBuffer = {
+      baseY,
+      viewportY,
+      type: "normal",
+    };
+    const deferredWriteCallbacks: Array<() => void> = [];
+    const scrollLines = vi.fn((amount: number) => {
+      buffer.viewportY += amount;
+    });
+    const scrollToBottom = vi.fn(() => {
+      buffer.viewportY = buffer.baseY;
+    });
+    const terminal = {
+      buffer: { active: buffer },
+      scrollLines,
+      scrollToBottom,
+      write: (_data: Uint8Array, callback?: () => void) => {
+        buffer.baseY += 5;
+        buffer.viewportY += 2;
+        if (callback && deferWrite) deferredWriteCallbacks.push(callback);
+        else callback?.();
+      },
+    } as unknown as XtermTerminal;
+    const scrollController = createTerminalOutputScrollController(terminal);
+    const batcher = new OutputBatcher();
+    batcher.attach(terminal, scrollController);
+    return {
+      batcher,
+      buffer,
+      deferredWriteCallbacks,
+      scrollController,
+      scrollLines,
+      scrollToBottom,
+    };
+  };
+
+  it("keeps following after output when it started at the bottom", () => {
+    const harness = createViewportHarness(100, 100, false);
+
+    harness.batcher.pushBytes(textEncoder.encode("output"));
+
+    expect(harness.scrollToBottom).toHaveBeenCalledOnce();
+    expect(harness.buffer.viewportY).toBe(105);
+  });
+
+  it("restores an absolute detached viewport after output parses", () => {
+    const harness = createViewportHarness(100, 70, false);
+
+    harness.batcher.pushBytes(textEncoder.encode("output"));
+
+    expect(harness.scrollLines).toHaveBeenCalledWith(-2);
+    expect(harness.buffer.viewportY).toBe(70);
+  });
+
+  it("does not restore a stale viewport over a user scroll during parsing", () => {
+    const harness = createViewportHarness(100, 70, true);
+    harness.batcher.pushBytes(textEncoder.encode("output"));
+    harness.buffer.viewportY = 64;
+    harness.scrollController.noteUserScroll();
+
+    harness.deferredWriteCallbacks[0]?.();
+
+    expect(harness.scrollLines).not.toHaveBeenCalled();
+    expect(harness.scrollToBottom).not.toHaveBeenCalled();
+    expect(harness.buffer.viewportY).toBe(64);
+  });
 });
 
 describe("OutputBatcher staging buffer growth", () => {

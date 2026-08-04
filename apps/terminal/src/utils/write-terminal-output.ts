@@ -8,6 +8,7 @@ import {
   SYNCHRONIZED_OUTPUT_PREEMPTION_MINIMUM_COMPLETED_FRAMES,
 } from "@/lib/constants";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
+import type { TerminalOutputScrollController } from "@/utils/create-terminal-output-scroll-controller";
 
 interface XtermRenderDebouncer {
   _animationFrame?: number;
@@ -59,6 +60,7 @@ const flushPendingInteractiveRender = (terminal: XtermTerminal): void => {
 
 class OutputBatcher {
   private terminal: XtermTerminal | null = null;
+  private outputScrollController: TerminalOutputScrollController | null = null;
   private buffer = new Uint8Array(OUTPUT_BATCHER_INITIAL_CAPACITY_BYTES);
   private byteLength = 0;
   private pendingWrites: Array<PendingTerminalWrite | undefined> = [];
@@ -89,8 +91,12 @@ class OutputBatcher {
   // next vsync (or time advance in tests) picks up the re-arm the outer set.
   private isDispatching = false;
 
-  attach = (terminal: XtermTerminal) => {
+  attach = (
+    terminal: XtermTerminal,
+    outputScrollController: TerminalOutputScrollController | null = null,
+  ) => {
     this.terminal = terminal;
+    this.outputScrollController = outputScrollController;
     this.pendingWrites = [];
     this.pendingWriteIndex = 0;
     this.pendingSynchronizedFrameCount = 0;
@@ -133,6 +139,7 @@ class OutputBatcher {
     this.synchronizedOutputTrailingByteLength = 0;
     this.synchronizedFramePacingBypassAtMs = Number.NEGATIVE_INFINITY;
     this.terminal = null;
+    this.outputScrollController = null;
     this.afterFlush = null;
   };
 
@@ -506,9 +513,13 @@ class OutputBatcher {
         this.awaitingSynchronizedFrameRender = true;
         synchronizedFrameGeneration = ++this.synchronizedFrameGeneration;
       }
+      const outputScrollSnapshot = this.outputScrollController?.capture();
       const afterWrite =
-        shouldRenderImmediately || shouldPaceNextSynchronizedFrame
+        outputScrollSnapshot || shouldRenderImmediately || shouldPaceNextSynchronizedFrame
           ? () => {
+              if (outputScrollSnapshot) {
+                this.outputScrollController?.restore(outputScrollSnapshot);
+              }
               if (shouldRenderImmediately) this.flushInteractiveRender(terminal);
               if (shouldPaceNextSynchronizedFrame) {
                 this.waitForSynchronizedFrameRender(terminal, synchronizedFrameGeneration);

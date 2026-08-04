@@ -16,6 +16,7 @@ interface InstallTerminalScrollbarOptions {
   scrollbarTrackRef: RefObject<HTMLDivElement | null>;
   scrollbarThumbRef: RefObject<HTMLDivElement | null>;
   setPtyViewportVersion: Dispatch<SetStateAction<number>>;
+  onUserScroll: () => void;
 }
 
 interface TerminalScrollbar {
@@ -31,6 +32,7 @@ export const installTerminalScrollbar = ({
   scrollbarTrackRef,
   scrollbarThumbRef,
   setPtyViewportVersion,
+  onUserScroll,
 }: InstallTerminalScrollbarOptions): TerminalScrollbar => {
   const patchFitAddonScrollbarWidth = () => {
     if (!fitAddon.proposeDimensions) return;
@@ -113,6 +115,7 @@ export const installTerminalScrollbar = ({
 
   const handleThumbPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
+    onUserScroll();
     isDragging = true;
     dragStartY = event.clientY;
     dragStartViewportY = terminal.buffer.active.viewportY;
@@ -150,6 +153,7 @@ export const installTerminalScrollbar = ({
   const handleTrackPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
     if (event.target === scrollbarThumbRef.current) return;
+    onUserScroll();
     const trackEl = scrollbarTrackRef.current;
     if (!trackEl) return;
     const trackRect = trackEl.getBoundingClientRect();

@@ -22,6 +22,8 @@ import { getTerminalMinimumContrastRatio } from "@/utils/get-terminal-minimum-co
 import { preserveTerminalMouseWheelMagnitude } from "@/utils/preserve-terminal-mouse-wheel-magnitude";
 import { registerTerminalClipboard } from "@/utils/register-terminal-clipboard";
 import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider";
+import { createTerminalOutputScrollController } from "@/utils/create-terminal-output-scroll-controller";
+import type { TerminalOutputScrollController } from "@/utils/create-terminal-output-scroll-controller";
 import { outputBatcher } from "@/utils/write-terminal-output";
 
 interface CurrentRef<Value> {
@@ -54,6 +56,7 @@ interface CreateTerminalSurfaceOptions {
 interface TerminalSurface {
   terminal: XtermTerminal;
   fitAddon: FitAddon;
+  outputScrollController: TerminalOutputScrollController;
   loadWebgl: () => void;
   dispose: () => void;
 }
@@ -99,7 +102,8 @@ export const createTerminalSurface = ({
     },
     scrollbar: { showScrollbar: false },
   });
-  outputBatcher.attach(terminal);
+  const outputScrollController = createTerminalOutputScrollController(terminal);
+  outputBatcher.attach(terminal, outputScrollController);
   const fitAddon = new FitAddon();
   fitAddonRef.current = fitAddon;
   terminal.loadAddon(fitAddon);
@@ -167,6 +171,7 @@ export const createTerminalSurface = ({
   return {
     terminal,
     fitAddon,
+    outputScrollController,
     loadWebgl: () => {
       try {
         const webglAddon = new WebglAddon({

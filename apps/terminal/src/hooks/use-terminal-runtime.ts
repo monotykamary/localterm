@@ -365,8 +365,34 @@ export const useTerminalRuntime = ({
       webglAddonRef,
       setSearchResults,
     });
-    const { terminal, fitAddon } = terminalSurface;
+    const { terminal, fitAddon, outputScrollController } = terminalSurface;
     terminalRef.current = terminal;
+
+    const clearResizeScrollRestore = () => {
+      const state = resizeScrollRestoreRef.current;
+      if (state) cancelAnimationFrame(state.frameId);
+      resizeScrollRestoreRef.current = null;
+    };
+
+    const restoreResizeScroll = () => {
+      const state = resizeScrollRestoreRef.current;
+      if (!state) return;
+      restoreTerminalScrollAnchor(terminal, state.anchor);
+    };
+
+    const beginResizeScrollRestore = (anchor: TerminalScrollAnchor) => {
+      clearResizeScrollRestore();
+      const frameId = requestAnimationFrame(() => {
+        restoreResizeScroll();
+        resizeScrollRestoreRef.current = null;
+      });
+      resizeScrollRestoreRef.current = { anchor, frameId };
+    };
+
+    const noteTerminalUserScroll = () => {
+      outputScrollController.noteUserScroll();
+      clearResizeScrollRestore();
+    };
 
     const terminalTouchInteractions = installTerminalTouchInteractions({
       terminal,
@@ -385,6 +411,7 @@ export const useTerminalRuntime = ({
       scrollbarTrackRef,
       scrollbarThumbRef,
       setPtyViewportVersion,
+      onUserScroll: noteTerminalUserScroll,
     });
     const updateScrollbar = terminalScrollbar.update;
 
@@ -444,27 +471,6 @@ export const useTerminalRuntime = ({
     setCaffeinateBatteryThresholdRef.current = (percent: number | null) =>
       send({ type: "caffeinate-battery-threshold", percent });
 
-    const clearResizeScrollRestore = () => {
-      const state = resizeScrollRestoreRef.current;
-      if (state) cancelAnimationFrame(state.frameId);
-      resizeScrollRestoreRef.current = null;
-    };
-
-    const restoreResizeScroll = () => {
-      const state = resizeScrollRestoreRef.current;
-      if (!state) return;
-      restoreTerminalScrollAnchor(terminal, state.anchor);
-    };
-
-    const beginResizeScrollRestore = (anchor: TerminalScrollAnchor) => {
-      clearResizeScrollRestore();
-      const frameId = requestAnimationFrame(() => {
-        restoreResizeScroll();
-        resizeScrollRestoreRef.current = null;
-      });
-      resizeScrollRestoreRef.current = { anchor, frameId };
-    };
-
     installTerminalInputHandlers({
       terminal,
       isMac,
@@ -474,6 +480,7 @@ export const useTerminalRuntime = ({
       getBackspaceSequence: () => terminalBackspaceSequence,
       getKeyboardShortcuts: () => keyboardShortcutsRef.current,
       getLocalEcho: () => localEchoRef.current,
+      onUserScroll: noteTerminalUserScroll,
       onOpenNewShell: () => openNewShellRef.current?.(),
       onToggleCommandPalette: () => toggleCommandPaletteRef.current?.(),
       onToggleAutomations: () => toggleAutomationsRef.current?.(),
