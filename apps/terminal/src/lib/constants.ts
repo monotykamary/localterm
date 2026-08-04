@@ -353,6 +353,10 @@ export const CUSTOM_FONT_FAMILY_STORAGE_KEY = "localterm:custom-font-family";
 export const CUSTOM_THEMES_STORAGE_KEY = "localterm:custom-themes";
 export const NERD_FONT_ENABLED_STORAGE_KEY = "localterm:nerd-font-enabled";
 export const LIGATURES_ENABLED_STORAGE_KEY = "localterm:ligatures-enabled";
+export const MINIMUM_LIGATURE_SEQUENCE_CHARACTERS_COUNT = 2;
+export const WWW_LIGATURE_SEQUENCE_CHARACTERS_COUNT = 3;
+export const LIGATURE_SUPPORT_CACHE_MAX_ENTRIES_COUNT = 512;
+export const LIGATURE_SUPPORT_PROBE_MAX_CHARACTERS_COUNT = 256;
 export const MUTE_EMOJI_COLORS_STORAGE_KEY = "localterm:mute-emoji-colors";
 export const FONT_LOAD_PROBE_PX = 16;
 

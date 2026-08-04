@@ -45,6 +45,36 @@ describe("findLigatureRanges — operator runs", () => {
   it("does not join operators separated by a space", () => {
     expect(findLigatureRanges("> =")).toEqual([]);
   });
+
+  it("does not join regex punctuation that has no ligature substitution", () => {
+    const ansiPattern = String.raw`ansi.match(/\\x1b\\[(?:38|48);2;(\\d+);(\\d+);(\\d+)m/)`;
+    expect(findLigatureRanges(ansiPattern)).toEqual([]);
+  });
+
+  it("keeps known non-arrow programming ligatures as candidates", () => {
+    expect(findLigatureRanges("a :: b /* c */ d <|> e")).toEqual([
+      [2, 4],
+      [7, 9],
+      [12, 14],
+      [17, 20],
+    ]);
+  });
+
+  it("only joins slash-backslash conjunctions at shaping boundaries", () => {
+    expect(findLigatureRanges(String.raw` /\ \/ `)).toEqual([
+      [1, 3],
+      [4, 6],
+    ]);
+    expect(findLigatureRanges(String.raw`(/\x)`)).toEqual([]);
+  });
+
+  it("joins Fira Code number-sign and underscore rule families", () => {
+    expect(findLigatureRanges("## __ _|_ ||")).toEqual([
+      [0, 2],
+      [3, 5],
+      [6, 9],
+    ]);
+  });
 });
 
 describe("findLigatureRanges — letter ligatures", () => {
@@ -113,8 +143,11 @@ describe("findLigatureRanges — range merging", () => {
     expect(findLigatureRanges("0xfin")).toEqual([[0, 4]]);
   });
 
-  it("merges adjacent ligature sites into a single joined cell", () => {
-    expect(findLigatureRanges("fi->")).toEqual([[0, 4]]);
+  it("keeps adjacent independent ligature sites in separate joined cells", () => {
+    expect(findLigatureRanges("fi->")).toEqual([
+      [0, 2],
+      [2, 4],
+    ]);
   });
 
   it("keeps ligature sites separate when split by non-ligature characters", () => {

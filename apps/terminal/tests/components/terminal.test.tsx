@@ -2477,19 +2477,25 @@ describe("Terminal emoji colors", () => {
 });
 
 describe("Terminal ligatures", () => {
+  const flushFontReady = async (): Promise<void> => {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  };
   it("does not register a character joiner on mount when ligatures are disabled", () => {
     installFakeLocalStorage();
     render(<Terminal />);
     expect(fakeXterms[0]?.registerCharacterJoiner).not.toHaveBeenCalled();
   });
 
-  it("registers a character joiner on mount when ligatures are stored enabled", () => {
+  it("registers a character joiner on mount when ligatures are stored enabled", async () => {
     installFakeLocalStorage({ [LIGATURES_ENABLED_STORAGE_KEY]: "true" });
     render(<Terminal />);
+    await flushFontReady();
     expect(fakeXterms[0]?.registerCharacterJoiner).toHaveBeenCalledTimes(1);
   });
 
-  it("registers the joiner when the ligatures switch is toggled on", () => {
+  it("registers the joiner when the ligatures switch is toggled on", async () => {
     installFakeLocalStorage();
     render(<Terminal />);
     fireEvent.click(screen.getByLabelText("terminal settings"));
@@ -2499,20 +2505,23 @@ describe("Terminal ligatures", () => {
       fireEvent.click(screen.getByLabelText("toggle ligatures"));
     });
 
+    await flushFontReady();
     expect(fakeXterms[0]?.registerCharacterJoiner).toHaveBeenCalledTimes(1);
     expect(fakeXterms[0]?.deregisterCharacterJoiner).not.toHaveBeenCalled();
   });
 
-  it("deregisters the joiner when the ligatures switch is toggled off", () => {
+  it("deregisters the joiner when the ligatures switch is toggled off", async () => {
     installFakeLocalStorage({ [LIGATURES_ENABLED_STORAGE_KEY]: "true" });
     render(<Terminal />);
     fireEvent.click(screen.getByLabelText("terminal settings"));
+    await flushFontReady();
     expect(fakeXterms[0]?.registerCharacterJoiner).toHaveBeenCalledTimes(1);
 
     act(() => {
       fireEvent.click(screen.getByLabelText("toggle ligatures"));
     });
 
+    await flushFontReady();
     expect(fakeXterms[0]?.deregisterCharacterJoiner).toHaveBeenCalledTimes(1);
     expect(fakeXterms[0]?.deregisterCharacterJoiner.mock.calls[0]?.[0]).toBe(1);
   });

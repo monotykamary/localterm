@@ -1,58 +1,177 @@
-// Fira Code builds its ligatures with contextual alternates (calt): the browser
-// runs HarfBuzz over a shaped string and the font's own calt table decides
-// which subsequences fuse — including the composable arrows assembled from
-// start/middle/end fragments (->, -->, --->, ====>, <====, …) and the markdown
-// rules (-, --, ---, … and =, ==, ===, …) that no finite sequence list could
-// enumerate. So instead of listing sequences, the joiner hands the renderer
-// every maximal run of operator characters as one shaped unit and lets the
-// font decide. This also reproduces Fira Code's overlapping contextual
-// ligatures (e.g. >=> inside =>=>) that a split-by-sequence joiner would miss.
-//
-// Beyond operators, the joiner also surfaces the two non-operator ligature
-// families Fira Code ships by default (verified empirically against the font's
-// calt shaping, not guessed): the disambiguation/standard letter pairs
-// (fi, fj, Fl, Il, Tl) and www, plus hex/dimension literals (0xFF, 0xDEADBEEF,
-// 1920x1080). fl/ff/ffl and <digit><letter> pairs are deliberately excluded —
-// Fira Code does not ligature them.
-//
-// Every terminal font here is monospace, so a font with no calt entry for a
-// given run shapes each glyph at its fixed cell advance — byte-identical to
-// per-cell drawing. Over-joining is therefore a harmless no-op, and the same
-// vocabulary is safe across fonts that don't ligature at all.
+import {
+  MINIMUM_LIGATURE_SEQUENCE_CHARACTERS_COUNT,
+  WWW_LIGATURE_SEQUENCE_CHARACTERS_COUNT,
+} from "@/lib/constants";
 
-const OPERATOR_VOCABULARY: ReadonlySet<string> = new Set(
-  "!#$%&()*+,-./:;<=>?@[\\]^_`{|}~".split(""),
-);
+// xterm renders every range returned by a character joiner as one atlas glyph,
+// even when the active font makes no substitution. Joining arbitrary punctuation
+// therefore creates dark or light boundary strokes where an unchanged run meets
+// the following cell. Only return spans that match known programming-ligature
+// families; the browser-facing support probe then removes candidates unsupported
+// by the active font. Maximal arrow/rule families remain intact so Fira Code can
+// apply its overlapping contextual substitutions at arbitrary lengths.
+//
+// Fira Code's non-operator families are included as candidates as well: the
+// disambiguation pairs (fi, fj, Fl, Il, Tl), www, and hex/dimension literals.
+// Adjacent independent candidates remain separate because xterm supports adjacent
+// ranges and shaping them together only expands the artifact surface.
 
+const EQUAL_LIGATURE_CHARACTERS: ReadonlySet<string> = new Set("!/:<=>|~".split(""));
+const HYPHEN_LIGATURE_CHARACTERS: ReadonlySet<string> = new Set("-<>|".split(""));
+const CENTERED_COLON_LIGATURE_CHARACTERS: ReadonlySet<string> = new Set(":<>".split(""));
+const UNDERSCORE_LIGATURE_CHARACTERS: ReadonlySet<string> = new Set("_|".split(""));
+const NUMBER_SIGN_LIGATURE_CHARACTERS: ReadonlySet<string> = new Set(["#"]);
+
+const KNOWN_OPERATOR_LIGATURES = [
+  "<---->",
+  "<====>",
+  "<--->",
+  "<===>",
+  "<!---",
+  "<---",
+  "--->",
+  "<-->",
+  "<==>",
+  "<===",
+  "===>",
+  "<!--",
+  "!===",
+  "<*>",
+  "<|>",
+  "<~~",
+  "~~>",
+  "<--",
+  "<<-",
+  "->>",
+  "<==",
+  "<<=",
+  "=>>",
+  "==>",
+  ">>=",
+  "<->",
+  "<=>",
+  ":::",
+  "</>",
+  "===",
+  "!==",
+  "+++",
+  "<-",
+  "->",
+  "<=",
+  "=>",
+  ">=",
+  "::",
+  "</",
+  "/>",
+  "==",
+  "!=",
+  "/=",
+  "~=",
+  "<>",
+  "<:",
+  ":=",
+  "*=",
+  "*+",
+  "<*",
+  "*>",
+  "<|",
+  "|>",
+  "+*",
+  "=*",
+  "=:",
+  ":>",
+  "/*",
+  "*/",
+].sort((left, right) => right.length - left.length);
+
+const CONJUNCTION_LIGATURES = ["/\\", "\\/"];
 const LETTER_LIGATURE_PAIRS: ReadonlySet<string> = new Set(["fi", "fj", "Fl", "Il", "Tl"]);
-
 const HEX_DIGITS: ReadonlySet<string> = new Set("0123456789abcdefABCDEF".split(""));
 const DECIMAL_DIGITS: ReadonlySet<string> = new Set("0123456789".split(""));
 
-const MIN_OPERATOR_RUN_LENGTH = 2;
-const WWW_RUN_LENGTH = 3;
+const isDigit = (character: string): boolean => DECIMAL_DIGITS.has(character);
+const isHexDigit = (character: string): boolean => HEX_DIGITS.has(character);
 
-const isDigit = (char: string): boolean => DECIMAL_DIGITS.has(char);
-const isHexDigit = (char: string): boolean => HEX_DIGITS.has(char);
-
-const findOperatorRuns = (text: string): [number, number][] => {
+const findQualifiedCharacterRuns = (
+  text: string,
+  characters: ReadonlySet<string>,
+  qualifies: (run: string) => boolean,
+): [number, number][] => {
   const ranges: [number, number][] = [];
-  let runStart = -1;
-  for (let index = 0; index <= text.length; index++) {
-    const inVocabulary = index < text.length && OPERATOR_VOCABULARY.has(text[index]!);
-    if (inVocabulary) {
-      if (runStart === -1) runStart = index;
-    } else if (runStart !== -1) {
-      if (index - runStart >= MIN_OPERATOR_RUN_LENGTH) ranges.push([runStart, index]);
-      runStart = -1;
+  let runStart: number | undefined;
+  for (let index = 0; index <= text.length; index += 1) {
+    const isRunCharacter = index < text.length && characters.has(text[index]!);
+    if (isRunCharacter) {
+      runStart ??= index;
+      continue;
+    }
+    if (runStart === undefined) continue;
+    const run = text.slice(runStart, index);
+    if (run.length >= MINIMUM_LIGATURE_SEQUENCE_CHARACTERS_COUNT && qualifies(run)) {
+      ranges.push([runStart, index]);
+    }
+    runStart = undefined;
+  }
+  return ranges;
+};
+
+const findOperatorFamilyRuns = (text: string): [number, number][] => [
+  ...findQualifiedCharacterRuns(text, EQUAL_LIGATURE_CHARACTERS, (run) => run.includes("=")),
+  ...findQualifiedCharacterRuns(text, HYPHEN_LIGATURE_CHARACTERS, (run) => run.includes("-")),
+  ...findQualifiedCharacterRuns(
+    text,
+    CENTERED_COLON_LIGATURE_CHARACTERS,
+    (run) => run.includes(":") && (run.includes("<") || run.includes(">")),
+  ),
+  ...findQualifiedCharacterRuns(text, NUMBER_SIGN_LIGATURE_CHARACTERS, () => true),
+];
+
+const findKnownOperatorLigatures = (text: string): [number, number][] => {
+  const ranges: [number, number][] = [];
+  let index = 0;
+  while (index < text.length) {
+    const sequence = KNOWN_OPERATOR_LIGATURES.find((candidate) =>
+      text.startsWith(candidate, index),
+    );
+    if (!sequence) {
+      index += 1;
+      continue;
+    }
+    ranges.push([index, index + sequence.length]);
+    index += sequence.length;
+  }
+  return ranges;
+};
+
+const findConjunctionLigatures = (text: string): [number, number][] => {
+  const ranges: [number, number][] = [];
+  for (let index = 0; index < text.length; index += 1) {
+    const sequence = CONJUNCTION_LIGATURES.find((candidate) => text.startsWith(candidate, index));
+    if (!sequence) continue;
+    const precedingCharacter = text[index - 1];
+    const followingCharacter = text[index + sequence.length];
+    const hasLeadingBoundary = precedingCharacter === undefined || precedingCharacter === " ";
+    const hasTrailingBoundary = followingCharacter === undefined || followingCharacter === " ";
+    if (hasLeadingBoundary && hasTrailingBoundary) {
+      ranges.push([index, index + sequence.length]);
+      index += sequence.length - 1;
     }
   }
   return ranges;
 };
 
-// <digits>x<hex-or-digits>+ — matches 0xFF, 0xDEADBEEF, 1920x1080, 0x0, 1x1.
-// Fira Code ligatures the x into a multiplication sign; a lone "0x" with no
-// following hex digit is not ligatured and is correctly excluded by the +.
+const findUnderscoreLigatureRuns = (text: string): [number, number][] =>
+  findQualifiedCharacterRuns(text, UNDERSCORE_LIGATURE_CHARACTERS, (run) => {
+    const firstUnderscore = run.indexOf("_");
+    return firstUnderscore >= 0 && firstUnderscore !== run.lastIndexOf("_");
+  }).map((range) => {
+    const run = text.slice(range[0], range[1]);
+    return [range[0] + run.indexOf("_"), range[0] + run.lastIndexOf("_") + 1];
+  });
+
+// <digits>x<hex-or-digits>+ matches 0xFF, 0xDEADBEEF, 1920x1080, 0x0, and 1x1.
+// A lone 0x is excluded because Fira Code only substitutes x when another
+// hexadecimal or decimal glyph follows it.
 const findHexDimensionRuns = (text: string): [number, number][] => {
   const ranges: [number, number][] = [];
   let index = 0;
@@ -78,48 +197,61 @@ const findHexDimensionRuns = (text: string): [number, number][] => {
 
 const findLetterLigatureRuns = (text: string): [number, number][] => {
   const ranges: [number, number][] = [];
-  for (let index = 0; index + 2 <= text.length; index++) {
-    if (LETTER_LIGATURE_PAIRS.has(text.slice(index, index + 2))) ranges.push([index, index + 2]);
-  }
-  return ranges;
-};
-
-// Fira Code ligatures exactly "www" (a 3-w run bounded by non-w). Runs of 2 or
-// 4+ w's are not ligatured — verified empirically — so only an exact-3 maximal
-// run is joined.
-const findWwwRuns = (text: string): [number, number][] => {
-  const ranges: [number, number][] = [];
-  let runStart = -1;
-  for (let index = 0; index <= text.length; index++) {
-    const isW = index < text.length && text[index] === "w";
-    if (isW) {
-      if (runStart === -1) runStart = index;
-    } else if (runStart !== -1) {
-      if (index - runStart === WWW_RUN_LENGTH) ranges.push([runStart, index]);
-      runStart = -1;
+  for (
+    let index = 0;
+    index + MINIMUM_LIGATURE_SEQUENCE_CHARACTERS_COUNT <= text.length;
+    index += 1
+  ) {
+    const rangeEnd = index + MINIMUM_LIGATURE_SEQUENCE_CHARACTERS_COUNT;
+    if (LETTER_LIGATURE_PAIRS.has(text.slice(index, rangeEnd))) {
+      ranges.push([index, rangeEnd]);
     }
   }
   return ranges;
 };
 
-// Merge overlapping and adjacent ranges so neighbouring ligature sites (e.g.
-// "0xf" + "fi" inside "0xfin") shape as one unit, giving HarfBuzz the full
-// context Fira Code's calt rules expect. Adjacent merging also collapses
-// back-to-back ligatures ("fi->") into a single joined cell.
-const mergeRanges = (ranges: [number, number][]): [number, number][] => {
-  const sorted = [...ranges].sort((left, right) => left[0] - right[0] || left[1] - right[1]);
-  const merged: [number, number][] = [];
-  for (const range of sorted) {
-    const last = merged[merged.length - 1];
-    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
-    else merged.push([range[0], range[1]]);
+// Fira Code ligatures exactly www: shorter or longer maximal w runs are left
+// alone so xterm does not combine text the font will render unchanged.
+const findWwwRuns = (text: string): [number, number][] => {
+  const ranges: [number, number][] = [];
+  let runStart: number | undefined;
+  for (let index = 0; index <= text.length; index += 1) {
+    const isW = index < text.length && text[index] === "w";
+    if (isW) {
+      runStart ??= index;
+      continue;
+    }
+    if (runStart === undefined) continue;
+    if (index - runStart === WWW_LIGATURE_SEQUENCE_CHARACTERS_COUNT) {
+      ranges.push([runStart, index]);
+    }
+    runStart = undefined;
   }
-  return merged;
+  return ranges;
+};
+
+// Overlapping candidates share shaping context, while adjacent independent
+// ligatures remain separate rendering units as supported by xterm.
+const mergeOverlappingRanges = (ranges: [number, number][]): [number, number][] => {
+  const sortedRanges = [...ranges].sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  const mergedRanges: [number, number][] = [];
+  for (const range of sortedRanges) {
+    const previousRange = mergedRanges[mergedRanges.length - 1];
+    if (previousRange && range[0] < previousRange[1]) {
+      previousRange[1] = Math.max(previousRange[1], range[1]);
+    } else {
+      mergedRanges.push(range);
+    }
+  }
+  return mergedRanges;
 };
 
 export const findLigatureRanges = (text: string): [number, number][] =>
-  mergeRanges([
-    ...findOperatorRuns(text),
+  mergeOverlappingRanges([
+    ...findOperatorFamilyRuns(text),
+    ...findKnownOperatorLigatures(text),
+    ...findConjunctionLigatures(text),
+    ...findUnderscoreLigatureRuns(text),
     ...findHexDimensionRuns(text),
     ...findLetterLigatureRuns(text),
     ...findWwwRuns(text),

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal as XtermTerminal } from "@xterm/xterm";
@@ -8,6 +8,10 @@ import { LocalEcho } from "@/lib/local-echo";
 import type { TerminalTheme } from "@/lib/terminal-themes";
 import { applyTerminalAppearance } from "@/utils/apply-terminal-appearance";
 import { awaitFontReady } from "@/utils/await-font-ready";
+import {
+  createLigatureSupportProbe,
+  type LigatureSupportProbe,
+} from "@/utils/create-ligature-support-probe";
 import { findLigatureRanges } from "@/utils/ligature-joiner";
 import { fitTerminalPreservingScroll } from "@/utils/fit-terminal-preserving-scroll";
 import { getTerminalMinimumContrastRatio } from "@/utils/get-terminal-minimum-contrast-ratio";
@@ -67,8 +71,6 @@ export const useTerminalXtermSettingsEffects = ({
   activePaddingX,
   activePaddingY,
 }: UseTerminalXtermSettingsEffectsParams): void => {
-  const ligatureJoinerIdRef = useRef<number | null>(null);
-
   useLayoutEffect(
     () => applyTerminalAppearance(effectiveTheme, effectiveFontFamily),
     [effectiveTheme, effectiveFontFamily],
@@ -109,23 +111,42 @@ export const useTerminalXtermSettingsEffects = ({
     webglAddonRef.current?.setEmojiColorsMuted(activeMuteEmojiColors);
   }, [activeMuteEmojiColors, webglAddonRef]);
 
-  // registerCharacterJoiner/deregisterCharacterJoiner each refresh the whole
-  // viewport in xterm core, so toggling re-rasters joined spans without an
-  // explicit refresh. The id guards keep the register/deregister idempotent
-  // across effect re-runs.
   useEffect(() => {
-    if (!terminalReady) return;
+    if (!terminalReady || !activeLigaturesEnabled) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
-    if (activeLigaturesEnabled) {
-      if (ligatureJoinerIdRef.current === null) {
-        ligatureJoinerIdRef.current = terminal.registerCharacterJoiner(findLigatureRanges);
-      }
-    } else if (ligatureJoinerIdRef.current !== null) {
-      terminal.deregisterCharacterJoiner(ligatureJoinerIdRef.current);
-      ligatureJoinerIdRef.current = null;
-    }
-  }, [terminalReady, activeLigaturesEnabled, terminalRef]);
+
+    let didCancel = false;
+    let ligatureJoinerId: number | undefined;
+    let ligatureSupportProbe: LigatureSupportProbe | undefined;
+    void awaitFontReady(effectiveFont).then(() => {
+      if (didCancel || terminalRef.current !== terminal) return;
+      const activeLigatureSupportProbe = createLigatureSupportProbe(
+        terminal.element,
+        effectiveFontFamily,
+        activeFontSize,
+      );
+      ligatureSupportProbe = activeLigatureSupportProbe;
+      ligatureJoinerId = terminal.registerCharacterJoiner((text) =>
+        findLigatureRanges(text).filter((range) =>
+          activeLigatureSupportProbe.supports(text.slice(range[0], range[1])),
+        ),
+      );
+    });
+
+    return () => {
+      didCancel = true;
+      if (ligatureJoinerId !== undefined) terminal.deregisterCharacterJoiner(ligatureJoinerId);
+      ligatureSupportProbe?.dispose();
+    };
+  }, [
+    terminalReady,
+    activeLigaturesEnabled,
+    effectiveFont,
+    effectiveFontFamily,
+    activeFontSize,
+    terminalRef,
+  ]);
 
   useEffect(() => {
     if (!terminalReady) return;
