@@ -14,6 +14,7 @@ import {
   HAPTIC_TAP_MS,
   RECONNECT_DELAY_MS,
   RESIZE_DEBOUNCE_MS,
+  TERMINAL_BACKSPACE_SEQUENCE,
 } from "@/lib/constants";
 import {
   AMBIENT_TAB_CLOSE_DEADLINE_MS,
@@ -195,6 +196,7 @@ interface TerminalRuntimeCallbacks extends TerminalControlMessageCallbacks {
   setExitInfo: (value: TerminalExitInfo | null) => void;
   setConsecutiveFailures: Dispatch<SetStateAction<number>>;
   setSessionInfo: (value: TerminalSessionInfo | null) => void;
+  setTerminalBackspaceSequence: (sequence: string) => void;
   setLiveCwd: (cwd: string | null) => void;
   setForegroundProcess: (process: string | null) => void;
   setSearchResults: (value: TerminalSearchResultState) => void;
@@ -282,6 +284,7 @@ export const useTerminalRuntime = ({
     setExitInfo,
     setConsecutiveFailures,
     setSessionInfo,
+    setTerminalBackspaceSequence,
     setLiveCwd,
     setGitDiffSummary,
     setForegroundProcess,
@@ -428,6 +431,7 @@ export const useTerminalRuntime = ({
       send({ type: "input", data });
     };
     sendInputRef.current = sendInput;
+    let terminalBackspaceSequence = TERMINAL_BACKSPACE_SEQUENCE;
 
     setCaffeinateModeRef.current = (mode: CaffeinateMode) =>
       send({ type: "caffeinate-mode", mode });
@@ -467,6 +471,7 @@ export const useTerminalRuntime = ({
       sendInput,
       getHasForegroundProcess: tabOutputActivity.getHasForegroundProcess,
       getKittyFlags,
+      getBackspaceSequence: () => terminalBackspaceSequence,
       getKeyboardShortcuts: () => keyboardShortcutsRef.current,
       getLocalEcho: () => localEchoRef.current,
       onOpenNewShell: () => openNewShellRef.current?.(),
@@ -758,6 +763,8 @@ export const useTerminalRuntime = ({
             foregroundProcess: message.foreground,
             isSwitch,
           });
+          terminalBackspaceSequence = TERMINAL_BACKSPACE_SEQUENCE;
+          setTerminalBackspaceSequence(TERMINAL_BACKSPACE_SEQUENCE);
           setSessionInfo({
             shell: message.shell,
             shellName: message.shellName,
@@ -792,6 +799,9 @@ export const useTerminalRuntime = ({
             compress: COMPRESS_MODE,
             binaryFraming: true,
           });
+        } else if (message.type === "terminal-input-capabilities") {
+          terminalBackspaceSequence = message.backspaceSequence;
+          setTerminalBackspaceSequence(message.backspaceSequence);
         } else if (message.type === "compress") {
           outputSession.setCompressMode(message.mode);
         } else if (message.type === "binary-framing") {

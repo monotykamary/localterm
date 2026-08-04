@@ -1,6 +1,7 @@
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import {
   KITTY_KEYBOARD_DISAMBIGUATE_FLAG,
+  TERMINAL_BACKSPACE_SEQUENCE,
   TERMINAL_BACK_TAB_SEQUENCE,
   TERMINAL_TAB_SEQUENCE,
 } from "@/lib/constants";
@@ -17,6 +18,7 @@ interface InstallTerminalInputHandlersOptions {
   sendInput: (data: string) => void;
   getHasForegroundProcess: () => boolean;
   getKittyFlags: () => number;
+  getBackspaceSequence: () => string;
   getKeyboardShortcuts: () => KeyboardShortcutMap;
   getLocalEcho: () => LocalEcho | null;
   onOpenNewShell: () => void;
@@ -37,6 +39,7 @@ export const installTerminalInputHandlers = ({
   sendInput,
   getHasForegroundProcess,
   getKittyFlags,
+  getBackspaceSequence,
   getKeyboardShortcuts,
   getLocalEcho,
   onOpenNewShell,
@@ -147,6 +150,21 @@ export const installTerminalInputHandlers = ({
     }
     const kittyFlags = getKittyFlags();
     const isKittyKeyboardActive = kittyFlags !== 0;
+    const isPlainLegacyBackspace =
+      !isKittyKeyboardActive &&
+      event.key === "Backspace" &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey;
+    if (isPlainLegacyBackspace) {
+      const backspaceSequence = getBackspaceSequence();
+      if (backspaceSequence !== TERMINAL_BACKSPACE_SEQUENCE) {
+        event.preventDefault();
+        if (event.type === "keydown") sendInput(backspaceSequence);
+        return false;
+      }
+    }
     const terminalEditingOutput = buildTerminalEditingOutput({
       key: event.key,
       alternate: event.altKey && !isKittyKeyboardActive,

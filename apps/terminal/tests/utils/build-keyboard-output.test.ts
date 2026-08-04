@@ -113,6 +113,12 @@ describe("buildSpecialOutput", () => {
     expect(buildSpecialOutput("backspace", off)).toBe(String.fromCharCode(127));
   });
 
+  it("uses an application-specific backspace sequence", () => {
+    expect(
+      buildSpecialOutput("backspace", off, { backspaceSequence: String.fromCharCode(8) }),
+    ).toBe(String.fromCharCode(8));
+  });
+
   it("maps Command+Backspace to delete-to-line-start", () => {
     expect(buildSpecialOutput("backspace", on({ command: "oneShot" }))).toBe(
       String.fromCharCode(21),

@@ -5,15 +5,22 @@ const TAKEOVER_KEY_CODES = ["KeyN"];
 const FULLSCREEN_REQUEST_ERROR =
   "Fullscreen was blocked. Enter fullscreen manually to activate Ctrl+N takeover.";
 const KEYBOARD_LOCK_ERROR =
-  "The browser refused Keyboard Lock. Check this site's permissions, then try fullscreen again.";
+  "Keyboard Lock was refused. Allow Keyboard Lock in this site's browser permissions, then try again.";
 
 interface UseCtrlNTakeoverOptions {
   enabled: boolean;
   onError?: (message: string) => void;
+  onKeyboardLockFailure?: () => void;
 }
 
-const applyCtrlNLock = (onError?: (message: string) => void) => {
-  void navigator.keyboard?.lock(TAKEOVER_KEY_CODES).catch(() => onError?.(KEYBOARD_LOCK_ERROR));
+const applyCtrlNLock = (
+  onError?: (message: string) => void,
+  onKeyboardLockFailure?: () => void,
+) => {
+  void navigator.keyboard?.lock(TAKEOVER_KEY_CODES).catch(() => {
+    onKeyboardLockFailure?.();
+    onError?.(KEYBOARD_LOCK_ERROR);
+  });
 };
 
 // Chromium browsers on non-Mac reserve Ctrl+N (new window) below the page — the
@@ -22,7 +29,11 @@ const applyCtrlNLock = (onError?: (message: string) => void) => {
 // The returned activation callback must run directly inside the settings click
 // so requestFullscreen retains transient user activation; the effect handles
 // persisted settings, later fullscreen transitions, and cleanup.
-export const useCtrlNTakeover = ({ enabled, onError }: UseCtrlNTakeoverOptions): (() => void) => {
+export const useCtrlNTakeover = ({
+  enabled,
+  onError,
+  onKeyboardLockFailure,
+}: UseCtrlNTakeoverOptions): (() => void) => {
   const enabledRef = useRef(enabled);
   const hookRequestedFullscreenRef = useRef(false);
 
@@ -51,23 +62,25 @@ export const useCtrlNTakeover = ({ enabled, onError }: UseCtrlNTakeoverOptions):
           void document.exitFullscreen();
           return;
         }
-        applyCtrlNLock(onError);
+        applyCtrlNLock(onError, onKeyboardLockFailure);
       })
       .catch(() => {
         hookRequestedFullscreenRef.current = false;
         onError?.(FULLSCREEN_REQUEST_ERROR);
       });
-  }, [onError]);
+  }, [onError, onKeyboardLockFailure]);
 
   useEffect(() => {
     if (!enabled || !detectCtrlNTakeoverSupported()) return;
-    if (document.fullscreenElement !== null) applyCtrlNLock(onError);
+    if (document.fullscreenElement !== null) {
+      applyCtrlNLock(onError, onKeyboardLockFailure);
+    }
     const handleFullscreenChange = () => {
       if (document.fullscreenElement === null) {
         hookRequestedFullscreenRef.current = false;
         return;
       }
-      applyCtrlNLock(onError);
+      applyCtrlNLock(onError, onKeyboardLockFailure);
     };
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => {
@@ -78,7 +91,7 @@ export const useCtrlNTakeover = ({ enabled, onError }: UseCtrlNTakeoverOptions):
         void document.exitFullscreen();
       }
     };
-  }, [enabled, onError]);
+  }, [enabled, onError, onKeyboardLockFailure]);
 
   return activateCtrlNTakeover;
 };

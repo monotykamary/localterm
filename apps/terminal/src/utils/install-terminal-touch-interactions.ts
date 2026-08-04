@@ -6,7 +6,6 @@ import {
   TERMINAL_VIEWPORT_WIDTH_STABLE_PX,
 } from "@/lib/constants";
 import { dispatchTerminalMouseTap } from "@/utils/dispatch-terminal-mouse-tap";
-import { isTerminalCursorTap } from "@/utils/is-terminal-cursor-tap";
 import { suppressTerminalSystemKeyboard } from "@/utils/suppress-terminal-system-keyboard";
 
 interface InstallTerminalTouchInteractionsOptions {
@@ -80,27 +79,13 @@ export const installTerminalTouchInteractions = ({
     const tapClientX = endingTouch?.clientX ?? tapStartClientX;
     const tapClientY = endingTouch?.clientY ?? tapStartClientY;
     if (terminal.modes.mouseTrackingMode !== "none") {
-      const screen = container.querySelector(".xterm-screen");
-      if (!(screen instanceof HTMLElement)) return;
-      const screenRect = screen.getBoundingClientRect();
-      const didTapTerminalCursor = isTerminalCursorTap({
-        isCursorVisible: terminal.modes.showCursor,
-        tapClientX,
-        tapClientY,
-        screenLeft: screenRect.left,
-        screenTop: screenRect.top,
-        screenWidth: screenRect.width,
-        screenHeight: screenRect.height,
-        columns: terminal.cols,
-        rows: terminal.rows,
-        cursorColumn: terminal.buffer.active.cursorX,
-        cursorRow: terminal.buffer.active.cursorY,
-      });
       event.preventDefault();
-      if (didTapTerminalCursor && !onScreenKeyboardOpenRef.current) {
+      if (!onScreenKeyboardOpenRef.current) {
         openOnScreenKeyboard();
         return;
       }
+      const screen = container.querySelector(".xterm-screen");
+      if (!(screen instanceof HTMLElement)) return;
       dispatchTerminalMouseTap(screen, { clientX: tapClientX, clientY: tapClientY });
       return;
     }

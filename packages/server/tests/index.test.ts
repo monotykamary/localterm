@@ -24,7 +24,11 @@ const normalizeMessage = (event: WebSocket.MessageEvent): unknown => {
 const connectAndCollect = (
   port: number,
   timeoutMs = 10_000,
-): Promise<{ socket: WebSocket; waitForSession: () => Promise<unknown> }> =>
+): Promise<{
+  socket: WebSocket;
+  messages: readonly unknown[];
+  waitForSession: () => Promise<unknown>;
+}> =>
   new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("ws connect timeout")), timeoutMs);
     const messages: unknown[] = [];
@@ -47,6 +51,7 @@ const connectAndCollect = (
       clearTimeout(timer);
       resolve({
         socket,
+        messages,
         waitForSession: () =>
           messages.some(
             (message) =>
@@ -125,8 +130,8 @@ describe("createServer WS lifecycle", { tags: ["integration"] }, () => {
     await server.stop();
   });
 
-  it("sends a session frame on connect", async () => {
-    const { socket, waitForSession } = await connectAndCollect(server.port);
+  it("sends session and terminal input capability frames on connect", async () => {
+    const { socket, messages, waitForSession } = await connectAndCollect(server.port);
     try {
       const session = await waitForSession();
       expect(session).toEqual(
@@ -137,6 +142,19 @@ describe("createServer WS lifecycle", { tags: ["integration"] }, () => {
           foreground: null,
         }),
       );
+      const didReceiveInputCapabilities = await pollFor(() =>
+        messages.some(
+          (message) =>
+            message !== null &&
+            typeof message === "object" &&
+            (message as Record<string, unknown>).type === "terminal-input-capabilities",
+        ),
+      );
+      expect(didReceiveInputCapabilities).toBe(true);
+      expect(messages).toContainEqual({
+        type: "terminal-input-capabilities",
+        backspaceSequence: expect.any(String),
+      });
     } finally {
       await closeWs(socket);
     }

@@ -254,6 +254,22 @@ describe("serverToClientMessageSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts terminal input capabilities", () => {
+    const result = serverToClientMessageSchema.safeParse({
+      type: "terminal-input-capabilities",
+      backspaceSequence: "\b",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a multi-byte terminal backspace sequence", () => {
+    const result = serverToClientMessageSchema.safeParse({
+      type: "terminal-input-capabilities",
+      backspaceSequence: "ab",
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("accepts a session frame with null foreground (idle shell)", () => {
     const result = serverToClientMessageSchema.safeParse({
       type: "session",

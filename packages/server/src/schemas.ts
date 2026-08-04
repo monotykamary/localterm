@@ -622,6 +622,13 @@ const sessionMessageSchema = z
   })
   .strict();
 
+const terminalInputCapabilitiesMessageSchema = z
+  .object({
+    type: z.literal("terminal-input-capabilities"),
+    backspaceSequence: z.string().length(1),
+  })
+  .strict();
+
 const cwdMessageSchema = z
   .object({
     type: z.literal("cwd"),
@@ -2146,6 +2153,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   exitMessageSchema,
   titleMessageSchema,
   sessionMessageSchema,
+  terminalInputCapabilitiesMessageSchema,
   cwdMessageSchema,
   foregroundMessageSchema,
   notificationMessageSchema,

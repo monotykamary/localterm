@@ -65,10 +65,15 @@ const installDeferredFullscreen = (): DeferredFullscreenStub => {
 
 const flushPromises = () => act(async () => {});
 
-const renderTakeover = (enabled: boolean, onError?: (message: string) => void) =>
-  renderHook((props: { enabled: boolean }) => useCtrlNTakeover({ ...props, onError }), {
-    initialProps: { enabled },
-  });
+const renderTakeover = (
+  enabled: boolean,
+  onError?: (message: string) => void,
+  onKeyboardLockFailure?: () => void,
+) =>
+  renderHook(
+    (props: { enabled: boolean }) => useCtrlNTakeover({ ...props, onError, onKeyboardLockFailure }),
+    { initialProps: { enabled } },
+  );
 
 describe("useCtrlNTakeover", () => {
   afterEach(() => {
@@ -142,14 +147,16 @@ describe("useCtrlNTakeover", () => {
   it("reports Keyboard Lock failures", async () => {
     const { lock } = installKeyboardLock();
     const onError = vi.fn();
+    const onKeyboardLockFailure = vi.fn();
     installFullscreenApi();
     fakeFullscreenElement = document.documentElement;
     lock.mockRejectedValue(new Error("permission denied"));
 
-    renderTakeover(true, onError);
+    renderTakeover(true, onError, onKeyboardLockFailure);
     await flushPromises();
 
     expect(onError).toHaveBeenCalledWith(expect.stringContaining("Keyboard Lock"));
+    expect(onKeyboardLockFailure).toHaveBeenCalledOnce();
   });
 
   it("reports synchronous fullscreen request failures", () => {

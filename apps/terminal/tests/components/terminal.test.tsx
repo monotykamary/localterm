@@ -1229,6 +1229,52 @@ describe("Terminal floating keyboard button", () => {
     expect(queryOnScreenKeyboard()).not.toBeNull();
   });
 
+  it("uses the server's terminfo backspace sequence in the on-screen keyboard", () => {
+    installFakeLocalStorage({ [KEYBOARD_FLOATING_BUTTON_STORAGE_KEY]: "true" });
+    render(<Terminal />);
+    const socket = fakeWebSockets[0];
+    socket?.fireOpen();
+    socket?.fireMessage({
+      type: "session",
+      shell: "/bin/zsh",
+      shellName: "zsh",
+      pid: 123,
+      cwd: "/tmp",
+      title: "tmp",
+      foreground: null,
+    });
+    socket?.fireMessage({
+      type: "terminal-input-capabilities",
+      backspaceSequence: String.fromCharCode(8),
+    });
+    fireEvent.click(screen.getByLabelText("show on-screen keyboard"));
+    const keyboard = queryOnScreenKeyboard();
+    const backspaceKey = keyboard?.querySelector('[aria-label="delete"]');
+    if (!(keyboard instanceof HTMLElement) || !(backspaceKey instanceof HTMLElement)) {
+      throw new Error("on-screen backspace key did not render");
+    }
+    backspaceKey.getBoundingClientRect = () => ({
+      bottom: 140,
+      height: 40,
+      left: 100,
+      right: 140,
+      top: 100,
+      width: 40,
+      x: 100,
+      y: 100,
+      toJSON: () => ({}),
+    });
+    keyboard.setPointerCapture = vi.fn();
+    socket?.send.mockClear();
+
+    fireEvent.pointerDown(keyboard, { clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.pointerUp(keyboard, { clientX: 120, clientY: 120, pointerId: 1 });
+
+    expect(socket?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "input", data: String.fromCharCode(8) }),
+    );
+  });
+
   it("adds the floating button when toggled on in settings", () => {
     installFakeLocalStorage({ [KEYBOARD_FLOATING_BUTTON_STORAGE_KEY]: "false" });
     render(<Terminal />);
@@ -1246,6 +1292,7 @@ describe("Terminal Ctrl+N takeover", () => {
   afterEach(() => {
     cleanup();
     Reflect.deleteProperty(navigator, "keyboard");
+    Reflect.deleteProperty(navigator, "permissions");
     Reflect.deleteProperty(document.documentElement, "requestFullscreen");
     Reflect.deleteProperty(document, "fullscreenElement");
     Reflect.deleteProperty(document, "exitFullscreen");
@@ -1291,6 +1338,24 @@ describe("Terminal Ctrl+N takeover", () => {
     expect(localStorage.getItem(CTRL_N_TAKEOVER_STORAGE_KEY)).toBe("true");
   });
 
+  it("disables a persisted takeover when Keyboard Lock permission is denied", async () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Linux armv8l" });
+    Object.defineProperty(navigator, "permissions", {
+      configurable: true,
+      value: { query: vi.fn(() => Promise.resolve({ state: "denied" })) },
+    });
+    installFakeLocalStorage({ [CTRL_N_TAKEOVER_STORAGE_KEY]: "true" });
+    render(<Terminal />);
+
+    await act(async () => {});
+    fireEvent.click(screen.getByLabelText("terminal settings"));
+    const takeoverSwitch = screen.getByLabelText("toggle Ctrl+N takeover");
+
+    expect(takeoverSwitch.getAttribute("aria-disabled")).toBe("true");
+    expect(takeoverSwitch.getAttribute("aria-checked")).toBe("false");
+    expect(localStorage.getItem(CTRL_N_TAKEOVER_STORAGE_KEY)).toBe("false");
+  });
+
   it("keeps the takeover switch disabled on macOS where Ctrl+N already passes through", () => {
     installFakeLocalStorage();
     render(<Terminal />);
@@ -1303,6 +1368,67 @@ describe("Terminal Ctrl+N takeover", () => {
 });
 
 describe("Terminal Kitty keyboard protocol", () => {
+  it("uses the server's terminfo sequence for physical legacy Backspace", () => {
+    render(<Terminal />);
+    const socket = fakeWebSockets[0];
+    socket?.fireOpen();
+    socket?.fireMessage({
+      type: "session",
+      shell: "/bin/zsh",
+      shellName: "zsh",
+      pid: 123,
+      cwd: "/tmp",
+      title: "tmp",
+      foreground: null,
+    });
+    socket?.fireMessage({
+      type: "terminal-input-capabilities",
+      backspaceSequence: String.fromCharCode(8),
+    });
+    socket?.send.mockClear();
+
+    expect(dispatchTerminalKey(fakeXterms[0], "keydown", "Backspace")).toEqual({
+      handlerResult: false,
+      preventDefaultCalls: 1,
+    });
+    expect(socket?.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "input", data: String.fromCharCode(8) }),
+    );
+    const sendCallCount = socket?.send.mock.calls.length;
+    expect(dispatchTerminalKey(fakeXterms[0], "keyup", "Backspace")).toEqual({
+      handlerResult: false,
+      preventDefaultCalls: 1,
+    });
+    expect(socket?.send).toHaveBeenCalledTimes(sendCallCount ?? 0);
+  });
+
+  it("leaves Backspace encoding with xterm while Kitty keyboard mode is active", () => {
+    render(<Terminal />);
+    const socket = fakeWebSockets[0];
+    socket?.fireOpen();
+    socket?.fireMessage({
+      type: "session",
+      shell: "/bin/zsh",
+      shellName: "zsh",
+      pid: 123,
+      cwd: "/tmp",
+      title: "tmp",
+      foreground: null,
+    });
+    socket?.fireMessage({
+      type: "terminal-input-capabilities",
+      backspaceSequence: String.fromCharCode(8),
+    });
+    activateKittyKeyboard(KITTY_KEYBOARD_DISAMBIGUATE_FLAG);
+    socket?.send.mockClear();
+
+    expect(dispatchTerminalKey(fakeXterms[0], "keydown", "Backspace")).toEqual({
+      handlerResult: true,
+      preventDefaultCalls: 0,
+    });
+    expect(socket?.send).not.toHaveBeenCalled();
+  });
+
   it("enables xterm's native Kitty keyboard implementation", () => {
     render(<Terminal />);
 

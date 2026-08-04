@@ -68,7 +68,15 @@ const applyModifiersToChar = (glyph: KeyGlyph, modifiers: ModifierState): string
   return activeMeta ? TERMINAL_ESCAPE_SEQUENCE + base : base;
 };
 
-const buildSpecialSequence = (action: SpecialAction, modifiers: ModifierState): string => {
+interface BuildSpecialOutputOptions {
+  readonly backspaceSequence?: string;
+}
+
+const buildSpecialSequence = (
+  action: SpecialAction,
+  modifiers: ModifierState,
+  options: BuildSpecialOutputOptions,
+): string => {
   if (action === "backspace") {
     if (modifierIsActive(modifiers.function)) return TERMINAL_ESCAPE_SEQUENCE + "[3~";
     const terminalEditingOutput = terminalEditingOutputFor("Backspace", modifiers);
@@ -76,7 +84,7 @@ const buildSpecialSequence = (action: SpecialAction, modifiers: ModifierState): 
   }
   switch (action) {
     case "backspace":
-      return TERMINAL_BACKSPACE_SEQUENCE;
+      return options.backspaceSequence ?? TERMINAL_BACKSPACE_SEQUENCE;
     case "enter":
       return TERMINAL_CARRIAGE_RETURN_SEQUENCE;
     default:
@@ -87,5 +95,8 @@ const buildSpecialSequence = (action: SpecialAction, modifiers: ModifierState): 
 export const buildCharOutput = (glyph: KeyGlyph, modifiers: ModifierState): string =>
   applyModifiersToChar(glyph, modifiers);
 
-export const buildSpecialOutput = (action: SpecialAction, modifiers: ModifierState): string =>
-  buildSpecialSequence(action, modifiers);
+export const buildSpecialOutput = (
+  action: SpecialAction,
+  modifiers: ModifierState,
+  options: BuildSpecialOutputOptions = {},
+): string => buildSpecialSequence(action, modifiers, options);

@@ -65,6 +65,7 @@ import {
   PROCESSES_FILENAME,
   SECRETS_FILENAME,
   THEMES_FILENAME,
+  TERM_BACKSPACE_SEQUENCE,
   FONTS_FILENAME,
   SECRETS_SHIMS_DIRNAME,
   SECRET_EXPORT_SCRYPT_WORK_FACTOR,
@@ -3243,6 +3244,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             title: liveSession.currentTitle || liveSession.initialDocumentTitle,
             foreground: liveSession.lastEmittedForeground,
             id: sessionId ?? undefined,
+          });
+          safeSend(ws, {
+            type: "terminal-input-capabilities",
+            backspaceSequence: TERM_BACKSPACE_SEQUENCE,
           });
           // Tell this tab the current keep-awake state so its coffee toggle
           // renders correctly (and is hidden where caffeinate is unsupported).

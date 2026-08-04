@@ -18,6 +18,7 @@ import { TerminalOverlays } from "@/components/terminal-overlays";
 import { useGitBranchInfo } from "@/hooks/use-git-branch-info";
 import { useGitDiffSummary } from "@/hooks/use-git-diff-summary";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { useKeyboardLockPermission } from "@/hooks/use-keyboard-lock-permission";
 import { useScreenWakeLock } from "@/hooks/use-screen-wake-lock";
 import { useTerminalCommandPalette } from "@/hooks/use-terminal-command-palette";
 import { useTerminalImagePaste } from "@/hooks/use-terminal-image-paste";
@@ -43,6 +44,7 @@ import {
   RECONNECT_POLL_INTERVAL_MS,
   RESTART_COMMAND,
   RETRY_BUTTON_FEEDBACK_MS,
+  TERMINAL_BACKSPACE_SEQUENCE,
 } from "@/lib/constants";
 import { type AutomationWithNextRun } from "@monotykamary/localterm-server/protocol";
 import type { TerminalSessionInfo } from "@/lib/terminal-session-info";
@@ -310,6 +312,9 @@ export const Terminal = () => {
     isQrOpen ||
     isSecretsOpen;
   const [sessionInfo, setSessionInfo] = useState<TerminalSessionInfo | null>(null);
+  const [terminalBackspaceSequence, setTerminalBackspaceSequence] = useState(
+    TERMINAL_BACKSPACE_SEQUENCE,
+  );
   const [notificationsPermission, setNotificationsPermission] = useState<
     NotificationPermission | "unsupported"
   >("Notification" in window ? Notification.permission : "unsupported");
@@ -318,6 +323,8 @@ export const Terminal = () => {
   const liveCwdRef = useRef<string | null>(null);
   const wsConnectedRef = useRef(false);
   const isMac = useMemo(detectIsMacPlatform, []);
+  const { permissionState: keyboardLockPermissionState, refreshPermissionState } =
+    useKeyboardLockPermission();
   const toastManager = useToast();
   const showCtrlNTakeoverError = useCallback(
     (message: string) => {
@@ -333,8 +340,9 @@ export const Terminal = () => {
   );
   const isCtrlNTakeoverSupported = detectCtrlNTakeoverSupported();
   const activateCtrlNTakeover = useCtrlNTakeover({
-    enabled: ctrlNTakeoverEnabled && !isMac,
+    enabled: ctrlNTakeoverEnabled && !isMac && keyboardLockPermissionState !== "denied",
     onError: showCtrlNTakeoverError,
+    onKeyboardLockFailure: refreshPermissionState,
   });
   const handleCtrlNTakeoverChange = useCallback(
     (enabled: boolean) => {
@@ -343,11 +351,18 @@ export const Terminal = () => {
     },
     [activateCtrlNTakeover, handleCtrlNTakeoverEnabledChange],
   );
+  useEffect(() => {
+    if (keyboardLockPermissionState === "denied" && ctrlNTakeoverEnabled) {
+      handleCtrlNTakeoverEnabledChange(false);
+    }
+  }, [ctrlNTakeoverEnabled, handleCtrlNTakeoverEnabledChange, keyboardLockPermissionState]);
   const ctrlNTakeoverDisabledReason = isMac
     ? "macOS browsers reserve Cmd+N instead, so Ctrl+N already reaches the terminal here."
-    : isCtrlNTakeoverSupported
-      ? null
-      : "Needs the Keyboard Lock and Fullscreen APIs available in supported Chromium browsers.";
+    : keyboardLockPermissionState === "denied"
+      ? "Keyboard Lock is blocked for this site. Allow it in Chrome's site settings to take over Ctrl+N."
+      : isCtrlNTakeoverSupported
+        ? null
+        : "Needs the Keyboard Lock and Fullscreen APIs available in supported Chromium browsers.";
   const { keyboardShortcuts, setKeyboardShortcut, resetKeyboardShortcuts } =
     useKeyboardShortcuts(isMac);
   const keyboardShortcutsRef = useRef(keyboardShortcuts);
@@ -519,6 +534,7 @@ export const Terminal = () => {
       setExitInfo,
       setConsecutiveFailures,
       setSessionInfo,
+      setTerminalBackspaceSequence,
       setLiveCwd,
       setForegroundProcess,
       setSearchResults,
@@ -1214,6 +1230,7 @@ export const Terminal = () => {
             sendInputRef.current?.(data);
             refocusTerminal();
           }}
+          backspaceSequence={terminalBackspaceSequence}
           onAttachImage={pickAndPasteImage}
           onDismiss={dismissOnScreenKeyboard}
           onRefocus={refocusTerminal}

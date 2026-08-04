@@ -6,6 +6,14 @@ interface KeyboardLockManager {
   unlock: () => void;
 }
 
+interface KeyboardLockPermissionDescriptor {
+  readonly name: "keyboard-lock";
+}
+
+interface Permissions {
+  query(permissionDescriptor: KeyboardLockPermissionDescriptor): Promise<PermissionStatus>;
+}
+
 interface Navigator {
   readonly keyboard?: KeyboardLockManager;
 }

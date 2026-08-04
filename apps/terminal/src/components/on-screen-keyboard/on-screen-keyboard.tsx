@@ -57,6 +57,7 @@ import {
 
 interface OnScreenKeyboardProps {
   readonly onInput: (data: string) => void;
+  readonly backspaceSequence?: string;
   readonly onHeightChange: (height: number) => void;
   readonly onAttachImage: () => void;
   readonly onDismiss: () => void;
@@ -169,6 +170,7 @@ const renderAlternateCorners = (
 
 export const OnScreenKeyboard = ({
   onInput,
+  backspaceSequence,
   onHeightChange,
   onAttachImage,
   onDismiss,
@@ -352,10 +354,12 @@ export const OnScreenKeyboard = ({
       if (gesture.cell.type === "char") {
         onInput(buildCharOutput(gesture.selected ?? gesture.cell.center, modifiersRef.current));
       } else {
-        onInput(buildSpecialOutput(gesture.cell.action, modifiersRef.current));
+        onInput(
+          buildSpecialOutput(gesture.cell.action, modifiersRef.current, { backspaceSequence }),
+        );
       }
     },
-    [onInput],
+    [backspaceSequence, onInput],
   );
 
   const clearRepeat = useCallback((pointerId: number) => {
@@ -426,12 +430,20 @@ export const OnScreenKeyboard = ({
           return;
         default: {
           const current = modifiersRef.current;
-          onInput(buildSpecialOutput(cell.action, current));
+          onInput(buildSpecialOutput(cell.action, current, { backspaceSequence }));
           applyModifiers(consumeOneShot(current));
         }
       }
     },
-    [applyModifiers, onAttachImage, onDismiss, onInput, openKeyboardSettings, vibrate],
+    [
+      applyModifiers,
+      backspaceSequence,
+      onAttachImage,
+      onDismiss,
+      onInput,
+      openKeyboardSettings,
+      vibrate,
+    ],
   );
 
   const handlePointerDown = useCallback(
