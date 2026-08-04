@@ -1,5 +1,13 @@
 # localterm
 
+## 2.72.10
+
+### Patch Changes
+
+- a69ecd3: Keep the on-screen keyboard available while tmux mouse tracking is enabled, negotiate the daemon platform's backspace sequence for physical and on-screen keyboards, and handle Chrome's Keyboard Lock site permission without repeated Android fullscreen errors.
+- Updated dependencies [a69ecd3]
+  - @monotykamary/localterm-server@2.72.10
+
 ## 2.72.9
 
 ### Patch Changes
