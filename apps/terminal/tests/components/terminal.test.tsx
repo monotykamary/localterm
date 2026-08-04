@@ -58,6 +58,7 @@ interface FakeCsiHandlerEntry {
 
 interface FakeXtermBufferState {
   baseY: number;
+  cursorY: number;
   viewportY: number;
   type: "normal";
 }
@@ -192,7 +193,7 @@ vi.mock("@xterm/xterm", () => {
     unicode = { activeVersion: "11", register: () => {} };
     options: Record<string, unknown> = {};
     buffer: { active: FakeXtermBufferState } = {
-      active: { baseY: 0, viewportY: 0, type: "normal" },
+      active: { baseY: 0, cursorY: 0, viewportY: 0, type: "normal" },
     };
     modes: FakeXtermModes = { mouseTrackingMode: "none" };
     scrollLines = vi.fn();
@@ -204,6 +205,18 @@ vi.mock("@xterm/xterm", () => {
       if (this.focusResponse === null) return;
       for (const listener of this.dataListeners) listener(this.focusResponse);
     });
+    registerMarker = (cursorYOffset = 0) => {
+      let isDisposed = false;
+      return {
+        dispose: () => {
+          isDisposed = true;
+        },
+        get isDisposed() {
+          return isDisposed;
+        },
+        line: this.buffer.active.baseY + this.buffer.active.cursorY + cursorYOffset,
+      };
+    };
     registerCharacterJoiner = vi.fn((_handler: (text: string) => [number, number][]) => 1);
     deregisterCharacterJoiner = vi.fn((_joinerId: number) => {});
     private titleListeners = new Set<(title: string) => void>();
@@ -252,7 +265,9 @@ vi.mock("@xterm/xterm", () => {
         },
         getOptions: () => this.options,
         setBufferState: ({ baseY, viewportY }) => {
-          this.buffer = { active: { baseY, viewportY, type: "normal" } };
+          this.buffer = {
+            active: { baseY, cursorY: this.buffer.active.cursorY, viewportY, type: "normal" },
+          };
         },
         scrollLines: this.scrollLines,
         scrollToBottom: this.scrollToBottom,
@@ -2251,6 +2266,34 @@ describe("Terminal scroll preservation through hot-swaps", () => {
     if (!wheelHandler) throw new Error("wheel handler not installed");
     act(() => {
       wheelHandler(new WheelEvent("wheel", { deltaY: -20 }));
+      handle.setBufferState({ baseY: 105, viewportY: 64 });
+      writeCallback?.();
+    });
+
+    expect(handle.scrollLines).not.toHaveBeenCalled();
+    expect(handle.scrollToBottom).not.toHaveBeenCalled();
+  });
+
+  it("does not restore an output anchor over an in-flight keyboard page scroll", () => {
+    render(<Terminal />);
+    const handle = fakeXterms[0];
+    if (!handle) throw new Error("xterm not constructed");
+    let writeCallback: (() => void) | undefined;
+    handle.setBufferState({ baseY: 100, viewportY: 70 });
+    handle.scrollLines.mockClear();
+    handle.scrollToBottom.mockClear();
+    handle.write.mockImplementation((_data: string, callback?: () => void) => {
+      handle.setBufferState({ baseY: 105, viewportY: 72 });
+      writeCallback = callback;
+    });
+
+    act(() => {
+      fakeWebSockets[0]?.fireMessage({ type: "output", data: "redraw" });
+    });
+    const keyHandler = handle.customKeyEventHandler;
+    if (!keyHandler) throw new Error("key handler not installed");
+    act(() => {
+      keyHandler(new KeyboardEvent("keydown", { key: "PageUp", shiftKey: true }));
       handle.setBufferState({ baseY: 105, viewportY: 64 });
       writeCallback?.();
     });

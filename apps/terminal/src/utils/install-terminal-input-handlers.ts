@@ -159,6 +159,15 @@ export const installTerminalInputHandlers = ({
     }
     const kittyFlags = getKittyFlags();
     const isKittyKeyboardActive = kittyFlags !== 0;
+    const buffer = terminal.buffer.active;
+    const isLocalPageScroll =
+      event.type === "keydown" &&
+      !isKittyKeyboardActive &&
+      event.shiftKey &&
+      buffer.type === "normal" &&
+      ((event.key === "PageUp" && buffer.viewportY > 0) ||
+        (event.key === "PageDown" && buffer.viewportY < buffer.baseY));
+    if (isLocalPageScroll) onUserScroll();
     const isPlainLegacyBackspace =
       !isKittyKeyboardActive &&
       event.key === "Backspace" &&

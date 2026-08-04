@@ -514,12 +514,13 @@ class OutputBatcher {
         this.awaitingSynchronizedFrameRender = true;
         synchronizedFrameGeneration = ++this.synchronizedFrameGeneration;
       }
-      const outputScrollSnapshot = this.outputScrollController?.capture();
+      const outputScrollController = this.outputScrollController;
+      const outputScrollSnapshot = outputScrollController?.capture();
       const afterWrite =
         outputScrollSnapshot || shouldRenderImmediately || shouldPaceNextSynchronizedFrame
           ? () => {
               if (outputScrollSnapshot) {
-                this.outputScrollController?.restore(outputScrollSnapshot);
+                outputScrollController?.restore(outputScrollSnapshot);
               }
               if (shouldRenderImmediately) this.flushInteractiveRender(terminal);
               if (shouldPaceNextSynchronizedFrame) {

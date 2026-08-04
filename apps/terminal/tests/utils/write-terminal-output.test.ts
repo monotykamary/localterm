@@ -12,8 +12,15 @@ import { OutputBatcher } from "../../src/utils/write-terminal-output";
 
 interface OutputScrollBuffer {
   baseY: number;
+  cursorY: number;
   viewportY: number;
   type: "normal";
+}
+
+interface OutputScrollMarker {
+  dispose: () => void;
+  isDisposed: boolean;
+  line: number;
 }
 
 interface FakeTerminalOptions {
@@ -116,10 +123,21 @@ describe("OutputBatcher viewport anchoring", () => {
   const createViewportHarness = (baseY: number, viewportY: number, deferWrite: boolean) => {
     const buffer: OutputScrollBuffer = {
       baseY,
+      cursorY: 0,
       viewportY,
       type: "normal",
     };
     const deferredWriteCallbacks: Array<() => void> = [];
+    const registerMarker = (cursorYOffset = 0) => {
+      const marker: OutputScrollMarker = {
+        dispose: () => {
+          marker.isDisposed = true;
+        },
+        isDisposed: false,
+        line: buffer.baseY + buffer.cursorY + cursorYOffset,
+      };
+      return marker;
+    };
     const scrollLines = vi.fn((amount: number) => {
       buffer.viewportY += amount;
     });
@@ -128,6 +146,7 @@ describe("OutputBatcher viewport anchoring", () => {
     });
     const terminal = {
       buffer: { active: buffer },
+      registerMarker,
       scrollLines,
       scrollToBottom,
       write: (_data: Uint8Array, callback?: () => void) => {
@@ -147,6 +166,7 @@ describe("OutputBatcher viewport anchoring", () => {
       scrollController,
       scrollLines,
       scrollToBottom,
+      terminal,
     };
   };
 
@@ -179,6 +199,21 @@ describe("OutputBatcher viewport anchoring", () => {
     expect(harness.scrollLines).not.toHaveBeenCalled();
     expect(harness.scrollToBottom).not.toHaveBeenCalled();
     expect(harness.buffer.viewportY).toBe(64);
+  });
+
+  it("restores a deferred write through the controller that captured it", () => {
+    const firstHarness = createViewportHarness(100, 70, true);
+    const secondHarness = createViewportHarness(20, 10, false);
+    const firstRestore = vi.spyOn(firstHarness.scrollController, "restore");
+    const secondRestore = vi.spyOn(secondHarness.scrollController, "restore");
+    firstHarness.batcher.pushBytes(textEncoder.encode("output"));
+
+    firstHarness.batcher.detach();
+    firstHarness.batcher.attach(secondHarness.terminal, secondHarness.scrollController);
+    firstHarness.deferredWriteCallbacks[0]?.();
+
+    expect(firstRestore).toHaveBeenCalledOnce();
+    expect(secondRestore).not.toHaveBeenCalled();
   });
 });
 

@@ -1,8 +1,9 @@
-import type { Terminal as XtermTerminal } from "@xterm/xterm";
+import type { IMarker, Terminal as XtermTerminal } from "@xterm/xterm";
 
 interface TerminalOutputScrollSnapshot {
   bufferType: "normal" | "alternate";
   userScrollGeneration: number;
+  viewportMarker: IMarker | null;
   viewportY: number;
   wasAtBottom: boolean;
 }
@@ -22,11 +23,16 @@ export const createTerminalOutputScrollController = (
   return {
     capture: () => {
       const buffer = terminal.buffer.active;
+      const wasAtBottom = buffer.viewportY === buffer.baseY;
       return {
         bufferType: buffer.type,
         userScrollGeneration,
+        viewportMarker:
+          buffer.type === "normal" && !wasAtBottom
+            ? terminal.registerMarker(buffer.viewportY - buffer.baseY - buffer.cursorY)
+            : null,
         viewportY: buffer.viewportY,
-        wasAtBottom: buffer.viewportY === buffer.baseY,
+        wasAtBottom,
       };
     },
     noteUserScroll: () => {
@@ -40,16 +46,24 @@ export const createTerminalOutputScrollController = (
       return true;
     },
     restore: (snapshot) => {
-      if (snapshot.userScrollGeneration !== userScrollGeneration) return;
-      const buffer = terminal.buffer.active;
-      if (buffer.type !== snapshot.bufferType) return;
-      if (snapshot.wasAtBottom) {
-        if (buffer.viewportY !== buffer.baseY) terminal.scrollToBottom();
-        return;
+      try {
+        if (snapshot.userScrollGeneration !== userScrollGeneration) return;
+        const buffer = terminal.buffer.active;
+        if (buffer.type !== snapshot.bufferType) return;
+        if (snapshot.wasAtBottom) {
+          if (buffer.viewportY !== buffer.baseY) terminal.scrollToBottom();
+          return;
+        }
+        if (snapshot.viewportMarker?.isDisposed) return;
+        const targetViewportY = Math.min(
+          snapshot.viewportMarker?.line ?? snapshot.viewportY,
+          buffer.baseY,
+        );
+        const lineDelta = targetViewportY - buffer.viewportY;
+        if (lineDelta !== 0) terminal.scrollLines(lineDelta);
+      } finally {
+        snapshot.viewportMarker?.dispose();
       }
-      const targetViewportY = Math.min(snapshot.viewportY, buffer.baseY);
-      const lineDelta = targetViewportY - buffer.viewportY;
-      if (lineDelta !== 0) terminal.scrollLines(lineDelta);
     },
   };
 };
