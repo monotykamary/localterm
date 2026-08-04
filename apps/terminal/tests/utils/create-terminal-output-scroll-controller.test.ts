@@ -49,6 +49,18 @@ describe("createTerminalOutputScrollController", () => {
     expect(harness.buffer.viewportY).toBe(105);
   });
 
+  it("does not refresh the viewport when xterm already followed output", () => {
+    const harness = createTerminalScrollHarness({ baseY: 100, viewportY: 100, type: "normal" });
+    const snapshot = harness.controller.capture();
+    harness.buffer.baseY = 105;
+    harness.buffer.viewportY = 105;
+
+    harness.controller.restore(snapshot);
+
+    expect(harness.scrollToBottom).not.toHaveBeenCalled();
+    expect(harness.scrollLines).not.toHaveBeenCalled();
+  });
+
   it("keeps the same absolute scrollback row visible while detached", () => {
     const harness = createTerminalScrollHarness({ baseY: 100, viewportY: 70, type: "normal" });
     const snapshot = harness.controller.capture();

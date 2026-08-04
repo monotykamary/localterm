@@ -36,7 +36,7 @@ export const createTerminalOutputScrollController = (
       const buffer = terminal.buffer.active;
       if (buffer.type !== snapshot.bufferType) return;
       if (snapshot.wasAtBottom) {
-        terminal.scrollToBottom();
+        if (buffer.viewportY !== buffer.baseY) terminal.scrollToBottom();
         return;
       }
       const targetViewportY = Math.min(snapshot.viewportY, buffer.baseY);
