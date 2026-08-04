@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.72.16
+
+### Patch Changes
+
+- 70ccfc4: Prevent WebGL boundary strokes in regex-heavy terminal output by joining only real ligature candidates supported by the active font.
+
 ## 2.72.15
 
 ### Patch Changes
