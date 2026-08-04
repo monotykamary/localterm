@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.72.15
+
+### Patch Changes
+
+- 1c7a91f: Keep detached terminal transcripts fixed in place while live output trims a full scrollback buffer, and preserve Shift+PageUp/PageDown scrolling across in-flight writes.
+
 ## 2.72.14
 
 ### Patch Changes
