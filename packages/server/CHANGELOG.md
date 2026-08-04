@@ -1,5 +1,12 @@
 # localterm-server
 
+## 2.72.13
+
+### Patch Changes
+
+- ad5af9f: Keep size-split tmux and Herdr redraws atomic across slow links instead of exposing a partially repainted terminal until the next forced refresh.
+- ad5af9f: Pin a scrolled mobile terminal to the bottom when the on-screen keyboard types, while preserving touch and inertial scroll gestures during active terminal output.
+
 ## 2.72.12
 
 ### Patch Changes
