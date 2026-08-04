@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.72.11
+
+### Patch Changes
+
+- 1126fbb: Prevent the terminal browser bundle from evaluating the Node-only `process.platform` global, which left the app on a black screen before React could mount.
+
 ## 2.72.10
 
 ### Patch Changes
