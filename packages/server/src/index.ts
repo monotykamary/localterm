@@ -65,7 +65,6 @@ import {
   PROCESSES_FILENAME,
   SECRETS_FILENAME,
   THEMES_FILENAME,
-  TERM_BACKSPACE_SEQUENCE,
   FONTS_FILENAME,
   SECRETS_SHIMS_DIRNAME,
   SECRET_EXPORT_SCRYPT_WORK_FACTOR,
@@ -93,6 +92,7 @@ import {
 } from "./constants.js";
 import { getDefaultShell, listKnownShells, resolveShellOverride } from "./default-shell.js";
 import { resolveWindowId } from "./utils/resolve-window-id.js";
+import { resolveTermBackspaceSequence } from "./utils/resolve-term-backspace-sequence.js";
 import { getHerdrConfigPaths } from "./utils/get-herdr-config-paths.js";
 import { isHerdrProcess } from "./utils/is-herdr-process.js";
 import { shellPathForUserShell } from "./utils/shell-path.js";
@@ -3247,7 +3247,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
           });
           safeSend(ws, {
             type: "terminal-input-capabilities",
-            backspaceSequence: TERM_BACKSPACE_SEQUENCE,
+            backspaceSequence: resolveTermBackspaceSequence(),
           });
           // Tell this tab the current keep-awake state so its coffee toggle
           // renders correctly (and is hidden where caffeinate is unsupported).

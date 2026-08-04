@@ -6,10 +6,6 @@ export const DEFAULT_ROWS = 32;
 export const DEFAULT_SHELL_FALLBACK = "/bin/sh";
 
 export const TERM_TYPE = "xterm-256color";
-// Apple's xterm-256color terminfo advertises kbs=Ctrl-H; Linux entries use DEL.
-// Browser input must match the daemon-side TERM database that tmux and TUIs read.
-export const TERM_BACKSPACE_SEQUENCE =
-  process.platform === "darwin" ? String.fromCharCode(8) : String.fromCharCode(127);
 export const COLORTERM_VALUE = "truecolor";
 export const LOCALTERM_VALUE = "1";
 export const DEFAULT_TERMINAL_BROWSER_DISPLAY_SCALE = 1;
