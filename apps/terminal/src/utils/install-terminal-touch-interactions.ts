@@ -4,6 +4,7 @@ import {
   TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX,
   TERMINAL_TAP_MOVEMENT_THRESHOLD_PX,
   TERMINAL_VIEWPORT_WIDTH_STABLE_PX,
+  XTERM_TOUCH_SCROLL_EVENT,
 } from "@/lib/constants";
 import { dispatchTerminalMouseTap } from "@/utils/dispatch-terminal-mouse-tap";
 import { suppressTerminalSystemKeyboard } from "@/utils/suppress-terminal-system-keyboard";
@@ -14,6 +15,7 @@ interface InstallTerminalTouchInteractionsOptions {
   isTouchDevice: boolean;
   onScreenKeyboardOpenRef: RefObject<boolean>;
   openOnScreenKeyboard: () => void;
+  onUserScroll: () => void;
 }
 
 interface TerminalTouchInteractions {
@@ -27,6 +29,7 @@ export const installTerminalTouchInteractions = ({
   isTouchDevice,
   onScreenKeyboardOpenRef,
   openOnScreenKeyboard,
+  onUserScroll,
 }: InstallTerminalTouchInteractionsOptions): TerminalTouchInteractions => {
   const helperTextArea = container.querySelector("textarea.xterm-helper-textarea");
   if (helperTextArea instanceof HTMLTextAreaElement) {
@@ -132,6 +135,18 @@ export const installTerminalTouchInteractions = ({
         signal: tapListenerAbort.signal,
       });
     }
+    container.querySelector(".xterm-screen")?.addEventListener(
+      XTERM_TOUCH_SCROLL_EVENT,
+      () => {
+        if (
+          terminal.buffer.active.type === "normal" &&
+          terminal.modes.mouseTrackingMode === "none"
+        ) {
+          onUserScroll();
+        }
+      },
+      { signal: tapListenerAbort.signal },
+    );
     terminal.element?.addEventListener("touchstart", handleTerminalTouchStart, {
       capture: true,
       passive: true,

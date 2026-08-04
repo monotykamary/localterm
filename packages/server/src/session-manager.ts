@@ -85,16 +85,33 @@ export interface WaitResult {
 // so a quiet-but-running shell isn't reaped.
 export type SessionActivityState = "running" | "alive-quiet" | "ready";
 
+interface PendingClientControlMessage {
+  kind: "control";
+  payload: ServerToClientMessage;
+}
+
+interface PendingClientOutputBytes {
+  bytes: Uint8Array<ArrayBuffer>;
+  kind: "output";
+}
+
+interface PendingClientOutputFrameBoundary {
+  kind: "output-frame-start" | "output-frame-end";
+}
+
+type PendingClientMessage =
+  | PendingClientControlMessage
+  | PendingClientOutputBytes
+  | PendingClientOutputFrameBoundary;
+
 export interface ManagedClient {
   ws: ClientSocket;
   pending: boolean;
-  // Buffered while pending: live output bytes and control messages are queued
-  // here (not sent) until the client sends {type:"ready"} or the pending
-  // timeout auto-promotes it. Flushed in order on promote so nothing is lost
-  // and the scrollback replay (when requested) lands first.
-  pendingControl: ServerToClientMessage[];
-  pendingBytes: Uint8Array<ArrayBuffer>[];
+  // Output and controls share one queue because an atomic frame boundary must
+  // remain ordered around the binary output it encloses during promotion.
+  pendingQueue: PendingClientMessage[];
   pendingBytesLength: number;
+  pendingControlMessageCount: number;
   pendingOverflowed: boolean;
   pendingTimer: NodeJS.Timeout | null;
   cols: number;
@@ -135,6 +152,9 @@ export interface ManagedSession {
   automationLog: string;
   outputBatch: string;
   outputBatchTimer: NodeJS.Timeout | null;
+  outputBurstStartedAtMs: number | null;
+  outputBurstIsStream: boolean;
+  atomicOutputFrameOpen: boolean;
   synchronizedOutputEndDetector: SynchronizedOutputEndDetector;
   drainPollTimer: NodeJS.Timeout | null;
   // Last PTY output time + whether a foreground program is running, the inputs
@@ -429,6 +449,9 @@ export class SessionManager {
       automationLog: "",
       outputBatch: "",
       outputBatchTimer: null,
+      outputBurstStartedAtMs: null,
+      outputBurstIsStream: false,
+      atomicOutputFrameOpen: false,
       synchronizedOutputEndDetector: createSynchronizedOutputEndDetector(),
       drainPollTimer: null,
       lastOutputAt: Date.now(),
@@ -756,7 +779,7 @@ export class SessionManager {
   }
 
   private handleExit(managed: ManagedSession, code: number | null): void {
-    this.outputCoordinator.flushOutput(managed);
+    this.outputCoordinator.finishOutputBurst(managed);
     for (const client of managed.clients) {
       this.hooks.onClientExit(client.ws, code);
       this.sendControl(client.ws, { type: "exit", code });

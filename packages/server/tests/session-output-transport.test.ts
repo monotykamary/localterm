@@ -36,6 +36,21 @@ describe("makeBrotliEncoder", () => {
     expect(encoder.queuedBytes()).toBe(0);
     encoder.release();
   });
+
+  it("orders compressed output, raw tails, and boundaries in one FIFO", async () => {
+    const encoder = makeBrotliEncoder(WS_OUTPUT_BROTLI_QUALITY);
+    const order: string[] = [];
+
+    const compressed = encoder.flush(new Uint8Array(2_048), () => order.push("compressed"));
+    const raw = encoder.enqueue(() => order.push("raw"), 32);
+    const boundary = encoder.enqueue(() => order.push("output-frame-end"));
+
+    await Promise.all([compressed, raw, boundary]);
+
+    expect(order).toEqual(["compressed", "raw", "output-frame-end"]);
+    expect(encoder.queuedBytes()).toBe(0);
+    encoder.release();
+  });
 });
 
 describe("pixel frames and always-on binary framing", () => {
@@ -54,9 +69,9 @@ describe("pixel frames and always-on binary framing", () => {
     const client = {
       ws,
       pending: false,
-      pendingBytes: [],
+      pendingQueue: [],
       pendingBytesLength: 0,
-      pendingControl: [],
+      pendingControlMessageCount: 0,
       pendingOverflowed: false,
       compressMode: null,
       brotliEncoder: null,
@@ -94,6 +109,25 @@ describe("pixel frames and always-on binary framing", () => {
     } as unknown as ManagedSession;
     transport.broadcastPixelFrame(managed, 1, 1, new Uint8Array(4));
     expect(pending.sent.length).toBe(0);
+  });
+
+  it("keeps pending atomic boundaries ordered around output bytes", () => {
+    const transport = new SessionOutputTransport(() => undefined);
+    const pending = fakeClient({ pending: true });
+    const managed = {
+      id: "test",
+      clients: new Set([pending.client]),
+    } as unknown as ManagedSession;
+
+    transport.broadcastAtomicOutputFrameBoundary(managed, "output-frame-start");
+    transport.broadcastBytes(managed, new Uint8Array([1, 2, 3]));
+    transport.broadcastAtomicOutputFrameBoundary(managed, "output-frame-end");
+
+    expect(pending.client.pendingQueue.map((message) => message.kind)).toEqual([
+      "output-frame-start",
+      "output",
+      "output-frame-end",
+    ]);
   });
 
   it("adds a raw header byte for framing-enabled raw-mode clients", async () => {

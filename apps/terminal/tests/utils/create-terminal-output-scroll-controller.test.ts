@@ -15,7 +15,10 @@ interface TerminalScrollHarness {
   scrollToBottom: ReturnType<typeof vi.fn>;
 }
 
-const createTerminalScrollHarness = (initialBuffer: FakeTerminalBuffer): TerminalScrollHarness => {
+const createTerminalScrollHarness = (
+  initialBuffer: FakeTerminalBuffer,
+  scrollOnUserInput = true,
+): TerminalScrollHarness => {
   const buffer = { ...initialBuffer };
   const scrollLines = vi.fn((amount: number) => {
     buffer.viewportY += amount;
@@ -25,6 +28,7 @@ const createTerminalScrollHarness = (initialBuffer: FakeTerminalBuffer): Termina
   });
   const terminal = {
     buffer: { active: buffer },
+    options: { scrollOnUserInput },
     scrollLines,
     scrollToBottom,
   } as unknown as XtermTerminal;
@@ -86,6 +90,32 @@ describe("createTerminalOutputScrollController", () => {
     expect(harness.scrollLines).not.toHaveBeenCalled();
     expect(harness.scrollToBottom).not.toHaveBeenCalled();
     expect(harness.buffer.viewportY).toBe(65);
+  });
+
+  it("pins to the bottom on input and invalidates an in-flight output anchor", () => {
+    const harness = createTerminalScrollHarness({ baseY: 100, viewportY: 70, type: "normal" });
+    const snapshot = harness.controller.capture();
+
+    expect(harness.controller.scrollToBottomOnUserInput()).toBe(true);
+    harness.buffer.baseY = 105;
+    harness.buffer.viewportY = 105;
+    harness.controller.restore(snapshot);
+
+    expect(harness.scrollToBottom).toHaveBeenCalledOnce();
+    expect(harness.scrollLines).not.toHaveBeenCalled();
+    expect(harness.buffer.viewportY).toBe(105);
+  });
+
+  it("preserves a scrolled viewport when scroll-on-input is disabled", () => {
+    const harness = createTerminalScrollHarness(
+      { baseY: 100, viewportY: 70, type: "normal" },
+      false,
+    );
+
+    expect(harness.controller.scrollToBottomOnUserInput()).toBe(false);
+
+    expect(harness.scrollToBottom).not.toHaveBeenCalled();
+    expect(harness.buffer.viewportY).toBe(70);
   });
 
   it("does not carry a normal-buffer anchor into the alternate buffer", () => {

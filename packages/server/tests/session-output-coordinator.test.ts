@@ -3,6 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
+  OUTPUT_BATCH_FLUSH_BYTES,
+  OUTPUT_BATCH_WINDOW_MS,
+  OUTPUT_STREAM_THRESHOLD_MS,
   WS_OUTPUT_PIXEL_FRAME,
   WS_OUTPUT_FRAME_HEADER_BYTES,
   WS_READY_STATE_OPEN,
@@ -31,9 +34,9 @@ describe("SessionOutputCoordinator kitty file-medium handling", () => {
         },
         close: () => undefined,
       },
-      pendingBytes: [],
+      pendingQueue: [],
       pendingBytesLength: 0,
-      pendingControl: [],
+      pendingControlMessageCount: 0,
       pendingOverflowed: false,
     } as unknown as ManagedClient;
     const managed = {
@@ -44,6 +47,9 @@ describe("SessionOutputCoordinator kitty file-medium handling", () => {
       synchronizedOutputEndDetector: createSynchronizedOutputEndDetector(),
       outputBatch: "",
       outputBatchTimer: null,
+      outputBurstStartedAtMs: null,
+      outputBurstIsStream: false,
+      atomicOutputFrameOpen: false,
       automation: null,
       automationLog: "",
       captureRenderer: undefined,
@@ -63,7 +69,7 @@ describe("SessionOutputCoordinator kitty file-medium handling", () => {
       onOutputActivity: () => undefined,
       writeInput,
     });
-    return { coordinator, writeInput };
+    return { coordinator, sendControl, writeInput };
   };
 
   it("answers a file-medium probe with OK for framed viewers", async () => {
@@ -104,5 +110,82 @@ describe("SessionOutputCoordinator kitty file-medium handling", () => {
     expect(view.getUint32(5, true)).toBe(2);
     expect(frame.byteLength).toBe(WS_OUTPUT_FRAME_HEADER_BYTES + 4 * 2 * 4);
     fs.rmSync(frameFile, { force: true });
+  });
+
+  it("brackets a size-split redraw until its idle boundary", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      const { managed, sent } = makeSession(true);
+      const { coordinator, sendControl } = makeCoordinator();
+
+      await coordinator.onSessionOutput(managed, "a".repeat(OUTPUT_BATCH_FLUSH_BYTES));
+
+      expect(sent).toHaveLength(1);
+      expect(sendControl.mock.calls.map((call) => call[1].type)).toEqual(["output-frame-start"]);
+
+      await coordinator.onSessionOutput(managed, "tail");
+      await vi.advanceTimersByTimeAsync(OUTPUT_BATCH_WINDOW_MS);
+
+      expect(sent).toHaveLength(2);
+      expect(sendControl.mock.calls.map((call) => call[1].type)).toEqual([
+        "output-frame-start",
+        "output-frame-end",
+      ]);
+      expect(managed.atomicOutputFrameOpen).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("releases a sustained stream after the redraw threshold", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(2_000);
+    try {
+      const { managed } = makeSession(true);
+      const { coordinator, sendControl } = makeCoordinator();
+      const outputChunk = "s".repeat(OUTPUT_BATCH_FLUSH_BYTES);
+
+      await coordinator.onSessionOutput(managed, outputChunk);
+      vi.setSystemTime(2_000 + OUTPUT_STREAM_THRESHOLD_MS);
+      await coordinator.onSessionOutput(managed, outputChunk);
+      await coordinator.onSessionOutput(managed, outputChunk);
+
+      expect(sendControl.mock.calls.map((call) => call[1].type)).toEqual([
+        "output-frame-start",
+        "output-frame-end",
+      ]);
+      expect(managed.outputBurstIsStream).toBe(true);
+      coordinator.finishOutputBurst(managed);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a long synchronized redraw atomic until DECRST 2026", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(3_000);
+    try {
+      const { managed } = makeSession(true);
+      const { coordinator, sendControl } = makeCoordinator();
+      const outputChunk = "x".repeat(OUTPUT_BATCH_FLUSH_BYTES);
+
+      await coordinator.onSessionOutput(managed, `\x1b[?2026h${outputChunk}`);
+      vi.setSystemTime(3_000 + OUTPUT_STREAM_THRESHOLD_MS * 2);
+      await coordinator.onSessionOutput(managed, outputChunk);
+
+      expect(managed.outputBurstIsStream).toBe(false);
+      expect(sendControl.mock.calls.map((call) => call[1].type)).toEqual(["output-frame-start"]);
+
+      await coordinator.onSessionOutput(managed, "\x1b[?2026l");
+
+      expect(sendControl.mock.calls.map((call) => call[1].type)).toEqual([
+        "output-frame-start",
+        "output-frame-end",
+      ]);
+      expect(managed.atomicOutputFrameOpen).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

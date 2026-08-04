@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
+import { XTERM_TOUCH_SCROLL_EVENT } from "../../src/lib/constants";
 import { installTerminalTouchInteractions } from "../../src/utils/install-terminal-touch-interactions";
 
 interface TouchInteractionHarness {
@@ -17,11 +18,11 @@ const createHarness = (mouseTrackingMode: "none" | "any"): TouchInteractionHarne
   container.append(screen, textarea);
   document.body.append(container);
   const terminal = {
-    buffer: { active: { cursorX: 0, cursorY: 0 } },
     cols: 80,
     element: container,
     focus: vi.fn(),
     modes: { mouseTrackingMode, showCursor: true },
+    buffer: { active: { cursorX: 0, cursorY: 0, type: "normal" } },
     rows: 24,
     textarea,
   } as unknown as XtermTerminal;
@@ -57,6 +58,7 @@ describe("installTerminalTouchInteractions", () => {
       isTouchDevice: true,
       onScreenKeyboardOpenRef: { current: false },
       openOnScreenKeyboard,
+      onUserScroll: vi.fn(),
     });
 
     dispatchTouch(container);
@@ -77,12 +79,51 @@ describe("installTerminalTouchInteractions", () => {
       isTouchDevice: true,
       onScreenKeyboardOpenRef: { current: true },
       openOnScreenKeyboard,
+      onUserScroll: vi.fn(),
     });
 
     dispatchTouch(container);
 
     expect(openOnScreenKeyboard).not.toHaveBeenCalled();
     expect(mouseDown).toHaveBeenCalledOnce();
+    interactions.dispose();
+  });
+
+  it("marks touch movement and inertia as user scrolling", () => {
+    const { container, screen, terminal } = createHarness("none");
+    const onUserScroll = vi.fn();
+    const interactions = installTerminalTouchInteractions({
+      terminal,
+      container,
+      isTouchDevice: true,
+      onScreenKeyboardOpenRef: { current: false },
+      openOnScreenKeyboard: vi.fn(),
+      onUserScroll,
+    });
+    screen.dispatchEvent(new Event(XTERM_TOUCH_SCROLL_EVENT));
+    screen.dispatchEvent(new Event(XTERM_TOUCH_SCROLL_EVENT));
+
+    expect(onUserScroll).toHaveBeenCalledTimes(2);
+    interactions.dispose();
+    screen.dispatchEvent(new Event(XTERM_TOUCH_SCROLL_EVENT));
+    expect(onUserScroll).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not mark gestures owned by a mouse-tracking application", () => {
+    const { container, screen, terminal } = createHarness("any");
+    const onUserScroll = vi.fn();
+    const interactions = installTerminalTouchInteractions({
+      terminal,
+      container,
+      isTouchDevice: true,
+      onScreenKeyboardOpenRef: { current: true },
+      openOnScreenKeyboard: vi.fn(),
+      onUserScroll,
+    });
+
+    screen.dispatchEvent(new Event(XTERM_TOUCH_SCROLL_EVENT));
+
+    expect(onUserScroll).not.toHaveBeenCalled();
     interactions.dispose();
   });
 
@@ -95,6 +136,7 @@ describe("installTerminalTouchInteractions", () => {
       isTouchDevice: true,
       onScreenKeyboardOpenRef: { current: false },
       openOnScreenKeyboard,
+      onUserScroll: vi.fn(),
     });
 
     dispatchTouch(container);

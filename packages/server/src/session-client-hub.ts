@@ -153,9 +153,9 @@ export class SessionClientHub {
     const client: ManagedClient = {
       ws,
       pending: true,
-      pendingControl: [],
-      pendingBytes: [],
+      pendingQueue: managed.atomicOutputFrameOpen ? [{ kind: "output-frame-start" }] : [],
       pendingBytesLength: 0,
+      pendingControlMessageCount: managed.atomicOutputFrameOpen ? 1 : 0,
       pendingOverflowed: false,
       pendingTimer: null,
       cols: 0,
@@ -269,17 +269,22 @@ export class SessionClientHub {
     // snapshot was empty or replay wasn't requested — so the client always
     // exits its suppressed-replay window and never deadlocks on a slow link.
     this.sendControl(ws, { type: "replay-end" });
-    for (const payload of client.pendingControl) {
+    let pendingMessageIndex = 0;
+    while (pendingMessageIndex < client.pendingQueue.length) {
       if (client.pendingOverflowed) return;
-      this.sendControl(ws, payload);
+      const pendingMessage = client.pendingQueue[pendingMessageIndex];
+      pendingMessageIndex += 1;
+      if (pendingMessage.kind === "control") {
+        this.sendControl(ws, pendingMessage.payload);
+      } else if (pendingMessage.kind === "output") {
+        await this.outputTransport.sendOutputFrame(ws, pendingMessage.bytes, client);
+      } else {
+        await this.outputTransport.sendAtomicOutputFrameBoundary(client, pendingMessage.kind);
+      }
     }
-    for (const bytes of client.pendingBytes) {
-      if (client.pendingOverflowed) return;
-      await this.outputTransport.sendOutputFrame(ws, bytes, client);
-    }
-    client.pendingControl = [];
-    client.pendingBytes = [];
+    client.pendingQueue = [];
     client.pendingBytesLength = 0;
+    client.pendingControlMessageCount = 0;
     client.pending = false;
     // Re-push the ambient git-diff summary to the now-live client so a summary
     // pushed while pending (and wiped by the client's cwd-driven null-reset on
@@ -471,9 +476,9 @@ export class SessionClientHub {
         clearTimeout(client.pendingTimer);
         client.pendingTimer = null;
       }
-      client.pendingControl = [];
-      client.pendingBytes = [];
+      client.pendingQueue = [];
       client.pendingBytesLength = 0;
+      client.pendingControlMessageCount = 0;
       if (client.coordinator) {
         client.coordinator.remove(client.ws);
         this.releaseCoordinator(client.coordinator);
@@ -493,9 +498,9 @@ export class SessionClientHub {
       client.brotliEncoder.release();
       client.brotliEncoder = null;
     }
-    client.pendingControl = [];
-    client.pendingBytes = [];
+    client.pendingQueue = [];
     client.pendingBytesLength = 0;
+    client.pendingControlMessageCount = 0;
     if (client.coordinator) {
       client.coordinator.remove(client.ws);
       this.releaseCoordinator(client.coordinator);

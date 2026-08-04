@@ -181,6 +181,10 @@ describe("serverToClientMessageSchema", () => {
       true,
     );
     expect(serverToClientMessageSchema.safeParse({ type: "replay-end" }).success).toBe(true);
+    expect(serverToClientMessageSchema.safeParse({ type: "output-frame-start" }).success).toBe(
+      true,
+    );
+    expect(serverToClientMessageSchema.safeParse({ type: "output-frame-end" }).success).toBe(true);
     expect(serverToClientMessageSchema.safeParse({ type: "peer-attached" }).success).toBe(true);
     expect(
       serverToClientMessageSchema.safeParse({ type: "pty-size", cols: 80, rows: 24 }).success,

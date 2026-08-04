@@ -7,6 +7,8 @@ import {
   MAX_OUTPUT_BYTES,
   OUTPUT_BATCH_FLUSH_BYTES,
   OUTPUT_BATCH_WINDOW_MS,
+  OUTPUT_STREAM_THRESHOLD_MS,
+  OUTPUT_SYNCHRONIZED_FRAME_TIMEOUT_MS,
   WS_OUTBOUND_DRAIN_POLL_MS,
   WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES,
   WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
@@ -142,52 +144,108 @@ export class SessionOutputCoordinator {
       this.outputTransport.broadcast(managed, { type: "pixel-frames-clear" });
     }
     const output = scan.output;
+    const outputAtMs = Date.now();
     const didEndSynchronizedOutput = managed.synchronizedOutputEndDetector.push(output);
+    if (output.length > 0 && managed.outputBurstStartedAtMs === null) {
+      managed.outputBurstStartedAtMs = outputAtMs;
+    }
     managed.outputBatch += output;
-    managed.lastOutputAt = Date.now();
+    managed.lastOutputAt = outputAtMs;
     if (managed.automation) this.appendAutomationLog(managed, output);
     this.noteOutputActivity(managed.session.pid);
     this.onOutputActivity();
-    // Keep the capture renderer (if one exists) in lockstep with the PTY so a
-    // later capture-pane reads current rendered text. Lazily created, so this
-    // is a no-op for sessions nobody has captured (the common browser case).
+    // Keep the lazy capture renderer in lockstep with PTY output when one exists.
     managed.captureRenderer?.write(output);
-    // DEC synchronized output supplies the exact safe redraw boundary. Flush
-    // when DECRST 2026 arrives instead of waiting for the idle fallback, while
-    // unsynchronized output keeps the existing anti-flicker window unchanged.
-    if (didEndSynchronizedOutput || managed.outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
-      if (managed.outputBatchTimer !== null) {
-        clearTimeout(managed.outputBatchTimer);
-        managed.outputBatchTimer = null;
+
+    if (output.length === 0) {
+      await asyncTasks;
+      return;
+    }
+
+    if (didEndSynchronizedOutput) {
+      this.clearOutputBatchTimer(managed);
+      if (!managed.outputBurstIsStream && managed.outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
+        this.openAtomicOutputFrame(managed);
       }
       this.flushOutput(managed);
+      this.closeAtomicOutputFrame(managed);
+      this.resetOutputBurst(managed);
       await asyncTasks;
       return;
     }
-    // Without a synchronized-output boundary, reset the coalescing window on
-    // every chunk so the flush lands OUTPUT_BATCH_WINDOW_MS after the LAST
-    // chunk of a burst, not a fixed window after the first. A full-screen TUI
-    // redraw of a large session emits across more than the window (node-pty
-    // delivers it as many 1024-byte data events over successive event-loop
-    // turns); a one-shot window flushed mid-redraw and split the frame across
-    // multiple WebSocket messages. Over a bandwidth-limited link each split
-    // arrives as its own atomic message and xterm paints it separately — the
-    // visible top-to-bottom crawl. A resetting window holds the whole burst until the
-    // PTY goes idle, then sends one message; the browser receives it atomically
-    // and xterm renders it in a single paint regardless of link bandwidth.
-    // Sustained high-throughput output never idles, so OUTPUT_BATCH_FLUSH_BYTES
-    // still gates the message rate there (unchanged).
-    if (managed.outputBatchTimer !== null) {
-      managed.outputBatchTimer.refresh();
+
+    // Small bursts still flush as one message on the resetting idle timer. Once
+    // a redraw crosses 64 KiB, bracket every size-capped message so a capable
+    // browser retains the old complete screen until the idle boundary and then
+    // commits the new screen in one xterm write. After 100 ms without idling,
+    // unsynchronized output is a stream and returns to progressive delivery.
+    // DEC 2026 remains authoritative until DECRST or its safety timeout.
+    if (managed.outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
+      this.clearOutputBatchTimer(managed);
+      const outputBurstStartedAtMs = managed.outputBurstStartedAtMs ?? outputAtMs;
+      const outputBurstDurationMs = outputAtMs - outputBurstStartedAtMs;
+      if (
+        !managed.outputBurstIsStream &&
+        !managed.synchronizedOutputEndDetector.isActive() &&
+        outputBurstDurationMs >= OUTPUT_STREAM_THRESHOLD_MS
+      ) {
+        managed.outputBurstIsStream = true;
+      }
+      if (!managed.outputBurstIsStream) this.openAtomicOutputFrame(managed);
+      this.flushOutput(managed);
+      if (managed.outputBurstIsStream) this.closeAtomicOutputFrame(managed);
+      this.scheduleOutputBatchFlush(managed);
       await asyncTasks;
       return;
     }
+
+    this.scheduleOutputBatchFlush(managed);
+    await asyncTasks;
+  }
+
+  private clearOutputBatchTimer(managed: ManagedSession): void {
+    if (managed.outputBatchTimer === null) return;
+    clearTimeout(managed.outputBatchTimer);
+    managed.outputBatchTimer = null;
+  }
+
+  private scheduleOutputBatchFlush(managed: ManagedSession): void {
+    const outputBurstStartedAtMs = managed.outputBurstStartedAtMs;
+    if (outputBurstStartedAtMs === null) return;
+    this.clearOutputBatchTimer(managed);
+    const synchronizedOutputActive =
+      managed.synchronizedOutputEndDetector.isActive() && !managed.outputBurstIsStream;
+    const timeoutMs = synchronizedOutputActive
+      ? Math.max(0, OUTPUT_SYNCHRONIZED_FRAME_TIMEOUT_MS - (Date.now() - outputBurstStartedAtMs))
+      : OUTPUT_BATCH_WINDOW_MS;
     managed.outputBatchTimer = setTimeout(() => {
       managed.outputBatchTimer = null;
       this.flushOutput(managed);
-    }, OUTPUT_BATCH_WINDOW_MS);
+      this.closeAtomicOutputFrame(managed);
+      if (managed.synchronizedOutputEndDetector.isActive()) {
+        managed.outputBurstIsStream = true;
+      } else {
+        this.resetOutputBurst(managed);
+      }
+    }, timeoutMs);
     managed.outputBatchTimer.unref?.();
-    await asyncTasks;
+  }
+
+  private openAtomicOutputFrame(managed: ManagedSession): void {
+    if (managed.atomicOutputFrameOpen) return;
+    managed.atomicOutputFrameOpen = true;
+    this.outputTransport.broadcastAtomicOutputFrameBoundary(managed, "output-frame-start");
+  }
+
+  private closeAtomicOutputFrame(managed: ManagedSession): void {
+    if (!managed.atomicOutputFrameOpen) return;
+    this.outputTransport.broadcastAtomicOutputFrameBoundary(managed, "output-frame-end");
+    managed.atomicOutputFrameOpen = false;
+  }
+
+  private resetOutputBurst(managed: ManagedSession): void {
+    managed.outputBurstStartedAtMs = null;
+    managed.outputBurstIsStream = false;
   }
 
   // Accumulate ANSI-stripped PTY output for an automation shell run, keeping
@@ -202,6 +260,16 @@ export class SessionOutputCoordinator {
     }
     const overflow = combined.length - MAX_AUTOMATION_LOG_LENGTH;
     managed.automationLog = combined.slice(overflow);
+  }
+
+  finishOutputBurst(managed: ManagedSession): void {
+    this.clearOutputBatchTimer(managed);
+    if (!managed.outputBurstIsStream && managed.outputBatch.length >= OUTPUT_BATCH_FLUSH_BYTES) {
+      this.openAtomicOutputFrame(managed);
+    }
+    this.flushOutput(managed);
+    this.closeAtomicOutputFrame(managed);
+    this.resetOutputBurst(managed);
   }
 
   flushOutput(managed: ManagedSession): void {

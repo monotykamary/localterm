@@ -10,6 +10,7 @@ interface TerminalOutputScrollSnapshot {
 export interface TerminalOutputScrollController {
   capture: () => TerminalOutputScrollSnapshot;
   noteUserScroll: () => void;
+  scrollToBottomOnUserInput: () => boolean;
   restore: (snapshot: TerminalOutputScrollSnapshot) => void;
 }
 
@@ -30,6 +31,13 @@ export const createTerminalOutputScrollController = (
     },
     noteUserScroll: () => {
       userScrollGeneration += 1;
+    },
+    scrollToBottomOnUserInput: () => {
+      if (!terminal.options.scrollOnUserInput) return false;
+      userScrollGeneration += 1;
+      const buffer = terminal.buffer.active;
+      if (buffer.viewportY !== buffer.baseY) terminal.scrollToBottom();
+      return true;
     },
     restore: (snapshot) => {
       if (snapshot.userScrollGeneration !== userScrollGeneration) return;

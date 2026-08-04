@@ -28,9 +28,11 @@ interface CreateTerminalOutputSessionOptions {
 }
 
 export interface TerminalOutputSession {
+  beginAtomicOutputFrame: () => void;
   beginSession: () => void;
   beginReplay: () => void;
   dispose: () => void;
+  finishAtomicOutputFrame: () => void;
   finishReplay: () => void;
   handleBinaryMessage: (data: ArrayBuffer) => void;
   isSuppressingOutput: () => boolean;
@@ -70,6 +72,9 @@ export const createTerminalOutputSession = ({
   let inReplay = false;
   let replayBytes = 0;
   let replayChunks: Uint8Array[] = [];
+  let atomicOutputFrameOpen = false;
+  let atomicOutputFrameBytes = 0;
+  let atomicOutputFrameChunks: Uint8Array[] = [];
   let suppressOutput = false;
   let disposed = false;
   // Server-confirmed always-on binary framing ({binary-framing} control). Raw
@@ -99,6 +104,7 @@ export const createTerminalOutputSession = ({
     inReplay = false;
     replayBytes = 0;
     replayChunks = [];
+    clearAtomicOutputFrame();
     suppressOutput = false;
   };
 
@@ -113,7 +119,10 @@ export const createTerminalOutputSession = ({
 
   const enqueueDecompress = (bytes: number, task: () => Promise<void> | void): void => {
     if (disposed) return;
-    if (queuedBytes + bytes > WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES) {
+    if (
+      queuedBytes + replayBytes + atomicOutputFrameBytes + bytes >
+      WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES
+    ) {
       overflow();
       return;
     }
@@ -137,6 +146,22 @@ export const createTerminalOutputSession = ({
       });
   };
 
+  const clearAtomicOutputFrame = (): void => {
+    atomicOutputFrameOpen = false;
+    atomicOutputFrameBytes = 0;
+    atomicOutputFrameChunks = [];
+  };
+
+  const retainAtomicOutputFrameChunk = (bytes: Uint8Array): boolean => {
+    if (atomicOutputFrameBytes + bytes.byteLength > WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES) {
+      overflow();
+      return false;
+    }
+    atomicOutputFrameChunks.push(bytes);
+    atomicOutputFrameBytes += bytes.byteLength;
+    return true;
+  };
+
   const retainReplayChunk = (bytes: Uint8Array): boolean => {
     if (replayBytes + bytes.byteLength > WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES) {
       overflow();
@@ -145,6 +170,36 @@ export const createTerminalOutputSession = ({
     replayChunks.push(bytes);
     replayBytes += bytes.byteLength;
     return true;
+  };
+
+  const handleOutputBytes = (bytes: Uint8Array): void => {
+    if (inReplay) {
+      retainReplayChunk(bytes);
+    } else if (atomicOutputFrameOpen) {
+      retainAtomicOutputFrameChunk(bytes);
+    } else {
+      onOutput(bytes);
+    }
+  };
+
+  const flushAtomicOutputFrame = (): void => {
+    if (disposed || !atomicOutputFrameOpen) return;
+    const chunks = atomicOutputFrameChunks;
+    const byteLength = atomicOutputFrameBytes;
+    clearAtomicOutputFrame();
+    if (chunks.length === 0) return;
+    if (chunks.length === 1) {
+      const chunk = chunks[0];
+      if (chunk) onOutput(chunk);
+      return;
+    }
+    const bytes = new Uint8Array(byteLength);
+    let byteOffset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, byteOffset);
+      byteOffset += chunk.byteLength;
+    }
+    onOutput(bytes);
   };
 
   const flushReplay = (): void => {
@@ -166,6 +221,14 @@ export const createTerminalOutputSession = ({
   };
 
   return {
+    beginAtomicOutputFrame: () => {
+      if (disposed) return;
+      const beginFrame = (): void => {
+        if (!disposed && !atomicOutputFrameOpen) atomicOutputFrameOpen = true;
+      };
+      if (negotiatedCompressMode === null && !binaryFramingEnabled) beginFrame();
+      else enqueueDecompress(0, beginFrame);
+    },
     beginSession: () => {
       if (disposed) return;
       ptyGeneration += 1;
@@ -183,6 +246,7 @@ export const createTerminalOutputSession = ({
       inReplay = false;
       replayBytes = 0;
       replayChunks = [];
+      clearAtomicOutputFrame();
       suppressOutput = false;
     },
     beginReplay: () => {
@@ -191,8 +255,14 @@ export const createTerminalOutputSession = ({
       suppressOutput = true;
       replayBytes = 0;
       replayChunks = [];
+      clearAtomicOutputFrame();
     },
     dispose,
+    finishAtomicOutputFrame: () => {
+      if (disposed) return;
+      if (negotiatedCompressMode === null && !binaryFramingEnabled) flushAtomicOutputFrame();
+      else enqueueDecompress(0, flushAtomicOutputFrame);
+    },
     finishReplay: () => {
       if (disposed) return;
       // Compressed replay frames are decompressed async (the per-socket
@@ -200,7 +270,7 @@ export const createTerminalOutputSession = ({
       // block. Raw mode (no compression) flushes inline — the frames
       // arrived synchronously and the flush must land before the next
       // (inline) live frame reads `inReplay`.
-      if (negotiatedCompressMode === null) flushReplay();
+      if (negotiatedCompressMode === null && !binaryFramingEnabled) flushReplay();
       else enqueueDecompress(0, flushReplay);
     },
     handleBinaryMessage: (messageData) => {
@@ -236,11 +306,7 @@ export const createTerminalOutputSession = ({
           overflow();
           return;
         }
-        if (inReplay) {
-          retainReplayChunk(data);
-          return;
-        }
-        onOutput(data);
+        handleOutputBytes(data);
         return;
       }
       // Compressed frame. 0x00/0x01/0x02 use a 1-byte header (per-frame
@@ -282,13 +348,7 @@ export const createTerminalOutputSession = ({
           return;
         }
         if (disposed || ptyGeneration !== generationAtEnqueue) return;
-        if (inReplay) {
-          // Buffer the DECOMPRESSED bytes; replay-end writes them as one
-          // suppressed block (dropping xterm's stale query responses).
-          retainReplayChunk(bytes);
-          return;
-        }
-        onOutput(bytes);
+        handleOutputBytes(bytes);
       });
     },
     isSuppressingOutput: () => suppressOutput,

@@ -149,10 +149,12 @@ class OutputBatcher {
   pushBytes = (bytes: Uint8Array) => {
     this.enqueueBytes(bytes);
     this.lastOutputAtMs = performanceNow();
-    // Raw in/out: flush on arrival. The server coalesces ordinary TUI bursts
-    // and caps each message at OUTPUT_BATCH_FLUSH_BYTES (under xterm's 12ms
-    // parse-yield budget). Larger DEC 2026 frames span multiple messages; the
-    // completed-frame gate below preserves those message boundaries and holds
+    // Raw in/out: flush on arrival. Ordinary output enters as one server chunk
+    // capped at OUTPUT_BATCH_FLUSH_BYTES. When a redraw crosses that cap, the
+    // output session retains its bracketed transport chunks and calls pushBytes
+    // once with the complete logical frame, so unsynchronized tmux output is one
+    // xterm parse action and cannot paint between its pieces. DEC 2026 boundaries
+    // inside that frame still feed the completed-frame gate below, which holds
     // the next complete frame until xterm presents the current one. Multiple
     // newer completions prove a real backlog rather than a normal vsync phase
     // overlap; only then does the backlog preempt the stale wait and collapse to
@@ -170,12 +172,11 @@ class OutputBatcher {
     // window to shift a frame past a vsync boundary and skip it (the visible
     // jank on a 60fps TUI animation such as the opentui golden-star demo). A
     // backgrounded browser tab pauses rAF and throttles setTimeout to ~1Hz, but
-    // flushing synchronously here lets xterm parse a ≤64KB write within its
-    // 12ms budget in the same task — answering a terminal query before the
-    // probing program's read times out (the response otherwise leaks into the
-    // shell as typed text, e.g. `62;4;9;22c` on switching tabs back), and
-    // never spilling to xterm's async drain (no partial paint). There is no
-    // paint cost while hidden.
+    // ordinary ≤64 KiB writes still parse within xterm's 12ms budget in the same
+    // task — answering terminal queries before the probing program times out. A
+    // larger bracketed redraw is intentionally one WriteBuffer chunk; xterm runs
+    // its parse action before checking that budget, so no renderer task can expose
+    // the intermediate screen. There is no paint cost while hidden.
     const shouldCoalesceCompletedFrameBacklog =
       this.preemptSynchronizedFrameWaitForCompletedBacklog();
     const didRenderImmediately = this.flushPending(false, shouldCoalesceCompletedFrameBacklog);

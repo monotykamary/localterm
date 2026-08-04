@@ -296,61 +296,39 @@ export const WS_PENDING_CLIENT_MAX_BYTES = WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES;
 export const WS_PENDING_CLIENT_MAX_CONTROL_MESSAGES = 256;
 export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 
-// Output batch early-flush threshold. DEC synchronized-output redraws flush at
-// their explicit DECRST 2026 boundary; the OUTPUT_BATCH_WINDOW_MS timer remains
-// authoritative for low-throughput streams without that boundary (keystroke
-// echo and unsynchronized TUI redraws of 3–6KB on a 120×40 terminal). It
-// coalesces the per-chunk data events of one logical frame into a single
-// message, which xterm.js parses atomically —
-// splitting a frame causes the half-erased frame to render and flicker (visible
-// on every keypress in cmd/Claude Code). Unsynchronized TUI frames rarely
-// approach this threshold, so the timer governs them — EXCEPT a full-screen
-// repaint of a large session (a big pi/Claude Code conversation, a wide terminal
-// with heavy SGR styling), which can exceed the old 32KB threshold and split
-// across messages. Over a bandwidth-limited link each split arrives as its own
-// atomic WebSocket message and xterm paints it separately — the visible
-// top-to-bottom crawl. Raising the threshold to 64KB keeps a big single redraw
-// as one message (the browser receives it atomically, one paint) while staying
-// under xterm's 12ms parse-yield budget (a 64KB write parses in ~4–6ms, measured), so a
-// single message never spills to xterm's async drain (no partial paint).
+// Output transport chunk cap. Small PTY bursts flush on the idle boundary below;
+// a size-split redraw is bracketed with output-frame-start/end so the browser
+// can stage all chunks and pass the complete logical frame to xterm at once.
+// This distinction matters for wide, SGR-heavy screens: measured 180×55 tmux
+// and Herdr redraws are 182–233 KiB, far beyond one transport chunk.
 //
-// This threshold also governs high-throughput output (cat of large files, full
-// TTY repaints, `gcc -v`, ~15MB/s), where the threshold not the timer sets the
-// message rate. There the dominant cost is per-message RunTask plumbing on the
+// Keep each chunk at 64 KiB for high-throughput output (`cat`, `gcc -v`,
+// ~15 MB/s). The dominant cost there is per-message RunTask plumbing on the
 // renderer main thread: every WS message arrives in its own V8 task whose
-// median 0.30ms body is ~88% fixed V8/Chrome task-lifecycle overhead and only
-// ~12% the onmessage JS (measured 1364 msg/sec => 36.5% main thread on pure
-// per-message overhead). At 64KB the message rate halves vs the old 32KB (~470
-// => ~235 msg/sec at 15MB/s), halving that fixed overhead to ~1.2ms/frame.
-// xterm's own parser amortises the parse cost across batched bytes; a 64KB
-// batch parses in ~4–6ms (under its 12ms chunk cap), so no yield, no partial.
-// Batch latency at this size is ~4ms at 15MB/s, imperceptible; the keep-warm
-// rAF on the client holds needsBeginFrame=1 across inter-arrival gaps
-// regardless of burst heaviness, so fatter-but-rarer batches do not reintroduce
-// the 122ms hibernation stalls.
+// median 0.30 ms body is ~88% fixed V8/Chrome task-lifecycle overhead. At
+// 64 KiB the rate is ~235 messages/sec rather than ~470 at the old 32 KiB cap,
+// while a chunk still parses in the measured 4–6 ms, below xterm's 12 ms write
+// budget. Once OUTPUT_STREAM_THRESHOLD_MS classifies a sustained stream, these
+// chunks render progressively rather than accumulating as one large write.
 export const OUTPUT_BATCH_FLUSH_BYTES = 64 * 1024;
 
-// Output batching fallback for streams without an explicit synchronized-output
-// end boundary. The kernel PTY delivers child writes in 1024-byte chunks on
-// macOS, and node-pty emits each chunk as a separate data event in
-// its own event loop iteration — a setImmediate scheduled on the first chunk
-// fires before the remaining chunks of the same child write are read. That
-// split a single ink/TUI redraw frame (erase + repaint, ~3KB) across multiple
-// WebSocket messages, and xterm.js rendering between them flashed the
-// half-erased frame (visible flicker in cmd/Claude Code on every keypress).
-// The window RESETS on every chunk (onSessionOutput refreshes the existing
-// timer), so it flushes OUTPUT_BATCH_WINDOW_MS after the LAST
-// chunk of a burst — not a fixed window after the first. A full-screen
-// repaint of a large session emits over more than the window; a one-shot
-// window split it mid-redraw, and over a bandwidth-limited link each split
-// arrived as its own atomic message and painted separately (the visible
-// top-to-bottom crawl). The resetting window coalesces the whole burst into
-// one message so the browser receives it atomically and xterm renders it in
-// a single paint regardless of link bandwidth.
-// For continuous high-throughput output the window never idles, so
-// OUTPUT_BATCH_FLUSH_BYTES triggers an immediate flush regardless of the
-// timer, keeping the data flowing.
+// The kernel PTY delivers one child write through many data events. Reset this
+// idle timer on every event so a sub-64 KiB burst flushes after its last chunk,
+// not midway through an erase-and-repaint. If the burst crosses the size cap,
+// the coordinator sends transport chunks immediately but keeps their atomic
+// frame open until this same idle boundary. Explicit DEC 2026 output closes at
+// DECRST instead. A continuous stream never idles and is released by the size
+// and duration thresholds.
 export const OUTPUT_BATCH_WINDOW_MS = 2;
+
+// A size-capped burst remains one atomic frame while it still resembles a TUI
+// redraw. Continuous output past this duration switches back to progressive
+// 64 KiB delivery so streams never wait indefinitely for an idle boundary.
+export const OUTPUT_STREAM_THRESHOLD_MS = 100;
+
+// DEC 2026 is authoritative unless an application leaves it open. Match
+// xterm's safety timeout, then release the staged bytes as a stream.
+export const OUTPUT_SYNCHRONIZED_FRAME_TIMEOUT_MS = 1_000;
 // Output compression. The server compresses each binary output frame for
 // viewers that advertised a decompressor in the {ready} handshake; viewers
 // that didn't get the raw bytes (backward-compatible). A header tags the frame
@@ -364,8 +342,8 @@ export const OUTPUT_BATCH_WINDOW_MS = 2;
 //          frame: the persistent DecompressionStream doesn't end per frame, so
 //          the decoder emits the frame in arbitrary 16KB chunks (measured) and
 //          only the raw-size bound recovers the frame boundary.
-// Brotli q6 on a 64KB frame (the batcher cap) hits ~10x — a 200KB redraw crosses
-// a 10Mbps 5G link in ~16ms instead of ~160ms (one paint, not a crawl). The
+// Brotli q6 on each 64 KiB transport chunk hits ~10x; atomic frame controls
+// keep every chunk of a larger redraw staged until the complete frame arrives. The
 // context-takeover delta adds 1.24–3.7x on top (measured: 3.7x for a 1-row TUI
 // update, 1.24x for a SIGWINCH re-wrap) — the prior screen primes the LZ77
 // window so unchanged rows compress to back-references. gzip L3 is the fallback

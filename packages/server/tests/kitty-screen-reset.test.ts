@@ -61,9 +61,9 @@ describe("SessionOutputCoordinator frame lifecycle", () => {
         },
         close: () => undefined,
       },
-      pendingBytes: [],
+      pendingQueue: [],
       pendingBytesLength: 0,
-      pendingControl: [],
+      pendingControlMessageCount: 0,
       pendingOverflowed: false,
     } as unknown as ManagedClient;
     const managed = {
@@ -74,6 +74,9 @@ describe("SessionOutputCoordinator frame lifecycle", () => {
       synchronizedOutputEndDetector: createSynchronizedOutputEndDetector(),
       outputBatch: "",
       outputBatchTimer: null,
+      outputBurstStartedAtMs: null,
+      outputBurstIsStream: false,
+      atomicOutputFrameOpen: false,
       automation: null,
       automationLog: "",
       captureRenderer: undefined,

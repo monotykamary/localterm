@@ -1087,6 +1087,42 @@ describe("Terminal on-screen keyboard arbitration", () => {
     expect(toolbar.parentElement?.className).toContain("pointer-events-none");
   });
 
+  it("pins a scrolled viewport when the on-screen keyboard types", () => {
+    installFakeLocalStorage({ [MOBILE_RESUME_STORAGE_KEY]: "false" });
+    render(<Terminal />);
+    const socket = fakeWebSockets[0];
+    const handle = fakeXterms[0];
+    if (!socket || !handle) throw new Error("terminal did not initialize");
+    act(() => socket.fireOpen());
+    handle.setBufferState({ baseY: 100, viewportY: 70 });
+    handle.scrollToBottom.mockClear();
+
+    const keyboard = openOnScreenKeyboard();
+    const characterKey = keyboard.querySelector('[aria-label="q"]');
+    if (!(keyboard instanceof HTMLElement) || !(characterKey instanceof HTMLElement)) {
+      throw new Error("on-screen character key did not render");
+    }
+    characterKey.getBoundingClientRect = () => ({
+      bottom: 140,
+      height: 40,
+      left: 100,
+      right: 140,
+      top: 100,
+      width: 40,
+      x: 100,
+      y: 100,
+      toJSON: () => ({}),
+    });
+    keyboard.setPointerCapture = vi.fn();
+    socket.send.mockClear();
+
+    fireEvent.pointerDown(keyboard, { clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.pointerUp(keyboard, { clientX: 120, clientY: 120, pointerId: 1 });
+
+    expect(handle.scrollToBottom).toHaveBeenCalledOnce();
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "input", data: "q" }));
+  });
+
   it("restores Git metadata when the mobile overlay opens in herdr", () => {
     installFakeLocalStorage({ [MOBILE_RESUME_STORAGE_KEY]: "false" });
     render(<Terminal />);

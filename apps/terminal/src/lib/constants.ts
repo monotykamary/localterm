@@ -8,6 +8,10 @@ export const DEFAULT_TERMINAL_FONT_SIZE_PX = 13;
 export const TERMINAL_FONT_SIZE_MIN_PX = 9;
 export const TERMINAL_FONT_SIZE_MAX_PX = 24;
 export const TERMINAL_FONT_SIZE_STEP_PX = 1;
+// xterm emits this private gesture event for both touch movement and inertia;
+// its public API exposes neither source, so LocalTerm uses the pinned event name
+// to prevent output-anchor restoration from fighting mobile scroll gestures.
+export const XTERM_TOUCH_SCROLL_EVENT = "-xterm-gesturechange";
 export const TERMINAL_TAP_MOVEMENT_THRESHOLD_PX = 10;
 export const TERMINAL_CURSOR_KEYBOARD_TAP_TARGET_PX = 44;
 export const TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX = 150;

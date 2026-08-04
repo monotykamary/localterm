@@ -400,6 +400,7 @@ export const useTerminalRuntime = ({
       isTouchDevice,
       onScreenKeyboardOpenRef,
       openOnScreenKeyboard,
+      onUserScroll: noteTerminalUserScroll,
     });
     const { refocusTerminalQuietly } = terminalTouchInteractions;
 
@@ -454,6 +455,7 @@ export const useTerminalRuntime = ({
     };
     const sendInput = (data: string) => {
       if (socket?.readyState !== WebSocket.OPEN) return;
+      if (outputScrollController.scrollToBottomOnUserInput()) clearResizeScrollRestore();
       outputBatcher.noteUserInput();
       send({ type: "input", data });
     };
@@ -821,6 +823,10 @@ export const useTerminalRuntime = ({
           // hard-reset the terminal): drop the overlay so fresh shell text is
           // visible.
           pixelFrameOverlay.clear();
+        } else if (message.type === "output-frame-start") {
+          outputSession.beginAtomicOutputFrame();
+        } else if (message.type === "output-frame-end") {
+          outputSession.finishAtomicOutputFrame();
         } else if (message.type === "replay-end") {
           // The server has finished sending the scrollback replay. Write the
           // buffered frames as one block with onData suppressed so xterm's

@@ -45,4 +45,45 @@ describe("createTerminalOutputSession", () => {
     expect(onReplay).not.toHaveBeenCalled();
     expect(onOutput).not.toHaveBeenCalled();
   });
+
+  it("keeps unbracketed output on the backward-compatible immediate path", () => {
+    const { session, onOutput } = createSession();
+    const bytes = Uint8Array.from([1, 2, 3]);
+
+    session.handleBinaryMessage(bytes.buffer);
+
+    expect(onOutput).toHaveBeenCalledOnce();
+    expect(Array.from(onOutput.mock.calls[0][0])).toEqual([1, 2, 3]);
+  });
+
+  it("commits every piece of a bracketed redraw as one output write", () => {
+    const { session, onOutput } = createSession();
+
+    session.beginAtomicOutputFrame();
+    session.handleBinaryMessage(Uint8Array.from([1, 2]).buffer);
+    session.handleBinaryMessage(Uint8Array.from([3, 4]).buffer);
+
+    expect(onOutput).not.toHaveBeenCalled();
+
+    session.finishAtomicOutputFrame();
+
+    expect(onOutput).toHaveBeenCalledOnce();
+    expect(Array.from(onOutput.mock.calls[0][0])).toEqual([1, 2, 3, 4]);
+  });
+
+  it("bounds a retained atomic redraw and ignores output after overflow", () => {
+    const { session, onOutput, onOverflow } = createSession();
+    const frame = new ArrayBuffer(MAX_OUTPUT_BYTES);
+    const frameCount = Math.floor(WS_OUTPUT_CLIENT_QUEUE_MAX_BYTES / MAX_OUTPUT_BYTES) + 1;
+
+    session.beginAtomicOutputFrame();
+    for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+      session.handleBinaryMessage(frame);
+    }
+    session.finishAtomicOutputFrame();
+    session.handleBinaryMessage(new ArrayBuffer(1));
+
+    expect(onOverflow).toHaveBeenCalledOnce();
+    expect(onOutput).not.toHaveBeenCalled();
+  });
 });

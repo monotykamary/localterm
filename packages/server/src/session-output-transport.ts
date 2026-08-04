@@ -30,7 +30,14 @@ import { getBufferedAmount, type ClientSocket } from "./utils/ws-socket.js";
 // next tick). The accumulator is trimmed after each flush so a long session
 // doesn't grow without bound.
 export interface BrotliEncoder {
-  flush: (bytes: Uint8Array<ArrayBuffer>) => Promise<Buffer<ArrayBuffer>>;
+  enqueue: <Result>(
+    task: () => Promise<Result> | Result,
+    queuedByteLength?: number,
+  ) => Promise<Result>;
+  flush: (
+    bytes: Uint8Array<ArrayBuffer>,
+    onCompressed?: (compressed: Buffer<ArrayBuffer>) => void,
+  ) => Promise<Buffer<ArrayBuffer>>;
   queuedBytes: () => number;
   release: () => void;
 }
@@ -85,18 +92,34 @@ export const makeBrotliEncoder = (level: number): BrotliEncoder => {
       }
     });
 
-  const flush = (bytes: Uint8Array<ArrayBuffer>): Promise<Buffer<ArrayBuffer>> => {
+  const enqueue = <Result>(
+    task: () => Promise<Result> | Result,
+    queuedByteLength = 0,
+  ): Promise<Result> => {
     if (released) return Promise.reject(new Error("Brotli encoder released"));
-    pendingBytes += bytes.byteLength;
-    const result = tail.then(() => compress(bytes));
+    pendingBytes += queuedByteLength;
+    const result = tail.then(() => {
+      if (released) throw new Error("Brotli encoder released");
+      return task();
+    });
     tail = result.then(
       () => undefined,
       () => undefined,
     );
     return result.finally(() => {
-      pendingBytes = Math.max(0, pendingBytes - bytes.byteLength);
+      pendingBytes = Math.max(0, pendingBytes - queuedByteLength);
     });
   };
+
+  const flush = (
+    bytes: Uint8Array<ArrayBuffer>,
+    onCompressed?: (compressed: Buffer<ArrayBuffer>) => void,
+  ): Promise<Buffer<ArrayBuffer>> =>
+    enqueue(async () => {
+      const compressed = await compress(bytes);
+      onCompressed?.(compressed);
+      return compressed;
+    }, bytes.byteLength);
 
   const release = (): void => {
     if (released) return;
@@ -110,7 +133,7 @@ export const makeBrotliEncoder = (level: number): BrotliEncoder => {
     }
   };
 
-  return { flush, queuedBytes: () => pendingBytes, release };
+  return { enqueue, flush, queuedBytes: () => pendingBytes, release };
 };
 
 export class SessionOutputTransport {
@@ -193,19 +216,27 @@ export class SessionOutputTransport {
       );
       return;
     }
-    if (bytes.length < WS_OUTPUT_COMPRESS_THRESHOLD_BYTES) {
-      this.sendOutputBytes(ws, this.frameWithHeader(WS_OUTPUT_RAW, bytes));
-      return;
-    }
     if (mode === "br-ctx") {
       const encoder = client.brotliEncoder;
       if (!encoder) return;
       try {
-        const compressed = await encoder.flush(bytes);
-        this.sendOutputBytes(ws, this.frameWithCtxHeader(compressed, bytes.length));
+        if (bytes.length < WS_OUTPUT_COMPRESS_THRESHOLD_BYTES) {
+          await encoder.enqueue(
+            () => this.sendOutputBytes(ws, this.frameWithHeader(WS_OUTPUT_RAW, bytes)),
+            bytes.byteLength,
+          );
+        } else {
+          await encoder.flush(bytes, (compressed) =>
+            this.sendOutputBytes(ws, this.frameWithCtxHeader(compressed, bytes.length)),
+          );
+        }
       } catch {
         return;
       }
+      return;
+    }
+    if (bytes.length < WS_OUTPUT_COMPRESS_THRESHOLD_BYTES) {
+      this.sendOutputBytes(ws, this.frameWithHeader(WS_OUTPUT_RAW, bytes));
       return;
     }
     const compressed = this.compressPayload(bytes, mode);
@@ -248,7 +279,7 @@ export class SessionOutputTransport {
           this.overflowPendingClient(client);
           continue;
         }
-        client.pendingBytes.push(bytes);
+        client.pendingQueue.push({ bytes, kind: "output" });
         client.pendingBytesLength += bytes.byteLength;
         continue;
       }
@@ -260,23 +291,14 @@ export class SessionOutputTransport {
         );
         continue;
       }
-      if (!compressible) {
-        this.sendOutputBytes(client.ws, this.frameWithHeader(WS_OUTPUT_RAW, bytes));
+      if (mode === "br-ctx") {
+        // Context compression is asynchronous. sendOutputFrame also queues raw
+        // tail frames so neither they nor an atomic boundary can overtake it.
+        void this.sendOutputFrame(client.ws, bytes, client);
         continue;
       }
-      if (mode === "br-ctx") {
-        // Per-client persistent stream: the flush is async (chained per encoder
-        // in PTY order), so fire-and-forget here — the chain preserves order
-        // across this client's frames and sendOutputBytes checks
-        // readyState/backpressure at send time.
-        const encoder = client.brotliEncoder;
-        if (!encoder) continue;
-        void encoder
-          .flush(bytes)
-          .then((compressed) =>
-            this.sendOutputBytes(client.ws, this.frameWithCtxHeader(compressed, bytes.length)),
-          )
-          .catch(() => undefined);
+      if (!compressible) {
+        this.sendOutputBytes(client.ws, this.frameWithHeader(WS_OUTPUT_RAW, bytes));
         continue;
       }
       if (mode === "br") {
@@ -289,14 +311,20 @@ export class SessionOutputTransport {
     }
   }
 
+  private reservePendingControlMessage(client: ManagedClient): boolean {
+    if (client.pendingOverflowed) return false;
+    if (client.pendingControlMessageCount >= WS_PENDING_CLIENT_MAX_CONTROL_MESSAGES) {
+      this.overflowPendingClient(client);
+      return false;
+    }
+    client.pendingControlMessageCount += 1;
+    return true;
+  }
+
   sendToClient(client: ManagedClient, payload: ServerToClientMessage): void {
     if (client.pending) {
-      if (client.pendingOverflowed) return;
-      if (client.pendingControl.length >= WS_PENDING_CLIENT_MAX_CONTROL_MESSAGES) {
-        this.overflowPendingClient(client);
-        return;
-      }
-      client.pendingControl.push(payload);
+      if (!this.reservePendingControlMessage(client)) return;
+      client.pendingQueue.push({ kind: "control", payload });
       return;
     }
     this.sendControl(client.ws, payload);
@@ -304,13 +332,44 @@ export class SessionOutputTransport {
 
   private overflowPendingClient(client: ManagedClient): void {
     client.pendingOverflowed = true;
-    client.pendingControl = [];
-    client.pendingBytes = [];
+    client.pendingQueue = [];
     client.pendingBytesLength = 0;
+    client.pendingControlMessageCount = 0;
     try {
       client.ws.close(WS_CLOSE_BACKPRESSURE, "pending client backpressure");
     } catch {
       return;
+    }
+  }
+
+  async sendAtomicOutputFrameBoundary(
+    client: ManagedClient,
+    boundary: "output-frame-start" | "output-frame-end",
+  ): Promise<void> {
+    const payload: ServerToClientMessage = { type: boundary };
+    const encoder = client.compressMode === "br-ctx" ? client.brotliEncoder : null;
+    if (encoder) {
+      try {
+        await encoder.enqueue(() => this.sendControl(client.ws, payload));
+      } catch {
+        return;
+      }
+      return;
+    }
+    this.sendControl(client.ws, payload);
+  }
+
+  broadcastAtomicOutputFrameBoundary(
+    managed: ManagedSession,
+    boundary: "output-frame-start" | "output-frame-end",
+  ): void {
+    for (const client of managed.clients) {
+      if (client.pending) {
+        if (!this.reservePendingControlMessage(client)) continue;
+        client.pendingQueue.push({ kind: boundary });
+      } else {
+        void this.sendAtomicOutputFrameBoundary(client, boundary);
+      }
     }
   }
 

@@ -1582,6 +1582,12 @@ const automationsMessageSchema = z
 // reattach, or a back-compat reader) treats it as a no-op.
 const replayEndMessageSchema = z.object({ type: z.literal("replay-end") }).strict();
 
+// A redraw that crosses the 64 KiB transport cap is bracketed by these controls.
+// New clients retain the enclosed binary messages and commit them to xterm as
+// one write; older clients ignore the controls and keep raw in/out behavior.
+const outputFrameStartMessageSchema = z.object({ type: z.literal("output-frame-start") }).strict();
+const outputFrameEndMessageSchema = z.object({ type: z.literal("output-frame-end") }).strict();
+
 // The server's chosen compress mode, sent on promote BEFORE the scrollback
 // replay so the client knows how to parse the compressed replay frames. A
 // back-compat server that doesn't know "br-ctx" never sends this frame, so the
@@ -2165,6 +2171,8 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   fontsMessageSchema,
   cdpControlledMessageSchema,
   replayEndMessageSchema,
+  outputFrameStartMessageSchema,
+  outputFrameEndMessageSchema,
   compressMessageSchema,
   binaryFramingMessageSchema,
   pixelFramesClearMessageSchema,
