@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.72.12
+
+### Patch Changes
+
+- Preserve the terminal viewport during live output: follow naturally at the bottom, keep detached scrollback stable, and let active user scrolling override in-flight output or resize anchors without redundant xterm refreshes.
+
 ## 2.72.11
 
 ### Patch Changes
