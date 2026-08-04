@@ -134,6 +134,7 @@ interface TerminalRuntimeRefs {
   terminalRef: CurrentRef<XtermTerminal | null>;
   ptySizeRef: CurrentRef<TerminalPtySize | null>;
   naturalColsRef: CurrentRef<number | null>;
+  naturalRowsRef: CurrentRef<number | null>;
   liveCwdRef: CurrentRef<string | null>;
   liveSessionIdRef: CurrentRef<string | null>;
   previousSessionIdRef: CurrentRef<string | null>;
@@ -226,6 +227,7 @@ export const useTerminalRuntime = ({
     terminalRef,
     ptySizeRef,
     naturalColsRef,
+    naturalRowsRef,
     liveCwdRef,
     liveSessionIdRef,
     previousSessionIdRef,
@@ -403,11 +405,21 @@ export const useTerminalRuntime = ({
       onUserScroll: noteTerminalUserScroll,
     });
     const { refocusTerminalQuietly } = terminalTouchInteractions;
+    let isProgrammaticTerminalRefocus = false;
+    const refocusTerminalWithoutReporting = () => {
+      isProgrammaticTerminalRefocus = true;
+      try {
+        refocusTerminalQuietly();
+      } finally {
+        isProgrammaticTerminalRefocus = false;
+      }
+    };
 
     const terminalScrollbar = installTerminalScrollbar({
       terminal,
       fitAddon,
       naturalColsRef,
+      naturalRowsRef,
       ptySizeRef,
       scrollbarTrackRef,
       scrollbarThumbRef,
@@ -503,7 +515,7 @@ export const useTerminalRuntime = ({
       document.title = titleForLiveSession(trimmed);
     };
 
-    refocusTerminalRef.current = refocusTerminalQuietly;
+    refocusTerminalRef.current = refocusTerminalWithoutReporting;
     // Routes through the normal paste pipeline (bracketed paste when the
     // foreground app enables it), so multi-line text lands in the prompt
     // without executing.
@@ -519,14 +531,13 @@ export const useTerminalRuntime = ({
       };
       const canvasWidth = terminalInternals._core._renderService?.dimensions?.css?.canvas?.width;
       const canvasHeight = terminalInternals._core._renderService?.dimensions?.css?.canvas?.height;
-      // Report the viewer's natural cols, not the grid clamped to the active
-      // viewer's PTY width. The server retains every client's available size
-      // so a focus or input handoff can resize to it immediately. Rows are
-      // unclamped, so the passed rows are already the natural height.
+      // Report the viewer's natural dimensions, not the grid clamped to the
+      // active viewer's PTY width. The server retains every client's available
+      // size so a focus or input handoff can resize both axes immediately.
       send({
         type: "resize",
         cols: naturalColsRef.current ?? cols,
-        rows,
+        rows: naturalRowsRef.current ?? rows,
         ...(canvasWidth != null && canvasHeight != null
           ? { pixelWidth: Math.round(canvasWidth), pixelHeight: Math.round(canvasHeight) }
           : {}),
@@ -581,6 +592,9 @@ export const useTerminalRuntime = ({
       nextTerminalDataIsUserInput = true;
     });
     const terminalDataDisposable = terminal.onData((data) => {
+      // DEC focus reports emitted by OSK refocus must not land between a tmux
+      // prefix and its follow-up key. Genuine browser focus events still pass.
+      if (isProgrammaticTerminalRefocus) return;
       const isUserInput = terminalUserInputDisposable === null || nextTerminalDataIsUserInput;
       nextTerminalDataIsUserInput = false;
       // During a scrollback replay xterm re-emits responses to the stale query
@@ -615,7 +629,7 @@ export const useTerminalRuntime = ({
 
     observer.observe(container);
     fitToContainer();
-    if (!onScreenKeyboardOpenRef.current) requestAnimationFrame(refocusTerminalQuietly);
+    if (!onScreenKeyboardOpenRef.current) requestAnimationFrame(refocusTerminalWithoutReporting);
 
     const showDeadSessionMask = (exitCode: number | null) => {
       if (disposed) return;

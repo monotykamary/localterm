@@ -86,13 +86,13 @@ export const Terminal = () => {
   // ptySize as a ref so the proposeDimensions closure (set once at terminal
   // creation) can read the live effective size and clamp the local grid to it.
   const ptySizeRef = useRef<{ cols: number; rows: number } | null>(null);
-  // The local viewer's natural cols (the viewport's width in cells, ignoring
-  // the active viewer's width), stashed by proposeDimensions so sendResize
-  // can report it to the server and the overlay can gate the mask on it. Each
-  // viewer reports its natural cols so the server can resize immediately when
-  // focus or input hands PTY ownership to that viewer. The grid reflow is a
-  // purely local render concern the server never sees.
+  // The local viewer's natural dimensions, ignoring the active viewer's PTY
+  // width, are stashed by proposeDimensions so sendResize can report both axes
+  // to the server. The overlay uses the natural columns to gate its mask. Each
+  // viewer reports its available grid so focus or input can transfer PTY size
+  // immediately; the width-only local reflow remains a render concern.
   const naturalColsRef = useRef<number | null>(null);
+  const naturalRowsRef = useRef<number | null>(null);
   // Bumped on any resize/layout change so the pty-viewport overlay recomputes
   // against the freshly-measured `.xterm-screen` rect. ptySize alone only
   // covers the effective size changing; this covers the local grid/cells moving
@@ -476,6 +476,7 @@ export const Terminal = () => {
       terminalRef,
       ptySizeRef,
       naturalColsRef,
+      naturalRowsRef,
       liveCwdRef,
       liveSessionIdRef,
       previousSessionIdRef,

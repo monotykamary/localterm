@@ -12,6 +12,7 @@ interface InstallTerminalScrollbarOptions {
   terminal: XtermTerminal;
   fitAddon: FitAddon;
   naturalColsRef: RefObject<number | null>;
+  naturalRowsRef: RefObject<number | null>;
   ptySizeRef: RefObject<TerminalPtySize | null>;
   scrollbarTrackRef: RefObject<HTMLDivElement | null>;
   scrollbarThumbRef: RefObject<HTMLDivElement | null>;
@@ -28,6 +29,7 @@ export const installTerminalScrollbar = ({
   terminal,
   fitAddon,
   naturalColsRef,
+  naturalRowsRef,
   ptySizeRef,
   scrollbarTrackRef,
   scrollbarThumbRef,
@@ -60,9 +62,10 @@ export const installTerminalScrollbar = ({
           parseInt(elementStyle.getPropertyValue("padding-bottom")));
       const naturalCols = Math.max(2, Math.floor(availableWidth / cellWidth));
       const naturalRows = Math.max(1, Math.floor(availableHeight / cellHeight));
-      // Stash the natural cols so sendResize reports them (not the clamped
-      // grid) and the overlay gates the mask on natural-vs-effective.
+      // Stash the natural dimensions so sendResize reports the available grid,
+      // while the overlay uses the columns to gate its natural-vs-effective mask.
       naturalColsRef.current = naturalCols;
+      naturalRowsRef.current = naturalRows;
       // Reflow the local grid to the active viewer's effective PTY cols when
       // this client is wider. xterm reflows the whole buffer on resize, so the
       // columns beyond the effective width carry no stale wide content (a

@@ -72,6 +72,7 @@ interface FakeXtermHandle {
   fireTitleChange: (title: string) => void;
   fireData: (data: string) => void;
   fireTerminalResponse: (data: string) => void;
+  setFocusResponse: (data: string | null) => void;
   getOptions: () => Record<string, unknown>;
   setBufferState: (state: { baseY: number; viewportY: number }) => void;
   scrollLines: ReturnType<typeof vi.fn>;
@@ -198,7 +199,11 @@ vi.mock("@xterm/xterm", () => {
     scrollToBottom = vi.fn();
     selectAll = vi.fn();
     write = vi.fn((_data: string, callback?: () => void) => callback?.());
-    focus = vi.fn();
+    private focusResponse: string | null = null;
+    focus = vi.fn(() => {
+      if (this.focusResponse === null) return;
+      for (const listener of this.dataListeners) listener(this.focusResponse);
+    });
     registerCharacterJoiner = vi.fn((_handler: (text: string) => [number, number][]) => 1);
     deregisterCharacterJoiner = vi.fn((_joinerId: number) => {});
     private titleListeners = new Set<(title: string) => void>();
@@ -241,6 +246,9 @@ vi.mock("@xterm/xterm", () => {
         },
         fireTerminalResponse: (data: string) => {
           for (const listener of this.dataListeners) listener(data);
+        },
+        setFocusResponse: (data: string | null) => {
+          this.focusResponse = data;
         },
         getOptions: () => this.options,
         setBufferState: ({ baseY, viewportY }) => {
@@ -1276,6 +1284,51 @@ describe("Terminal floating keyboard button", () => {
     fireEvent.click(screen.getByLabelText("show on-screen keyboard"));
 
     expect(queryOnScreenKeyboard()).not.toBeNull();
+  });
+
+  it("keeps programmatic focus reports out of tmux prefix chords", () => {
+    installFakeLocalStorage({ [KEYBOARD_FLOATING_BUTTON_STORAGE_KEY]: "true" });
+    render(<Terminal />);
+    const socket = fakeWebSockets[0];
+    socket?.fireOpen();
+    fireEvent.click(screen.getByLabelText("show on-screen keyboard"));
+    const keyboard = queryOnScreenKeyboard();
+    if (!(keyboard instanceof HTMLElement)) {
+      throw new Error("on-screen keyboard did not render");
+    }
+    keyboard.setPointerCapture = vi.fn();
+    fakeXterms[0]?.setFocusResponse("\u001b[I");
+    socket?.send.mockClear();
+
+    const tapKey = (label: string, pointerId: number, left: number) => {
+      const key = keyboard.querySelector(`[aria-label="${label}"]`);
+      if (!(key instanceof HTMLElement)) throw new Error(`${label} key did not render`);
+      key.getBoundingClientRect = () => ({
+        bottom: 140,
+        height: 40,
+        left,
+        right: left + 40,
+        top: 100,
+        width: 40,
+        x: left,
+        y: 100,
+        toJSON: () => ({}),
+      });
+      fireEvent.pointerDown(keyboard, { clientX: left + 20, clientY: 120, pointerId });
+      fireEvent.pointerUp(keyboard, { clientX: left + 20, clientY: 120, pointerId });
+    };
+
+    tapKey("ctrl", 1, 100);
+    tapKey("b", 2, 200);
+    tapKey("s", 3, 300);
+
+    const terminalMessages = socket?.send.mock.calls
+      .map(([payload]) => JSON.parse(String(payload)))
+      .filter((message) => message.type === "input" || message.type === "terminal-response");
+    expect(terminalMessages).toEqual([
+      { type: "input", data: String.fromCharCode(2) },
+      { type: "input", data: "s" },
+    ]);
   });
 
   it("uses the server's terminfo backspace sequence in the on-screen keyboard", () => {
