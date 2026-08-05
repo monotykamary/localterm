@@ -1,5 +1,12 @@
 # localterm
 
+## 2.72.17
+
+### Patch Changes
+
+- c475d99: Run the macOS launchd daemon through a signed, audio-entitled LocalTerm launcher so voice-enabled PTY applications receive microphone input instead of privacy-filtered zero samples.
+  - @monotykamary/localterm-server@2.72.17
+
 ## 2.72.16
 
 ### Patch Changes
