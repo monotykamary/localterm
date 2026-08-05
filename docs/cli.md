@@ -13,6 +13,8 @@ localterm uninstall                              # remove auto-start service
 localterm completions <bash|zsh|fish> [--install|--uninstall]  # print/install/uninstall shell completions
 ```
 
+On macOS, `localterm install` also installs a signed background launcher that lets launchd-spawned terminal applications request microphone access. macOS shows a **LocalTerm** permission prompt on first use.
+
 ## config
 
 ```bash

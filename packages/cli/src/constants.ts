@@ -52,6 +52,16 @@ export const DAEMON_PROCESS_TITLE = "localtermd";
 
 export const LAUNCHD_LABEL = "com.monotykamary.localterm";
 export const LAUNCHD_PLIST_FILENAME = `${LAUNCHD_LABEL}.plist`;
+export const MACOS_DAEMON_APP_DIRECTORY_NAME = "LocalTerm Daemon.app";
+export const MACOS_DAEMON_APP_EXECUTABLE_NAME = "localtermd-launcher";
+export const MACOS_DAEMON_BUNDLE_IDENTIFIER = `${LAUNCHD_LABEL}.daemon`;
+export const MACOS_DAEMON_BUNDLE_VERSION = "1";
+export const MACOS_DAEMON_APPLE_EVENTS_USAGE_DESCRIPTION =
+  "LocalTerm uses System Events to accept Dia browser debugging prompts.";
+export const MACOS_DAEMON_MICROPHONE_USAGE_DESCRIPTION =
+  "LocalTerm uses microphone input for voice-enabled terminal applications.";
+export const MACOS_DAEMON_EXECUTABLE_MODE = 0o755;
+export const MACOS_DAEMON_CODESIGN_TIMEOUT_MS = 30_000;
 
 export const SYSTEMD_USER_UNIT_NAME = "localterm.service";
 // How long the unit's ExecStartPre waits for tailscaled before booting the

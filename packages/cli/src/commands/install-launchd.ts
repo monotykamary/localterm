@@ -7,6 +7,10 @@ import kleur from "kleur";
 import { DAEMON_BASE_PATH, LAUNCHD_LABEL, PORTLESS_RESOLVE_TIMEOUT_MS } from "../constants.js";
 import { cliError, type CliError, exitCodeForCliError } from "../errors.js";
 import { getLaunchdPlistPath, getStateDirectory } from "../paths.js";
+import {
+  installMacosDaemonBundle,
+  removeMacosDaemonBundle,
+} from "../utils/install-macos-daemon-bundle.js";
 import { cliEntry } from "../utils/cli-entry.js";
 import { removeTailscaleServe } from "../utils/tailscale.js";
 import { reportCliError } from "../utils/report-cli-error.js";
@@ -19,7 +23,11 @@ const execFileAsync = promisify(execFile);
 const escapePlistString = (value: string): string =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-export const buildPlistContent = (options: InstallOptions): string => {
+export interface BuildPlistContentOptions extends InstallOptions {
+  daemonLauncherPath?: string;
+}
+
+export const buildPlistContent = (options: BuildPlistContentOptions): string => {
   const stateDirectory = getStateDirectory();
   const logPath = path.join(stateDirectory, "server.log");
   // Minimal system PATH + the daemon's own node dir + the portless dir (the
@@ -30,6 +38,10 @@ export const buildPlistContent = (options: InstallOptions): string => {
   const pathParts = [DAEMON_BASE_PATH, nodeDir];
   if (options.portlessDir) pathParts.push(options.portlessDir);
   const pathEnv = pathParts.join(":");
+  const escapedNodePath = escapePlistString(process.execPath);
+  const daemonProgramPrefix = options.daemonLauncherPath
+    ? `        <string>${escapePlistString(options.daemonLauncherPath)}</string>\n        <string>${escapedNodePath}</string>`
+    : `        <string>${escapedNodePath}</string>`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -39,8 +51,8 @@ export const buildPlistContent = (options: InstallOptions): string => {
     <string>${LAUNCHD_LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${process.execPath}</string>
-        <string>${cliEntry}</string>
+${daemonProgramPrefix}
+        <string>${escapePlistString(cliEntry)}</string>
         <string>start</string>
         <string>--port</string>
         <string>${options.port}</string>
@@ -56,13 +68,13 @@ export const buildPlistContent = (options: InstallOptions): string => {
         <false/>
     </dict>
     <key>StandardOutPath</key>
-    <string>${logPath}</string>
+    <string>${escapePlistString(logPath)}</string>
     <key>StandardErrorPath</key>
-    <string>${logPath}</string>
+    <string>${escapePlistString(logPath)}</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
-        <string>${os.homedir()}</string>
+        <string>${escapePlistString(os.homedir())}</string>
         <key>PATH</key>
         <string>${escapePlistString(pathEnv)}</string>
     </dict>
@@ -91,14 +103,6 @@ export const runInstallMac = async (
 ): Promise<void> => {
   const plistPath = getLaunchdPlistPath();
 
-  if (existsSync(plistPath)) {
-    try {
-      await launchctl("unload", plistPath);
-    } catch {
-      // May not be loaded; that's fine
-    }
-  }
-
   const dirValidationError = validateLaunchAgentsDirectory();
   if (dirValidationError !== null) {
     reportCliError(dirValidationError);
@@ -117,7 +121,15 @@ export const runInstallMac = async (
     // portless not installed — daemon announces the loopback surface instead
   }
 
-  const content = buildPlistContent({ ...options, portlessDir });
+  const daemonLauncherPath = await installMacosDaemonBundle();
+  if (existsSync(plistPath)) {
+    try {
+      await launchctl("unload", plistPath);
+    } catch {
+      // May not be loaded; that's fine
+    }
+  }
+  const content = buildPlistContent({ ...options, portlessDir, daemonLauncherPath });
   writeFileSync(plistPath, content, "utf8");
 
   try {
@@ -134,7 +146,8 @@ export const runInstallMac = async (
 
   console.log(kleur.green(`✔ launchd service installed`));
   console.log(`  plist:  ${kleur.dim(plistPath)}`);
-  console.log(`  node:   ${kleur.dim(process.execPath)}`);
+  console.log(`  launcher: ${kleur.dim(daemonLauncherPath)}`);
+  console.log(`  node:     ${kleur.dim(process.execPath)}`);
   console.log(`  entry:  ${kleur.dim(cliEntry)}`);
   console.log(`  port:   ${options.port}`);
   console.log(`  host:   ${options.host}`);
@@ -157,6 +170,7 @@ export const runUninstallMac = async (): Promise<void> => {
   const plistPath = getLaunchdPlistPath();
 
   if (!existsSync(plistPath)) {
+    removeMacosDaemonBundle();
     console.log(kleur.dim("launchd service is not installed."));
     return;
   }
@@ -169,6 +183,7 @@ export const runUninstallMac = async (): Promise<void> => {
 
   await removeTailscaleServe();
   await teardownShellCompletions();
+  removeMacosDaemonBundle();
 
   try {
     unlinkSync(plistPath);

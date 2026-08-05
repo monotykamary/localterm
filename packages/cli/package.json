@@ -30,6 +30,7 @@
   "files": [
     "bin",
     "dist",
+    "resources",
     "terminal",
     "README.md",
     "LICENSE"
@@ -45,6 +46,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:macos-launcher": "node ../../scripts/build-macos-daemon-launcher.mjs",
     "dev": "tsc -p tsconfig.build.json --watch",
     "test": "vp test --run --tagsFilter '!integration && !e2e'",
     "typecheck": "tsc --noEmit",

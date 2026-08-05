@@ -1,8 +1,7 @@
 # pi integration
 
 [pi](https://github.com/earendil-works/pi-coding-agent) runs first-class inside
-localterm. The `@monotykamary/pi-localterm` extension wires the two together with
-two features, both inert outside localterm.
+localterm. The `@monotykamary/pi-localterm` extension wires terminal-specific capabilities into pi and stays inert outside localterm.
 
 ## Kitty graphics + OSC 8 links
 
@@ -19,6 +18,10 @@ extension overrides the `bash` tool with a spawn hook that strips the `pi`
 process's localterm-managed secret env vars from each command's child env — pi's
 own env (and its provider calls) keep them. This is defense-in-depth, not a hard
 barrier (see the package README for the threat model).
+
+## Realtime voice on macOS
+
+PTYs started by a plain launchd Node daemon are denied microphone access by macOS and receive zero-filled audio buffers. `localterm install` runs the daemon through an audio-entitled LocalTerm launcher, so voice extensions can use native microphone capture. Allow the **LocalTerm** microphone prompt on first use.
 
 ## Install
 

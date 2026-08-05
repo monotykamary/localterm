@@ -1,6 +1,11 @@
 import os from "node:os";
 import path from "node:path";
-import { LAUNCHD_PLIST_FILENAME, SYSTEMD_USER_UNIT_NAME } from "./constants.js";
+import {
+  LAUNCHD_PLIST_FILENAME,
+  MACOS_DAEMON_APP_DIRECTORY_NAME,
+  MACOS_DAEMON_APP_EXECUTABLE_NAME,
+  SYSTEMD_USER_UNIT_NAME,
+} from "./constants.js";
 
 export const getStateDirectory = (): string => path.join(os.homedir(), ".localterm");
 export const getPidFile = (): string => path.join(getStateDirectory(), "server.pid");
@@ -10,6 +15,10 @@ export const getLogFile = (): string => path.join(getStateDirectory(), "server.l
 export const getCommandSpecFile = (): string => path.join(getStateDirectory(), "command-spec.json");
 export const getLaunchdPlistPath = (): string =>
   path.join(os.homedir(), "Library", "LaunchAgents", LAUNCHD_PLIST_FILENAME);
+export const getMacosDaemonAppPath = (): string =>
+  path.join(getStateDirectory(), MACOS_DAEMON_APP_DIRECTORY_NAME);
+export const getMacosDaemonExecutablePath = (appPath = getMacosDaemonAppPath()): string =>
+  path.join(appPath, "Contents", "MacOS", MACOS_DAEMON_APP_EXECUTABLE_NAME);
 export const getSystemdUserUnitDir = (): string =>
   path.join(os.homedir(), ".config", "systemd", "user");
 export const getSystemdUserUnitPath = (): string =>

@@ -10,6 +10,10 @@ import { runInstallMac, runUninstallMac } from "./install-launchd.js";
 import { runInstallLinux, runUninstallLinux } from "./install-systemd.js";
 
 export { buildPlistContent } from "./install-launchd.js";
+export {
+  buildMacosDaemonEntitlements,
+  buildMacosDaemonInfoPlist,
+} from "../utils/install-macos-daemon-bundle.js";
 export { buildSystemdUnitContent } from "./install-systemd.js";
 
 const execFileAsync = promisify(execFile);

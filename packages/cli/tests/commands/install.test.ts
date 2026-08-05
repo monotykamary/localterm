@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import path from "node:path";
-import { buildPlistContent, buildSystemdUnitContent } from "../../src/commands/install.js";
+import {
+  buildMacosDaemonEntitlements,
+  buildMacosDaemonInfoPlist,
+  buildPlistContent,
+  buildSystemdUnitContent,
+} from "../../src/commands/install.js";
 import { DAEMON_BASE_PATH, LAUNCHD_LABEL } from "../../src/constants.js";
 
 describe("buildPlistContent", () => {
@@ -32,6 +37,20 @@ describe("buildPlistContent", () => {
   it("includes the node exec path in the daemon command", () => {
     const plist = buildPlistContent({ port: 3417, host: "127.0.0.1" });
     expect(plist).toContain(process.execPath);
+  });
+
+  it("uses and XML-escapes an installed audio-capable daemon launcher", () => {
+    const daemonLauncherPath =
+      "/Users/test & dev/.localterm/LocalTerm Daemon.app/Contents/MacOS/localtermd-launcher";
+    const plist = buildPlistContent({
+      port: 3417,
+      host: "127.0.0.1",
+      daemonLauncherPath,
+    });
+
+    expect(plist).toContain(
+      `<string>${daemonLauncherPath.replace("&", "&amp;")}</string>\n        <string>${process.execPath}</string>`,
+    );
   });
 
   it("includes HOME environment variable", () => {
@@ -68,6 +87,24 @@ describe("buildPlistContent", () => {
     expect(plist).toContain("server.log");
     expect(plist).toContain("<key>StandardOutPath</key>");
     expect(plist).toContain("<key>StandardErrorPath</key>");
+  });
+});
+
+describe("macOS daemon bundle", () => {
+  it("declares the microphone usage shown by macOS", () => {
+    const infoPlist = buildMacosDaemonInfoPlist();
+
+    expect(infoPlist).toContain("<key>NSAppleEventsUsageDescription</key>");
+    expect(infoPlist).toContain("<key>NSMicrophoneUsageDescription</key>");
+    expect(infoPlist).toContain("<string>LocalTerm Daemon</string>");
+  });
+
+  it("adds audio input to the responsible launcher", () => {
+    const entitlements = buildMacosDaemonEntitlements();
+
+    expect(entitlements).toContain("<key>com.apple.security.automation.apple-events</key>");
+    expect(entitlements).toContain("<key>com.apple.security.device.audio-input</key>");
+    expect(entitlements).not.toContain("com.apple.security.cs.disable-library-validation");
   });
 });
 

@@ -11,6 +11,8 @@ plist in `~/Library/LaunchAgents/` with `RunAtLoad` and `KeepAlive` enabled:
 - **RunAtLoad** — localterm starts automatically when you log in.
 - **KeepAlive** — launchd restarts the daemon immediately if it crashes.
 
+The LaunchAgent runs through a small signed LocalTerm launcher with macOS audio-input permission. This lets terminal applications such as realtime voice assistants use the microphone even though their PTY processes descend from a background daemon. macOS asks for **LocalTerm** microphone access the first time an application requests it; allow that prompt.
+
 ```bash
 npx @monotykamary/localterm@latest install
 # or with a global install:

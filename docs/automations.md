@@ -69,9 +69,10 @@ connection behind an `Allow debugging connection?` prompt — Return dismisses
 it. localterm auto-dismisses it: when the daemon's CDP socket is still
 connecting past ~600ms it fires a Return at the Dia process via `osascript`, so
 the socket opens with no manual click (a no-op for every other browser and off
-macOS). It needs **macOS Accessibility** for the `node` binary running the
-daemon — without it the keystroke is dropped and the socket just waits on its
-connect timeout, so grant it once in System Settings → Privacy & Security →
+macOS). It needs **macOS Accessibility** for **LocalTerm** when using the
+installed LaunchAgent, or for the launching terminal when started manually.
+Without it the keystroke is dropped and the socket just waits on its connect
+timeout, so grant it once in System Settings → Privacy & Security →
 Accessibility.
 
 To pin a specific port instead (e.g. Aside's `52860` when several browsers are

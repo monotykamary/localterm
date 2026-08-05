@@ -2,3 +2,4 @@
 # NUL used as a string separator) trips git's binary-file heuristic.
 *.ts diff
 *.tsx diff
+packages/cli/resources/localtermd-launcher binary

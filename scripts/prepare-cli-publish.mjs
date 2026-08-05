@@ -8,6 +8,7 @@ const repoRoot = path.resolve(moduleDir, "..");
 const cliRoot = path.join(repoRoot, "packages/cli");
 const terminalDistRoot = path.join(repoRoot, "apps/terminal/dist");
 const cliTerminalDestination = path.join(cliRoot, "terminal");
+const macosDaemonLauncher = path.join(cliRoot, "resources", "localtermd-launcher");
 const repoReadme = path.join(repoRoot, "README.md");
 const cliReadmeDestination = path.join(cliRoot, "README.md");
 const repoLicense = path.join(repoRoot, "LICENSE");
@@ -17,6 +18,12 @@ const die = (message) => {
   console.error(`prepare-cli-publish: ${message}`);
   process.exit(1);
 };
+
+if (!existsSync(macosDaemonLauncher)) {
+  die(
+    `packages/cli/resources/localtermd-launcher not found. build it on macOS with 'pnpm --filter @monotykamary/localterm build:macos-launcher'.`,
+  );
+}
 
 if (!existsSync(terminalDistRoot)) {
   die(
