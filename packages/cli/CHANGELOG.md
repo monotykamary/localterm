@@ -1,5 +1,12 @@
 # localterm
 
+## 2.72.18
+
+### Patch Changes
+
+- 17f061a: Encode modified Enter presses from the mobile on-screen keyboard with the active Kitty keyboard protocol so Option+Enter reaches terminal applications as a distinct shortcut.
+  - @monotykamary/localterm-server@2.72.18
+
 ## 2.72.17
 
 ### Patch Changes
