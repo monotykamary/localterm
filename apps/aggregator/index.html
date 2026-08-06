@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>localterm workspaces</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0b0b0c; color: #e6e6e6;
+    font: 14px/1.4 -apple-system, system-ui, Segoe UI, sans-serif; overflow: hidden; }
+  #topbar { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 10px;
+    background: #161618; border-bottom: 1px solid #2a2a2e; position: relative; z-index: 30; }
+  #topbar .ws-title { font-weight: 600; }
+  #topbar .ws-cwd { color: #6a6a6a; font-size: 12px; max-width: 40vw; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  #topbar .spacer { flex: 1; }
+  .btn { padding: 6px 11px; border-radius: 6px; background: #232327; color: #cfcfcf;
+    border: 1px solid #2f2f35; cursor: pointer; font-size: 13px; white-space: nowrap; }
+  .btn:hover { background: #2f2f35; }
+  #menu { font-size: 17px; padding: 4px 9px; }
+
+  #app { display: flex; height: calc(100% - 44px); position: relative; }
+  #nav { position: fixed; top: 44px; bottom: 0; left: 0; width: 230px; z-index: 25;
+    background: #111113; border-right: 1px solid #2a2a2e; overflow-y: auto; padding: 8px;
+    transform: translateX(-100%); transition: transform .18s ease; }
+  body.nav-open #nav { transform: translateX(0); }
+  #main { margin-left: 0; transition: margin-left .18s ease; }
+  @media (min-width: 720px) { body.nav-open #main { margin-left: 230px; } }
+  #nav h3 { margin: 4px 6px 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6a6a6a; }
+  .ws-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 7px;
+    cursor: pointer; color: #9a9a9a; border: 1px solid transparent; margin-bottom: 2px; }
+  .ws-item:hover { background: #1a1a1e; }
+  .ws-item.active { background: #2f2f35; color: #fff; border-color: #3a3a40; }
+  .ws-item .wname { flex: 1; outline: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-item .wname[contenteditable="true"] { background: #000; padding: 1px 4px; border-radius: 3px; }
+  .ws-item .wx { opacity: .35; font-size: 12px; }
+  .ws-item .wx:hover { opacity: 1; }
+  .ws-item .cnt { font-size: 11px; color: #6a6a6a; background: #1a1a1e; padding: 1px 6px; border-radius: 8px; }
+  .ws-add-row { display: flex; gap: 6px; margin-top: 10px; }
+  .ws-add-row input { flex: 1; background: #1a1a1e; border: 1px solid #2f2f35; color: #e6e6e6;
+    border-radius: 6px; padding: 6px 8px; font-size: 12px; outline: none; }
+  .ws-add-row .hint { font-size: 10px; color: #555; margin: 4px 2px 0; }
+
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #bar { display: flex; gap: 4px; padding: 6px; background: #161618; border-bottom: 1px solid #2a2a2e;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; align-items: center; min-height: 41px; }
+  .tab { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 6px;
+    background: #232327; color: #9a9a9a; border: 1px solid transparent; cursor: pointer; white-space: nowrap; font-size: 13px; }
+  .tab.active { background: #2f2f35; color: #fff; border-color: #3a3a40; }
+  .tab .lbl { outline: none; }
+  .tab .lbl[contenteditable="true"] { background: #000; padding: 1px 4px; border-radius: 3px; }
+  .tab .x { opacity: .45; font-size: 13px; line-height: 1; padding: 0 2px; }
+  .tab .x:hover { opacity: 1; }
+  .tab .dot { width: 7px; height: 7px; border-radius: 50%; background: #555; flex: 0 0 auto; }
+  .tab.loading .dot { background: #e0a800; animation: pulse 1s infinite; }
+  .tab.live .dot { background: #3fb950; }
+  .tab.err .dot { background: #f85149; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  #add { flex: 0 0 auto; padding: 7px 12px; border-radius: 6px; background: transparent; color: #6a6a6a;
+    border: 1px dashed #3a3a40; cursor: pointer; }
+  #frameWrap { position: relative; flex: 1; min-height: 0; }
+  iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; display: none; }
+  iframe.active { display: block; }
+
+  #backdrop { display: none; position: fixed; inset: 0; top: 44px; background: rgba(0,0,0,.5); z-index: 20; }
+  body.nav-open #backdrop { display: block; }
+  @media (min-width: 720px) { body.nav-open #backdrop { display: none; } }
+  .empty { color: #6a6a6a; padding: 8px 12px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <button class="btn" id="menu" title="workspaces">☰</button>
+  <span class="ws-title" id="wsTitle">—</span>
+  <span class="ws-cwd" id="wsCwd"></span>
+  <span class="spacer"></span>
+  <button class="btn" id="addTab">+ tab</button>
+</div>
+<div id="app">
+  <div id="backdrop"></div>
+  <div id="nav">
+    <h3>Workspaces</h3>
+    <div id="wsList"></div>
+    <div class="ws-add-row">
+      <input id="newWsPath" placeholder="/path/to/repo" autocomplete="off">
+      <button class="btn" id="addWs">+</button>
+    </div>
+    <div class="hint">add a repo path, then +</div>
+  </div>
+  <div id="main">
+    <div id="bar"></div>
+    <div id="frameWrap"></div>
+  </div>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const LT_ORIGIN = params.get('lt') || location.origin.replace(/:\d+$/, '');
+const BASE = LT_ORIGIN + '/?sid=';
+const HOME = params.get('home') || '/';
+const bar = document.getElementById('bar');
+const wrap = document.getElementById('frameWrap');
+const wsList = document.getElementById('wsList');
+const wsTitle = document.getElementById('wsTitle');
+const wsCwd = document.getElementById('wsCwd');
+
+let state = { workspaces: [], activeWs: null, nextId: 1, version: 0 };
+const frames = new Map();        // tabId -> iframe (per device, created once)
+let writing = false, saveTimer = null;
+
+function uid(){ return state.nextId++; }
+function basename(p){ return (p||'').replace(/\/+$/,'').split('/').pop() || p; }
+function activeWs(){ return state.workspaces.find(w => w.id === state.activeWs); }
+
+// ---- shared state sync ----
+async function loadState(){ const r = await fetch('/api/state'); state = await r.json(); }
+function save(){
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    saveTimer = null; writing = true;
+    try { const r = await fetch('/api/state', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(state)});
+      state.version = (await r.json()).version; } catch(e){} finally { writing = false; }
+  }, 250);
+}
+async function poll(){
+  if (writing) return;
+  try { const r = await fetch('/api/state'); const s = await r.json();
+    if (s.version > (state.version || 0)) await applyState(s);
+  } catch(e){}
+}
+async function applyState(s){
+  const ids = new Set();
+  for (const w of s.workspaces) for (const t of w.tabs) { ids.add(t.id); ensureFrame(t); }
+  for (const tid of [...frames.keys()]) if (!ids.has(tid)) removeFrame(tid);
+  state = s;
+  if (!state.workspaces.find(w => w.id === state.activeWs)) state.activeWs = state.workspaces[0]?.id || null;
+  renderNav(); renderTabStrip();
+}
+
+// ---- iframe lifecycle — uses SHARED sid from state, localterm handles multi-client ----
+function ensureFrame(t){
+  let f = frames.get(t.id);
+  if (!f){
+    f = document.createElement('iframe');
+    f.dataset.tid = t.id;
+    f.addEventListener('load', () => {
+      if (t.sid && f.src && f.src.indexOf('sid=' + t.sid) > -1 && t.state !== 'live') { t.state = 'live'; save(); renderTabStrip(); }
+    });
+    wrap.appendChild(f); frames.set(t.id, f);
+  }
+  if (t.sid && (!f.src || f.src.indexOf('sid=' + t.sid) === -1)) f.src = BASE + t.sid;
+  return f;
+}
+function removeFrame(tid){
+  const f = frames.get(tid);
+  if (f){ f.src = 'about:blank'; f.remove(); frames.delete(tid); }
+}
+
+// ---- rendering ----
+function renderTabStrip(){
+  bar.innerHTML = '';
+  const ws = activeWs();
+  wsTitle.textContent = ws ? ws.name : '—'; wsCwd.textContent = ws ? ws.cwd : '';
+  if (!ws){ bar.innerHTML = '<div class="empty">no workspace — add one in the ☰ pane</div>'; return; }
+  if (ws.tabs.length === 0) bar.innerHTML = '<div class="empty">no tabs — click "+ tab"</div>';
+  ws.tabs.forEach(t => {
+    ensureFrame(t);
+    const el = document.createElement('div');
+    el.className = 'tab ' + (t.state || 'loading') + (t.id === ws.activeTab ? ' active' : '');
+    el.dataset.tid = t.id;
+    el.innerHTML = `<span class="dot"></span><span class="lbl"></span><span class="x">✕</span>`;
+    const lbl = el.querySelector('.lbl'); lbl.textContent = t.label;
+    lbl.addEventListener('dblclick', ev => { ev.stopPropagation(); lbl.contentEditable='true'; lbl.focus(); document.execCommand('selectAll'); });
+    lbl.addEventListener('keydown', e => { if (e.key==='Enter'){ e.preventDefault(); lbl.blur(); } });
+    lbl.addEventListener('blur', () => { lbl.contentEditable='false'; t.label = lbl.textContent.trim() || t.label; save(); });
+    el.querySelector('.x').addEventListener('click', ev => { ev.stopPropagation(); closeTab(t.id); });
+    el.addEventListener('click', () => activateTab(t.id));
+    bar.appendChild(el);
+  });
+  const add = document.createElement('div'); add.id='add'; add.textContent='+ tab';
+  add.addEventListener('click', addTab); bar.appendChild(add);
+  showActiveFrame();
+}
+function showActiveFrame(){
+  const ws = activeWs();
+  frames.forEach((f, tid) => { const t = ws?.tabs.find(x => x.id === tid);
+    f.classList.toggle('active', !!(ws && t && t.id === ws.activeTab)); });
+}
+function renderNav(){
+  wsList.innerHTML = '';
+  state.workspaces.forEach(w => {
+    const el = document.createElement('div');
+    el.className = 'ws-item' + (w.id === state.activeWs ? ' active' : '');
+    el.innerHTML = `<span class="wname"></span><span class="cnt">${w.tabs.length}</span><span class="wx">✕</span>`;
+    const nameEl = el.querySelector('.wname'); nameEl.textContent = w.name;
+    nameEl.addEventListener('dblclick', () => { nameEl.contentEditable='true'; nameEl.focus(); document.execCommand('selectAll'); });
+    nameEl.addEventListener('keydown', e => { if (e.key==='Enter'){ e.preventDefault(); nameEl.blur(); } });
+    nameEl.addEventListener('blur', () => { nameEl.contentEditable='false'; w.name = nameEl.textContent.trim() || w.name; save(); });
+    el.querySelector('.wx').addEventListener('click', e => { e.stopPropagation(); closeWorkspace(w.id); });
+    el.addEventListener('click', () => switchWs(w.id));
+    wsList.appendChild(el);
+  });
+}
+
+// ---- actions ----
+function switchWs(id){ state.activeWs = id; save(); renderNav(); renderTabStrip(); if (window.innerWidth < 720) closeNav(); }
+function activateTab(id){
+  const ws = activeWs(); if (!ws) return; ws.activeTab = id; save();
+  bar.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', Number(el.dataset.tid) === id));
+  showActiveFrame();
+}
+async function addTab(){
+  const ws = activeWs(); if (!ws) return;
+  const id = uid();
+  const t = { id, label: 'Terminal ' + (ws.tabs.length+1), state: 'loading', cwd: ws.cwd, sid: null };
+  ws.tabs.push(t); ws.activeTab = id; save(); renderTabStrip();
+  try {
+    const r = await fetch('/api/new-session?cwd=' + encodeURIComponent(ws.cwd || HOME));
+    const d = await r.json();
+    if (d.sid){ t.sid = d.sid; save(); ensureFrame(t); renderTabStrip(); }
+    else { t.state = 'err'; save(); renderTabStrip(); }
+  } catch(e){ t.state = 'err'; save(); renderTabStrip(); }
+}
+function closeTab(id){
+  const ws = activeWs(); if (!ws) return;
+  const i = ws.tabs.findIndex(t => t.id === id); if (i < 0) return;
+  const t = ws.tabs[i];
+  if (t.sid) fetch('/api/kill-session?sid=' + encodeURIComponent(t.sid)).catch(()=>{});
+  removeFrame(id);
+  ws.tabs.splice(i, 1);
+  if (ws.activeTab === id) ws.activeTab = ws.tabs[0]?.id || null;
+  save(); renderTabStrip();
+}
+function addWorkspace(path){
+  const p = (path||'').trim(); if (!p) return;
+  if (state.workspaces.some(w => w.cwd === p)) { switchWs(state.workspaces.find(w => w.cwd === p).id); return; }
+  const w = { id: uid(), name: basename(p), cwd: p, tabs: [], activeTab: null };
+  state.workspaces.push(w); state.activeWs = w.id; save(); renderNav(); renderTabStrip();
+  if (window.innerWidth < 720) closeNav();
+}
+function closeWorkspace(id){
+  const w = state.workspaces.find(x => x.id === id); if (!w) return;
+  if (!confirm('Close workspace "' + w.name + '"? Its ' + w.tabs.length + ' session(s) will be killed.')) return;
+  w.tabs.forEach(t => { if (t.sid) fetch('/api/kill-session?sid=' + encodeURIComponent(t.sid)).catch(()=>{}); removeFrame(t.id); });
+  state.workspaces = state.workspaces.filter(x => x.id !== id);
+  if (state.activeWs === id) state.activeWs = state.workspaces[0]?.id || null;
+  save(); renderNav(); renderTabStrip();
+}
+
+// ---- nav toggle ----
+const menuBtn = document.getElementById('menu');
+const backdrop = document.getElementById('backdrop');
+function openNav(){ document.body.classList.add('nav-open'); }
+function closeNav(){ document.body.classList.remove('nav-open'); }
+function toggleNav(){ document.body.classList.toggle('nav-open'); }
+menuBtn.addEventListener('click', toggleNav);
+backdrop.addEventListener('click', closeNav);
+document.getElementById('addWs').addEventListener('click', () => { const inp = document.getElementById('newWsPath'); addWorkspace(inp.value); inp.value=''; inp.focus(); });
+document.getElementById('newWsPath').addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('addWs').click(); });
+document.getElementById('addTab').addEventListener('click', addTab);
+
+// ---- init ----
+(async function init(){
+  await loadState();
+  if (!state.workspaces.length){
+    state = { workspaces: [{id:1, name:basename(HOME), cwd:HOME, tabs:[], activeTab:null}], activeWs:1, nextId:2, version:0 };
+    save();
+  }
+  if (!state.workspaces.find(w => w.id === state.activeWs)) state.activeWs = state.workspaces[0]?.id || null;
+  if (window.innerWidth >= 720) openNav();
+  renderNav(); renderTabStrip();
+  setInterval(poll, 3000);
+})();
+</script>
+</body>
+</html>
