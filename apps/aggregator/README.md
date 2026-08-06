@@ -58,7 +58,7 @@ open "http://localhost:8090?lt=http://localhost:3417"
 tailscale serve --bg 3417
 
 # Serve the aggregator on :8090
-tailspal serve --bg 8090
+tailscale serve --bg 8090
 
 # Open from any device on the tailnet:
 # https://<hostname>.ts.net:8090/
