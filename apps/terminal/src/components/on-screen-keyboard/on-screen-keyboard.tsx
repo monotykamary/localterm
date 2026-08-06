@@ -58,6 +58,7 @@ import {
 interface OnScreenKeyboardProps {
   readonly onInput: (data: string) => void;
   readonly backspaceSequence?: string;
+  readonly getKittyKeyboardFlags?: () => number;
   readonly onHeightChange: (height: number) => void;
   readonly onAttachImage: () => void;
   readonly onDismiss: () => void;
@@ -171,6 +172,7 @@ const renderAlternateCorners = (
 export const OnScreenKeyboard = ({
   onInput,
   backspaceSequence,
+  getKittyKeyboardFlags,
   onHeightChange,
   onAttachImage,
   onDismiss,
@@ -355,11 +357,14 @@ export const OnScreenKeyboard = ({
         onInput(buildCharOutput(gesture.selected ?? gesture.cell.center, modifiersRef.current));
       } else {
         onInput(
-          buildSpecialOutput(gesture.cell.action, modifiersRef.current, { backspaceSequence }),
+          buildSpecialOutput(gesture.cell.action, modifiersRef.current, {
+            backspaceSequence,
+            kittyKeyboardFlags: getKittyKeyboardFlags?.(),
+          }),
         );
       }
     },
-    [backspaceSequence, onInput],
+    [backspaceSequence, getKittyKeyboardFlags, onInput],
   );
 
   const clearRepeat = useCallback((pointerId: number) => {
@@ -430,7 +435,12 @@ export const OnScreenKeyboard = ({
           return;
         default: {
           const current = modifiersRef.current;
-          onInput(buildSpecialOutput(cell.action, current, { backspaceSequence }));
+          onInput(
+            buildSpecialOutput(cell.action, current, {
+              backspaceSequence,
+              kittyKeyboardFlags: getKittyKeyboardFlags?.(),
+            }),
+          );
           applyModifiers(consumeOneShot(current));
         }
       }
@@ -438,6 +448,7 @@ export const OnScreenKeyboard = ({
     [
       applyModifiers,
       backspaceSequence,
+      getKittyKeyboardFlags,
       onAttachImage,
       onDismiss,
       onInput,

@@ -151,6 +151,7 @@ interface TerminalRuntimeRefs {
   scrollbarThumbRef: CurrentRef<HTMLDivElement | null>;
   onScreenKeyboardOpenRef: CurrentRef<boolean>;
   sendInputRef: CurrentRef<((data: string) => void) | null>;
+  getKittyKeyboardFlagsRef: CurrentRef<() => number>;
   wsConnectedRef: CurrentRef<boolean>;
   keyboardShortcutsRef: CurrentRef<KeyboardShortcutMap>;
 }
@@ -244,6 +245,7 @@ export const useTerminalRuntime = ({
     scrollbarThumbRef,
     onScreenKeyboardOpenRef,
     sendInputRef,
+    getKittyKeyboardFlagsRef,
     wsConnectedRef,
     keyboardShortcutsRef,
   } = refs;
@@ -438,6 +440,7 @@ export const useTerminalRuntime = ({
 
     const kittyKeyboardProtocol = registerTerminalKittyKeyboardProtocol(terminal);
     const getKittyFlags = kittyKeyboardProtocol.getFlags;
+    getKittyKeyboardFlagsRef.current = getKittyFlags;
 
     // Inline TUIs should be allowed to clear and repaint the visible screen, but
     // not to delete the browser-owned scrollback. xterm implements ED3
@@ -997,6 +1000,7 @@ export const useTerminalRuntime = ({
       terminalScrollbar.dispose();
       pixelFrameOverlay.dispose();
       kittyKeyboardProtocol.dispose();
+      getKittyKeyboardFlagsRef.current = () => 0;
       scrollbackPurgeDisposable.dispose();
       selectiveScrollbackPurgeDisposable.dispose();
       terminalDataDisposable.dispose();

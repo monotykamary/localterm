@@ -4,6 +4,13 @@ import type {
   SpecialAction,
 } from "@/components/on-screen-keyboard/keyboard-layout";
 import {
+  KITTY_KEYBOARD_ALT_MODIFIER,
+  KITTY_KEYBOARD_CONTROL_MODIFIER,
+  KITTY_KEYBOARD_DISAMBIGUATE_FLAG,
+  KITTY_KEYBOARD_ENTER_CODEPOINT,
+  KITTY_KEYBOARD_MODIFIER_BASE,
+  KITTY_KEYBOARD_SHIFT_MODIFIER,
+  KITTY_KEYBOARD_SUPER_MODIFIER,
   TERMINAL_BACKSPACE_SEQUENCE,
   TERMINAL_CARRIAGE_RETURN_SEQUENCE,
   TERMINAL_ESCAPE_SEQUENCE,
@@ -70,7 +77,23 @@ const applyModifiersToChar = (glyph: KeyGlyph, modifiers: ModifierState): string
 
 interface BuildSpecialOutputOptions {
   readonly backspaceSequence?: string;
+  readonly kittyKeyboardFlags?: number;
 }
+
+const buildKittyEnterSequence = (modifiers: ModifierState): string => {
+  let modifier = KITTY_KEYBOARD_MODIFIER_BASE;
+  if (modifierIsActive(modifiers.shift)) modifier += KITTY_KEYBOARD_SHIFT_MODIFIER;
+  if (modifierIsActive(modifiers.alternate)) modifier += KITTY_KEYBOARD_ALT_MODIFIER;
+  if (modifierIsActive(modifiers.control)) modifier += KITTY_KEYBOARD_CONTROL_MODIFIER;
+  if (modifierIsActive(modifiers.command)) modifier += KITTY_KEYBOARD_SUPER_MODIFIER;
+  return `${TERMINAL_ESCAPE_SEQUENCE}[${KITTY_KEYBOARD_ENTER_CODEPOINT};${modifier}u`;
+};
+
+const hasEnterModifier = (modifiers: ModifierState): boolean =>
+  modifierIsActive(modifiers.shift) ||
+  modifierIsActive(modifiers.alternate) ||
+  modifierIsActive(modifiers.control) ||
+  modifierIsActive(modifiers.command);
 
 const buildSpecialSequence = (
   action: SpecialAction,
@@ -86,7 +109,17 @@ const buildSpecialSequence = (
     case "backspace":
       return options.backspaceSequence ?? TERMINAL_BACKSPACE_SEQUENCE;
     case "enter":
+      if (
+        hasEnterModifier(modifiers) &&
+        ((options.kittyKeyboardFlags ?? 0) & KITTY_KEYBOARD_DISAMBIGUATE_FLAG) !== 0
+      ) {
+        return buildKittyEnterSequence(modifiers);
+      }
+      if (modifierIsActive(modifiers.alternate) || modifierIsActive(modifiers.command)) {
+        return TERMINAL_ESCAPE_SEQUENCE + TERMINAL_CARRIAGE_RETURN_SEQUENCE;
+      }
       return TERMINAL_CARRIAGE_RETURN_SEQUENCE;
+
     default:
       return "";
   }

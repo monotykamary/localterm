@@ -129,6 +129,18 @@ describe("buildSpecialOutput", () => {
     expect(buildSpecialOutput("enter", off)).toBe(String.fromCharCode(13));
   });
 
+  it("emits legacy Alt+Enter when Kitty keyboard mode is inactive", () => {
+    expect(buildSpecialOutput("enter", on({ alternate: "oneShot" }))).toBe(ESC + "\r");
+  });
+
+  it("emits Kitty CSI-u for modified Enter when disambiguation is active", () => {
+    const options = { kittyKeyboardFlags: 1 };
+    expect(buildSpecialOutput("enter", on({ alternate: "oneShot" }), options)).toBe(ESC + "[13;3u");
+    expect(buildSpecialOutput("enter", on({ shift: "oneShot" }), options)).toBe(ESC + "[13;2u");
+    expect(buildSpecialOutput("enter", on({ control: "oneShot" }), options)).toBe(ESC + "[13;5u");
+    expect(buildSpecialOutput("enter", on({ command: "oneShot" }), options)).toBe(ESC + "[13;9u");
+  });
+
   it("remaps fn+backspace to the forward-delete CSI", () => {
     expect(buildSpecialOutput("backspace", on({ function: "oneShot" }))).toBe(ESC + "[3~");
   });

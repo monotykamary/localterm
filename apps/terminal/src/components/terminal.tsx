@@ -253,6 +253,8 @@ export const Terminal = () => {
   const canUseOnScreenKeyboard =
     deviceTier !== "desktop" || hasTouchscreen || floatingKeyboardButtonEnabled;
   const sendInputRef = useRef<((data: string) => void) | null>(null);
+  const getKittyKeyboardFlagsRef = useRef<() => number>(() => 0);
+  const getKittyKeyboardFlags = useCallback(() => getKittyKeyboardFlagsRef.current(), []);
   const {
     isOnScreenKeyboardOpen,
     onScreenKeyboardHeight,
@@ -493,6 +495,7 @@ export const Terminal = () => {
       scrollbarThumbRef,
       onScreenKeyboardOpenRef,
       sendInputRef,
+      getKittyKeyboardFlagsRef,
       wsConnectedRef,
       keyboardShortcutsRef,
     },
@@ -1232,6 +1235,7 @@ export const Terminal = () => {
             refocusTerminal();
           }}
           backspaceSequence={terminalBackspaceSequence}
+          getKittyKeyboardFlags={getKittyKeyboardFlags}
           onAttachImage={pickAndPasteImage}
           onDismiss={dismissOnScreenKeyboard}
           onRefocus={refocusTerminal}

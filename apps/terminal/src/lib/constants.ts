@@ -280,6 +280,12 @@ export const TERMINAL_DELETE_TO_LINE_START_SEQUENCE = String.fromCharCode(21);
 // the legacy bare control byte (which can't distinguish e.g. Enter vs Shift+Enter).
 export const KITTY_KEYBOARD_DISAMBIGUATE_FLAG = 1;
 export const KITTY_KEYBOARD_REPORT_EVENT_TYPES_FLAG = 2;
+export const KITTY_KEYBOARD_ENTER_CODEPOINT = 13;
+export const KITTY_KEYBOARD_MODIFIER_BASE = 1;
+export const KITTY_KEYBOARD_SHIFT_MODIFIER = 1;
+export const KITTY_KEYBOARD_ALT_MODIFIER = 2;
+export const KITTY_KEYBOARD_CONTROL_MODIFIER = 4;
+export const KITTY_KEYBOARD_SUPER_MODIFIER = 8;
 export {
   KITTY_KEYBOARD_SET_MODE_AND_NOT,
   KITTY_KEYBOARD_SET_MODE_OR,
