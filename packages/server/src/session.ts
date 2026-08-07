@@ -32,7 +32,11 @@ import { parseOscDirtyFromChunk } from "./utils/parse-osc-dirty.js";
 import { parseOscNotificationsFromChunk } from "./utils/parse-osc-notification.js";
 import { parseOscForegroundFromChunk } from "./utils/parse-osc-foreground.js";
 import { parseOscTitleFromChunk } from "./utils/parse-osc-title.js";
-import { TerminalModeState } from "./utils/terminal-mode-state.js";
+import {
+  decrqmFocusResponse,
+  extractDecrqmFocusQueries,
+  TerminalModeState,
+} from "./utils/terminal-mode-state.js";
 import { terminalQueryResponder } from "./utils/terminal-query-responder.js";
 
 interface SessionEvents {
@@ -44,6 +48,7 @@ interface SessionEvents {
   notification: [body: string];
   "git-dirty": [];
   "automation-exit": [code: number];
+  "focus-reporting-changed": [enabled: boolean];
 }
 
 export class Session extends EventEmitter<SessionEvents> {
@@ -92,6 +97,7 @@ export class Session extends EventEmitter<SessionEvents> {
   // have scrolled out of the 256KB replay window — otherwise the wheel scrolls
   // xterm's scrollback instead of the TUI.
   private readonly modeState = new TerminalModeState();
+  private focusReportingWasEnabled = false;
   private readonly reportInitialCommandExit: boolean;
   private hasEmittedAutomationExit = false;
 
@@ -102,6 +108,12 @@ export class Session extends EventEmitter<SessionEvents> {
   // dispatching a real event over CDP.
   get mouseEnabled(): boolean {
     return this.modeState.mouseEnabled;
+  }
+
+  // Whether the foreground app enabled focus-event reporting (mode 1004). The
+  // client hub uses this to gate `CSI I`/`CSI O` injection on tab focus changes.
+  get focusReportingEnabled(): boolean {
+    return this.modeState.focusReportingEnabled;
   }
 
   constructor(input: SpawnPtyInput) {
@@ -165,9 +177,18 @@ export class Session extends EventEmitter<SessionEvents> {
       // are removed from client output and scrollback.
       const { passthrough, responses } = terminalQueryResponder.interceptRequest(data);
       for (const response of responses) this.pty.write(response);
-      this.onPtyOutput(passthrough);
-      this.appendScrollback(passthrough);
-      this.emit("output", passthrough);
+      // DECRQM mode-1004 probes are stripped mid-stream and answered from
+      // the tracked mode state: xterm.js cannot answer DECRQM at all, and a
+      // probe coalesced with TUI render bytes in one PTY read chunk must not
+      // strand the requester (it would time out and mark focus support absent).
+      const extracted = extractDecrqmFocusQueries(passthrough);
+      for (let index = 0; index < extracted.count; index += 1) {
+        this.pty.write(decrqmFocusResponse(this.modeState.focusReportingEnabled));
+      }
+      const output = extracted.data;
+      this.onPtyOutput(output);
+      this.appendScrollback(output);
+      this.emit("output", output);
     });
 
     this.pty.onExit(({ exitCode }) => {
@@ -362,6 +383,11 @@ export class Session extends EventEmitter<SessionEvents> {
     this.pendingParse = "";
 
     this.modeState.update(combined);
+    const focusReportingEnabled = this.modeState.focusReportingEnabled;
+    if (focusReportingEnabled !== this.focusReportingWasEnabled) {
+      this.focusReportingWasEnabled = focusReportingEnabled;
+      this.emit("focus-reporting-changed", focusReportingEnabled);
+    }
 
     const osc7Path = parseOsc7FromChunk(combined);
     let cwdChanged = false;

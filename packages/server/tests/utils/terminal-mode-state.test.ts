@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
-import { TerminalModeState } from "../../src/utils/terminal-mode-state.js";
+import {
+  DECRQM_FOCUS_QUERY,
+  decrqmFocusResponse,
+  extractDecrqmFocusQueries,
+  TERMINAL_FOCUS_IN_SEQUENCE,
+  TERMINAL_FOCUS_OUT_SEQUENCE,
+  TerminalModeState,
+} from "../../src/utils/terminal-mode-state.js";
 
 const ESC = "\x1b";
 
@@ -106,5 +113,57 @@ describe("TerminalModeState replay restoration", () => {
     const state = new TerminalModeState();
     state.update(`${ESC}[?1049h${ESC}[>7u${ESC}c`);
     expect(state.restoreReplay("output")).toBe("output");
+  });
+});
+
+describe("TerminalModeState focus reporting", () => {
+  it("is disabled until CSI ? 1004 h is seen", () => {
+    const state = new TerminalModeState();
+    expect(state.focusReportingEnabled).toBe(false);
+    state.update(`${ESC}[?1004h`);
+    expect(state.focusReportingEnabled).toBe(true);
+    state.update(`${ESC}[?1004l`);
+    expect(state.focusReportingEnabled).toBe(false);
+  });
+
+  it("tracks 1004 across batched private mode sequences", () => {
+    const state = new TerminalModeState();
+    state.update(`${ESC}[?1049;1004;2004h`);
+    expect(state.focusReportingEnabled).toBe(true);
+  });
+
+  it("clears focus reporting on a hard terminal reset", () => {
+    const state = new TerminalModeState();
+    state.update(`${ESC}[?1004h`);
+    state.update(`${ESC}c`);
+    expect(state.focusReportingEnabled).toBe(false);
+  });
+});
+
+describe("DECRQM focus query helpers", () => {
+  it("extracts queries anywhere in a chunk, preserving other bytes", () => {
+    expect(extractDecrqmFocusQueries(DECRQM_FOCUS_QUERY)).toEqual({ data: "", count: 1 });
+    expect(extractDecrqmFocusQueries(`render${DECRQM_FOCUS_QUERY}more`)).toEqual({
+      data: "rendermore",
+      count: 1,
+    });
+    expect(extractDecrqmFocusQueries(`${DECRQM_FOCUS_QUERY}${DECRQM_FOCUS_QUERY}`)).toEqual({
+      data: "",
+      count: 2,
+    });
+    expect(extractDecrqmFocusQueries(`${ESC}[?1003$p`)).toEqual({
+      data: `${ESC}[?1003$p`,
+      count: 0,
+    });
+  });
+
+  it("answers set or reset per the tracked mode state", () => {
+    expect(decrqmFocusResponse(true)).toBe(`${ESC}[?1004;1$y`);
+    expect(decrqmFocusResponse(false)).toBe(`${ESC}[?1004;2$y`);
+  });
+
+  it("emits the canonical focus in/out input sequences", () => {
+    expect(TERMINAL_FOCUS_IN_SEQUENCE).toBe(`${ESC}[I`);
+    expect(TERMINAL_FOCUS_OUT_SEQUENCE).toBe(`${ESC}[O`);
   });
 });

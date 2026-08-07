@@ -34,6 +34,31 @@ interface KittyKeyboardModeState {
 const ESC = "\x1b";
 const RIS_SEQUENCE = `${ESC}c`;
 
+// Focus-event reporting (DEC private mode 1004). Apps that enable it expect
+// `CSI I` / `CSI O` input on focus changes, and probe support with DECRQM.
+// xterm.js neither answers DECRQM nor emits focus events, so the server —
+// which already tracks the mode here and knows tab focus via client-focus
+// messages — provides both pieces itself (see session-client-hub.ts).
+export const TERMINAL_FOCUS_REPORTING_MODE = 1004;
+export const DECRQM_FOCUS_QUERY = `${ESC}[?${TERMINAL_FOCUS_REPORTING_MODE}$p`;
+export const TERMINAL_FOCUS_IN_SEQUENCE = `${ESC}[I`;
+export const TERMINAL_FOCUS_OUT_SEQUENCE = `${ESC}[O`;
+
+// Pull every-mode-1004 DECRQM request out of a chunk mid-stream (unlike the
+// DA responder's whole-chunk discipline): xterm.js never answers DECRQM, so
+// no other response can interleave and there is no wire order to preserve.
+// Probes that coalesce with TUI render bytes in one PTY read still get
+// answered instead of timing out into the app's unsupported-terminal path.
+export function extractDecrqmFocusQueries(data: string): { data: string; count: number } {
+  if (!data.includes(DECRQM_FOCUS_QUERY)) return { data, count: 0 };
+  const parts = data.split(DECRQM_FOCUS_QUERY);
+  return { data: parts.join(""), count: parts.length - 1 };
+}
+
+export function decrqmFocusResponse(enabled: boolean): string {
+  return `${ESC}[?${TERMINAL_FOCUS_REPORTING_MODE};${enabled ? 1 : 2}$y`;
+}
+
 const RESTORABLE_PRIVATE_MODES = new Set([
   1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1015, 1047, 1048, 1049, 2004,
 ]);
@@ -200,5 +225,13 @@ export class TerminalModeState {
       if (mode >= 1000 && mode <= 1003) return true;
     }
     return false;
+  }
+
+  // Whether the foreground app asked for focus-in/out reports (mode 1004).
+  // Gates the hub's `CSI I`/`CSI O` injection so focus bytes are never
+  // written into an app that didn't ask for them — the same discipline as
+  // `mouseEnabled`, since either would land as typed text otherwise.
+  get focusReportingEnabled(): boolean {
+    return this.enabledModes.has(TERMINAL_FOCUS_REPORTING_MODE);
   }
 }

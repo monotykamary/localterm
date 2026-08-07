@@ -10,6 +10,10 @@ import { makeBrotliEncoder, SessionOutputTransport } from "./session-output-tran
 import type { CompressMode } from "./schemas.js";
 import type { GitBranchPr, ServerToClientMessage, SessionClientProfile } from "./types.js";
 import type { SessionOwner } from "./identity/types.js";
+import {
+  TERMINAL_FOCUS_IN_SEQUENCE,
+  TERMINAL_FOCUS_OUT_SEQUENCE,
+} from "./utils/terminal-mode-state.js";
 import type { ClientSocket } from "./utils/ws-socket.js";
 import type { WorkspaceEntry, WorkspaceTab } from "./workspace-store.js";
 
@@ -39,6 +43,10 @@ export class SessionClientHub {
   private readonly startGrace: (managed: ManagedSession) => void;
   private readonly onSessionActivity: () => void;
   private nextActivitySequence = INITIAL_CLIENT_ACTIVITY_SEQUENCE;
+  // Last focus-in/out byte injected into each session's PTY, so transitions
+  // are only written on change. Weak-keyed: dead sessions drop out with the
+  // ManagedSession itself.
+  private readonly focusSignal = new WeakMap<ManagedSession, boolean>();
 
   constructor(options: SessionClientHubOptions) {
     this.outputTransport = options.outputTransport;
@@ -202,6 +210,7 @@ export class SessionClientHub {
       this.pendingPromoteTimeoutMs,
     );
     client.pendingTimer.unref?.();
+    this.syncFocusReporting(managed);
     this.onSessionActivity();
     return managed;
   }
@@ -321,11 +330,39 @@ export class SessionClientHub {
     entry.client.focused = focused;
     if (focused) {
       this.promoteResizeOwner(entry.session, entry.client);
+    } else if (entry.session.resizeOwner === entry.client) {
+      const focusedClient = this.latestClientByActivity(entry.session, true);
+      if (focusedClient) this.promoteResizeOwner(entry.session, focusedClient);
+    }
+    this.syncFocusReporting(entry.session);
+  }
+
+  // Inject mode 1004 focus events (`CSI I` / `CSI O`) into the PTY when the
+  // session's effective tab focus changes — but only while the foreground app
+  // enabled focus reporting, mirroring the mouseEnabled gating discipline:
+  // focus bytes sent to an app that didn't ask for them would surface as
+  // typed text. Effective focus is the OR over attached clients (two tabs
+  // viewing one PTY keep it "focused" while either is), so multi-viewer
+  // sessions don't flap when a single viewer blurs.
+  syncFocusReporting(managed: ManagedSession): void {
+    if (!managed.session.focusReportingEnabled || managed.session.isExited) {
+      this.focusSignal.delete(managed);
       return;
     }
-    if (entry.session.resizeOwner !== entry.client) return;
-    const focusedClient = this.latestClientByActivity(entry.session, true);
-    if (focusedClient) this.promoteResizeOwner(entry.session, focusedClient);
+    let focused = false;
+    for (const client of managed.clients) {
+      if (client.focused) {
+        focused = true;
+        break;
+      }
+    }
+    const previous = this.focusSignal.get(managed);
+    if (previous === focused) return;
+    this.focusSignal.set(managed, focused);
+    // An out-edge is only owed after an in-edge was delivered; a viewer
+    // attaching to a never-signaled session starts silently unfocused.
+    if (previous === undefined && !focused) return;
+    managed.session.write(focused ? TERMINAL_FOCUS_IN_SEQUENCE : TERMINAL_FOCUS_OUT_SEQUENCE);
   }
 
   private ensureTerminalResponder(managed: ManagedSession, preferredClient?: ManagedClient): void {
@@ -376,6 +413,7 @@ export class SessionClientHub {
     }
     if (client.terminalResponder) this.ensureTerminalResponder(managed);
     this.recomputeResize(managed);
+    this.syncFocusReporting(managed);
     if (managed.clients.size === 0 && !managed.session.isExited) this.startGrace(managed);
     this.onSessionActivity();
     return managed;
