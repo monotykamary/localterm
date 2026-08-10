@@ -14,6 +14,9 @@ import type { GitDiffFileMeta, GitDiffMode, GitDiffSummary } from "./types.js";
 // TTL backstop so a missed invalidation can't serve a stale tree indefinitely.
 export interface DiffCache {
   summary: GitDiffSummary;
+  // Resolved comparison ref (HEAD, a merge-base sha, or the empty tree) —
+  // /git/diff/file-contents reads old-side blobs from it via `git show`.
+  baseRef: string;
   fileMeta: GitDiffFileMeta[];
   filePatchByPath: Map<string, string | null>;
   fileBinaryByPath: Map<string, boolean>;

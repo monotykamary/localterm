@@ -696,6 +696,20 @@ export const gitDiffFilePatchSchema = z
   })
   .strict();
 
+// Full documents backing one file's patch, fetched on demand for syntax
+// highlighting. newContent is the working-tree file (null when deleted there);
+// oldContent is the blob at the comparison base (null for untracked/added
+// files and for unborn-branch repos). A truncated side exceeded
+// GIT_DIFF_FILE_CONTENT_MAX_BYTES and renders unhighlighted client-side.
+export const gitDiffFileContentsSchema = z
+  .object({
+    oldContent: z.string().nullable(),
+    newContent: z.string().nullable(),
+    oldTruncated: z.boolean(),
+    newTruncated: z.boolean(),
+  })
+  .strict();
+
 // Lightweight working-tree stats pushed to the browser for the diff indicator.
 // `branch` is the current branch (null when detached / not a repo); the client
 // watches it to refresh the ambient PR lease only when the branch actually

@@ -542,6 +542,11 @@ export const GIT_BINARY_SNIFF_BYTES = 8000;
 // "too large" notice); past the total cap all remaining patches are dropped.
 export const GIT_MAX_PATCH_BYTES_PER_FILE = 1 * 1024 * 1024;
 export const GIT_MAX_TOTAL_PATCH_BYTES = 10 * 1024 * 1024;
+// Per-side full-document cap for /api/git/diff/file-contents. The new side is
+// the working-tree file, the old side a git blob at the comparison base; both
+// exist only for syntax highlighting, whose client-side source cap is 200k
+// chars, so 256KiB of UTF-8 covers every highlightable document.
+export const GIT_DIFF_FILE_CONTENT_MAX_BYTES = 256 * 1024;
 export const GIT_DIRTY_THROTTLE_MS = 100;
 // The diff viewer opens into branch mode when a PR exists, then its prefetch
 // queue asks for ~every file's patch. The full diff pass (one tree diff + a

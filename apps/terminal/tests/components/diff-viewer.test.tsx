@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS } from "../../src/lib/constants";
 import type {
   GitBranchInfo,
+  GitDiffFileContents,
   GitDiffFileListResponse,
   GitDiffFilePatch,
 } from "@monotykamary/localterm-server/protocol";
@@ -12,26 +13,8 @@ import type { SyntaxHighlightColorScheme } from "../../src/utils/syntax-highligh
 vi.mock("../../src/utils/fetch-git-diff", () => ({
   fetchGitDiffFiles: vi.fn(),
   fetchGitDiffFilePatch: vi.fn(),
+  fetchGitDiffFileContents: vi.fn(),
 }));
-
-vi.mock("../../src/utils/syntax-highlight", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/utils/syntax-highlight")>();
-  return {
-    ...actual,
-    tokenizeDiffLines: vi.fn<typeof actual.tokenizeDiffLines>(
-      async (_filePath, lines, _languageId, colorScheme) =>
-        lines.map((line) => ({
-          tokens: [
-            {
-              content: line,
-              color: colorScheme === "dark" ? "rgb(255, 255, 255)" : "rgb(0, 0, 0)",
-              fontStyle: 0,
-            },
-          ],
-        })),
-    ),
-  };
-});
 
 class StubResizeObserver {
   private callback: ResizeObserverCallback;
@@ -87,10 +70,28 @@ vi.mock("@tanstack/react-virtual", () => {
   };
 });
 
-import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "../../src/utils/fetch-git-diff";
+import {
+  fetchGitDiffFileContents,
+  fetchGitDiffFilePatch,
+  fetchGitDiffFiles,
+} from "../../src/utils/fetch-git-diff";
+import { clearDiffFileContentsCache } from "../../src/utils/diff-file-contents";
+import { clearSyntaxTokenCache } from "../../src/utils/syntax-token-manager";
 
 const filesMock = vi.mocked(fetchGitDiffFiles);
 const patchMock = vi.mocked(fetchGitDiffFilePatch);
+const contentsMock = vi.mocked(fetchGitDiffFileContents);
+
+// Full-document sides backing MODIFIED_PATCH: alpha/beta/gamma in the base,
+// alpha/BETA/gamma in the working tree.
+const CONTENTS: Record<string, GitDiffFileContents> = {
+  "src/app.ts": {
+    oldContent: "alpha\nbeta\ngamma",
+    newContent: "alpha\nBETA\ngamma",
+    oldTruncated: false,
+    newTruncated: false,
+  },
+};
 
 const BRANCH_INFO: GitBranchInfo = {
   isRepo: true,
@@ -161,6 +162,7 @@ const tailwindZIndexOf = (node: Element | null | undefined): number | null => {
 const mockHappyPath = () => {
   filesMock.mockResolvedValue(FILE_LIST);
   patchMock.mockImplementation((_cwd, path) => Promise.resolve(PATCHES[path] ?? null));
+  contentsMock.mockImplementation((_cwd, path) => Promise.resolve(CONTENTS[path] ?? null));
 };
 
 // branchInfo is leased by the parent and passed in as a prop; tests pass it
@@ -193,6 +195,9 @@ const renderDiffViewer = ({
 afterEach(() => {
   filesMock.mockReset();
   patchMock.mockReset();
+  contentsMock.mockReset();
+  clearDiffFileContentsCache();
+  clearSyntaxTokenCache();
   vi.unstubAllGlobals();
   // The diff view mode persists in localStorage across tests in this file; the
   // split-toggle tests below would otherwise leak "split" into later tests that
@@ -222,7 +227,9 @@ describe("DiffViewer", () => {
     // masking a real hang (isolation renders in <1s).
   }, 10_000);
 
-  it("retokenizes with a light syntax palette when the color scheme changes", async () => {
+  // Both schemes arrive in one token payload, so a scheme flip re-renders from
+  // the cached entry — no contents refetch, no retokenize.
+  it("re-palettes with the light syntax theme when the color scheme changes", async () => {
     mockHappyPath();
     const { rerender } = renderDiffViewer({ syntaxHighlightColorScheme: "dark" });
 
@@ -248,6 +255,8 @@ describe("DiffViewer", () => {
       expect(lightColor).not.toBe("");
       expect(lightColor).not.toBe(darkColor);
     });
+    expect(contentsMock).toHaveBeenCalledTimes(1);
+    expect(contentsMock.mock.calls[0]?.slice(0, 2)).toEqual(["/repo", "src/app.ts"]);
   });
 
   it("shows a binary notice when a non-image binary file is selected", async () => {

@@ -438,6 +438,16 @@ export const WS_OUTPUT_FRAME_HEADER_BYTES = 9;
 // Same cap as the daemon: 16M pixels × 4 bytes/px.
 export const MAX_PIXEL_FRAME_PIXELS = 16 * 1024 * 1024;
 export const SYNTAX_TOKEN_CACHE_MAX_FILES = 32;
+// Total source text retained across cached tokenized diff files (old + new
+// side documents share storage with their materialized tokens).
+export const SYNTAX_TOKEN_CACHE_MAX_SOURCE_CHARS = 4_000_000;
+// Per-side full-document cap for diff syntax highlighting. A larger side
+// renders unhighlighted rather than tokenizing a giant file.
+export const SYNTAX_HIGHLIGHT_MAX_SOURCE_CHARS = 200_000;
+// The /git/diff/file-contents cache keys by patch text, so it can outlive the
+// server's diff cache safely: an unchanged patch implies unchanged documents.
+export const DIFF_CONTENTS_CACHE_MAX_ENTRIES = 32;
+export const DIFF_CONTENTS_CACHE_MAX_CHARS = 4_000_000;
 export const AGENT_SKILL_CACHE_MAX_CWDS = 64;
 
 // How often the terminal polls the daemon's cached update check (the daemon

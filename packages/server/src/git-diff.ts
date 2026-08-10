@@ -8,6 +8,7 @@ export {
 } from "./git-diff-parser.js";
 export {
   getGitDiff,
+  getGitDiffFileContents,
   getGitDiffFilePatch,
   getGitDiffFiles,
   getGitDiffSummary,

@@ -13,9 +13,12 @@ export class PrefetchQueue {
   private maxConcurrent: number;
   private running = new Set<string>();
   private pending: PrefetchQueueItem[] = [];
-  private executor: (path: string, force: boolean) => Promise<void>;
+  private executor: (path: string, force: boolean, priority: number) => Promise<void>;
 
-  constructor(maxConcurrent: number, executor: (path: string, force: boolean) => Promise<void>) {
+  constructor(
+    maxConcurrent: number,
+    executor: (path: string, force: boolean, priority: number) => Promise<void>,
+  ) {
     this.maxConcurrent = maxConcurrent;
     this.executor = executor;
   }
@@ -51,7 +54,7 @@ export class PrefetchQueue {
     while (this.running.size < this.maxConcurrent && this.pending.length > 0) {
       const next = this.pending.shift()!;
       this.running.add(next.path);
-      void this.executor(next.path, Boolean(next.force)).finally(() => {
+      void this.executor(next.path, Boolean(next.force), next.priority).finally(() => {
         this.running.delete(next.path);
         this.drain();
       });

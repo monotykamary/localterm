@@ -108,6 +108,7 @@ import {
   getGitBranchInfo,
   getGitBranchPr,
   getGitDiff,
+  getGitDiffFileContents,
   getGitDiffFilePatch,
   getGitDiffFiles,
   getGitDiffSummary,
@@ -1460,6 +1461,17 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     if (!filePath) return context.json({ error: "invalid_path" }, HTTP_STATUS_BAD_REQUEST);
     const options = parseDiffOptions(context.req.query("mode"), context.req.query("base"));
     return context.json(await getGitDiffFilePatch(cwd, filePath, options));
+  });
+
+  // Full old/new documents backing one file's patch — the syntax highlighter
+  // tokenizes these (not patch fragments) so grammar state is correct.
+  api.get("/git/diff/file-contents", async (context) => {
+    const cwd = resolveCwdQuery(context.req.query("cwd"));
+    if (!cwd) return context.json({ error: "invalid_cwd" }, HTTP_STATUS_BAD_REQUEST);
+    const filePath = sanitizeDiffPath(context.req.query("path"));
+    if (!filePath) return context.json({ error: "invalid_path" }, HTTP_STATUS_BAD_REQUEST);
+    const options = parseDiffOptions(context.req.query("mode"), context.req.query("base"));
+    return context.json(await getGitDiffFileContents(cwd, filePath, options));
   });
 
   // Base-branch picker data for "branch" mode: candidate refs, a preselected

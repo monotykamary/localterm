@@ -33,14 +33,17 @@ import {
 } from "@/utils/format-review-prompt";
 import { parseUnifiedDiff, type DiffLine } from "@/utils/parse-unified-diff";
 import { useLatestRef } from "@/utils/use-latest-ref";
+import { buildDiffTokenMap } from "@/utils/build-diff-token-map";
 import {
-  detectLangId,
-  getCachedTokens,
-  tokenizeDiffLines,
+  DIFF_SYNTAX_PRIORITY_SELECTED,
+  requestDiffSyntaxTokens,
+  type DiffSyntaxModel,
   type SyntaxHighlightColorScheme,
   type SyntaxLine,
 } from "@/utils/syntax-highlight";
+import { materializeEntryTokens } from "@/utils/syntax-token-manager";
 import type { DiffViewMode } from "@/utils/stored-diff-view-mode";
+import type { GitDiffMode } from "@monotykamary/localterm-server/protocol";
 
 interface DragSelection {
   anchor: DiffLineTarget;
@@ -50,6 +53,9 @@ interface DragSelection {
 interface UseFileDiffPaneStateOptions {
   filePath: string;
   patch: string | null;
+  cwd: string | null;
+  diffMode: GitDiffMode;
+  diffBase: string | null;
   syntaxHighlightColorScheme: SyntaxHighlightColorScheme;
   viewMode: DiffViewMode;
   annotations: Record<string, DiffAnnotation>;
@@ -61,6 +67,9 @@ interface UseFileDiffPaneStateOptions {
 export const useFileDiffPaneState = ({
   filePath,
   patch,
+  cwd,
+  diffMode,
+  diffBase,
   syntaxHighlightColorScheme,
   viewMode,
   annotations,
@@ -76,55 +85,42 @@ export const useFileDiffPaneState = ({
   const hunks = useMemo(() => (patch ? parseUnifiedDiff(patch) : []), [patch]);
   const rangeIndex = useMemo(() => buildDiffLineRangeIndex(hunks), [hunks]);
 
-  const [syntaxResult, setSyntaxResult] = useState<readonly SyntaxLine[] | null | undefined>(() => {
-    if (!patch) return undefined;
-    const initialHunks = parseUnifiedDiff(patch);
-    const langId = detectLangId(filePath);
-    if (!langId || initialHunks.length === 0) return null;
-    const allLines = initialHunks.flatMap((hunk) => hunk.lines);
-    const texts = allLines.map((line) => line.text);
-    return getCachedTokens(filePath, texts, syntaxHighlightColorScheme);
-  });
+  const [syntaxModel, setSyntaxModel] = useState<DiffSyntaxModel | null | undefined>(() =>
+    patch ? undefined : null,
+  );
 
-  const highlightingPending = syntaxResult === undefined;
+  const highlightingPending = syntaxModel === undefined;
 
   const tokenMap = useMemo(() => {
-    if (syntaxResult === undefined || syntaxResult === null) return new Map<DiffLine, SyntaxLine>();
+    if (!syntaxModel) return new Map<DiffLine, SyntaxLine>();
     const allLines = hunks.flatMap((hunk) => hunk.lines);
-    const map = new Map<DiffLine, SyntaxLine>();
-    for (let index = 0; index < allLines.length; index += 1) {
-      if (syntaxResult[index]) map.set(allLines[index], syntaxResult[index]);
-    }
-    return map;
-  }, [syntaxResult, hunks]);
+    return buildDiffTokenMap(
+      allLines,
+      syntaxModel.targets,
+      materializeEntryTokens(syntaxModel.entry, syntaxHighlightColorScheme),
+    );
+  }, [syntaxModel, hunks, syntaxHighlightColorScheme]);
 
   useEffect(() => {
-    const langId = detectLangId(filePath);
-    if (!langId || hunks.length === 0) {
-      setSyntaxResult(null);
+    if (!patch || !cwd || hunks.length === 0) {
+      setSyntaxModel(null);
       return;
     }
-    const allLines = hunks.flatMap((hunk) => hunk.lines);
-    if (allLines.length === 0) {
-      setSyntaxResult(null);
-      return;
-    }
-    const texts = allLines.map((line) => line.text);
-    const cached = getCachedTokens(filePath, texts, syntaxHighlightColorScheme);
-    if (cached !== undefined) {
-      setSyntaxResult(cached);
-      return;
-    }
-    setSyntaxResult(undefined);
+    setSyntaxModel(undefined);
     let cancelled = false;
-    tokenizeDiffLines(filePath, texts, langId, syntaxHighlightColorScheme).then((result) => {
-      if (cancelled) return;
-      startTransition(() => setSyntaxResult(result));
+    void requestDiffSyntaxTokens({
+      cwd,
+      filePath,
+      query: { mode: diffMode, base: diffBase },
+      patch,
+      priority: DIFF_SYNTAX_PRIORITY_SELECTED,
+    }).then((model) => {
+      if (!cancelled) startTransition(() => setSyntaxModel(model));
     });
     return () => {
       cancelled = true;
     };
-  }, [filePath, hunks, syntaxHighlightColorScheme]);
+  }, [cwd, filePath, patch, hunks, diffMode, diffBase]);
 
   useEffect(() => {
     if (viewMode !== "split") return;

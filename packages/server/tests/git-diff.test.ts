@@ -9,6 +9,7 @@ import {
   getGitBranchPr,
   listGithubRemoteSlugs,
   getGitDiff,
+  getGitDiffFileContents,
   getGitDiffFilePatch,
   getGitDiffFiles,
   getGitDiffSummary,
@@ -916,5 +917,75 @@ describe("fork PR base resolution", () => {
     } finally {
       fs.rmSync(repo.dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("getGitDiffFileContents", () => {
+  let testRepo: TestRepo;
+  let plainDir: string;
+
+  beforeAll(async () => {
+    plainDir = makeTempDir();
+    testRepo = await initRepo(makeTempDir());
+    fs.writeFileSync(path.join(testRepo.dir, "tracked.txt"), "alpha\nbeta\ngamma\n");
+    fs.writeFileSync(path.join(testRepo.dir, "removed.txt"), "to be deleted\n");
+    fs.writeFileSync(path.join(testRepo.dir, "renamed-old.txt"), "one\ntwo\nthree\n");
+    await commitAll(testRepo, "base");
+
+    fs.writeFileSync(path.join(testRepo.dir, "tracked.txt"), "alpha\nBETA\ngamma\n");
+    fs.rmSync(path.join(testRepo.dir, "removed.txt"));
+    stageRename(testRepo, "renamed-old.txt", "renamed-new.txt");
+    fs.writeFileSync(path.join(testRepo.dir, "renamed-new.txt"), "one\nTWO\nthree\n");
+    fs.writeFileSync(path.join(testRepo.dir, "untracked.txt"), "new one\nnew two\n");
+  });
+
+  afterAll(() => {
+    fs.rmSync(testRepo.dir, { recursive: true, force: true });
+    fs.rmSync(plainDir, { recursive: true, force: true });
+  });
+
+  it("returns null sides outside a git repo", async () => {
+    expect(await getGitDiffFileContents(plainDir, "whatever.txt")).toEqual({
+      oldContent: null,
+      newContent: null,
+      oldTruncated: false,
+      newTruncated: false,
+    });
+  });
+
+  it("serves both sides of a modified file", async () => {
+    expect(await getGitDiffFileContents(testRepo.dir, "tracked.txt")).toEqual({
+      oldContent: "alpha\nbeta\ngamma\n",
+      newContent: "alpha\nBETA\ngamma\n",
+      oldTruncated: false,
+      newTruncated: false,
+    });
+  });
+
+  it("serves only the old side of a deleted file", async () => {
+    expect(await getGitDiffFileContents(testRepo.dir, "removed.txt")).toEqual({
+      oldContent: "to be deleted\n",
+      newContent: null,
+      oldTruncated: false,
+      newTruncated: false,
+    });
+  });
+
+  it("serves only the working-tree side of an untracked file", async () => {
+    expect(await getGitDiffFileContents(testRepo.dir, "untracked.txt")).toEqual({
+      oldContent: null,
+      newContent: "new one\nnew two\n",
+      oldTruncated: false,
+      newTruncated: false,
+    });
+  });
+
+  it("reads the old side of a renamed file from its old path", async () => {
+    expect(await getGitDiffFileContents(testRepo.dir, "renamed-new.txt")).toEqual({
+      oldContent: "one\ntwo\nthree\n",
+      newContent: "one\nTWO\nthree\n",
+      oldTruncated: false,
+      newTruncated: false,
+    });
   });
 });

@@ -12,11 +12,9 @@ import {
 } from "@/lib/constants";
 import { deriveDiffSummary } from "@/utils/derive-diff-summary";
 import { fetchGitDiffFilePatch, fetchGitDiffFiles } from "@/utils/fetch-git-diff";
-import { parseUnifiedDiff } from "@/utils/parse-unified-diff";
 import { useLatestRef } from "@/utils/use-latest-ref";
 import { PrefetchQueue, type PrefetchQueueItem } from "@/utils/prefetch-queue";
-import { detectLangId, tokenizeDiffLines } from "@/utils/syntax-highlight";
-import type { SyntaxHighlightColorScheme } from "@/utils/syntax-highlight";
+import { DIFF_SYNTAX_PRIORITY_SELECTED, requestDiffSyntaxTokens } from "@/utils/syntax-highlight";
 
 interface UseDiffViewerDataOptions {
   open: boolean;
@@ -25,7 +23,6 @@ interface UseDiffViewerDataOptions {
   baseOverride: string | null;
   gitDirtyVersion: number | undefined;
   currentBranch: string | null;
-  syntaxHighlightColorScheme: SyntaxHighlightColorScheme;
   onDiffSummaryUpdate: ((summary: GitDiffSummary) => void) | undefined;
 }
 
@@ -36,7 +33,6 @@ export const useDiffViewerData = ({
   baseOverride,
   gitDirtyVersion,
   currentBranch,
-  syntaxHighlightColorScheme,
   onDiffSummaryUpdate,
 }: UseDiffViewerDataOptions) => {
   // Per-mode file lists, pre-fetched on cwd change (even while the viewer is
@@ -59,7 +55,6 @@ export const useDiffViewerData = ({
   const lastFileMetaRef = useRef<Map<string, string>>(new Map());
   // Latest cache, read by loadPatch without making it depend on patchCache.
   const patchCacheRef = useLatestRef(patchCache);
-  const syntaxHighlightColorSchemeRef = useLatestRef(syntaxHighlightColorScheme);
   const onDiffSummaryUpdateRef = useLatestRef(onDiffSummaryUpdate);
 
   useEffect(() => {
@@ -233,7 +228,11 @@ export const useDiffViewerData = ({
   const files = useMemo(() => displayFileList?.files ?? [], [displayFileList]);
 
   const loadPatch = useCallback(
-    (filePath: string | null | undefined, force = false) => {
+    (
+      filePath: string | null | undefined,
+      force = false,
+      priority = DIFF_SYNTAX_PRIORITY_SELECTED,
+    ) => {
       if (!filePath || !cwd) return;
       const existing = patchCacheRef.current[filePath];
       const inFlight = patchControllersRef.current.has(filePath);
@@ -258,23 +257,20 @@ export const useDiffViewerData = ({
         { mode: compareMode, base: baseOverride },
         controller.signal,
       )
-        .then(async (data) => {
+        .then((data) => {
           if (controller.signal.aborted) return;
           patchControllersRef.current.delete(filePath);
+          // Warm the syntax caches (contents fetch + tokenize) without
+          // blocking the patch from painting — the pane picks the result up
+          // via requestDiffSyntaxTokens' shared in-flight/cache state.
           if (data?.patch) {
-            const languageId = detectLangId(filePath);
-            if (languageId) {
-              const hunks = parseUnifiedDiff(data.patch);
-              const allLines = hunks.flatMap((hunk) => hunk.lines);
-              if (allLines.length > 0) {
-                await tokenizeDiffLines(
-                  filePath,
-                  allLines.map((line) => line.text),
-                  languageId,
-                  syntaxHighlightColorSchemeRef.current,
-                );
-              }
-            }
+            void requestDiffSyntaxTokens({
+              cwd,
+              filePath,
+              query: { mode: compareMode, base: baseOverride },
+              patch: data.patch,
+              priority,
+            });
           }
           if (controller.signal.aborted) return;
           setPatchCache((previous) => ({
@@ -291,15 +287,15 @@ export const useDiffViewerData = ({
           }));
         });
     },
-    [cwd, compareMode, baseOverride, patchCacheRef, syntaxHighlightColorSchemeRef],
+    [cwd, compareMode, baseOverride, patchCacheRef],
   );
 
   const getOrCreatePrefetchQueue = useCallback(() => {
     if (!prefetchQueueRef.current) {
       prefetchQueueRef.current = new PrefetchQueue(
         PATCH_PREFETCH_CONCURRENCY,
-        async (filePath, force) => {
-          loadPatch(filePath, force);
+        async (filePath, force, priority) => {
+          loadPatch(filePath, force, priority);
         },
       );
     }

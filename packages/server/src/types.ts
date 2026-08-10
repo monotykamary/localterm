@@ -35,6 +35,7 @@ import type {
   gitBranchPrStateSchema,
   gitDiffFileListResponseSchema,
   gitDiffFileMetaSchema,
+  gitDiffFileContentsSchema,
   gitDiffFilePatchSchema,
   gitDiffFileSchema,
   gitDiffFileStatusSchema,
@@ -235,5 +236,6 @@ export type ListeningPortsResponse = z.infer<typeof listeningPortsResponseSchema
 export type GitDiffFileMeta = z.infer<typeof gitDiffFileMetaSchema>;
 export type GitDiffFileListResponse = z.infer<typeof gitDiffFileListResponseSchema>;
 export type GitDiffFilePatch = z.infer<typeof gitDiffFilePatchSchema>;
+export type GitDiffFileContents = z.infer<typeof gitDiffFileContentsSchema>;
 export type GitDiffFile = z.infer<typeof gitDiffFileSchema>;
 export type GitDiffResponse = z.infer<typeof gitDiffResponseSchema>;

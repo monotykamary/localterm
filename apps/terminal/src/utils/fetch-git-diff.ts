@@ -1,10 +1,12 @@
 import {
   gitBranchInfoSchema,
   gitBranchPrLeaseSchema,
+  gitDiffFileContentsSchema,
   gitDiffFileListResponseSchema,
   gitDiffFilePatchSchema,
   type GitBranchInfo,
   type GitBranchPr,
+  type GitDiffFileContents,
   type GitDiffFileListResponse,
   type GitDiffFilePatch,
   type GitDiffMode,
@@ -12,6 +14,7 @@ import {
 
 const GIT_DIFF_FILES_ENDPOINT = "/api/git/diff/files";
 const GIT_DIFF_FILE_ENDPOINT = "/api/git/diff/file";
+const GIT_DIFF_FILE_CONTENTS_ENDPOINT = "/api/git/diff/file-contents";
 const GIT_BRANCHES_ENDPOINT = "/api/git/branches";
 const GIT_BRANCH_PR_ENDPOINT = "/api/git/branches/pr";
 
@@ -72,6 +75,28 @@ export const fetchGitDiffFilePatch = async (
     );
     if (!response.ok) return null;
     const parsed = gitDiffFilePatchSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+};
+
+// Full old/new documents backing one file's patch, fetched lazily for syntax
+// highlighting against real grammar state. Heavier than the patch payload, so
+// it rides its own endpoint and is cached client-side (see diff-file-contents).
+export const fetchGitDiffFileContents = async (
+  cwd: string,
+  path: string,
+  query: GitDiffQuery,
+  signal?: AbortSignal,
+): Promise<GitDiffFileContents | null> => {
+  try {
+    const response = await fetch(
+      buildEndpointUrl(GIT_DIFF_FILE_CONTENTS_ENDPOINT, { ...diffParams(cwd, query), path }),
+      { signal },
+    );
+    if (!response.ok) return null;
+    const parsed = gitDiffFileContentsSchema.safeParse(await response.json());
     return parsed.success ? parsed.data : null;
   } catch {
     return null;

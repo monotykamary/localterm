@@ -29,4 +29,9 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: true,
   },
+  // Module workers keep the syntax worker code-split (per-language chunks load
+  // on demand instead of one multi-MB IIFE); supported iOS 15+/Safari 15+.
+  worker: {
+    format: "es",
+  },
 });

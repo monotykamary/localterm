@@ -178,7 +178,6 @@ export const DiffViewer = ({
     baseOverride,
     gitDirtyVersion,
     currentBranch: branchInfo?.currentBranch ?? null,
-    syntaxHighlightColorScheme,
     onDiffSummaryUpdate,
   });
 
@@ -672,6 +671,8 @@ export const DiffViewer = ({
                       key={selectedFile.path}
                       file={selectedFile}
                       cwd={cwd}
+                      diffMode={compareMode}
+                      diffBase={baseOverride}
                       payload={patchCache[selectedFile.path] ?? { state: "loading" }}
                       syntaxHighlightColorScheme={syntaxHighlightColorScheme}
                       viewMode={viewMode}

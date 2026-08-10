@@ -1,4 +1,4 @@
-import type { GitDiffFileMeta } from "@monotykamary/localterm-server/protocol";
+import type { GitDiffFileMeta, GitDiffMode } from "@monotykamary/localterm-server/protocol";
 import { isImagePath } from "@monotykamary/localterm-server/protocol";
 import { FileWarning } from "lucide-react";
 import { useState, type ReactNode, type RefObject } from "react";
@@ -52,6 +52,8 @@ const ImagePreview = ({ src, alt }: ImagePreviewProps) => {
 interface FileDiffPaneProps {
   file: GitDiffFileMeta;
   cwd: string | null;
+  diffMode: GitDiffMode;
+  diffBase: string | null;
   payload: PatchEntry;
   syntaxHighlightColorScheme: SyntaxHighlightColorScheme;
   viewMode: DiffViewMode;
@@ -74,6 +76,8 @@ interface FileDiffPaneProps {
 export const FileDiffPane = ({
   file,
   cwd,
+  diffMode,
+  diffBase,
   payload,
   syntaxHighlightColorScheme,
   viewMode,
@@ -102,6 +106,9 @@ export const FileDiffPane = ({
   } = useFileDiffPaneState({
     filePath: file.path,
     patch,
+    cwd,
+    diffMode,
+    diffBase,
     syntaxHighlightColorScheme,
     viewMode,
     annotations,

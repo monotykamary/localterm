@@ -1,6 +1,14 @@
-import { createHighlighterCore } from "shiki/core";
-import { createJavaScriptRegexEngine } from "@shikijs/engine-javascript";
-import { SYNTAX_TOKEN_CACHE_MAX_FILES } from "@/lib/constants";
+import { SYNTAX_HIGHLIGHT_MAX_SOURCE_CHARS } from "@/lib/constants";
+import { getDiffFileContents } from "./diff-file-contents";
+import {
+  buildDocumentTokenTargets,
+  buildFragmentTokenTargets,
+  type DiffLineTokenTarget,
+} from "./diff-line-token-targets";
+import type { GitDiffQuery } from "./fetch-git-diff";
+import { parseUnifiedDiff } from "./parse-unified-diff";
+import { requestSyntaxTokens } from "./syntax-token-manager";
+import type { SyntaxDocuments, SyntaxTokenCacheEntry } from "./syntax-token-manager";
 
 export interface SyntaxToken {
   content: string;
@@ -13,40 +21,6 @@ export interface SyntaxLine {
 }
 
 export type SyntaxHighlightColorScheme = "dark" | "light";
-
-const LANG_LOADERS: Record<string, () => Promise<unknown>> = {
-  typescript: () => import("@shikijs/langs/typescript"),
-  tsx: () => import("@shikijs/langs/tsx"),
-  javascript: () => import("@shikijs/langs/javascript"),
-  jsx: () => import("@shikijs/langs/jsx"),
-  python: () => import("@shikijs/langs/python"),
-  css: () => import("@shikijs/langs/css"),
-  scss: () => import("@shikijs/langs/scss"),
-  less: () => import("@shikijs/langs/less"),
-  html: () => import("@shikijs/langs/html"),
-  json: () => import("@shikijs/langs/json"),
-  jsonc: () => import("@shikijs/langs/jsonc"),
-  markdown: () => import("@shikijs/langs/markdown"),
-  bash: () => import("@shikijs/langs/bash"),
-  shellscript: () => import("@shikijs/langs/shellscript"),
-  rust: () => import("@shikijs/langs/rust"),
-  go: () => import("@shikijs/langs/go"),
-  java: () => import("@shikijs/langs/java"),
-  c: () => import("@shikijs/langs/c"),
-  cpp: () => import("@shikijs/langs/cpp"),
-  yaml: () => import("@shikijs/langs/yaml"),
-  toml: () => import("@shikijs/langs/toml"),
-  docker: () => import("@shikijs/langs/docker"),
-  sql: () => import("@shikijs/langs/sql"),
-  ruby: () => import("@shikijs/langs/ruby"),
-  php: () => import("@shikijs/langs/php"),
-  swift: () => import("@shikijs/langs/swift"),
-  kotlin: () => import("@shikijs/langs/kotlin"),
-  vue: () => import("@shikijs/langs/vue"),
-  svelte: () => import("@shikijs/langs/svelte"),
-  xml: () => import("@shikijs/langs/xml"),
-  diff: () => import("@shikijs/langs/diff"),
-};
 
 const EXT_TO_LANG: Record<string, string> = {
   ts: "typescript",
@@ -100,35 +74,6 @@ const FILENAME_TO_LANG: Record<string, string> = {
   Makefile: "make",
 };
 
-const SYNTAX_THEME_IDS: Record<SyntaxHighlightColorScheme, string> = {
-  dark: "dark-plus",
-  light: "light-plus",
-};
-
-interface TokenCacheEntry {
-  contentKey: string;
-  result: readonly SyntaxLine[] | null;
-}
-
-const tokenCache = new Map<string, Map<SyntaxHighlightColorScheme, TokenCacheEntry>>();
-
-const storeCachedTokens = (
-  filePath: string,
-  colorScheme: SyntaxHighlightColorScheme,
-  entry: TokenCacheEntry,
-): void => {
-  const fileCache =
-    tokenCache.get(filePath) ?? new Map<SyntaxHighlightColorScheme, TokenCacheEntry>();
-  fileCache.set(colorScheme, entry);
-  tokenCache.delete(filePath);
-  tokenCache.set(filePath, fileCache);
-  while (tokenCache.size > SYNTAX_TOKEN_CACHE_MAX_FILES) {
-    const oldestFilePath = tokenCache.keys().next().value;
-    if (oldestFilePath === undefined) break;
-    tokenCache.delete(oldestFilePath);
-  }
-};
-
 export const detectLangId = (filePath: string): string | null => {
   const lastSlash = filePath.lastIndexOf("/");
   const basename = lastSlash === -1 ? filePath : filePath.slice(lastSlash + 1);
@@ -142,77 +87,70 @@ export const detectLangId = (filePath: string): string | null => {
   return EXT_TO_LANG[extension] ?? null;
 };
 
-let highlighterPromise: Promise<Awaited<ReturnType<typeof createHighlighterCore>>> | null = null;
+// Priority used for the file the viewer is showing right now; prefetch warmers
+// pass their queue priority (higher = later).
+export const DIFF_SYNTAX_PRIORITY_SELECTED = 0;
 
-const loadedLangIds = new Set<string>();
+export interface DiffSyntaxModel {
+  targets: readonly DiffLineTokenTarget[];
+  entry: SyntaxTokenCacheEntry;
+}
 
-const getHighlighter = () => {
-  if (!highlighterPromise) {
-    highlighterPromise = createHighlighterCore({
-      themes: [import("@shikijs/themes/dark-plus"), import("@shikijs/themes/light-plus")],
-      langs: [],
-      engine: createJavaScriptRegexEngine(),
+const capSideText = (text: string | null): string | null =>
+  text !== null && text.length <= SYNTAX_HIGHLIGHT_MAX_SOURCE_CHARS ? text : null;
+
+// Resolve the tokenized side documents backing one file's patch. Prefers the
+// real per-side documents (base blob + working-tree file) so grammar state
+// around hunks is correct; falls back to per-side fragment streams when the
+// documents endpoint is unreachable (offline, older server).
+export const requestDiffSyntaxTokens = async (options: {
+  cwd: string;
+  filePath: string;
+  query: GitDiffQuery;
+  patch: string;
+  priority: number;
+}): Promise<DiffSyntaxModel | null> => {
+  const langId = detectLangId(options.filePath);
+  if (!langId) return null;
+  const hunks = parseUnifiedDiff(options.patch);
+  if (hunks.every((hunk) => hunk.lines.length === 0)) return null;
+
+  const contents = await getDiffFileContents(
+    options.cwd,
+    options.filePath,
+    options.query,
+    options.patch,
+  );
+  if (contents) {
+    const { targets, oldMaxLines, newMaxLines } = buildDocumentTokenTargets(hunks);
+    const documents: SyntaxDocuments = {
+      // No old rows shown (pure-addition diff): skip tokenizing the old side.
+      oldText: oldMaxLines === 0 || contents.oldTruncated ? null : capSideText(contents.oldContent),
+      newText: contents.newTruncated ? null : capSideText(contents.newContent),
+    };
+    if (documents.oldText === null && documents.newText === null) return null;
+    const entry = await requestSyntaxTokens({
+      langId,
+      documents,
+      oldMaxLines,
+      newMaxLines,
+      priority: options.priority,
     });
-  }
-  return highlighterPromise;
-};
-
-const contentKey = (lines: readonly string[]): string => lines.join("\n");
-
-export const getCachedTokens = (
-  filePath: string,
-  lines: readonly string[],
-  colorScheme: SyntaxHighlightColorScheme,
-): readonly SyntaxLine[] | null | undefined => {
-  const entry = tokenCache.get(filePath)?.get(colorScheme);
-  if (!entry) return undefined;
-  if (entry.contentKey !== contentKey(lines)) return undefined;
-  return entry.result;
-};
-
-export const tokenizeDiffLines = async (
-  filePath: string,
-  lines: readonly string[],
-  langId: string,
-  colorScheme: SyntaxHighlightColorScheme,
-): Promise<readonly SyntaxLine[] | null> => {
-  const cached = getCachedTokens(filePath, lines, colorScheme);
-  if (cached !== undefined) return cached;
-
-  const loader = LANG_LOADERS[langId];
-  if (!loader) {
-    storeCachedTokens(filePath, colorScheme, { contentKey: contentKey(lines), result: null });
-    return null;
+    return { targets, entry };
   }
 
-  try {
-    const highlighter = await getHighlighter();
-
-    if (!loadedLangIds.has(langId)) {
-      const grammarModule = await loader();
-      const grammar = (grammarModule as { default: unknown }).default;
-      await highlighter.loadLanguage(grammar as Parameters<typeof highlighter.loadLanguage>[0]);
-      loadedLangIds.add(langId);
-    }
-
-    const code = lines.join("\n");
-    const themedTokens = highlighter.codeToTokens(code, {
-      lang: langId,
-      theme: SYNTAX_THEME_IDS[colorScheme],
-    });
-
-    const result = themedTokens.tokens.map((line) => ({
-      tokens: line.map((token) => ({
-        content: token.content,
-        color: token.color ?? "",
-        fontStyle: token.fontStyle ?? 0,
-      })),
-    }));
-
-    storeCachedTokens(filePath, colorScheme, { contentKey: contentKey(lines), result });
-    return result;
-  } catch {
-    storeCachedTokens(filePath, colorScheme, { contentKey: contentKey(lines), result: null });
-    return null;
-  }
+  const fragments = buildFragmentTokenTargets(hunks);
+  const documents: SyntaxDocuments = {
+    oldText: capSideText(fragments.oldText === "" ? null : fragments.oldText),
+    newText: capSideText(fragments.newText === "" ? null : fragments.newText),
+  };
+  if (documents.oldText === null && documents.newText === null) return null;
+  const entry = await requestSyntaxTokens({
+    langId,
+    documents,
+    oldMaxLines: fragments.oldMaxLines,
+    newMaxLines: fragments.newMaxLines,
+    priority: options.priority,
+  });
+  return { targets: fragments.targets, entry };
 };

@@ -3,6 +3,7 @@ import fsPromises from "node:fs/promises";
 import path from "node:path";
 import {
   GIT_BINARY_SNIFF_BYTES,
+  GIT_DIFF_FILE_CONTENT_MAX_BYTES,
   GIT_EMPTY_TREE_HASH,
   GIT_MAX_PATCH_BYTES_PER_FILE,
   GIT_MAX_TOTAL_PATCH_BYTES,
@@ -29,6 +30,7 @@ import { detectPrDeduped, readPrCache } from "./github-pr.js";
 import { runGit } from "./utils/run-git.js";
 import type {
   GitDiffFile,
+  GitDiffFileContents,
   GitDiffFileListResponse,
   GitDiffFileMeta,
   GitDiffFilePatch,
@@ -340,6 +342,7 @@ const buildDiffCache = async (cwd: string, baseRef: string): Promise<DiffCache |
 
   return {
     summary,
+    baseRef,
     fileMeta,
     filePatchByPath,
     fileBinaryByPath,
@@ -514,4 +517,86 @@ const getGitDiffFilePatchFromWorkingTree = async (
   } catch {
     return empty;
   }
+};
+
+interface SideContent {
+  content: string | null;
+  truncated: boolean;
+}
+
+const NO_SIDE_CONTENT: SideContent = { content: null, truncated: false };
+
+// Old side = the blob at the resolved comparison base. Untracked files have no
+// old side; added files fail the show lookup (no such path at the base), which
+// the null return represents; renames read the old path, where the blob lived.
+const readOldSideContent = async (
+  cwd: string,
+  baseRef: string,
+  meta: GitDiffFileMeta | undefined,
+): Promise<SideContent> => {
+  if (!meta || meta.status === "untracked") return NO_SIDE_CONTENT;
+  const oldPath = meta.oldPath ?? meta.path;
+  const result = await runGit(cwd, ["show", `${baseRef}:${oldPath}`], {
+    maxStdoutBytes: GIT_DIFF_FILE_CONTENT_MAX_BYTES,
+  });
+  if (result.exitCode !== 0) return NO_SIDE_CONTENT;
+  if (result.stdoutTruncated) return { content: null, truncated: true };
+  return { content: result.stdout.toString("utf8"), truncated: false };
+};
+
+// New side = the working-tree file in every mode: `git diff <base>` always
+// compares against the working tree, never against HEAD's tree.
+const readNewSideContent = async (
+  cwd: string,
+  requestedPath: string,
+  meta: GitDiffFileMeta | undefined,
+): Promise<SideContent> => {
+  if (meta?.status === "deleted") return NO_SIDE_CONTENT;
+  const absolutePath = path.join(cwd, requestedPath);
+  try {
+    const stat = await fsPromises.stat(absolutePath);
+    if (!stat.isFile()) return NO_SIDE_CONTENT;
+    const bytesToRead = Math.min(stat.size, GIT_DIFF_FILE_CONTENT_MAX_BYTES);
+    const buffer = Buffer.allocUnsafe(bytesToRead);
+    const handle = await fsPromises.open(absolutePath, "r");
+    try {
+      const result = await handle.read(buffer, 0, bytesToRead, 0);
+      if (stat.size > result.bytesRead) return { content: null, truncated: true };
+      return { content: buffer.subarray(0, result.bytesRead).toString("utf8"), truncated: false };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return NO_SIDE_CONTENT;
+  }
+};
+
+// Full documents backing one file's patch, for client-side syntax
+// highlighting against real grammar state instead of bare patch fragments.
+// Runs off the warm diff cache (the patch endpoint always lands first), so
+// the cost is one `git show` plus one file read per file per 5s cache window.
+export const getGitDiffFileContents = async (
+  cwd: string,
+  requestedPath: string,
+  options: GitDiffOptions = WORKING_OPTIONS,
+): Promise<GitDiffFileContents> => {
+  const empty: GitDiffFileContents = {
+    oldContent: null,
+    newContent: null,
+    oldTruncated: false,
+    newTruncated: false,
+  };
+  const cache = await ensureDiffCache(cwd, options);
+  if (!cache) return empty;
+  const meta = cache.fileMeta.find((file) => file.path === requestedPath);
+  const [oldSide, newSide] = await Promise.all([
+    readOldSideContent(cwd, cache.baseRef, meta),
+    readNewSideContent(cwd, requestedPath, meta),
+  ]);
+  return {
+    oldContent: oldSide.content,
+    newContent: newSide.content,
+    oldTruncated: oldSide.truncated,
+    newTruncated: newSide.truncated,
+  };
 };
