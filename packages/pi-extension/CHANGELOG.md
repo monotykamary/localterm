@@ -1,5 +1,11 @@
 # @monotykamary/pi-localterm
 
+## 0.4.1
+
+### Patch Changes
+
+- chore(deps): update workspace dependencies to latest (excluding @fontsource/geist-mono, which stays pinned at 5.2.7 due to upstream ligature regressions)
+
 ## 0.4.0
 
 ### Minor Changes

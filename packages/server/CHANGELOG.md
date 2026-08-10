@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.73.1
+
+### Patch Changes
+
+- chore(deps): update workspace dependencies to latest (excluding @fontsource/geist-mono, which stays pinned at 5.2.7 due to upstream ligature regressions)
+
 ## 2.73.0
 
 ### Minor Changes
