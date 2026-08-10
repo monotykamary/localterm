@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.74.0
+
+### Minor Changes
+
+- Highlight diffs from real per-side documents. Adds `GET /api/git/diff/file-contents`, which serves the base blob and working-tree file backing a patch, and the diff viewer now tokenizes those (in a dedicated syntax worker with a main-thread fallback) instead of bare patch fragments — hunks inside comments, strings, or embedded languages get correct scopes, cross-hunk and old/new state bleed are gone, and both color schemes arrive in one payload so a theme flip never re-tokenizes.
+
 ## 2.73.1
 
 ### Patch Changes
