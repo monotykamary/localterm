@@ -39,7 +39,7 @@ const RIS_SEQUENCE = `${ESC}c`;
 // xterm.js neither answers DECRQM nor emits focus events, so the server —
 // which already tracks the mode here and knows tab focus via client-focus
 // messages — provides both pieces itself (see session-client-hub.ts).
-export const TERMINAL_FOCUS_REPORTING_MODE = 1004;
+const TERMINAL_FOCUS_REPORTING_MODE = 1004;
 export const DECRQM_FOCUS_QUERY = `${ESC}[?${TERMINAL_FOCUS_REPORTING_MODE}$p`;
 export const TERMINAL_FOCUS_IN_SEQUENCE = `${ESC}[I`;
 export const TERMINAL_FOCUS_OUT_SEQUENCE = `${ESC}[O`;

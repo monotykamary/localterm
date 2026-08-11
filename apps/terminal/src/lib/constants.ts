@@ -13,7 +13,6 @@ export const TERMINAL_FONT_SIZE_STEP_PX = 1;
 // to prevent output-anchor restoration from fighting mobile scroll gestures.
 export const XTERM_TOUCH_SCROLL_EVENT = "-xterm-gesturechange";
 export const TERMINAL_TAP_MOVEMENT_THRESHOLD_PX = 10;
-export const TERMINAL_CURSOR_KEYBOARD_TAP_TARGET_PX = 44;
 export const TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX = 150;
 export const TERMINAL_VIEWPORT_WIDTH_STABLE_PX = 20;
 export const XTERM_DEFAULT_SCROLL_SENSITIVITY = 1;

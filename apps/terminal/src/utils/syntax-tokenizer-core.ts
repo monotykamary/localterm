@@ -2,7 +2,7 @@ import { createHighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "@shikijs/engine-javascript";
 import type { SyntaxHighlightColorScheme } from "./syntax-highlight";
 
-export const SYNTAX_COLOR_SCHEMES: readonly SyntaxHighlightColorScheme[] = ["dark", "light"];
+const SYNTAX_COLOR_SCHEMES: readonly SyntaxHighlightColorScheme[] = ["dark", "light"];
 
 const SYNTAX_THEME_IDS: Record<SyntaxHighlightColorScheme, string> = {
   dark: "dark-plus",
@@ -52,7 +52,7 @@ export interface CompactThemeTokens {
   lines: number[][];
 }
 
-export type CompactSideTokens = Record<SyntaxHighlightColorScheme, CompactThemeTokens>;
+type CompactSideTokens = Record<SyntaxHighlightColorScheme, CompactThemeTokens>;
 
 export interface SyntaxDocumentTokens {
   old: CompactSideTokens | null;

@@ -78,7 +78,7 @@ const FILENAME_TO_LANG: Record<string, string> = {
   Makefile: "make",
 };
 
-export const detectLangId = (filePath: string): string | null => {
+const detectLangId = (filePath: string): string | null => {
   const lastSlash = filePath.lastIndexOf("/");
   const basename = lastSlash === -1 ? filePath : filePath.slice(lastSlash + 1);
 

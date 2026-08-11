@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type KeyboardLockPermissionState = PermissionState | "unknown";
+type KeyboardLockPermissionState = PermissionState | "unknown";
 
 interface KeyboardLockPermissionControls {
   readonly permissionState: KeyboardLockPermissionState;
