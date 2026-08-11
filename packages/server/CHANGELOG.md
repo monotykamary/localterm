@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.75.0
+
+### Minor Changes
+
+- 2de01d7: Add `max` as a thinking level for agent automations. The runner schema accepts `thinking: "max"`, which the pi harness passes through to `pi --thinking` and the `set_thinking_level` RPC, and the automation form's effort picker offers **Max** after Extra high. pi exposes `max` only for models that support it; an unsupported level fails the run with the RPC error in findings, same as `xhigh` today.
+
 ## 2.74.1
 
 ### Patch Changes
