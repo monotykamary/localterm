@@ -266,6 +266,26 @@ describe("DiffViewer", () => {
     expect(contentsMock.mock.calls[0]?.slice(0, 2)).toEqual(["/repo", "src/app.ts"]);
   });
 
+  // Warm caches restore on reselect in the same commit — no blank or
+  // unhighlighted frame between clicking the row and colored text.
+  it("restores colored text synchronously when reselecting a warmed file", async () => {
+    mockHappyPath();
+    renderDiffViewer();
+
+    await vi.waitFor(
+      () => {
+        expect(screen.getByText("BETA").style.color).not.toBe("");
+      },
+      { timeout: 5000 },
+    );
+
+    fireEvent.click(screen.getByRole("option", { name: /data\.bin/ }));
+    await screen.findByText(/Binary file/);
+
+    fireEvent.click(screen.getByRole("option", { name: /app\.ts/ }));
+    expect(screen.getByText("BETA").style.color).not.toBe("");
+  });
+
   it("shows a binary notice when a non-image binary file is selected", async () => {
     mockHappyPath();
     renderDiffViewer();

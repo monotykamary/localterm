@@ -42,6 +42,23 @@ const inFlightByKey = new Map<string, Promise<SyntaxTokenCacheEntry>>();
 
 const jobQueue: QueuedJob[] = [];
 
+export const buildSyntaxTokenCacheKey = (
+  langId: string,
+  oldSource: string,
+  newSource: string,
+): string => [langId, hashSyntaxSource(oldSource), hashSyntaxSource(newSource)].join("\0");
+
+// Synchronous read for the paint path: a hit lets the pane restore color in
+// the first commit instead of awaiting the async pipeline.
+export const readSyntaxTokenCache = (cacheKey: string): SyntaxTokenCacheEntry | undefined => {
+  const cached = tokenCache.get(cacheKey);
+  if (cached) {
+    tokenCache.delete(cacheKey);
+    tokenCache.set(cacheKey, cached);
+  }
+  return cached;
+};
+
 export const clearSyntaxTokenCache = (): void => {
   tokenCache.clear();
   tokenCacheChars = 0;
@@ -140,18 +157,13 @@ export const requestSyntaxTokens = (spec: {
   newMaxLines: number;
   priority: number;
 }): Promise<SyntaxTokenCacheEntry> => {
-  const key =
-    spec.langId +
-    "\0" +
-    hashSyntaxSource(spec.documents.oldText ?? "") +
-    "\0" +
-    hashSyntaxSource(spec.documents.newText ?? "");
-  const cached = tokenCache.get(key);
-  if (cached) {
-    tokenCache.delete(key);
-    tokenCache.set(key, cached);
-    return Promise.resolve(cached);
-  }
+  const key = buildSyntaxTokenCacheKey(
+    spec.langId,
+    spec.documents.oldText ?? "",
+    spec.documents.newText ?? "",
+  );
+  const cached = readSyntaxTokenCache(key);
+  if (cached) return Promise.resolve(cached);
   const inFlight = inFlightByKey.get(key);
   if (inFlight) {
     const queued = jobQueue.find((job) => job.key === key);

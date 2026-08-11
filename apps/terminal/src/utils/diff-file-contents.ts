@@ -18,6 +18,18 @@ interface ContentsCacheEntry {
 const contentsCache = new Map<string, ContentsCacheEntry>();
 let contentsCacheChars = 0;
 
+export const peekDiffFileContents = (
+  cwd: string | null,
+  filePath: string,
+  query: GitDiffQuery,
+  patch: string,
+): GitDiffFileContents | undefined => {
+  if (cwd === null) return undefined;
+  const entry = contentsCache.get(cacheKey(cwd, filePath, query));
+  if (!entry || entry.patch !== patch) return undefined;
+  return entry.contents;
+};
+
 export const clearDiffFileContentsCache = (): void => {
   contentsCache.clear();
   contentsCacheChars = 0;

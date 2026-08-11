@@ -3,7 +3,10 @@ import type {
   GitDiffMode,
   GitDiffSummary,
 } from "@monotykamary/localterm-server/protocol";
-import type { SyntaxHighlightColorScheme } from "@/utils/syntax-highlight";
+import {
+  DIFF_SYNTAX_PRIORITY_WARM,
+  type SyntaxHighlightColorScheme,
+} from "@/utils/syntax-highlight";
 import { ChevronDown, ExternalLink, GitBranch, RefreshCw, Send, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FileDiffPane } from "@/components/diff-viewer-file-diff-pane";
@@ -180,6 +183,16 @@ export const DiffViewer = ({
     currentBranch: branchInfo?.currentBranch ?? null,
     onDiffSummaryUpdate,
   });
+
+  // Hover/focus intent on a diff row warms the full pipeline (patch fetch,
+  // side contents, syntax tokens) ahead of the click, so selection paints
+  // from warm caches instead of the network waterfall.
+  const warmPatch = useCallback(
+    (path: string) => {
+      loadPatch(path, false, DIFF_SYNTAX_PRIORITY_WARM);
+    },
+    [loadPatch],
+  );
 
   const {
     annotationCounts,
@@ -586,6 +599,7 @@ export const DiffViewer = ({
                   selectedPath={selectedPath}
                   annotationCounts={annotationCounts}
                   onSelect={setSelectedPath}
+                  onHover={warmPatch}
                   virtualizerRef={fileListVirtualizerRef}
                 />
               </div>
@@ -641,6 +655,7 @@ export const DiffViewer = ({
                             files={files}
                             selectedPath={selectedPath}
                             onSelect={setSelectedPath}
+                            onHover={warmPatch}
                           />
                         </PopoverContent>
                       </Popover>

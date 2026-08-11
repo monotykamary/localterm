@@ -31,6 +31,7 @@ interface DiffFileOptionProps {
   style?: CSSProperties;
   dataIndex?: number;
   onSelect: (path: string) => void;
+  onHover?: (path: string) => void;
 }
 
 const DiffFileOption = ({
@@ -41,6 +42,7 @@ const DiffFileOption = ({
   style,
   dataIndex,
   onSelect,
+  onHover,
 }: DiffFileOptionProps) => {
   const status = DIFF_FILE_STATUS_LABELS[file.status];
   const { directory, basename } = splitFilePath(file.path);
@@ -51,6 +53,8 @@ const DiffFileOption = ({
       role="option"
       aria-selected={isSelected}
       onClick={() => onSelect(file.path)}
+      onPointerEnter={onHover ? () => onHover(file.path) : undefined}
+      onFocus={onHover ? () => onHover(file.path) : undefined}
       data-index={dataIndex}
       className={cn(
         "flex w-full items-center gap-2 rounded-sm px-2 text-left text-xs outline-none transition-colors",
@@ -100,9 +104,15 @@ interface FileListPopoverProps {
   files: GitDiffFileMeta[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  onHover?: (path: string) => void;
 }
 
-export const FileListPopover = ({ files, selectedPath, onSelect }: FileListPopoverProps) => {
+export const FileListPopover = ({
+  files,
+  selectedPath,
+  onSelect,
+  onHover,
+}: FileListPopoverProps) => {
   const [search, setSearch] = useState("");
   const filteredFiles = useMemo(() => {
     const normalizedSearch = search.toLowerCase();
@@ -144,6 +154,7 @@ export const FileListPopover = ({ files, selectedPath, onSelect }: FileListPopov
               isSelected={file.path === selectedPath}
               compact
               onSelect={onSelect}
+              onHover={onHover}
             />
           ))
         )}
@@ -157,6 +168,7 @@ interface FileListSidebarProps {
   selectedPath: string | null;
   annotationCounts: Map<string, number>;
   onSelect: (path: string) => void;
+  onHover?: (path: string) => void;
   virtualizerRef: RefObject<FileListVirtualizerHandle | null>;
 }
 
@@ -165,6 +177,7 @@ export const FileListSidebar = ({
   selectedPath,
   annotationCounts,
   onSelect,
+  onHover,
   virtualizerRef,
 }: FileListSidebarProps) => {
   const [search, setSearch] = useState("");
@@ -245,6 +258,7 @@ export const FileListSidebar = ({
                   dataIndex={virtualRow.index}
                   style={virtualRowStyle}
                   onSelect={onSelect}
+                  onHover={onHover}
                 />
               );
             })}

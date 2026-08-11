@@ -36,6 +36,7 @@ import { useLatestRef } from "@/utils/use-latest-ref";
 import { buildDiffTokenMap } from "@/utils/build-diff-token-map";
 import {
   DIFF_SYNTAX_PRIORITY_SELECTED,
+  getCachedDiffSyntaxTokens,
   requestDiffSyntaxTokens,
   type DiffSyntaxModel,
   type SyntaxHighlightColorScheme,
@@ -86,10 +87,16 @@ export const useFileDiffPaneState = ({
   const rangeIndex = useMemo(() => buildDiffLineRangeIndex(hunks), [hunks]);
 
   const [syntaxModel, setSyntaxModel] = useState<DiffSyntaxModel | null | undefined>(() =>
-    patch ? undefined : null,
+    patch && cwd
+      ? (getCachedDiffSyntaxTokens({
+          cwd,
+          filePath,
+          query: { mode: diffMode, base: diffBase },
+          patch,
+          hunks,
+        }) ?? undefined)
+      : null,
   );
-
-  const highlightingPending = syntaxModel === undefined;
 
   const tokenMap = useMemo(() => {
     if (!syntaxModel) return new Map<DiffLine, SyntaxLine>();
@@ -104,6 +111,17 @@ export const useFileDiffPaneState = ({
   useEffect(() => {
     if (!patch || !cwd || hunks.length === 0) {
       setSyntaxModel(null);
+      return;
+    }
+    const cached = getCachedDiffSyntaxTokens({
+      cwd,
+      filePath,
+      query: { mode: diffMode, base: diffBase },
+      patch,
+      hunks,
+    });
+    if (cached !== undefined) {
+      setSyntaxModel(cached);
       return;
     }
     setSyntaxModel(undefined);
@@ -277,7 +295,6 @@ export const useFileDiffPaneState = ({
     scrollContainerRef,
     hunks,
     tokenMap,
-    highlightingPending,
     visibleChunks,
     hiddenRows,
     isDragging,

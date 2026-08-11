@@ -1,13 +1,17 @@
 import { SYNTAX_HIGHLIGHT_MAX_SOURCE_CHARS } from "@/lib/constants";
-import { getDiffFileContents } from "./diff-file-contents";
+import { getDiffFileContents, peekDiffFileContents } from "./diff-file-contents";
 import {
   buildDocumentTokenTargets,
   buildFragmentTokenTargets,
   type DiffLineTokenTarget,
 } from "./diff-line-token-targets";
 import type { GitDiffQuery } from "./fetch-git-diff";
-import { parseUnifiedDiff } from "./parse-unified-diff";
-import { requestSyntaxTokens } from "./syntax-token-manager";
+import { parseUnifiedDiff, type DiffHunk } from "./parse-unified-diff";
+import {
+  buildSyntaxTokenCacheKey,
+  readSyntaxTokenCache,
+  requestSyntaxTokens,
+} from "./syntax-token-manager";
 import type { SyntaxDocuments, SyntaxTokenCacheEntry } from "./syntax-token-manager";
 
 export interface SyntaxToken {
@@ -91,6 +95,10 @@ export const detectLangId = (filePath: string): string | null => {
 // pass their queue priority (higher = later).
 export const DIFF_SYNTAX_PRIORITY_SELECTED = 0;
 
+// Lower than neighbor prefetch, higher than background warm: used when the
+// user hovers/focuses a file row, signalling selection intent.
+export const DIFF_SYNTAX_PRIORITY_WARM = 0.5;
+
 export interface DiffSyntaxModel {
   targets: readonly DiffLineTokenTarget[];
   entry: SyntaxTokenCacheEntry;
@@ -153,4 +161,40 @@ export const requestDiffSyntaxTokens = async (options: {
     priority: options.priority,
   });
   return { targets: fragments.targets, entry };
+};
+
+// Synchronous cache probe mirroring requestDiffSyntaxTokens' document mapping,
+// so a file whose pipeline is fully warm paints colored text in the first
+// commit. `undefined` means "not knowable without async work" (contents not
+// cached or token cache miss) - callers fall back to requestDiffSyntaxTokens.
+export const getCachedDiffSyntaxTokens = (options: {
+  cwd: string;
+  filePath: string;
+  query: GitDiffQuery;
+  patch: string;
+  hunks: readonly DiffHunk[];
+}): DiffSyntaxModel | null | undefined => {
+  const langId = detectLangId(options.filePath);
+  if (!langId) return null;
+  if (options.hunks.every((hunk) => hunk.lines.length === 0)) return null;
+
+  const contents = peekDiffFileContents(
+    options.cwd,
+    options.filePath,
+    options.query,
+    options.patch,
+  );
+  if (!contents) return undefined;
+
+  const { targets, oldMaxLines } = buildDocumentTokenTargets(options.hunks);
+  const documents: SyntaxDocuments = {
+    oldText: oldMaxLines === 0 || contents.oldTruncated ? null : capSideText(contents.oldContent),
+    newText: contents.newTruncated ? null : capSideText(contents.newContent),
+  };
+  if (documents.oldText === null && documents.newText === null) return null;
+
+  const entry = readSyntaxTokenCache(
+    buildSyntaxTokenCacheKey(langId, documents.oldText ?? "", documents.newText ?? ""),
+  );
+  return entry ? { targets, entry } : undefined;
 };

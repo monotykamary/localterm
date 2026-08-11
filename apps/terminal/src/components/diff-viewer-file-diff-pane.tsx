@@ -96,7 +96,6 @@ export const FileDiffPane = ({
     scrollContainerRef,
     hunks,
     tokenMap,
-    highlightingPending,
     visibleChunks,
     hiddenRows,
     isDragging,
@@ -177,7 +176,6 @@ export const FileDiffPane = ({
           annotations={annotations}
           editingKey={editingKey}
           pendingRange={pendingRange}
-          highlightingPending={highlightingPending}
           onOpenEditor={onOpenEditor}
           onSaveAnnotation={onSaveAnnotation}
           onCancelEditor={onCancelEditor}
