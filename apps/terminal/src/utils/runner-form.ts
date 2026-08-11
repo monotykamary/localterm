@@ -2,7 +2,7 @@ import type { AutomationRunner, RunnerInput } from "@monotykamary/localterm-serv
 
 export type RunnerType = AutomationRunner["kind"];
 type AgentSessionMode = "fresh" | "thread";
-export type AgentThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type AgentThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type HarnessKind = "pi" | "custom";
 
 export interface RunnerFormState {

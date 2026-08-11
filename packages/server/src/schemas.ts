@@ -1161,7 +1161,7 @@ export const triggerInputSchema = z.discriminatedUnion("kind", [
 // `custom` harness runs a user-supplied command (claude/codex/your own) with
 // the request passed as env vars. This keeps the architecture ready to swap
 // the agent without touching the rest of the automation pipeline.
-const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 const agentSessionModeSchema = z.enum(["fresh", "thread"]);
 

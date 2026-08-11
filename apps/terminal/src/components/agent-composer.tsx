@@ -34,6 +34,7 @@ const THINKING_ITEMS: readonly OptionItem[] = [
   { id: "medium", label: "Medium" },
   { id: "high", label: "High" },
   { id: "xhigh", label: "Extra high" },
+  { id: "max", label: "Max" },
 ];
 
 const SESSION_ITEMS: readonly OptionItem[] = [

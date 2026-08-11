@@ -18,7 +18,7 @@ automation. Only _what runs_ differs.
   "prompt": "Review the latest commit and post a one-paragraph summary.",
   "sessionMode": "fresh", // "fresh" | "thread"
   "model": "anthropic/claude-opus-4-5", // optional; short provider/id pattern
-  "thinking": "high", // optional: off|minimal|low|medium|high|xhigh
+  "thinking": "high", // optional: off|minimal|low|medium|high|xhigh|max
   "harness": { "kind": "pi" }, // optional; defaults to the built-in pi harness
 }
 ```
@@ -36,7 +36,8 @@ automation. Only _what runs_ differs.
   provider/id pattern, not a path. Omit for pi's default. The form's model
   picker is backed by `GET /api/agent-models`.
 - `thinking` — optional reasoning-effort level, passed to `pi --thinking`.
-  One of `off`/`minimal`/`low`/`medium`/`high`/`xhigh`.
+  One of `off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max` (pi exposes
+  `xhigh`/`max` only for models that support them).
 - `harness` — selects the agent implementation (see below). Defaults to the
   built-in `pi` harness.
 
