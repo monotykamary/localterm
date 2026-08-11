@@ -206,8 +206,8 @@ const LAYOUT_CONFIGS: HeaderLayout[] = [
 ];
 
 // The header is a flex row with gap-{N}:
-//   [title?] [compare] [branch?] [pr?] [stats] [ml-auto div]
-// The ml-auto div bundles [layout radio] [gap-1] [refresh] [gap-1] [close]
+//   [title?] [compare] [branch?] [pr?] [stats] [flex-1 spacer] [trailing div]
+// The trailing div bundles [layout radio] [gap-1] [refresh] [gap-1] [close]
 // as a single flex item, so header gap applies between left items and the
 // right div — not between the right div's internal children.
 const computeConfigWidth = (

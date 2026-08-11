@@ -88,7 +88,8 @@ export const AutomationListPopover = ({
                 >
                   {automation.name}
                 </span>
-                <span className="ml-auto shrink-0 text-[10px] tabular-nums">
+                <div className="flex-1" />
+                <span className="shrink-0 text-[10px] tabular-nums">
                   {automation.lifecycle === "finished"
                     ? "finished"
                     : automation.trigger.kind === "watch"

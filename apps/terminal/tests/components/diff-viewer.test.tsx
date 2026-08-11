@@ -152,10 +152,17 @@ const PATCHES: Record<string, GitDiffFilePatch> = {
 
 // Reads the numeric suffix from a Tailwind `z-N` utility so stacking-order
 // assertions don't depend on layout/paint.
+// Mirrors the ordered stacking scale in src/index.css; compare layer rank so
+// the assertions survive re-rangings of the numeric values.
+const STACKING_LAYERS = ["mask", "scrollbar", "local", "raised", "overlay", "always-on-top"];
+
 const tailwindZIndexOf = (node: Element | null | undefined): number | null => {
   if (!node) return null;
-  const match = (node.getAttribute("class") ?? "").match(/(?:^|\s)z-(\d+)(?:\s|$)/);
-  return match ? Number(match[1]) : null;
+  const classes = node.getAttribute("class") ?? "";
+  const token = classes.match(/(?:^|\s)z-\(--layer-([a-z-]+)\)(?:\s|$)/);
+  if (token) return STACKING_LAYERS.indexOf(token[1]);
+  const numeric = classes.match(/(?:^|\s)z-(\d+)(?:\s|$)/);
+  return numeric ? Number(numeric[1]) : null;
 };
 
 // Default happy path: a two-file list whose patches resolve from PATCHES.
@@ -498,7 +505,7 @@ describe("DiffViewer", () => {
 
   it("extends the range highlight over the sticky line-number gutter", async () => {
     // Regression: RangeHighlight had no z-index (z-auto), so the opaque sticky
-    // gutter (z-10, painted in a higher stacking group) covered it and the
+    // gutter (local layer, painted in a higher stacking group) covered it and the
     // comment-range tint stopped at the line-number column. The highlight must
     // stack above the gutter so its tint reaches the gutter.
     mockHappyPath();
@@ -519,7 +526,7 @@ describe("DiffViewer", () => {
 
     const highlight = highlights[0];
     const gutter = Array.from(highlight.parentElement?.children ?? []).find(
-      (node) => tailwindZIndexOf(node) === 10,
+      (node) => tailwindZIndexOf(node) === STACKING_LAYERS.indexOf("local"),
     );
 
     expect(tailwindZIndexOf(highlight)).not.toBeNull();
@@ -528,7 +535,7 @@ describe("DiffViewer", () => {
   });
 
   it("renders the annotate button above the sticky line-number gutter in unified mode", async () => {
-    // Regression: the sticky gutter (z-10, opaque bg-background, painted after
+    // Regression: the sticky gutter (local layer, opaque bg-background, painted after
     // the button in DOM order) occluded the annotate button at the same z-index,
     // so the comment bubble never showed on hover and pointerdown never reached
     // the drag handler. The button must stack strictly above the gutter.

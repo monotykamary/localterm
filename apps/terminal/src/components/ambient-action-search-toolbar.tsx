@@ -119,7 +119,7 @@ export const AmbientActionSearchToolbar = ({
   return (
     <div
       className={cn(
-        "absolute right-0 top-0 z-10 flex flex-col items-end pr-3 pt-1",
+        "absolute right-0 top-0 z-(--layer-local) flex flex-col items-end pr-3 pt-2.5",
         display.shouldEnablePointerEvents ? "pointer-events-auto" : "pointer-events-none",
       )}
       onMouseEnter={display.isTouchDevice ? undefined : actions.onMouseEnter}
@@ -136,7 +136,7 @@ export const AmbientActionSearchToolbar = ({
         aria-hidden="true"
         data-terminal-actions-toolbar-handle
         className={cn(
-          "mr-0.5 -mb-2.5 flex h-3 w-5 items-start transition-opacity duration-150",
+          "absolute top-1 right-3.5 flex h-3 w-5 items-start transition-opacity duration-150",
           display.shouldShowToolbarHandle
             ? "pointer-events-auto opacity-100"
             : "pointer-events-none opacity-0",
@@ -151,7 +151,7 @@ export const AmbientActionSearchToolbar = ({
           aria-label="terminal actions"
           data-terminal-actions-toolbar
           className={cn(
-            "mt-1 flex max-w-[calc(100dvw-1.5rem)] items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md",
+            "flex max-w-[calc(100dvw-1.5rem)] items-center gap-0.5 rounded-md border border-border/60 bg-background/70 p-0.5 text-muted-foreground shadow-xs backdrop-blur-md",
             "transition-[opacity,transform] duration-200 ease-snappy",
             display.isTouchDevice &&
               "touch-pan-x overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
@@ -346,7 +346,7 @@ export const AmbientActionSearchToolbar = ({
         <InputGroup
           role="search"
           aria-label="find in terminal"
-          className="mt-1 w-80 border-border/60 bg-background/70 text-muted-foreground shadow-xs backdrop-blur-md dark:bg-background/70"
+          className="w-80 border-border/60 bg-background/70 text-muted-foreground shadow-xs backdrop-blur-md dark:bg-background/70"
         >
           <InputGroupInput
             ref={search.inputRef}

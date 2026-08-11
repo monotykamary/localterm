@@ -162,8 +162,8 @@ export const AuthGate = ({ children }: { children: ReactNode }) => {
 
   return (
     <div className="flex h-dvh items-center justify-center bg-background px-4 text-foreground">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="space-y-1.5 text-center">
+      <div className="flex w-full max-w-sm flex-col gap-6">
+        <div className="flex flex-col gap-1.5 text-center">
           <div className="flex items-center justify-center gap-2 text-lg font-semibold">
             <Fingerprint className="size-5" />
             <span>localterm</span>
@@ -173,7 +173,7 @@ export const AuthGate = ({ children }: { children: ReactNode }) => {
 
         {isPasskey ? (
           state.webAuthnSupported ? (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               <Input
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}

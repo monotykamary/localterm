@@ -386,7 +386,7 @@ export const DiffViewer = ({
   const branchNoBase = isBranchMode && branchInfo !== null && displayBase === null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-5">
+    <div className="fixed inset-0 z-(--layer-overlay) flex items-center justify-center p-5">
       <div
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
@@ -402,7 +402,7 @@ export const DiffViewer = ({
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
         className={cn(
-          "relative z-10 flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-xl outline-none",
+          "relative z-(--layer-local) flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-xl outline-none",
           MODAL_PANEL_CLASSES,
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
@@ -492,7 +492,8 @@ export const DiffViewer = ({
           {displayFileList === null && headerLayout.showStats ? (
             <Spinner className="size-3.5" aria-label="loading diff" />
           ) : null}
-          <div className="ml-auto flex items-center gap-1">
+          <div className="flex-1" />
+          <div className="flex items-center gap-1">
             {headerLayout.showLayoutSelector ? (
               <div
                 role="radiogroup"
@@ -656,8 +657,9 @@ export const DiffViewer = ({
                         <ExternalLink />
                       </Button>
                     ) : null}
+                    <div className="flex-1" />
                     {!selectedFile.binary ? (
-                      <span className="ml-auto shrink-0 tabular-nums">
+                      <span className="shrink-0 tabular-nums">
                         <span className={DIFF_ADDITIONS_CLASSES}>+{selectedFile.additions}</span>{" "}
                         <span className={DIFF_DELETIONS_CLASSES}>−{selectedFile.deletions}</span>
                       </span>
@@ -702,7 +704,8 @@ export const DiffViewer = ({
             <span className="text-xs text-muted-foreground">
               {annotationList.length} pending comment{annotationList.length === 1 ? "" : "s"}
             </span>
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="flex-1" />
+            <div className="flex items-center gap-1.5">
               <Button variant="ghost" size="xs" onClick={clearAnnotations}>
                 Clear all
               </Button>

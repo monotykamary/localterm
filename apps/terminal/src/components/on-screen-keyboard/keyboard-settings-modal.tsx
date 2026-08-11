@@ -69,7 +69,7 @@ export const KeyboardSettingsModal = ({
   return (
     <div
       data-on-screen-keyboard-settings
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      className="fixed inset-0 z-(--layer-always-on-top) flex items-center justify-center p-4"
     >
       <div
         className="absolute inset-0 bg-black/20 backdrop-blur-xs animate-in fade-in-0 duration-150 ease-snappy"
@@ -80,7 +80,7 @@ export const KeyboardSettingsModal = ({
         aria-label="keyboard settings"
         aria-modal
         className={cn(
-          "relative z-10 w-full max-w-sm overflow-hidden rounded-xl outline-none animate-in fade-in-0 zoom-in-95 duration-150 ease-snappy",
+          "relative z-(--layer-local) w-full max-w-sm overflow-hidden rounded-xl outline-none animate-in fade-in-0 zoom-in-95 duration-150 ease-snappy",
           MODAL_PANEL_CLASSES,
         )}
       >
@@ -99,7 +99,7 @@ export const KeyboardSettingsModal = ({
             <X />
           </Button>
         </div>
-        <div className="space-y-3 p-4 text-xs text-muted-foreground">
+        <div className="flex flex-col gap-3 p-4 text-xs text-muted-foreground">
           <div className="flex items-center justify-between gap-3">
             <span>Keyboard height</span>
             <NumberStepper

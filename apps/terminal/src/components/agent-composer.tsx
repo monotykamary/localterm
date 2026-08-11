@@ -269,18 +269,19 @@ export const AgentComposer = ({
             </button>
           )}
         />
+        <div className="flex-1" />
         {prompt.length > 0 ? (
           <button
             type="button"
             onClick={() => onPromptChange("")}
             aria-label="clear prompt"
-            className="ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-muted-foreground/70 transition-colors hover:text-foreground"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-muted-foreground/70 transition-colors hover:text-foreground"
           >
             <Eraser className="size-3" aria-hidden="true" />
             Clear
           </button>
         ) : (
-          <span className="ml-auto inline-flex items-center gap-1 px-1 text-[10px] text-muted-foreground/50">
+          <span className="inline-flex items-center gap-1 px-1 text-[10px] text-muted-foreground/50">
             <span className="font-mono">/</span> for skills
           </span>
         )}

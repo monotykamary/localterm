@@ -22,7 +22,7 @@ export const KeyboardFloatingButton = ({
     aria-label={isOnScreenKeyboardOpen ? "hide on-screen keyboard" : "show on-screen keyboard"}
     aria-pressed={isOnScreenKeyboardOpen}
     className={cn(
-      "absolute right-3 bottom-3 z-10 size-11 rounded-full border border-border/60 bg-background/70 text-muted-foreground shadow-xs backdrop-blur-md transition-colors duration-200 ease-snappy hover:text-foreground",
+      "absolute right-3 bottom-3 z-(--layer-local) size-11 rounded-full border border-border/60 bg-background/70 text-muted-foreground shadow-xs backdrop-blur-md transition-colors duration-200 ease-snappy hover:text-foreground",
       isOnScreenKeyboardOpen && "text-primary",
     )}
   >

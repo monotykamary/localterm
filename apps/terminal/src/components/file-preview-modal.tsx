@@ -87,7 +87,7 @@ export const FilePreviewModal = ({
   const { directory, basename } = splitFilePath(filePath);
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-(--layer-overlay) flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-black/10 supports-backdrop-filter:backdrop-blur-xs animate-in fade-in-0 duration-150 ease-snappy"
         onClick={onClose}
@@ -99,7 +99,7 @@ export const FilePreviewModal = ({
         aria-modal
         tabIndex={-1}
         className={cn(
-          "relative z-10 flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl outline-none animate-in fade-in-0 zoom-in-95 duration-150 ease-snappy",
+          "relative z-(--layer-local) flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl outline-none animate-in fade-in-0 zoom-in-95 duration-150 ease-snappy",
           MODAL_PANEL_CLASSES,
         )}
       >
@@ -139,12 +139,14 @@ export const FilePreviewModal = ({
                 message="Couldn't load the image."
               />
             ) : (
-              <img
-                src={buildFileUrl(cwd, filePath)}
-                alt={filePath}
-                onError={() => setImageFailed(true)}
-                className="mx-auto max-h-full max-w-full object-contain"
-              />
+              <div className="flex h-full w-full items-center justify-center">
+                <img
+                  src={buildFileUrl(cwd, filePath)}
+                  alt={filePath}
+                  onError={() => setImageFailed(true)}
+                  className="max-h-full max-w-full object-contain"
+                />
+              </div>
             )
           ) : textState.status === "loading" ? (
             <div className="flex h-full items-center justify-center py-10">

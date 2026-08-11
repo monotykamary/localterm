@@ -12,6 +12,18 @@ body,
   overscroll-behavior: none;
 }
 
+/* Single ordered stacking scale for the whole app. z-index values outside
+   this list are not allowed — prefer portals + DOM order, and insert new
+   layers between existing values instead of outnumbering them. */
+:root {
+  --layer-mask: 4;
+  --layer-scrollbar: 5;
+  --layer-local: 10;
+  --layer-raised: 20;
+  --layer-overlay: 50;
+  --layer-always-on-top: 60;
+}
+
 body {
   margin: 0;
   background: #101010;
@@ -253,7 +265,7 @@ html[data-terminal-appearance] {
    background by default. Mask it as inactive chrome — a faint grey wash + a
    diagonal hatch (the universal "disabled" affordance) with a hairline at the
    live/dead boundary — so it conveys the active viewport is the narrower
-   peer's. Sits below the scrollbar (z-index 5) and toolbar (z-index 10) and
+   peer's. Sits below the scrollbar and local-ui layers and
    ignores pointer events so it never blocks selection or the controls over it. */
 :root {
   --pty-viewport-edge: color-mix(in oklab, var(--muted-foreground) 22%, transparent);
@@ -262,7 +274,7 @@ html[data-terminal-appearance] {
 .xterm-pty-viewport-mask {
   position: absolute;
   pointer-events: none;
-  z-index: 4;
+  z-index: var(--layer-mask);
   background-color: color-mix(in oklab, var(--muted-foreground) 8%, transparent);
   background-image: repeating-linear-gradient(
     135deg,
@@ -279,7 +291,7 @@ html[data-terminal-appearance] {
   pointer-events: none;
   opacity: 0;
   transition: opacity 200ms ease;
-  z-index: 5;
+  z-index: var(--layer-scrollbar);
 }
 
 .xterm-scrollbar-visible {

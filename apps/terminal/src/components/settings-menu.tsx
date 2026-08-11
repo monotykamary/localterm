@@ -272,7 +272,7 @@ export const SettingsMenu = ({
       </Button>
       {mounted
         ? createPortal(
-            <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]">
+            <div className="fixed inset-0 z-(--layer-overlay) flex items-start justify-center pt-[18vh]">
               <div
                 data-open={isVisible || undefined}
                 data-closed={!isVisible || undefined}
@@ -288,7 +288,7 @@ export const SettingsMenu = ({
                 data-open={isVisible || undefined}
                 data-closed={!isVisible || undefined}
                 className={cn(
-                  "relative z-10 flex w-[480px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl outline-none origin-top",
+                  "relative z-(--layer-local) flex w-[480px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl outline-none origin-top",
                   MODAL_PANEL_CLASSES,
                   COMMAND_PALETTE_PANEL_CLASSES,
                 )}

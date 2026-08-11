@@ -20,6 +20,7 @@ Browser (laptop/phone)
 ```
 
 The aggregator server (`server.py`) is a thin Python HTTP server that:
+
 1. Serves `index.html` and static files
 2. Manages shared state (`state.json`) via `/api/state` (GET/POST)
 3. Creates localterm sessions via `localterm session new --json` → `/api/new-session`
@@ -46,10 +47,10 @@ open "http://localhost:8090?lt=http://localhost:3417"
 
 ## Configuration
 
-| Query param | Default | Purpose |
-|---|---|---|
-| `lt` | same host, default port | localterm base URL (e.g. `http://localhost:3417`) |
-| `home` | `/` | default cwd for the initial workspace |
+| Query param | Default                 | Purpose                                           |
+| ----------- | ----------------------- | ------------------------------------------------- |
+| `lt`        | same host, default port | localterm base URL (e.g. `http://localhost:3417`) |
+| `home`      | `/`                     | default cwd for the initial workspace             |
 
 ## With Tailscale
 

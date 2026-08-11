@@ -172,8 +172,8 @@ const TriageThreadRow = ({
           <ArrowUpRight className="size-3.5" aria-hidden="true" />
         </button>
       </div>
-      <CollapsibleContent>
-        <div className="ml-3 border-l border-border/40">
+      <CollapsibleContent className="pl-3">
+        <div className="border-l border-border/40">
           {runs.map((run) => (
             <TriageRunRow
               key={`${automation.id}:${run.runId}`}
@@ -222,41 +222,46 @@ export const AutomationRecentRunsView = ({
           </button>
         ))}
         {hasUnread ? (
-          <button
-            type="button"
-            onClick={onMarkAllRead}
-            className="ml-auto rounded-sm px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Mark all read
-          </button>
+          <>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={onMarkAllRead}
+              className="rounded-sm px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Mark all read
+            </button>
+          </>
         ) : null}
         {runs.length > 0 ? (
-          <button
-            type="button"
-            aria-label={armedClear ? "confirm clear all run history" : "clear all run history"}
-            title={
-              armedClear
-                ? "Click again to confirm"
-                : "Clear all run history (keeps the automations)"
-            }
-            className={cn(
-              "rounded-sm px-2 py-0.5 text-[11px] transition-colors",
-              armedClear
-                ? "text-destructive hover:bg-destructive/10"
-                : "text-muted-foreground hover:text-foreground",
-              hasUnread ? "ml-1" : "ml-auto",
-            )}
-            onClick={() => {
-              if (!armedClear) {
-                setArmedClear(true);
-                return;
+          <>
+            {hasUnread ? null : <div className="flex-1" />}
+            <button
+              type="button"
+              aria-label={armedClear ? "confirm clear all run history" : "clear all run history"}
+              title={
+                armedClear
+                  ? "Click again to confirm"
+                  : "Clear all run history (keeps the automations)"
               }
-              setArmedClear(false);
-              onClearHistory();
-            }}
-          >
-            <Eraser className="size-3" aria-hidden="true" />
-          </button>
+              className={cn(
+                "rounded-sm px-2 py-0.5 text-[11px] transition-colors",
+                armedClear
+                  ? "text-destructive hover:bg-destructive/10"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => {
+                if (!armedClear) {
+                  setArmedClear(true);
+                  return;
+                }
+                setArmedClear(false);
+                onClearHistory();
+              }}
+            >
+              <Eraser className="size-3" aria-hidden="true" />
+            </button>
+          </>
         ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5">

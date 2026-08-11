@@ -264,7 +264,7 @@ export const PortsModal = ({ open, isTouchDevice, onClose }: PortsModalProps) =>
       : Math.max(PORTS_LIST_ROW_HEIGHT_PX, ordered.length * PORTS_LIST_ROW_HEIGHT_PX);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]">
+    <div className="fixed inset-0 z-(--layer-overlay) flex items-start justify-center pt-[18vh]">
       <div
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
@@ -278,7 +278,7 @@ export const PortsModal = ({ open, isTouchDevice, onClose }: PortsModalProps) =>
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
         className={cn(
-          "relative z-10 flex w-[520px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl origin-top",
+          "relative z-(--layer-local) flex w-[520px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl origin-top",
           MODAL_PANEL_CLASSES,
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
@@ -335,13 +335,13 @@ export const PortsModal = ({ open, isTouchDevice, onClose }: PortsModalProps) =>
                 </Button>
               </div>
             ) : ports === null ? null : ordered.length === 0 ? (
-              <div className="animate-in fade-in-0 duration-150 ease-snappy absolute inset-0 flex flex-col items-center justify-center px-2.5 text-center text-xs text-muted-foreground/70">
+              <div className="animate-in fade-in-0 duration-150 ease-snappy absolute inset-0 flex flex-col items-center justify-center gap-1 px-2.5 text-center text-xs text-muted-foreground/70">
                 {query ? (
                   <>No ports match “{query}”.</>
                 ) : (
                   <>
                     No listening dev ports from localterm sessions.
-                    <span className="mt-1 block text-[11px] text-muted-foreground/60">
+                    <span className="block text-[11px] text-muted-foreground/60">
                       Run a dev server (e.g. `npm run dev`) in a shell and it shows up here.
                     </span>
                   </>
@@ -374,7 +374,8 @@ export const PortsModal = ({ open, isTouchDevice, onClose }: PortsModalProps) =>
               <KeyHint keys="esc" label="close" />
             </>
           )}
-          <span className="ml-auto">
+          <div className="flex-1" />
+          <span>
             {ordered.length} {ordered.length === 1 ? "port" : "ports"}
           </span>
         </div>

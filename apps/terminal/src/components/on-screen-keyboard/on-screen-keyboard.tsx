@@ -721,7 +721,7 @@ export const OnScreenKeyboard = ({
       <div
         ref={containerRef}
         data-on-screen-keyboard
-        className="fixed inset-x-0 bottom-0 z-50 bg-background/95 backdrop-blur-sm"
+        className="fixed inset-x-0 bottom-0 z-(--layer-overlay) bg-background/95 backdrop-blur-sm"
         style={{
           paddingBottom: "calc(" + keyboardBottomPadding + "px + env(safe-area-inset-bottom))",
           touchAction: "none",
@@ -751,7 +751,7 @@ export const OnScreenKeyboard = ({
           ))}
         </div>
       </div>
-      <div className="pointer-events-none fixed inset-0 z-50 overflow-visible">
+      <div className="pointer-events-none fixed inset-0 z-(--layer-overlay) overflow-visible">
         {keyPreviewEnabled
           ? gestures.map((gesture) => {
               const rect = gesture.activeRect;

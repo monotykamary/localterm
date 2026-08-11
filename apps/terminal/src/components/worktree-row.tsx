@@ -88,8 +88,9 @@ export const WorktreeRow = ({
           {worktree.activeSessionCount === 1 ? "in use" : `${worktree.activeSessionCount} in use`}
         </WorktreeBadge>
       ) : null}
+      <div className="flex-1" />
       {worktree.isCurrent ? null : (
-        <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/worktree:opacity-100">
+        <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/worktree:opacity-100">
           <Button
             variant="ghost"
             size="icon-xs"

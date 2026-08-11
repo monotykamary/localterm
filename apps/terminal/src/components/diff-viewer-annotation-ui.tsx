@@ -18,7 +18,7 @@ export const formatRangeLabel = (start: DiffLineTarget, end: DiffLineTarget): st
 export const RangeHighlight = () => (
   <span
     aria-hidden="true"
-    className="pointer-events-none absolute inset-0 z-20 border-l-2 border-primary/60 bg-primary/10"
+    className="pointer-events-none absolute inset-0 z-(--layer-raised) border-l-2 border-primary/60 bg-primary/10"
   />
 );
 
@@ -38,7 +38,7 @@ export const AnnotateLineButton = ({ onClick, onDragStart }: AnnotateLineButtonP
       onDragStart();
     }}
     aria-label="comment on line — drag to select multiple lines"
-    className="absolute top-1/2 left-1 z-20 hidden size-4 -translate-y-1/2 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-transform group-hover/line:flex hover:scale-110"
+    className="absolute top-1/2 left-1 z-(--layer-raised) hidden size-4 -translate-y-1/2 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-transform group-hover/line:flex hover:scale-110"
   >
     <MessageSquarePlus className="size-3" aria-hidden="true" />
   </button>
@@ -111,9 +111,9 @@ export const AnnotationBlock = ({
   onDelete,
 }: AnnotationBlockProps) => (
   <div className="border-y border-border/40 bg-muted/20 py-2 pr-4 pl-3 font-sans">
-    <div className="sticky left-3 max-w-xl">
+    <div className="sticky left-3 flex max-w-xl flex-col gap-1">
       {rangeLabel ? (
-        <div className="mb-1 font-mono text-[10px] tracking-wide text-muted-foreground/80">
+        <div className="font-mono text-[10px] tracking-wide text-muted-foreground/80">
           {rangeLabel}
         </div>
       ) : null}
@@ -126,7 +126,7 @@ export const AnnotationBlock = ({
       ) : annotation ? (
         <div className="group/comment flex items-start gap-2">
           <MessageSquare
-            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+            className="size-3.5 shrink-0 translate-y-0.5 text-muted-foreground"
             aria-hidden="true"
           />
           <p className="min-w-0 flex-1 whitespace-pre-wrap text-foreground/90">

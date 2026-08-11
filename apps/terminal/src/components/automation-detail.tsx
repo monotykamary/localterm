@@ -298,11 +298,11 @@ export const AutomationDetail = ({
             </button>
           ) : null}
         </div>
-        <CollapsibleContent>
+        <CollapsibleContent className="pt-1">
           {automation.runs.length === 0 ? (
             <p className="px-2 py-2 text-[11px] text-muted-foreground">No runs yet.</p>
           ) : (
-            <div className="mt-1 flex flex-col divide-y divide-border/30 rounded-md border border-border/40">
+            <div className="flex flex-col divide-y divide-border/30 rounded-md border border-border/40">
               {automation.runs.map((run) => (
                 <AutomationRunRow key={run.runId} run={run} nowMs={nowMs} onOpenLog={onOpenLog} />
               ))}

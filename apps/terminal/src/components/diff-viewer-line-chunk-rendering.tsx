@@ -83,7 +83,7 @@ const UnifiedDiffLine = memo(
         />
       ) : null}
       <div
-        className="sticky left-0 z-10 flex shrink-0 bg-background"
+        className="sticky left-0 z-(--layer-local) flex shrink-0 bg-background"
         style={
           GUTTER_BG_OVERRIDES[line.type]
             ? {

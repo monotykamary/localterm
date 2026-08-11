@@ -69,7 +69,7 @@ const ToastViewport = ({
   <ToastPrimitive.Viewport
     data-slot="toast-viewport"
     className={cn(
-      "fixed top-4 inset-x-0 z-[60] flex flex-col items-center gap-2 pointer-events-none",
+      "fixed top-4 inset-x-0 z-(--layer-always-on-top) flex flex-col items-center gap-2 pointer-events-none",
       className,
     )}
     {...props}

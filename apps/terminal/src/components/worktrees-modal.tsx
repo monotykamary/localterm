@@ -151,7 +151,7 @@ export const WorktreesModal = ({
       : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-5">
+    <div className="fixed inset-0 z-(--layer-overlay) flex items-center justify-center p-5">
       <div
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
@@ -167,7 +167,7 @@ export const WorktreesModal = ({
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
         className={cn(
-          "relative z-10 flex w-full max-w-2xl flex-col overflow-hidden rounded-xl outline-none",
+          "relative z-(--layer-local) flex w-full max-w-2xl flex-col overflow-hidden rounded-xl outline-none",
           MODAL_PANEL_CLASSES,
           COMMAND_PALETTE_PANEL_CLASSES,
         )}

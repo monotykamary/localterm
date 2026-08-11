@@ -119,7 +119,7 @@ export const KeyboardShortcutsModal = ({
     <dialog
       ref={dialogRef}
       aria-label="keyboard shortcuts"
-      className="fixed inset-0 z-50 m-0 h-full max-h-none w-full max-w-none bg-transparent p-0 backdrop:bg-black/10 backdrop:backdrop-blur-xs"
+      className="fixed inset-0 z-(--layer-overlay) m-0 h-full max-h-none w-full max-w-none bg-transparent p-0 backdrop:bg-black/10 backdrop:backdrop-blur-xs"
     >
       <div className="flex h-full items-start justify-center pt-[14vh]">
         <div
@@ -134,15 +134,15 @@ export const KeyboardShortcutsModal = ({
           data-open={isVisible || undefined}
           data-closed={!isVisible || undefined}
           className={cn(
-            "relative z-10 flex w-[560px] max-w-[calc(100vw-2rem)] origin-top flex-col overflow-hidden rounded-xl outline-none",
+            "relative z-(--layer-local) flex w-[560px] max-w-[calc(100vw-2rem)] origin-top flex-col overflow-hidden rounded-xl outline-none",
             MODAL_PANEL_CLASSES,
             COMMAND_PALETTE_PANEL_CLASSES,
           )}
         >
           <header className="flex items-center gap-3 border-b border-border/40 px-4 py-3">
-            <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <h2 className="text-sm font-medium">Keyboard shortcuts</h2>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
+              <p className="text-[11px] text-muted-foreground">
                 Select a shortcut, then press the new key combination.
               </p>
             </div>

@@ -314,7 +314,7 @@ export const AutomationRunLogView = ({
         data-visible={showScrollButton || undefined}
         data-hidden={!showScrollButton || undefined}
         onClick={scrollToBottom}
-        className="absolute bottom-3 right-3 z-10 flex size-8 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground shadow-md backdrop-blur-sm transition-[opacity,translate,color] duration-150 ease-snappy hover:text-foreground data-[hidden]:pointer-events-none data-[hidden]:translate-y-1 data-[hidden]:opacity-0 data-[visible]:translate-y-0 data-[visible]:opacity-100"
+        className="absolute bottom-3 right-3 z-(--layer-local) flex size-8 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground shadow-md backdrop-blur-sm transition-[opacity,translate,color] duration-150 ease-snappy hover:text-foreground data-[hidden]:pointer-events-none data-[hidden]:translate-y-1 data-[hidden]:opacity-0 data-[visible]:translate-y-0 data-[visible]:opacity-100"
       >
         <ChevronDown className="size-4" aria-hidden="true" />
       </button>

@@ -23,7 +23,7 @@ export const PANEL_ANIMATION_CLASSES =
 // Alert dialog uses keyframe animations (animate-in/animate-out) because
 // Base UI primitives manage the full lifecycle — they never toggle rapidly.
 export const MODAL_BACKDROP_CLASSES =
-  "fixed inset-0 isolate z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs";
+  "fixed inset-0 isolate z-(--layer-overlay) bg-black/10 supports-backdrop-filter:backdrop-blur-xs";
 
 export const MODAL_BACKDROP_ANIMATION_CLASSES =
   "duration-150 ease-snappy data-closed:duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0";

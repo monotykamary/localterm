@@ -31,7 +31,7 @@ export const createPixelFrameOverlay = (container: HTMLElement | null): PixelFra
       top: "0",
       width: "100%",
       height: "100%",
-      zIndex: "50",
+      zIndex: "var(--layer-overlay)",
       pointerEvents: "none",
     });
     screen.appendChild(canvas);

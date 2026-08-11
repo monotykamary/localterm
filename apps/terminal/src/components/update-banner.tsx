@@ -27,8 +27,8 @@ export const UpdateBanner = ({ latest }: UpdateBannerProps) => {
 
   return (
     <div className="flex items-start gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-2.5 text-sm">
-      <ArrowUpCircle className="mt-0.5 size-4 shrink-0 text-sky-400" aria-hidden="true" />
-      <div className="flex-1 space-y-0.5">
+      <ArrowUpCircle className="size-4 shrink-0 translate-y-0.5 text-sky-400" aria-hidden="true" />
+      <div className="flex flex-1 flex-col gap-0.5">
         <div className="text-foreground">
           A new version is available: <span className="font-mono font-medium">{latest}</span>
         </div>

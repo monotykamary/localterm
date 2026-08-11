@@ -135,7 +135,7 @@ export const PromptSkillsAutocomplete = ({
       />
       {menuOpen ? (
         <div
-          className="absolute left-0 top-full z-10 mt-1 max-h-60 w-full overflow-y-auto overscroll-contain rounded-md border border-border/50 bg-background p-1 shadow-md"
+          className="absolute left-0 top-full z-(--layer-local) max-h-60 w-full translate-y-1 overflow-y-auto overscroll-contain rounded-md border border-border/50 bg-background p-1 shadow-md"
           role="listbox"
           aria-label="Skills"
         >

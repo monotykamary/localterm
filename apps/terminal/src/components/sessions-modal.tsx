@@ -205,7 +205,7 @@ const PeerAvatarFace = ({ windowId }: { windowId: string }) => {
       }}
     >
       {EYE_FACES[faceIndex]}
-      <span style={{ marginTop: "8%", fontSize: "26cqw", lineHeight: 1 }}>{initial}</span>
+      <span style={{ paddingTop: "8%", fontSize: "26cqw", lineHeight: 1 }}>{initial}</span>
     </span>
   );
 };
@@ -548,7 +548,7 @@ export const SessionsModal = ({
       : Math.max(SESSIONS_LIST_ROW_HEIGHT_PX, virtualizer.getTotalSize());
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]">
+    <div className="fixed inset-0 z-(--layer-overlay) flex items-start justify-center pt-[18vh]">
       <div
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
@@ -562,7 +562,7 @@ export const SessionsModal = ({
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
         className={cn(
-          "relative z-10 flex w-[520px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl origin-top",
+          "relative z-(--layer-local) flex w-[520px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl origin-top",
           MODAL_PANEL_CLASSES,
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
@@ -618,13 +618,13 @@ export const SessionsModal = ({
                 </Button>
               </div>
             ) : sessions === null ? null : ordered.length === 0 ? (
-              <div className="animate-in fade-in-0 duration-150 ease-snappy absolute inset-0 flex flex-col items-center justify-center px-2.5 text-center text-xs text-muted-foreground/70">
+              <div className="animate-in fade-in-0 duration-150 ease-snappy absolute inset-0 flex flex-col items-center justify-center gap-1 px-2.5 text-center text-xs text-muted-foreground/70">
                 {query ? (
                   <>No sessions match “{query}”.</>
                 ) : (
                   <>
                     No live shells. Open a new shell to start one.
-                    <span className="mt-1 block text-[11px] text-muted-foreground/60">
+                    <span className="block text-[11px] text-muted-foreground/60">
                       A closed tab's shell waits here for ~30s before it's reaped.
                     </span>
                   </>
@@ -687,7 +687,8 @@ export const SessionsModal = ({
               <KeyHint keys="esc" label="close" />
             </>
           )}
-          <span className="ml-auto flex items-center gap-2">
+          <div className="flex-1" />
+          <span className="flex items-center gap-2">
             <Button variant="ghost" size="xs" onClick={handleOpenNewShell}>
               <Plus aria-hidden="true" />
               New shell

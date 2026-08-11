@@ -272,7 +272,7 @@ export const QrModal = ({
   const isVisible = open && settled;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]">
+    <div className="fixed inset-0 z-(--layer-overlay) flex items-start justify-center pt-[18vh]">
       <div
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
@@ -286,7 +286,7 @@ export const QrModal = ({
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
         className={cn(
-          "relative z-10 flex w-[420px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl origin-top",
+          "relative z-(--layer-local) flex w-[420px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl origin-top",
           MODAL_PANEL_CLASSES,
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
@@ -320,13 +320,16 @@ export const QrModal = ({
             <IngestPanel videoRef={videoRef} status={scannerStatus} />
           )}
         </div>
-        <div className="flex items-center border-t border-border/40 px-4 py-1.5 text-[10px] text-muted-foreground/60">
+        <div className="flex items-center gap-1.5 border-t border-border/40 px-4 py-1.5 text-[10px] text-muted-foreground/60">
           <kbd className="rounded border border-border/40 bg-muted/30 px-1 font-mono text-[10px]">
             esc
           </kbd>
-          <span className="ml-1.5">close</span>
+          <span>close</span>
           {mode === "ingest" ? (
-            <span className="ml-auto">scans another device's session QR</span>
+            <>
+              <div className="flex-1" />
+              <span>scans another device's session QR</span>
+            </>
           ) : null}
         </div>
       </div>

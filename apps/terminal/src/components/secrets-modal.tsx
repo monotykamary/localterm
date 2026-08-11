@@ -163,7 +163,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
       : processActions.form !== null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]">
+    <div className="fixed inset-0 z-(--layer-overlay) flex items-start justify-center pt-[18vh]">
       <div
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
@@ -179,7 +179,7 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
         className={cn(
-          "relative z-10 flex w-[480px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl outline-none origin-top",
+          "relative z-(--layer-local) flex w-[480px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl outline-none origin-top",
           MODAL_PANEL_CLASSES,
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
@@ -372,7 +372,8 @@ export const SecretsModal = ({ open, onClose }: SecretsModalProps) => {
               New process
             </Button>
           ) : null}
-          <span className="ml-auto flex items-center gap-1">
+          <div className="flex-1" />
+          <span className="flex items-center gap-1">
             <kbd className="rounded border border-border/40 bg-muted/30 px-1 font-mono text-[10px]">
               esc
             </kbd>

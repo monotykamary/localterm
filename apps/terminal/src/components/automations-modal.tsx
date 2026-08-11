@@ -517,7 +517,7 @@ export const AutomationsModal = ({
   const isVisible = open && settled;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-5">
+    <div className="fixed inset-0 z-(--layer-overlay) flex items-center justify-center p-5">
       <div
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
@@ -533,7 +533,7 @@ export const AutomationsModal = ({
         data-open={isVisible || undefined}
         data-closed={!isVisible || undefined}
         className={cn(
-          "relative z-10 flex h-full max-h-[44rem] w-full max-w-5xl flex-col overflow-hidden rounded-xl outline-none",
+          "relative z-(--layer-local) flex h-full max-h-[44rem] w-full max-w-5xl flex-col overflow-hidden rounded-xl outline-none",
           MODAL_PANEL_CLASSES,
           COMMAND_PALETTE_PANEL_CLASSES,
         )}
@@ -580,7 +580,7 @@ export const AutomationsModal = ({
                   setTab(value);
                 }}
                 className={cn(
-                  "rounded-sm px-2 py-0.5 text-xs transition-colors",
+                  "inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-xs transition-colors",
                   tab === value
                     ? "bg-foreground/10 text-foreground"
                     : "text-muted-foreground hover:text-foreground",
@@ -588,14 +588,15 @@ export const AutomationsModal = ({
               >
                 {label}
                 {value === "recent-runs" && unreadCount > 0 ? (
-                  <span className="ml-1 inline-flex items-center rounded-full bg-foreground/15 px-1.5 text-[10px] tabular-nums text-foreground">
+                  <span className="inline-flex items-center rounded-full bg-foreground/15 px-1.5 text-[10px] tabular-nums text-foreground">
                     {unreadCount}
                   </span>
                 ) : null}
               </button>
             ))}
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-1">
+          <div className="flex-1" />
+          <div className="flex shrink-0 items-center gap-1">
             {tab === "automations" && mode === "view" ? (
               <Button
                 variant="ghost"

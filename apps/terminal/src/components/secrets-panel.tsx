@@ -101,9 +101,11 @@ export const SecretsPanel = ({
       </div>
 
       {!supported ? (
-        <div className="mx-2.5 mb-2 rounded-sm border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
-          Secret storage isn't supported on this server's platform (it uses macOS Keychain). Run the
-          localterm daemon on a Mac to manage secrets here.
+        <div className="px-2.5 pb-2">
+          <div className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
+            Secret storage isn't supported on this server's platform (it uses macOS Keychain). Run
+            the localterm daemon on a Mac to manage secrets here.
+          </div>
         </div>
       ) : null}
 

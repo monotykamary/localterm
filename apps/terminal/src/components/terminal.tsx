@@ -970,7 +970,7 @@ export const Terminal = () => {
             variant="destructive"
             role="status"
             aria-live="polite"
-            className="absolute top-2 left-3 z-10"
+            className="absolute top-2 left-3 z-(--layer-local)"
           >
             {exitInfo.reason === "shell-exited"
               ? exitInfo.exitCode === null
