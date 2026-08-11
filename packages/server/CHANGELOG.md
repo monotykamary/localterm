@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.74.1
+
+### Patch Changes
+
+- Diff viewer: text renders immediately while syntax highlighting settles, warmed files restore colored diffs in a single commit, and hovering or focusing a file row preloads its patch, side contents, and tokens ahead of the click.
+
 ## 2.74.0
 
 ### Minor Changes
