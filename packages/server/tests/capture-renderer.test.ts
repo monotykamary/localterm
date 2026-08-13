@@ -17,6 +17,35 @@ describe("CaptureRenderer hibernation", () => {
     }
   });
 
+  it("retains rendered colors and styles as SGR-only output", async () => {
+    const renderer = new CaptureRenderer(80, 1, 100);
+    const restored = new CaptureRenderer(80, 1, 100);
+    try {
+      renderer.write(
+        `plain ${ESC}[31mred${ESC}[0m ${ESC}[38;5;202morange${ESC}[0m ` +
+          `${ESC}[1;4;38;2;1;2;3;48;2;4;5;6mstyled${ESC}[0m`,
+      );
+      await renderer.flush();
+
+      const snapshot = renderer.captureNormal(100, 10_000);
+      expect(snapshot).toBe(
+        `plain ${ESC}[0;31mred${ESC}[0m ${ESC}[0;38;5;202morange${ESC}[0m ` +
+          `${ESC}[0;1;4;38;2;1;2;3;48;2;4;5;6mstyled${ESC}[0m`,
+      );
+      expect(snapshot.replaceAll(/\x1b\[[0-9;]*m/g, "")).toBe("plain red orange styled");
+      expect(snapshot.replaceAll(/\x1b\[[0-9;]*m/g, "")).not.toContain(ESC);
+      expect(renderer.captureNormal(100, snapshot.length - 1)).toBe("");
+
+      restored.write(snapshot);
+      await restored.flush();
+      expect(restored.capture()).toBe("plain red orange styled");
+      expect(restored.captureNormal(100, 10_000)).toBe(snapshot);
+    } finally {
+      renderer.dispose();
+      restored.dispose();
+    }
+  });
+
   it("keeps whole newest rows within both limits", async () => {
     const renderer = new CaptureRenderer(20, 3, 100);
     try {

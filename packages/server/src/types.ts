@@ -107,7 +107,7 @@ export interface SpawnPtyInput {
   cwd?: string;
   env?: Record<string, string>;
   initialCommand?: string;
-  // Plain rendered rows restored ahead of a fresh shell after daemon shutdown.
+  // Rendered rows with safe SGR styling, restored before a fresh shell starts.
   replaySeed?: string;
   // Directory of the per-program secret shims. The shell hook prepends it to PATH
   // so the shims shadow the real binaries. Threaded from the daemon's actual

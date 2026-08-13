@@ -66,8 +66,8 @@ export const DAEMON_CONFIG_FILE_VERSION = 1;
 // tabs (one-shot) and dormant/orphaned shells (no attached viewer).
 export const WORKSPACE_FILENAME = "workspace.json";
 export const WORKSPACE_FILE_VERSION = 1;
-// Graceful-shutdown hibernation: rendered normal-buffer text and the tab's
-// exact old session id. Plain text avoids replaying terminal control state.
+// Graceful-shutdown hibernation: rendered normal-buffer text, safe SGR styling,
+// and the tab's exact old session id. Terminal control state is never persisted.
 export const HIBERNATE_FILENAME = "hibernate.json";
 export const HIBERNATE_FILE_VERSION = 1;
 export const HIBERNATE_SCROLLBACK_LINES = 2_000;

@@ -39,7 +39,7 @@ const hibernateFileSchema = z
   .strict();
 
 // One compact file written during graceful daemon shutdown. Scrollback is
-// already rendered plain text; this store never parses or rewrites ANSI bytes.
+// rendered text with generated SGR styling; raw PTY control bytes are never stored.
 export class HibernateStore {
   constructor(private readonly filePath: string) {}
 

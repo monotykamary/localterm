@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { CAPTURE_RENDERER_SCROLLBACK } from "./constants.js";
+import { renderBufferLineWithSgr } from "./utils/render-buffer-line-with-sgr.js";
 
 // @xterm/headless ships a CJS `main` with no `exports` field and a broken
 // `module` field (points at a non-existent file), so Node's ESM loader can't
@@ -91,15 +92,17 @@ export class CaptureRenderer {
   }
 
   // Hibernation reads the normal buffer even while a TUI owns the alternate
-  // buffer. Rows are already rendered plain text, so restoring them cannot
-  // re-enter a TUI, clear the screen, or revive stale terminal modes.
+  // buffer. Only rendered text and SGR styling are exported; cursor movement,
+  // screen clearing, OSC, and terminal modes can never enter the snapshot.
   captureNormal(maxLines: number, maxCodeUnits: number): string {
     const buffer = this.terminal.buffer.normal;
+    const cell = buffer.getNullCell();
     const rows: string[] = [];
     let codeUnits = 0;
     const start = Math.max(0, buffer.length - maxLines);
     for (let index = buffer.length - 1; index >= start; index -= 1) {
-      const row = buffer.getLine(index)?.translateToString(true) ?? "";
+      const line = buffer.getLine(index);
+      const row = line ? renderBufferLineWithSgr(line, cell) : "";
       const separatorLength = rows.length === 0 ? 0 : 2;
       if (codeUnits + separatorLength + row.length > maxCodeUnits) break;
       rows.push(row);

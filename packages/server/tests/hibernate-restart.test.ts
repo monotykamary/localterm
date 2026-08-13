@@ -7,6 +7,8 @@ import { HIBERNATE_FILENAME } from "../src/constants.js";
 import { createServer, type RunningServer } from "../src/index.js";
 import { pollFor } from "./helpers/poll-for.js";
 
+const ESC = "\x1b";
+
 interface SessionFrame {
   id?: string;
 }
@@ -63,12 +65,14 @@ describe("rendered scrollback hibernation", { tags: ["integration"] }, () => {
     return server;
   };
 
-  it("restores plain normal-buffer text across two daemon restarts", async () => {
+  it("restores styled normal-buffer text across two daemon restarts", async () => {
     const stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-hibernate-state-"));
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-hibernate-cwd-"));
     dirs.push(stateDirectory, cwd);
     const params = { cwd, shell: "/bin/sh", wid: "desktop-window" };
     const firstMarker = "SIMPLE_HIBERNATE_FIRST";
+    const colorMarker = "SIMPLE_HIBERNATE_RED";
+    const styledColorMarker = `${ESC}[0;31m${colorMarker}${ESC}[0m`;
     const secondMarker = "SIMPLE_HIBERNATE_SECOND";
 
     const firstServer = await startServer(stateDirectory);
@@ -77,6 +81,13 @@ describe("rendered scrollback hibernation", { tags: ["integration"] }, () => {
     firstTab.socket.send(JSON.stringify({ type: "ready", replay: true }));
     firstTab.socket.send(JSON.stringify({ type: "input", data: `echo ${firstMarker}\n` }));
     expect(await pollFor(() => firstTab.output().includes(firstMarker), 10_000)).toBe(true);
+    firstTab.socket.send(
+      JSON.stringify({
+        type: "input",
+        data: `printf '\\033[31m${colorMarker}\\033[0m\\n'\n`,
+      }),
+    );
+    expect(await pollFor(() => firstTab.output().includes(colorMarker), 10_000)).toBe(true);
 
     // Stop while the terminal is in an alternate-screen frame. The browser saw
     // this frame, but hibernation must persist only the rendered normal buffer.
@@ -97,8 +108,9 @@ describe("rendered scrollback hibernation", { tags: ["integration"] }, () => {
     const firstStoredTab = firstSnapshot.entries[0]?.tabs[0];
     expect(firstStoredTab?.sessionId).toBe(firstTab.session.id);
     expect(firstStoredTab?.scrollback).toContain(firstMarker);
+    expect(firstStoredTab?.scrollback).toContain(styledColorMarker);
     expect(firstStoredTab?.scrollback).not.toContain("DEAD_TUI_FRAME");
-    expect(firstStoredTab?.scrollback).not.toContain("\x1b");
+    expect(firstStoredTab?.scrollback.replaceAll(/\x1b\[[0-9;]*m/g, "")).not.toContain(ESC);
     await firstServer.stop();
     expect(fs.readFileSync(path.join(stateDirectory, HIBERNATE_FILENAME), "utf8")).toBe(firstFile);
 
@@ -110,6 +122,7 @@ describe("rendered scrollback hibernation", { tags: ["integration"] }, () => {
     sockets.push(secondTab.socket);
     secondTab.socket.send(JSON.stringify({ type: "ready", replay: true }));
     expect(await pollFor(() => secondTab.output().includes(firstMarker), 10_000)).toBe(true);
+    expect(secondTab.output()).toContain(styledColorMarker);
     expect(secondTab.output()).not.toContain("DEAD_TUI_FRAME");
     expect(secondTab.session.id).not.toBe(firstTab.session.id);
 
@@ -124,6 +137,7 @@ describe("rendered scrollback hibernation", { tags: ["integration"] }, () => {
     const secondStoredTab = secondSnapshot.entries[0]?.tabs[0];
     expect(secondStoredTab?.sessionId).toBe(secondTab.session.id);
     expect(secondStoredTab?.scrollback).toContain(firstMarker);
+    expect(secondStoredTab?.scrollback).toContain(styledColorMarker);
     expect(secondStoredTab?.scrollback).toContain(secondMarker);
 
     const thirdServer = await startServer(stateDirectory);
@@ -139,5 +153,6 @@ describe("rendered scrollback hibernation", { tags: ["integration"] }, () => {
         10_000,
       ),
     ).toBe(true);
+    expect(thirdTab.output()).toContain(styledColorMarker);
   }, 60_000);
 });

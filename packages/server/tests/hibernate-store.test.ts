@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { HIBERNATE_FILE_VERSION } from "../src/constants.js";
 import { HibernateStore, type HibernateEntry } from "../src/hibernate-store.js";
 
+const ESC = "\x1b";
+
 describe("HibernateStore", () => {
   let dir: string;
   let filePath: string;
@@ -26,7 +28,7 @@ describe("HibernateStore", () => {
             sessionId: "old-session",
             cwd: "/project",
             shell: "/bin/zsh",
-            scrollback: "first\r\n$ ",
+            scrollback: `first\r\n${ESC}[0;31mred${ESC}[0m\r\n$ `,
           },
         ],
       },
