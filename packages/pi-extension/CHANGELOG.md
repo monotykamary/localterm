@@ -1,5 +1,11 @@
 # @monotykamary/pi-localterm
 
+## 0.4.2
+
+### Patch Changes
+
+- 32aaf4e: Reduce Pi startup time by resolving process secrets concurrently, adding a narrow secret lookup path, and shipping the LocalTerm Pi integration as a guarded JavaScript bundle.
+
 ## 0.4.1
 
 ### Patch Changes
