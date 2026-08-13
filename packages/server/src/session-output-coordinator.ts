@@ -9,6 +9,8 @@ import {
   OUTPUT_BATCH_WINDOW_MS,
   OUTPUT_STREAM_THRESHOLD_MS,
   OUTPUT_SYNCHRONIZED_FRAME_TIMEOUT_MS,
+  RENDERER_PENDING_PAUSE_HIGH_WATER_BYTES,
+  RENDERER_PENDING_RESUME_LOW_WATER_BYTES,
   WS_OUTBOUND_DRAIN_POLL_MS,
   WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES,
   WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
@@ -293,6 +295,11 @@ export class SessionOutputCoordinator {
 
   private maybePauseAfterFlush(managed: ManagedSession): void {
     if (managed.session.isPaused) return;
+    if (this.rendererBacklogBytes(managed) >= RENDERER_PENDING_PAUSE_HIGH_WATER_BYTES) {
+      managed.session.pause();
+      this.ensureDrainPoll(managed);
+      return;
+    }
     for (const client of managed.clients) {
       if (client.pending) continue;
       if (this.clientBacklogBytes(client) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES) {
@@ -310,12 +317,14 @@ export class SessionOutputCoordinator {
         this.stopDrainPoll(managed);
         return;
       }
-      let allLow = true;
-      for (const client of managed.clients) {
-        if (client.pending) continue;
-        if (this.clientBacklogBytes(client) > WS_OUTBOUND_RESUME_LOW_WATER_BYTES) {
-          allLow = false;
-          break;
+      let allLow = this.rendererBacklogBytes(managed) <= RENDERER_PENDING_RESUME_LOW_WATER_BYTES;
+      if (allLow) {
+        for (const client of managed.clients) {
+          if (client.pending) continue;
+          if (this.clientBacklogBytes(client) > WS_OUTBOUND_RESUME_LOW_WATER_BYTES) {
+            allLow = false;
+            break;
+          }
         }
       }
       if (allLow) {
@@ -324,6 +333,13 @@ export class SessionOutputCoordinator {
       }
     }, WS_OUTBOUND_DRAIN_POLL_MS);
     managed.drainPollTimer.unref?.();
+  }
+
+  private rendererBacklogBytes(managed: ManagedSession): number {
+    return Math.max(
+      managed.captureRenderer?.queuedBytes ?? 0,
+      managed.hibernateRenderer?.queuedBytes ?? 0,
+    );
   }
 
   private clientBacklogBytes(client: ManagedClient): number {

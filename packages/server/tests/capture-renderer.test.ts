@@ -46,6 +46,33 @@ describe("CaptureRenderer hibernation", () => {
     }
   });
 
+  it("coalesces parser input and accounts for queued UTF-8 bytes", async () => {
+    const renderer = new CaptureRenderer(400, 2, 100);
+    try {
+      const chunks = Array.from({ length: 300 }, () => "é");
+      for (const chunk of chunks) renderer.write(chunk);
+
+      expect(renderer.queuedBytes).toBe(Buffer.byteLength(chunks.join(""), "utf8"));
+      await renderer.flush();
+
+      expect(renderer.queuedBytes).toBe(0);
+      expect(renderer.capture()).toBe(chunks.join(""));
+    } finally {
+      renderer.dispose();
+    }
+  });
+
+  it("releases queued bytes and flush barriers on disposal", async () => {
+    const renderer = new CaptureRenderer(80, 2, 100);
+    renderer.write("pending".repeat(1_000));
+    const flushed = renderer.flush();
+
+    renderer.dispose();
+
+    await flushed;
+    expect(renderer.queuedBytes).toBe(0);
+  });
+
   it("keeps whole newest rows within both limits", async () => {
     const renderer = new CaptureRenderer(20, 3, 100);
     try {

@@ -1,5 +1,8 @@
 import { createRequire } from "node:module";
-import { CAPTURE_RENDERER_SCROLLBACK } from "./constants.js";
+import {
+  CAPTURE_RENDERER_PENDING_CHUNK_COMPACT_COUNT,
+  CAPTURE_RENDERER_SCROLLBACK,
+} from "./constants.js";
 import { renderBufferLineWithSgr } from "./utils/render-buffer-line-with-sgr.js";
 
 // @xterm/headless ships a CJS `main` with no `exports` field and a broken
@@ -18,22 +21,25 @@ const { Terminal } = require("@xterm/headless") as typeof import("@xterm/headles
 // browser); this is the one piece of new machinery that gives the REST/CLI
 // surfaces a grid to read, matching tmux's `capture-pane`.
 //
-// One renderer per session, lazily created on first capture and kept alive
-// afterward — zero overhead for browser-only sessions that are never captured.
-// Fed the session's scrollback snapshot at creation (so it catches up on
-// recent history before the renderer existed) and its live output thereafter;
-// resized in lockstep with the PTY; disposed on session exit/kill/teardown.
-// The same xterm parser at the same version the browser uses, so alt-screen,
-// OSC, SGR, and line-wrap are interpreted identically to what a tab shows.
+interface FlushWaiter {
+  resolve: () => void;
+  targetSequence: number;
+}
+
+// The hibernation renderer is always on; capture-pane renderers are created
+// lazily. Both receive live PTY output. xterm parses asynchronously, so keep one
+// write in flight, coalesce the next batch, and expose its byte backlog to PTY
+// flow control instead of retaining one Promise closure per PTY fragment.
 export class CaptureRenderer {
   private readonly terminal: InstanceType<typeof Terminal>;
+  private completedSequence = 0;
   private disposed = false;
-  // xterm parses `write()` asynchronously (batched on a timer), so a buffer read
-  // immediately after write returns blank. Serialize writes into a promise
-  // chain and expose `flush()` so capture/exec readers can await all pending
-  // parses before reading the grid — without forcing every live-feed write to
-  // block (they stay fire-and-forget; only readers await).
-  private writeChain: Promise<void> = Promise.resolve();
+  private enqueuedSequence = 0;
+  private flushWaiters: FlushWaiter[] = [];
+  private pendingByteLength = 0;
+  private pendingChunks: string[] = [];
+  private queuedByteLengthValue = 0;
+  private writeInFlight = false;
 
   constructor(cols: number, rows: number, scrollback: number = CAPTURE_RENDERER_SCROLLBACK) {
     this.terminal = new Terminal({
@@ -46,23 +52,62 @@ export class CaptureRenderer {
 
   write(data: string): void {
     if (this.disposed || !data) return;
-    this.writeChain = this.writeChain.then(() => this.writeAsync(data));
+    const byteLength = Buffer.byteLength(data, "utf8");
+    this.enqueuedSequence += 1;
+    this.pendingChunks.push(data);
+    this.pendingByteLength += byteLength;
+    this.queuedByteLengthValue += byteLength;
+    if (this.pendingChunks.length >= CAPTURE_RENDERER_PENDING_CHUNK_COMPACT_COUNT) {
+      this.pendingChunks = [this.pendingChunks.join("")];
+    }
+    this.pump();
   }
 
-  private writeAsync(data: string): Promise<void> {
+  private pump(): void {
+    if (this.disposed || this.writeInFlight || this.pendingChunks.length === 0) return;
+    const chunks = this.pendingChunks;
+    const batchByteLength = this.pendingByteLength;
+    const batchSequence = this.enqueuedSequence;
+    this.pendingChunks = [];
+    this.pendingByteLength = 0;
+    this.writeInFlight = true;
+    const data = chunks.length === 1 ? chunks[0] : chunks.join("");
+    let finished = false;
+    const finish = (): void => {
+      if (finished) return;
+      finished = true;
+      this.writeInFlight = false;
+      this.queuedByteLengthValue = Math.max(0, this.queuedByteLengthValue - batchByteLength);
+      this.completedSequence = Math.max(this.completedSequence, batchSequence);
+      this.resolveFlushWaiters();
+      this.pump();
+    };
+    try {
+      this.terminal.write(data, finish);
+    } catch {
+      finish();
+    }
+  }
+
+  private resolveFlushWaiters(): void {
+    const pending: FlushWaiter[] = [];
+    for (const waiter of this.flushWaiters) {
+      if (this.completedSequence >= waiter.targetSequence) waiter.resolve();
+      else pending.push(waiter);
+    }
+    this.flushWaiters = pending;
+  }
+
+  flush(): Promise<void> {
+    const targetSequence = this.enqueuedSequence;
+    if (this.disposed || this.completedSequence >= targetSequence) return Promise.resolve();
     return new Promise((resolve) => {
-      if (this.disposed) {
-        resolve();
-        return;
-      }
-      this.terminal.write(data, () => resolve());
+      this.flushWaiters.push({ resolve, targetSequence });
     });
   }
 
-  // Resolve once every write() so far has been parsed into the grid. Callers
-  // that read the buffer (capture, exec extraction) await this first.
-  async flush(): Promise<void> {
-    await this.writeChain;
+  get queuedBytes(): number {
+    return this.queuedByteLengthValue;
   }
 
   resize(cols: number, rows: number): void {
@@ -176,6 +221,11 @@ export class CaptureRenderer {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.pendingChunks = [];
+    this.pendingByteLength = 0;
+    this.queuedByteLengthValue = 0;
+    this.completedSequence = this.enqueuedSequence;
+    this.resolveFlushWaiters();
     try {
       this.terminal.dispose();
     } catch {

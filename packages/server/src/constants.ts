@@ -298,6 +298,11 @@ export const HOOKED_SHELL_NAMES = new Set(["zsh", "bash", "fish"]);
 export const WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES = 4 * 1024 * 1024;
 export const WS_OUTBOUND_RESUME_LOW_WATER_BYTES = 1 * 1024 * 1024;
 export const WS_OUTBOUND_DRAIN_POLL_MS = 50;
+// Headless xterm parsing must participate in the same PTY flow control as a
+// slow WebSocket. Its rendered scrollback is bounded, but bytes waiting for the
+// asynchronous parser are not part of that scrollback and need explicit bounds.
+export const RENDERER_PENDING_PAUSE_HIGH_WATER_BYTES = WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES;
+export const RENDERER_PENDING_RESUME_LOW_WATER_BYTES = WS_OUTBOUND_RESUME_LOW_WATER_BYTES;
 export const WS_PENDING_CLIENT_MAX_BYTES = WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES;
 export const WS_PENDING_CLIENT_MAX_CONTROL_MESSAGES = 256;
 export const WS_BACKPRESSURE_THRESHOLD_BYTES = 64 * 1024 * 1024;
@@ -898,6 +903,9 @@ export const CAPTURE_PANE_MAX_LINES = 10_000;
 // exit/kill. Sized to cover a reasonable screenful of history for an agent
 // reading a pane without ballooning memory across the session cap.
 export const CAPTURE_RENDERER_SCROLLBACK = 10_000;
+// Compact queued PTY fragments periodically so tiny writes cannot amplify the
+// renderer backlog into millions of array entries before flow control engages.
+export const CAPTURE_RENDERER_PENDING_CHUNK_COMPACT_COUNT = 256;
 
 // CDP-backed screenshot + mouse — the terminal-use parity layer that reuses
 // the daemon's existing CDP socket (the one `localterm start` opened for

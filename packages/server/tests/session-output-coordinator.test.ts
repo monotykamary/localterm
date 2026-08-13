@@ -6,10 +6,14 @@ import {
   OUTPUT_BATCH_FLUSH_BYTES,
   OUTPUT_BATCH_WINDOW_MS,
   OUTPUT_STREAM_THRESHOLD_MS,
+  RENDERER_PENDING_PAUSE_HIGH_WATER_BYTES,
+  RENDERER_PENDING_RESUME_LOW_WATER_BYTES,
+  WS_OUTBOUND_DRAIN_POLL_MS,
   WS_OUTPUT_PIXEL_FRAME,
   WS_OUTPUT_FRAME_HEADER_BYTES,
   WS_READY_STATE_OPEN,
 } from "../src/constants.js";
+import type { CaptureRenderer } from "../src/capture-renderer.js";
 import { SessionOutputCoordinator } from "../src/session-output-coordinator.js";
 import { SessionOutputTransport } from "../src/session-output-transport.js";
 import type { ManagedClient, ManagedSession } from "../src/session-manager.js";
@@ -17,7 +21,7 @@ import { createSynchronizedOutputEndDetector } from "../src/utils/create-synchro
 
 const ESC = "\x1b";
 const encode = (value: string) => Buffer.from(value).toString("base64");
-describe("SessionOutputCoordinator kitty file-medium handling", () => {
+describe("SessionOutputCoordinator", () => {
   const tmpdir = process.env.TMPDIR || os.tmpdir();
 
   const makeSession = (framingEnabled: boolean) => {
@@ -39,11 +43,23 @@ describe("SessionOutputCoordinator kitty file-medium handling", () => {
       pendingControlMessageCount: 0,
       pendingOverflowed: false,
     } as unknown as ManagedClient;
+    const session = {
+      pid: 1234,
+      isPaused: false,
+      pause: vi.fn(),
+      resume: vi.fn(),
+    };
+    session.pause.mockImplementation(() => {
+      session.isPaused = true;
+    });
+    session.resume.mockImplementation(() => {
+      session.isPaused = false;
+    });
     const managed = {
       id: "test-session",
       owner: null,
       clients: new Set([client]),
-      session: { pid: 1234, isPaused: false },
+      session,
       synchronizedOutputEndDetector: createSynchronizedOutputEndDetector(),
       outputBatch: "",
       outputBatchTimer: null,
@@ -53,10 +69,11 @@ describe("SessionOutputCoordinator kitty file-medium handling", () => {
       automation: null,
       automationLog: "",
       captureRenderer: undefined,
+      hibernateRenderer: undefined,
       drainPollTimer: null,
       lastOutputAt: 0,
     } as unknown as ManagedSession;
-    return { managed, client, sent };
+    return { managed, client, sent, session };
   };
 
   const makeCoordinator = () => {
@@ -71,6 +88,34 @@ describe("SessionOutputCoordinator kitty file-medium handling", () => {
     });
     return { coordinator, sendControl, writeInput };
   };
+
+  it("pauses the PTY until the hibernation renderer backlog drains", async () => {
+    vi.useFakeTimers();
+    const { managed, session } = makeSession(true);
+    const rendererBacklog = { queuedBytes: RENDERER_PENDING_PAUSE_HIGH_WATER_BYTES };
+    managed.hibernateRenderer = rendererBacklog as unknown as CaptureRenderer;
+    const { coordinator } = makeCoordinator();
+    try {
+      managed.outputBatch = "output";
+      coordinator.flushOutput(managed);
+
+      expect(session.pause).toHaveBeenCalledTimes(1);
+      expect(session.isPaused).toBe(true);
+
+      rendererBacklog.queuedBytes = RENDERER_PENDING_RESUME_LOW_WATER_BYTES + 1;
+      await vi.advanceTimersByTimeAsync(WS_OUTBOUND_DRAIN_POLL_MS);
+      expect(session.resume).not.toHaveBeenCalled();
+
+      rendererBacklog.queuedBytes = RENDERER_PENDING_RESUME_LOW_WATER_BYTES;
+      await vi.advanceTimersByTimeAsync(WS_OUTBOUND_DRAIN_POLL_MS);
+      expect(session.resume).toHaveBeenCalledTimes(1);
+      expect(session.isPaused).toBe(false);
+      expect(managed.drainPollTimer).toBeNull();
+    } finally {
+      coordinator.stopDrainPoll(managed);
+      vi.useRealTimers();
+    }
+  });
 
   it("answers a file-medium probe with OK for framed viewers", async () => {
     const probeFile = path.join(tmpdir, "kitty-probe-ok.rgba");
