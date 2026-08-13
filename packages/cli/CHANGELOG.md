@@ -1,5 +1,12 @@
 # localterm
 
+## 2.76.1
+
+### Patch Changes
+
+- 4542665: Keep the existing terminal frame visible while a replacement PTY reconnect buffers its scrollback, then apply reset and replay as one xterm parse transaction to eliminate the blank restart flash.
+  - @monotykamary/localterm-server@2.76.1
+
 ## 2.76.0
 
 ### Patch Changes
