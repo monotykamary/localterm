@@ -7,18 +7,22 @@ import { FILE_PREVIEW_MAX_BYTES } from "../src/constants.js";
 
 describe("/api/file/content text route", () => {
   let server: RunningServer;
+  let stateDirectory: string;
   let cwd: string;
 
   beforeAll(async () => {
+    stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-content-state-"));
     server = await createServer({
       port: 0,
       host: "127.0.0.1",
+      stateDirectory,
       tabController: { open: async () => null, close: async () => {} },
     });
   });
 
   afterAll(async () => {
     await server.stop();
+    fs.rmSync(stateDirectory, { recursive: true, force: true });
   });
 
   beforeEach(() => {

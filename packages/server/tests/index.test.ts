@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createServer, healthSchema, type RunningServer } from "../src/index.js";
 import { pollFor } from "./helpers/poll-for.js";
 import type { ProcessSnapshotEntry } from "../src/caffeinate-process-match.js";
 import type { ListeningSocketEntry } from "../src/listening-ports.js";
 import { WebSocket } from "ws";
+
+const makeStateDirectory = (): string =>
+  fs.mkdtempSync(path.join(os.tmpdir(), "localterm-index-state-"));
 
 // Output frames arrive as binary (raw UTF-8 bytes) so the client can dispense
 // with JSON.parse. In tests we normalize them back into a JSON-shaped
@@ -116,18 +122,22 @@ const closeWs = (socket: WebSocket): Promise<void> =>
 
 describe("createServer WS lifecycle", { tags: ["integration"] }, () => {
   let server: RunningServer;
+  let stateDirectory: string;
 
   beforeEach(async () => {
+    stateDirectory = makeStateDirectory();
     // Inject a no-op tab controller so the server doesn't reach for a real CDP browser.
     server = await createServer({
       port: 0,
       host: "127.0.0.1",
+      stateDirectory,
       tabController: { open: async () => null, close: async () => {} },
     });
   });
 
   afterEach(async () => {
     await server.stop();
+    fs.rmSync(stateDirectory, { recursive: true, force: true });
   });
 
   it("sends session and terminal input capability frames on connect", async () => {
@@ -313,9 +323,11 @@ describe("createServer WS lifecycle", { tags: ["integration"] }, () => {
   });
 
   it("reports CDP as not connected when no debug-enabled browser is reachable", async () => {
+    const cdpStateDirectory = makeStateDirectory();
     const cdpLess = await createServer({
       port: 0,
       host: "127.0.0.1",
+      stateDirectory: cdpStateDirectory,
       cdpDetect: async () => [],
     });
     try {
@@ -328,6 +340,7 @@ describe("createServer WS lifecycle", { tags: ["integration"] }, () => {
       expect(parsed.cdp).toEqual({ connected: false });
     } finally {
       await cdpLess.stop();
+      fs.rmSync(cdpStateDirectory, { recursive: true, force: true });
     }
   });
 
@@ -578,17 +591,21 @@ describe("createServer WS lifecycle", { tags: ["integration"] }, () => {
 
 describe("POST /api/sessions shell override", { tags: ["integration"] }, () => {
   let server: RunningServer;
+  let stateDirectory: string;
 
   beforeEach(async () => {
+    stateDirectory = makeStateDirectory();
     server = await createServer({
       port: 0,
       host: "127.0.0.1",
+      stateDirectory,
       tabController: { open: async () => null, close: async () => {} },
     });
   });
 
   afterEach(async () => {
     await server.stop();
+    fs.rmSync(stateDirectory, { recursive: true, force: true });
   });
 
   const sessionsUrl = () => `http://127.0.0.1:${server.port}/api/sessions`;
@@ -640,6 +657,7 @@ describe("POST /api/sessions shell override", { tags: ["integration"] }, () => {
 
 describe("open dev ports API", { tags: ["integration"] }, () => {
   let server: RunningServer;
+  let stateDirectory: string;
   let socket: WebSocket;
   let sessionPid = 0;
   let sessionId = "";
@@ -651,9 +669,11 @@ describe("open dev ports API", { tags: ["integration"] }, () => {
     // them between calls to model a dev server starting or a tree change.
     fakeSnapshot = [];
     fakeListeners = [];
+    stateDirectory = makeStateDirectory();
     server = await createServer({
       port: 0,
       host: "127.0.0.1",
+      stateDirectory,
       tabController: { open: async () => null, close: async () => {} },
       portsSnapshotProcesses: async () => fakeSnapshot,
       portsSnapshotListeners: async () => fakeListeners,
@@ -668,6 +688,7 @@ describe("open dev ports API", { tags: ["integration"] }, () => {
   afterEach(async () => {
     await closeWs(socket);
     await server.stop();
+    fs.rmSync(stateDirectory, { recursive: true, force: true });
   });
 
   it("lists listening sockets owned by descendants of a session shell", async () => {

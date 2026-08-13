@@ -12,18 +12,22 @@ const TEXT_BYTES = Buffer.from("just text");
 
 describe("/api/file image route", () => {
   let server: RunningServer;
+  let stateDirectory: string;
   let cwd: string;
 
   beforeAll(async () => {
+    stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-file-state-"));
     server = await createServer({
       port: 0,
       host: "127.0.0.1",
+      stateDirectory,
       tabController: { open: async () => null, close: async () => {} },
     });
   });
 
   afterAll(async () => {
     await server.stop();
+    fs.rmSync(stateDirectory, { recursive: true, force: true });
   });
 
   beforeEach(() => {
