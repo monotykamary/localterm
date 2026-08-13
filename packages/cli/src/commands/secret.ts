@@ -1,5 +1,5 @@
 import kleur from "kleur";
-import { createDefaultSecretBackend } from "@monotykamary/localterm-server";
+import { runSecretGet } from "./secret-get.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import {
   daemonBaseUrl,
@@ -68,31 +68,6 @@ const runList = async (): Promise<void> => {
       `${kleur.cyan(secret.name.padEnd(nameWidth))}  ${secret.envVar.padEnd(envWidth)}  ${value}`,
     );
   }
-};
-
-// `localterm secret get <name>` — resolves the value from the backend (macOS
-// Keychain) directly, NOT through the daemon's HTTP API. This mirrors the
-// generated shim's resolution path and preserves the "values never cross the
-// network" property: the value goes Keychain → CLI process → stdout, never
-// through the loopback server. Works even when the daemon is down — the
-// Keychain entry persists independently. Prints the value to stdout (with a
-// trailing newline, which `$()` strips for `VAR=$(localterm secret get x)`).
-const runGet = async (name: string): Promise<void> => {
-  const backend = createDefaultSecretBackend();
-  if (!backend.supported) {
-    console.log(kleur.red("✗ secret storage isn't supported on this platform."));
-    console.log(kleur.dim("  (it uses macOS Keychain; run on a Mac.)"));
-    process.exitCode = 1;
-    return;
-  }
-  const value = await backend.get(name);
-  if (value === null) {
-    console.log(kleur.red(`✗ no secret named '${name}'.`));
-    console.log(kleur.dim("  list with `localterm secret list`."));
-    process.exitCode = 1;
-    return;
-  }
-  process.stdout.write(`${value}\n`);
 };
 
 // `localterm secret set <name> -e <VAR> [-v <value>]` — upserts the secret's
@@ -283,7 +258,7 @@ const runImport = async (options: { input?: string; passphrase?: string }): Prom
 };
 
 export const runSecretList = runList;
-export const runSecretGet = runGet;
+export { runSecretGet };
 export const runSecretSet = runSet;
 export const runSecretDelete = runDelete;
 export const runSecretExport = runExport;

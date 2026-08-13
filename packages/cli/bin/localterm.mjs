@@ -1,2 +1,6 @@
 #!/usr/bin/env node
-import "../dist/index.js";
+const { trySecretGetFastPath } = await import("../dist/secret-get-fast-path.js");
+
+if (!(await trySecretGetFastPath(process.argv.slice(2)))) {
+  await import("../dist/index.js");
+}

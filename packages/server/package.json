@@ -41,6 +41,10 @@
       "types": "./dist/protocol.d.ts",
       "import": "./dist/protocol.js"
     },
+    "./secret-backend": {
+      "types": "./dist/secret-backend.d.ts",
+      "import": "./dist/secret-backend.js"
+    },
     "./constants": {
       "types": "./dist/constants.d.ts",
       "import": "./dist/constants.js"

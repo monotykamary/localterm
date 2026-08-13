@@ -168,7 +168,14 @@ describe("activity shim generation", () => {
   it("emits the fork-wait + signal variant for an activity-watched program", () => {
     const shimsDir = path.join(tmp, "shims");
     const activityDir = path.join(tmp, "activity");
-    const content = buildShimContent("gh", shimsDir, "", path.join(activityDir, "gh"));
+    const content = buildShimContent(
+      "gh",
+      shimsDir,
+      new FakeBackend(),
+      undefined,
+      [],
+      path.join(activityDir, "gh"),
+    );
     expect(content).toContain("_activity_file=");
     expect(content).toContain(activityDir);
     expect(content).toContain('"$_real" "$@"');
@@ -180,7 +187,10 @@ describe("activity shim generation", () => {
 
   it("keeps exec (no activity signal) for a non-activity-watched program", () => {
     const shimsDir = path.join(tmp, "shims");
-    const content = buildShimContent("pi", shimsDir, "_resolve ANTHROPIC_API_KEY");
+    const content = buildShimContent("pi", shimsDir, new FakeBackend(), undefined, [
+      { name: "anthropic", envVar: "ANTHROPIC_API_KEY" },
+    ]);
+    expect(content).toContain("_fake_resolve 'anthropic' ANTHROPIC_API_KEY");
     expect(content).toContain('exec "$_real" "$@"');
     expect(content).not.toContain("_activity_file=");
     expect(content).not.toContain("exit $_rc");
@@ -192,10 +202,12 @@ describe("activity shim generation", () => {
     const content = buildShimContent(
       "gh",
       shimsDir,
-      "_resolve GH_TOKEN",
+      new FakeBackend(),
+      undefined,
+      [{ name: "github", envVar: "GH_TOKEN" }],
       path.join(activityDir, "gh"),
     );
-    expect(content).toContain("_resolve GH_TOKEN");
+    expect(content).toContain("_fake_resolve 'github' GH_TOKEN");
     expect(content).toContain('"$_real" "$@"');
     expect(content).toContain("exit $_rc");
   });
@@ -203,7 +215,7 @@ describe("activity shim generation", () => {
   it("generates a gh activity shim even with no user-configured processes", () => {
     const shimsDir = path.join(tmp, "shims");
     const activityDir = path.join(tmp, "activity");
-    regenerateShims([], new Map(), shimsDir, new FakeBackend(), activityDir, ["gh"]);
+    regenerateShims([], new Map(), shimsDir, new FakeBackend(), activityDir, undefined, ["gh"]);
     const ghShim = path.join(shimsDir, "gh");
     expect(existsSync(ghShim)).toBe(true);
     const content = readFileSync(ghShim, "utf8");
@@ -215,7 +227,7 @@ describe("activity shim generation", () => {
     const shimsDir = path.join(tmp, "shims");
     const activityDir = path.join(tmp, "activity");
     const unsupported: SecretBackend = new UnsupportedBackend();
-    regenerateShims([], new Map(), shimsDir, unsupported, activityDir, ["gh"]);
+    regenerateShims([], new Map(), shimsDir, unsupported, activityDir, "/fake/helper", ["gh"]);
     expect(existsSync(path.join(shimsDir, "gh"))).toBe(false);
   });
 
@@ -232,12 +244,13 @@ describe("activity shim generation", () => {
       shimsDir,
       backend,
       activityDir,
+      undefined,
       ["gh"],
     );
     expect(existsSync(path.join(shimsDir, "pi"))).toBe(true);
     expect(existsSync(path.join(shimsDir, "gh"))).toBe(true);
     // Second pass: pi no longer requests the secret -> swept; gh stays.
-    regenerateShims([pi], new Map([["k", "K"]]), shimsDir, backend, activityDir, ["gh"]);
+    regenerateShims([pi], new Map([["k", "K"]]), shimsDir, backend, activityDir, undefined, ["gh"]);
     expect(existsSync(path.join(shimsDir, "pi"))).toBe(false);
     expect(existsSync(path.join(shimsDir, "gh"))).toBe(true);
     expect(readFileSync(path.join(shimsDir, "gh"), "utf8")).toContain("_activity_file=");

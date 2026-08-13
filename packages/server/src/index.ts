@@ -305,6 +305,11 @@ export interface ServerOptions {
    */
   secretBackend?: SecretBackend;
   /**
+   * Absolute path to the native helper used when the secret backend opts into
+   * its fixed Keychain protocol. Other backends retain their own shim snippets.
+   */
+  secretHelperPath?: string;
+  /**
    * Scrypt work factor (log2 N) for the age passphrase on secrets export.
    * Defaults to SECRET_EXPORT_SCRYPT_WORK_FACTOR. Injectable so tests use a
    * cheap factor instead of the ~2s pure-JS production KDF per export.
@@ -2328,6 +2333,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       shimsDir,
       secretBackend,
       activityDir,
+      options.secretHelperPath,
     );
   syncSecretShims();
   // Detect short-lived CLI invocations the process-tree walker can't catch

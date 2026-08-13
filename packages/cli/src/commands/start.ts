@@ -49,6 +49,9 @@ import { readPackageVersion } from "../utils/read-package-version.js";
 import { runStop } from "./stop.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const secretHelperPath = fileURLToPath(
+  new URL("../../resources/localterm-secret-helper", import.meta.url),
+);
 
 const resolveStaticRoot = (): string | null => {
   const candidates = [
@@ -198,6 +201,7 @@ const retryBindAfterOldDaemonExits = async (
         port: options.port,
         host: options.host,
         staticRoot,
+        secretHelperPath,
       });
     } catch (retryCaughtError) {
       const stillInUse =
@@ -245,6 +249,7 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
       host: options.host,
       staticRoot,
       currentVersion: readPackageVersion(),
+      secretHelperPath,
     });
   } catch (caughtError) {
     const isEaddrInuse =
@@ -264,6 +269,7 @@ const runStartInForeground = async (options: StartOptions): Promise<void> => {
           host: options.host,
           staticRoot,
           currentVersion: readPackageVersion(),
+          secretHelperPath,
         });
       } catch (retryError) {
         console.error(

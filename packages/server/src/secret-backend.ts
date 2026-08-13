@@ -20,15 +20,15 @@ const SECURITY_TIMEOUT_MS = 5_000;
 // the backend's resolution command into each shim.
 export interface SecretBackend {
   readonly supported: boolean;
+  /** Opts into the CLI's fixed macOS Keychain helper argument protocol. */
+  readonly nativeHelperProtocol?: "localterm-keychain-v1";
   get(name: string): Promise<string | null>;
   has(name: string): Promise<boolean>;
   set(name: string, value: string): Promise<void>;
   delete(name: string): Promise<void>;
-  // The two-line POSIX snippet a generated shim runs to resolve one secret and
-  // inject it as `envVar`. Baked into the shim at generation time so the shim
-  // is self-contained (no daemon or CLI dependency at run time). Backends own
-  // this because the resolution mechanism is backend-specific (Keychain shells
-  // out to `security`; an encrypted-file backend would call its resolver).
+  // The POSIX snippet a generated shim runs to resolve one secret and inject
+  // it as `envVar`. Backends own this resolution path. It remains the default;
+  // only the fixed Keychain protocol above may opt into the native helper.
   shimResolveSnippet(name: string, envVar: string): string;
 }
 
@@ -44,6 +44,7 @@ const keychainService = (name: string): string => `${SECRET_KEYCHAIN_SERVICE_PRE
 // that shells out to `security`; the value never touches disk.
 class KeychainSecretBackend implements SecretBackend {
   readonly supported: boolean;
+  readonly nativeHelperProtocol = "localterm-keychain-v1" as const;
 
   constructor() {
     this.supported = process.platform === "darwin";

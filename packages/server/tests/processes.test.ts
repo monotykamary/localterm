@@ -109,6 +109,8 @@ describe("processes API + shim generation", () => {
     expect(shim).toContain("ANTHROPIC_API_KEY");
     expect(shim).toContain("anthropic-api-key");
     expect(shim).toContain(shimsDir);
+    expect(shim).toContain("_fake_resolve 'anthropic-api-key' ANTHROPIC_API_KEY");
+    expect(shim).not.toContain("localterm-secret-helper");
     // The value is never baked into the shim (only the resolve snippet is).
     expect(shim).not.toContain("sk-test");
     expect(backend.store.get("anthropic-api-key")).toBe("sk-test");
@@ -325,6 +327,35 @@ describe("migrate-secrets-to-processes (one-time, in-place)", () => {
     expect(piShim).toContain("OPENAI_API_KEY");
     const claudeShim = readFileSync(path.join(shimsDir, "claude"), "utf8");
     expect(claudeShim).toContain("ANTHROPIC_API_KEY");
+  });
+
+  it("starts with persisted secret-bearing processes using a custom backend without a helper", async () => {
+    writeFileSync(
+      path.join(stateDirectory, "secrets.json"),
+      JSON.stringify({
+        version: 2,
+        secrets: [{ name: "anthropic", envVar: "ANTHROPIC_API_KEY" }],
+      }),
+    );
+    writeFileSync(
+      path.join(stateDirectory, "processes.json"),
+      JSON.stringify({
+        version: 1,
+        processes: [{ name: "pi", requestedSecrets: ["anthropic"] }],
+      }),
+    );
+
+    server = await createServer({
+      port: 0,
+      host: "127.0.0.1",
+      stateDirectory,
+      secretBackend: new FakeBackend(),
+      tabController: { open: async () => null, close: async () => {} },
+    });
+
+    expect(readFileSync(path.join(shimsDir, "pi"), "utf8")).toContain(
+      "_fake_resolve 'anthropic' ANTHROPIC_API_KEY",
+    );
   });
 
   it("no-ops when secrets.json is already v2 (or absent)", async () => {

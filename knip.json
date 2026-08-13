@@ -43,7 +43,8 @@
       "entry": ["src/index.ts", "vitest.config.ts"]
     },
     "packages/pi-extension": {
-      "entry": ["extensions/index.ts", "vitest.config.ts"]
+      "entry": ["extensions/index.ts", "vitest.config.ts"],
+      "ignore": ["dist/**"]
     }
   }
 }

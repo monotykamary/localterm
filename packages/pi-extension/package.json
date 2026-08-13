@@ -21,18 +21,19 @@
     "directory": "packages/pi-extension"
   },
   "files": [
-    "extensions",
-    "src"
+    "dist",
+    "README.md"
   ],
   "type": "module",
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json --watch",
+    "build": "vp pack extensions/index.ts --format esm --out-dir dist --deps.never-bundle @earendil-works/pi-coding-agent --deps.never-bundle @earendil-works/pi-tui",
+    "dev": "vp pack extensions/index.ts --format esm --out-dir dist --deps.never-bundle @earendil-works/pi-coding-agent --deps.never-bundle @earendil-works/pi-tui --watch",
     "test": "vp test --run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "pnpm run build"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.1",
@@ -50,7 +51,7 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/index.ts"
+      "./dist/index.mjs"
     ]
   }
 }
