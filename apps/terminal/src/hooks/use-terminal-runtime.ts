@@ -15,6 +15,7 @@ import {
   RECONNECT_DELAY_MS,
   RESIZE_DEBOUNCE_MS,
   TERMINAL_BACKSPACE_SEQUENCE,
+  TERMINAL_REPLAY_RESET_SEQUENCE,
 } from "@/lib/constants";
 import {
   AMBIENT_TAB_CLOSE_DEADLINE_MS,
@@ -100,6 +101,7 @@ const titleForDeadSession = (raw: string): string =>
 // DecompressionStream for each batch can dominate frame time. Browsers never
 // negotiate permessage-deflate, so this remains application-level.
 const COMPRESS_MODE = detectOutputCompressMode(window.location.hostname);
+const TERMINAL_REPLAY_RESET_BYTES = new TextEncoder().encode(TERMINAL_REPLAY_RESET_SEQUENCE);
 
 export type TerminalExitInfo =
   | { reason: "shell-exited"; exitCode: number | null }
@@ -573,6 +575,11 @@ export const useTerminalRuntime = ({
     localEcho.setEnabled(activeLocalEchoRef.current);
     localEchoRef.current = localEcho;
 
+    // A session-id change does not erase the old frame immediately. The full
+    // replay is buffered first, then RIS + replay enter xterm as one parse action,
+    // so the browser cannot paint the empty state between them. Keep this set
+    // across a failed replay reconnect: the surface still belongs to the old PTY.
+    let replaceTerminalSurfaceOnReplay = false;
     let activeOutputSession: TerminalOutputSession | null = null;
     const createOutputSession = (onOverflow: () => void) =>
       createTerminalOutputSession({
@@ -581,10 +588,15 @@ export const useTerminalRuntime = ({
           outputBatcher.pushBytes(localEcho.hasPending() ? localEcho.reconcile(bytes) : bytes);
           tabOutputActivity.noteOutputActivity();
         },
-        onReplay: (chunks, onComplete) => {
-          for (let index = 0; index < chunks.length; index += 1) {
-            terminal.write(chunks[index], index === chunks.length - 1 ? onComplete : undefined);
-          }
+        onReplay: (bytes, onComplete) => {
+          const replacesTerminalSurface = replaceTerminalSurfaceOnReplay;
+          // Once the single reset+replay write is queued, xterm owns the complete
+          // replacement even if this socket closes before its parse callback.
+          if (replacesTerminalSurface) replaceTerminalSurfaceOnReplay = false;
+          terminal.write(bytes, () => {
+            if (replacesTerminalSurface) pixelFrameOverlay.clear();
+            onComplete();
+          });
         },
         onReplayComplete: updateScrollbar,
         onPixelFrame: pixelFrameOverlay.applyFrame,
@@ -753,9 +765,6 @@ export const useTerminalRuntime = ({
           const sessionTransition = sessionLifecycle.handleSession(message.id);
           const { isSwitch, priorSessionId } = sessionTransition;
           outputSession.beginSession();
-          // A fresh PTY means the screen no longer represents the previous frame
-          // source; clear any stale overlay picture so it can't cover new content.
-          pixelFrameOverlay.clear();
           localEcho.flush();
           // Drop the prior PTY's effective-viewport mask: the new PTY's size
           // arrives in its own `pty-size` frame, and until it does the mask
@@ -769,22 +778,11 @@ export const useTerminalRuntime = ({
           // the debounced refit can't flash a stale region.
           scheduleFit();
           removeFreshSessionQueryParam();
-          // A switch (or a missed reattach that spawned a fresh shell): the
-          // new PTY is a different one than the tab was just viewing, so reset
-          // the terminal and ask the server to replay its scrollback before
-          // live fan-out begins. The replay lands as one binary frame right
-          // after this, so the screen shows the PTY's recent output instead
-          // of the prior PTY's stale content.
-          if (isSwitch) {
-            terminal.reset();
-            // xterm's reset() (RIS) does not clear coreService.isCursorHidden —
-            // only ?25h/?25l/softReset do — so a source PTY that hid the cursor
-            // leaves it hidden on the fresh surface. An empty target PTY sends
-            // no replay to re-establish its own cursor state, so the cursor stays
-            // invisible. Re-assert DECTCEM locally; the replay, if any, overrides
-            // with the target's own cursor state, and an empty replay keeps it on.
-            terminal.write("\x1b[?25h");
-          }
+          // A switch (or a missed reattach that spawned a fresh shell) needs a
+          // different surface, but keep the old frame visible while the server
+          // sends the replacement replay. Its RIS prefix is buffered with the
+          // replay and parsed atomically when replay-end lands.
+          if (isSwitch) replaceTerminalSurfaceOnReplay = true;
           tabOutputActivity.beginSession({
             foregroundProcess: message.foreground,
             isSwitch,
@@ -812,12 +810,14 @@ export const useTerminalRuntime = ({
           // lost across the gap — it lives in the ring buffer and arrives via
           // the replay. A brand-new spawn has an empty ring buffer, so a
           // fresh-load replay is a no-op there.
-          const wantsReplay = isSwitch || priorSessionId === null;
+          const wantsReplay = isSwitch || priorSessionId === null || replaceTerminalSurfaceOnReplay;
           if (wantsReplay) {
             // Open the suppressed-replay window: buffer the replay frames and
             // drop xterm's responses until `replay-end` writes them as one
             // block. Cleared in the replay-end handler.
-            outputSession.beginReplay();
+            outputSession.beginReplay(
+              replaceTerminalSurfaceOnReplay ? TERMINAL_REPLAY_RESET_BYTES : undefined,
+            );
           }
           send({
             type: "ready",

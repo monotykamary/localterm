@@ -46,6 +46,22 @@ describe("createTerminalOutputSession", () => {
     expect(onOutput).not.toHaveBeenCalled();
   });
 
+  it("coalesces a replacement prefix and replay chunks into one write", () => {
+    const { session, onReplay } = createSession();
+    session.beginReplay(Uint8Array.from([1, 2]));
+    session.handleBinaryMessage(Uint8Array.from([3, 4]).buffer);
+    session.handleBinaryMessage(Uint8Array.from([5, 6]).buffer);
+
+    session.finishReplay();
+
+    expect(onReplay).toHaveBeenCalledOnce();
+    expect(Array.from(onReplay.mock.calls[0]?.[0] ?? [])).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(session.isSuppressingOutput()).toBe(true);
+    const complete = onReplay.mock.calls[0]?.[1] as (() => void) | undefined;
+    complete?.();
+    expect(session.isSuppressingOutput()).toBe(false);
+  });
+
   it("keeps unbracketed output on the backward-compatible immediate path", () => {
     const { session, onOutput } = createSession();
     const bytes = Uint8Array.from([1, 2, 3]);

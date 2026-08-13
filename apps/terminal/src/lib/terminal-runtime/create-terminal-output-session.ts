@@ -17,10 +17,23 @@ import {
 import { createContextDecompressor } from "@/utils/create-context-decompressor";
 import { decompressFrame } from "@/utils/decompress-frame";
 
+const combineChunks = (chunks: Uint8Array[], byteLength: number): Uint8Array | undefined => {
+  const first = chunks[0];
+  if (!first) return undefined;
+  if (chunks.length === 1) return first;
+  const combined = new Uint8Array(byteLength);
+  let byteOffset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, byteOffset);
+    byteOffset += chunk.byteLength;
+  }
+  return combined;
+};
+
 interface CreateTerminalOutputSessionOptions {
   onOutput: (bytes: Uint8Array) => void;
   onOverflow: () => void;
-  onReplay: (chunks: Uint8Array[], onComplete: () => void) => void;
+  onReplay: (bytes: Uint8Array, onComplete: () => void) => void;
   onReplayComplete: () => void;
   // Relayed pixel frames (kitty file-medium RGBA relayed by the daemon) routed
   // outside the terminal output path — never written into xterm.
@@ -30,7 +43,7 @@ interface CreateTerminalOutputSessionOptions {
 export interface TerminalOutputSession {
   beginAtomicOutputFrame: () => void;
   beginSession: () => void;
-  beginReplay: () => void;
+  beginReplay: (prefix?: Uint8Array) => void;
   dispose: () => void;
   finishAtomicOutputFrame: () => void;
   finishReplay: () => void;
@@ -55,8 +68,8 @@ export const createTerminalOutputSession = ({
   // frames must reach xterm in PTY order, and the replay-end flush must wait
   // for the replay frames' decompresses. A promise chain (FIFO). ptyGeneration
   // invalidates pending decompresses when a {session} frame switches PTYs —
-  // a prior PTY's frame still in the queue would otherwise land in the new
-  // PTY (after terminal.reset()).
+  // a prior PTY's frame still in the queue would otherwise land after the new
+  // PTY's atomic reset-and-replay transaction.
   let decompressQueue: Promise<void> = Promise.resolve();
   let decompressQueueGeneration = 0;
   let queuedBytes = 0;
@@ -187,37 +200,32 @@ export const createTerminalOutputSession = ({
     const chunks = atomicOutputFrameChunks;
     const byteLength = atomicOutputFrameBytes;
     clearAtomicOutputFrame();
-    if (chunks.length === 0) return;
-    if (chunks.length === 1) {
-      const chunk = chunks[0];
-      if (chunk) onOutput(chunk);
-      return;
-    }
-    const bytes = new Uint8Array(byteLength);
-    let byteOffset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, byteOffset);
-      byteOffset += chunk.byteLength;
-    }
-    onOutput(bytes);
+    const bytes = combineChunks(chunks, byteLength);
+    if (bytes) onOutput(bytes);
   };
 
   const flushReplay = (): void => {
     if (disposed) return;
     const chunks = replayChunks;
+    const byteLength = replayBytes;
     const generationAtFlush = ptyGeneration;
     inReplay = false;
     replayBytes = 0;
     replayChunks = [];
     if (chunks.length === 0) {
       suppressOutput = false;
-    } else {
-      onReplay(chunks, () => {
-        if (disposed || generationAtFlush !== ptyGeneration) return;
-        suppressOutput = false;
-        onReplayComplete();
-      });
+      return;
     }
+    const bytes = combineChunks(chunks, byteLength);
+    if (!bytes) {
+      suppressOutput = false;
+      return;
+    }
+    onReplay(bytes, () => {
+      if (disposed || generationAtFlush !== ptyGeneration) return;
+      suppressOutput = false;
+      onReplayComplete();
+    });
   };
 
   return {
@@ -249,13 +257,14 @@ export const createTerminalOutputSession = ({
       clearAtomicOutputFrame();
       suppressOutput = false;
     },
-    beginReplay: () => {
+    beginReplay: (prefix) => {
       if (disposed) return;
       inReplay = true;
       suppressOutput = true;
       replayBytes = 0;
       replayChunks = [];
       clearAtomicOutputFrame();
+      if (prefix && prefix.byteLength > 0) retainReplayChunk(prefix);
     },
     dispose,
     finishAtomicOutputFrame: () => {

@@ -14,6 +14,7 @@ import {
   TERMINAL_FONT_SIZE_STORAGE_KEY,
   TERMINAL_LINE_HEIGHT_MAX,
   TERMINAL_LINE_HEIGHT_STORAGE_KEY,
+  TERMINAL_REPLAY_RESET_SEQUENCE,
   TERMINAL_SCROLL_ON_USER_INPUT_STORAGE_KEY,
   TERMINAL_SCROLLBACK_STORAGE_KEY,
   TERMINAL_TAB_SEQUENCE,
@@ -2681,6 +2682,69 @@ describe("Terminal session attachment", () => {
     expect(secondWs?.send).toHaveBeenCalledWith(
       expect.stringMatching(/"type":"ready","replay":true/),
     );
+  });
+
+  it("keeps the old frame until a replacement PTY replay is complete", () => {
+    const nextSessionId = "650e8400-e29b-41d4-a716-446655440000";
+    installFakeLocalStorage();
+    render(<Terminal />);
+    const firstWs = fakeWebSockets[0];
+    const xterm = fakeXterms[0];
+
+    act(() => {
+      fireSessionFrame(firstWs, TEST_SID);
+      firstWs?.fireMessage({ type: "replay-end" });
+      firstWs?.fireClose(1006, "", false);
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+
+    const replacementWs = fakeWebSockets[1];
+    xterm?.write.mockClear();
+    act(() => {
+      fireSessionFrame(replacementWs, nextSessionId);
+      replacementWs?.fireMessage({ type: "output", data: "RESTORED_FRAME" });
+    });
+    expect(xterm?.write).not.toHaveBeenCalled();
+
+    act(() => {
+      replacementWs?.fireMessage({ type: "replay-end" });
+    });
+    expect(xterm?.write).toHaveBeenCalledOnce();
+    expect(lastWriteArgAsString(xterm)).toBe(`${TERMINAL_REPLAY_RESET_SEQUENCE}RESTORED_FRAME`);
+  });
+
+  it("retains a pending surface replacement across another dropped socket", () => {
+    const nextSessionId = "650e8400-e29b-41d4-a716-446655440000";
+    installFakeLocalStorage();
+    render(<Terminal />);
+    const firstWs = fakeWebSockets[0];
+    const xterm = fakeXterms[0];
+
+    act(() => {
+      fireSessionFrame(firstWs, TEST_SID);
+      firstWs?.fireMessage({ type: "replay-end" });
+      firstWs?.fireClose(1006, "", false);
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+      fireSessionFrame(fakeWebSockets[1], nextSessionId);
+      fakeWebSockets[1]?.fireClose(1006, "", false);
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+
+    const retryWs = fakeWebSockets[2];
+    xterm?.write.mockClear();
+    act(() => {
+      fireSessionFrame(retryWs, nextSessionId);
+    });
+    expect(retryWs?.send).toHaveBeenCalledWith(
+      expect.stringMatching(/"type":"ready","replay":true/),
+    );
+    expect(xterm?.write).not.toHaveBeenCalled();
+
+    act(() => {
+      retryWs?.fireMessage({ type: "output", data: "RETRIED_FRAME" });
+      retryWs?.fireMessage({ type: "replay-end" });
+    });
+    expect(lastWriteArgAsString(xterm)).toBe(`${TERMINAL_REPLAY_RESET_SEQUENCE}RETRIED_FRAME`);
   });
 
   it("does not replay scrollback on a silent reattach of the same PTY", () => {

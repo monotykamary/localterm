@@ -274,6 +274,10 @@ export const TERMINAL_CURSOR_WORD_RIGHT_SEQUENCE = TERMINAL_ESCAPE_SEQUENCE + "f
 export const TERMINAL_CURSOR_LINE_START_SEQUENCE = String.fromCharCode(1);
 export const TERMINAL_CURSOR_LINE_END_SEQUENCE = String.fromCharCode(5);
 export const TERMINAL_DELETE_TO_LINE_START_SEQUENCE = String.fromCharCode(21);
+// RIS plus an explicit cursor show. xterm's RIS path does not clear its hidden-cursor
+// service flag, so a replay replacing a TUI surface must reassert DECTCEM.
+export const TERMINAL_REPLAY_RESET_SEQUENCE =
+  TERMINAL_ESCAPE_SEQUENCE + "c" + TERMINAL_ESCAPE_SEQUENCE + "[?25h";
 // Kitty keyboard protocol "Disambiguate escape codes" flag (bit 0). Active means
 // modifier+key combos must be reported as `CSI <keycode>;<mods+1> u` instead of
 // the legacy bare control byte (which can't distinguish e.g. Enter vs Shift+Enter).
