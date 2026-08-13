@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.76.2
+
+### Patch Changes
+
+- 9dc9595: Bound headless terminal rendering under sustained PTY output by coalescing parser writes and pausing the PTY at renderer queue watermarks. This prevents hibernation history capture from retaining an unbounded JavaScript heap when chatty agents outrun xterm parsing.
+
 ## 2.76.1
 
 ## 2.76.0
