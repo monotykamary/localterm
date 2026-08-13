@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 describe("extension entry", () => {
-  it("does not import or activate the implementation outside localterm", async () => {
+  it("does not activate the implementation outside localterm", async () => {
     delete process.env.LOCALTERM;
     await localtermExtension({} as never);
     expect(activation).not.toHaveBeenCalled();
