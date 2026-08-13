@@ -157,6 +157,15 @@ export class Session extends EventEmitter<SessionEvents> {
       env.LOCALTERM_INITIAL_COMMAND = input.initialCommand;
     }
 
+    if (input.replaySeed) {
+      const renderedRows = input.replaySeed.replace(/(?:\r\n|\r|\n)+$/, "");
+      if (renderedRows) {
+        for (const row of renderedRows.split(/\r\n|\r|\n/)) {
+          this.appendScrollback(`${row}\r\n`);
+        }
+      }
+    }
+
     this.pty = spawn(this.shell, shellArgs, {
       name: TERM_TYPE,
       cols: this.currentCols,

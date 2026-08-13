@@ -154,8 +154,9 @@ export class SessionOutputCoordinator {
     if (managed.automation) this.appendAutomationLog(managed, output);
     this.noteOutputActivity(managed.session.pid);
     this.onOutputActivity();
-    // Keep the lazy capture renderer in lockstep with PTY output when one exists.
+    // Keep rendered terminal models in lockstep with the bytes clients see.
     managed.captureRenderer?.write(output);
+    managed.hibernateRenderer?.write(output);
 
     if (output.length === 0) {
       await asyncTasks;

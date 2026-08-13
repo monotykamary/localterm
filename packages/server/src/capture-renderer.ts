@@ -71,7 +71,7 @@ export class CaptureRenderer {
     this.terminal.resize(cols, rows);
   }
 
-  // Read the last `lines` lines of the rendered grid as plain text (one row per
+  // Read the last `lines` lines of the active rendered grid as plain text (one row per
   // line, trailing whitespace trimmed). `lines` defaults to the visible
   // viewport (tmux `capture-pane -p` semantics); a larger value reaches into
   // scrollback. Trailing blank lines are stripped so an agent doesn't receive a
@@ -88,6 +88,26 @@ export class CaptureRenderer {
     }
     while (rows.length > 0 && rows[rows.length - 1] === "") rows.pop();
     return rows.join("\n");
+  }
+
+  // Hibernation reads the normal buffer even while a TUI owns the alternate
+  // buffer. Rows are already rendered plain text, so restoring them cannot
+  // re-enter a TUI, clear the screen, or revive stale terminal modes.
+  captureNormal(maxLines: number, maxCodeUnits: number): string {
+    const buffer = this.terminal.buffer.normal;
+    const rows: string[] = [];
+    let codeUnits = 0;
+    const start = Math.max(0, buffer.length - maxLines);
+    for (let index = buffer.length - 1; index >= start; index -= 1) {
+      const row = buffer.getLine(index)?.translateToString(true) ?? "";
+      const separatorLength = rows.length === 0 ? 0 : 2;
+      if (codeUnits + separatorLength + row.length > maxCodeUnits) break;
+      rows.push(row);
+      codeUnits += separatorLength + row.length;
+    }
+    rows.reverse();
+    while (rows.length > 0 && rows[rows.length - 1] === "") rows.pop();
+    return rows.join("\r\n");
   }
 
   // Find the index of the bottom-most row whose trimmed content equals `needle`,

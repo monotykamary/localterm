@@ -49,6 +49,7 @@ import {
   GIT_DIRTY_THROTTLE_MS,
   GIT_MAX_REF_LENGTH,
   HERDR_THEME_SYNC_DEBOUNCE_MS,
+  HIBERNATE_FILENAME,
   HTTP_STATUS_ACCEPTED,
   HTTP_STATUS_BAD_REQUEST,
   HTTP_STATUS_CONFLICT,
@@ -115,6 +116,7 @@ import {
   type GitDiffOptions,
 } from "./git-diff.js";
 import { HeartbeatStore } from "./heartbeat-store.js";
+import { HibernateStore, type HibernateTab } from "./hibernate-store.js";
 import { WorkspaceStore } from "./workspace-store.js";
 import { createDefaultSecretBackend, type SecretBackend } from "./secret-backend.js";
 import { SecretStore } from "./secret-store.js";
@@ -2295,6 +2297,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   );
   const worktreeConfigStore = new WorktreeConfigStore(stateDirectory);
   const workspaceStore = new WorkspaceStore(path.join(stateDirectory, WORKSPACE_FILENAME));
+  const hibernateStore = new HibernateStore(path.join(stateDirectory, HIBERNATE_FILENAME));
+  // Immutable shutdown snapshot for this daemon lifetime. Exact old session ids
+  // let surviving or CDP-restored browser tabs recover only their own text.
+  const startupHibernateEntries = hibernateStore.read();
   // Per-process secret injection: a backend (macOS Keychain on darwin) holds
   // secret values; a secret is an identity + the env var it exports
   // (~/.localterm/secrets.json, names + env var only — never values), and a
@@ -2911,11 +2917,23 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     workspaceStore.write(registry.workspaceEntries());
   };
 
-  const buildSpawnTabUrl = (cwd: string, shell: string): string => {
+  const buildSpawnTabUrl = (cwd: string, shell: string, sessionId?: string): string => {
     const url = new URL(localOrigin ?? publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`);
     if (cwd) url.searchParams.set("cwd", cwd);
     if (shell) url.searchParams.set("shell", shell);
+    if (sessionId) url.searchParams.set(SESSION_ID_QUERY_PARAM, sessionId);
     return url.toString();
+  };
+
+  const hibernatedTabFor = (
+    owner: SessionOwner,
+    windowId: string,
+    sessionId: string | null,
+  ): HibernateTab | undefined => {
+    if (!windowId || !sessionId) return undefined;
+    return startupHibernateEntries
+      .find((entry) => entry.owner === owner && entry.windowId === windowId)
+      ?.tabs.find((tab) => tab.sessionId === sessionId);
   };
 
   const restoredWorkspaceKeys = new Set<string>();
@@ -2938,50 +2956,42 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const restoreWorkspace = async (owner: SessionOwner, windowId: string): Promise<void> => {
     if (!daemonConfigStore.getWorkspaceRestore()) return;
     if (!cdpClient || !cdpClient.isConnected()) return;
-    const entry = workspaceStore
+    const hibernatedEntry = startupHibernateEntries.find(
+      (candidate) => candidate.owner === owner && candidate.windowId === windowId,
+    );
+    const workspaceEntry = workspaceStore
       .read()
       .find((candidate) => candidate.owner === owner && candidate.windowId === windowId);
-    if (!entry || entry.tabs.length === 0) return;
-    const manifest = entry.tabs;
+    const manifest = hibernatedEntry?.tabs ?? workspaceEntry?.tabs ?? [];
+    if (manifest.length === 0) return;
+    const urlFor = (index: number): string => {
+      const tab = manifest[index];
+      const sessionId =
+        "sessionId" in tab && typeof tab.sessionId === "string" ? tab.sessionId : undefined;
+      return buildSpawnTabUrl(tab.cwd, tab.shell, sessionId);
+    };
     const openCount = registry.attachedClientCount(owner, windowId);
     if (openCount >= manifest.length) return;
     if (openCount === 0) {
-      for (const tab of manifest) {
-        await cdpClient.openBackgroundTab(buildSpawnTabUrl(tab.cwd, tab.shell));
+      for (let index = 0; index < manifest.length; index += 1) {
+        await cdpClient.openBackgroundTab(urlFor(index));
       }
       return;
     }
     if (openCount === 1) {
-      // Browser was fully closed; the lone bootstrap tab is repointed to the
-      // first restored shell (navigate-the-bootstrap) so the reopen lands
-      // exactly N tabs in the manifest's cwds instead of N−1 + one stray in
-      // the default directory.
+      // Browser was fully closed; repoint the lone bootstrap to the first tab.
       const firstTargetId = [...wsToTargetId.entries()].find(([ws]) => {
         const profile = registry.clientProfile(ws);
         return profile !== null && profile.owner === owner && profile.windowId === windowId;
       })?.[1];
-      if (firstTargetId) {
-        await cdpClient.navigateTab(
-          firstTargetId,
-          buildSpawnTabUrl(manifest[0].cwd, manifest[0].shell),
-        );
-      }
-      for (let index = 1; index < manifest.length; index++) {
-        await cdpClient.openBackgroundTab(
-          buildSpawnTabUrl(manifest[index].cwd, manifest[index].shell),
-        );
+      if (firstTargetId) await cdpClient.navigateTab(firstTargetId, urlFor(0));
+      for (let index = 1; index < manifest.length; index += 1) {
+        await cdpClient.openBackgroundTab(urlFor(index));
       }
       return;
     }
-    // Partial survival (a daemon restart with some tabs left open): surviving
-    // tabs self-healed to their live cwds, so only the deficit is opened. Which
-    // manifest cwds the survivors cover can't be matched (their URLs carry the
-    // spawn cwd, stale after a `cd`), so the tail is opened as a best-effort
-    // placement — the count is exact, the cwd placement is approximate.
-    for (let index = openCount; index < manifest.length; index++) {
-      await cdpClient.openBackgroundTab(
-        buildSpawnTabUrl(manifest[index].cwd, manifest[index].shell),
-      );
+    for (let index = openCount; index < manifest.length; index += 1) {
+      await cdpClient.openBackgroundTab(urlFor(index));
     }
   };
 
@@ -3163,6 +3173,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
                 /* automation cwd vanished since creation; fall back to default */
               }
             }
+            const hibernatedTab =
+              claimedRun || requestedInitialCommand
+                ? undefined
+                : hibernatedTabFor(owner, requestedWindowId, requestedSid);
             const automation: AutomationContext | undefined = claimedRun
               ? {
                   automationId: claimedRun.automationId,
@@ -3173,8 +3187,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             const spawned = registry.spawnAndAttach(
               ws,
               {
-                cwd: sessionCwd,
-                shell: requestedShell,
+                cwd: hibernatedTab?.cwd ?? sessionCwd,
+                shell: hibernatedTab?.shell ?? requestedShell,
+                replaySeed: hibernatedTab?.scrollback,
                 initialCommand:
                   claimedRun && claimedRun.runner.kind === "shell"
                     ? claimedRun.runner.command
@@ -3485,54 +3500,60 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       });
   }
 
-  const stop = async () => {
-    flushWorkspaceSnapshot();
-    automationScheduler.dispose();
-    folderWatchManager.dispose();
-    automationGitWatcher.dispose();
-    updateCheckStore.dispose();
-    webhookTriggerManager.dispose();
-    caffeinateManager.dispose();
-    processActivityWatcher?.dispose();
-    herdrThemeSync?.dispose();
-    cdpClient?.close();
-    registry.disposeAll();
-    // Forcibly tear down every WS first. node-pty + ws upgraded sockets
-    // aren't tracked in http.Server's keep-alive set, so target.close() would
-    // otherwise wait forever for them and the CLI's force-exit fallback would
-    // fire on every shutdown.
-    for (const client of wss.clients) {
-      try {
-        client.terminate();
-      } catch {
-        /* socket already torn down */
+  let stopPromise: Promise<void> | null = null;
+  const stop = (): Promise<void> => {
+    if (stopPromise) return stopPromise;
+    stopPromise = (async () => {
+      flushWorkspaceSnapshot();
+      hibernateStore.write(await registry.hibernateEntries());
+      automationScheduler.dispose();
+      folderWatchManager.dispose();
+      automationGitWatcher.dispose();
+      updateCheckStore.dispose();
+      webhookTriggerManager.dispose();
+      caffeinateManager.dispose();
+      processActivityWatcher?.dispose();
+      herdrThemeSync?.dispose();
+      cdpClient?.close();
+      registry.disposeAll();
+      // Forcibly tear down every WS first. node-pty + ws upgraded sockets
+      // aren't tracked in http.Server's keep-alive set, so target.close() would
+      // otherwise wait forever for them and the CLI's force-exit fallback would
+      // fire on every shutdown.
+      for (const client of wss.clients) {
+        try {
+          client.terminate();
+        } catch {
+          /* socket already torn down */
+        }
       }
-    }
-    try {
-      wss.close();
-    } catch {
-      /* idempotent close — wss may already be closed */
-    }
-    if (!httpServer) return;
-    const target = httpServer;
-    const closeAllConnections = Reflect.get(target, "closeAllConnections");
-    if (typeof closeAllConnections === "function") {
-      closeAllConnections.call(target);
-    }
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const settle = () => {
-        if (settled) return;
-        settled = true;
-        resolve();
-      };
-      const grace = setTimeout(settle, SERVER_STOP_GRACE_MS);
-      grace.unref?.();
-      target.close(() => {
-        clearTimeout(grace);
-        settle();
+      try {
+        wss.close();
+      } catch {
+        /* idempotent close — wss may already be closed */
+      }
+      if (!httpServer) return;
+      const target = httpServer;
+      const closeAllConnections = Reflect.get(target, "closeAllConnections");
+      if (typeof closeAllConnections === "function") {
+        closeAllConnections.call(target);
+      }
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const settle = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        const grace = setTimeout(settle, SERVER_STOP_GRACE_MS);
+        grace.unref?.();
+        target.close(() => {
+          clearTimeout(grace);
+          settle();
+        });
       });
-    });
+    })();
+    return stopPromise;
   };
 
   return { port: actualPort, host, registry, automationStore, setPublicUrl, setLocalUrl, stop };

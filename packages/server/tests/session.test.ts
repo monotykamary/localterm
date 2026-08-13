@@ -65,6 +65,30 @@ describe("Session", { tags: ["integration"] }, () => {
     }
   });
 
+  it("places a rendered hibernate seed before fresh shell output", async () => {
+    const session = new Session({ shell: "/bin/sh", replaySeed: "OLD_RENDERED_ROW\n$ " });
+    try {
+      await collectOutput(session, 10_000);
+      expect(session.snapshotScrollback().startsWith("OLD_RENDERED_ROW\r\n$ \r\n")).toBe(true);
+    } finally {
+      session.dispose();
+    }
+  }, 15_000);
+
+  it("retains the newest rows when a rendered seed exceeds the replay cap", async () => {
+    const rows = Array.from(
+      { length: 400 },
+      (_, index) => `${index === 399 ? "NEWEST_RENDERED_ROW" : `row-${index}`}${"x".repeat(1_000)}`,
+    );
+    const session = new Session({ shell: "/bin/sh", replaySeed: rows.join("\n") });
+    try {
+      await collectOutput(session, 10_000);
+      expect(session.snapshotScrollback()).toContain("NEWEST_RENDERED_ROW");
+    } finally {
+      session.dispose();
+    }
+  }, 15_000);
+
   it("spawns a shell and emits output for typed input", async () => {
     const session = new Session({ shell: "/bin/sh" });
     try {

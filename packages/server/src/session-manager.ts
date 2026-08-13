@@ -1,6 +1,11 @@
 import path from "node:path";
-import type { CaptureRenderer } from "./capture-renderer.js";
-import { SESSION_GRACE_MS, SESSION_PENDING_PROMOTE_TIMEOUT_MS } from "./constants.js";
+import { CaptureRenderer } from "./capture-renderer.js";
+import {
+  HIBERNATE_SCROLLBACK_LINES,
+  HIBERNATE_SCROLLBACK_MAX_CODE_UNITS,
+  SESSION_GRACE_MS,
+  SESSION_PENDING_PROMOTE_TIMEOUT_MS,
+} from "./constants.js";
 import { redactText } from "./utils/redact-output.js";
 import type { GitMetadataCoordinator } from "./git-metadata-coordinator.js";
 import { Session } from "./session.js";
@@ -27,6 +32,7 @@ import {
 import { resolveNamedKeys } from "./utils/named-keys.js";
 import { deletePasteImagesForSession } from "./utils/paste-image-store.js";
 import type { ClientSocket } from "./utils/ws-socket.js";
+import type { HibernateEntry } from "./hibernate-store.js";
 import type { WorkspaceEntry } from "./workspace-store.js";
 
 export interface AutomationContext {
@@ -186,6 +192,9 @@ export interface ManagedSession {
   // the first capture; fed the session's live output thereafter and disposed on
   // teardown. Kept on the managed session so its lifecycle is bound to the PTY.
   captureRenderer: CaptureRenderer | undefined;
+  // Always-on, bounded renderer used only for graceful-shutdown hibernation.
+  // Its normal buffer excludes any currently-running alternate-screen TUI.
+  hibernateRenderer?: CaptureRenderer;
   resizeOwner: ManagedClient | null;
   // Last effective size broadcast to clients, or null before the active viewer
   // reports its dimensions. Tracked so resize activity that does not change the
@@ -359,6 +368,36 @@ export class SessionManager {
     return this.clientHub.workspaceEntries(this.sessions.values());
   }
 
+  async hibernateEntries(): Promise<HibernateEntry[]> {
+    const byKey = new Map<string, HibernateEntry>();
+    for (const managed of this.sessions.values()) {
+      if (managed.automation || managed.clients.size === 0) continue;
+      const renderer = managed.hibernateRenderer;
+      if (!renderer) continue;
+      await renderer.flush();
+      const tab = {
+        sessionId: managed.id,
+        cwd: managed.session.lastEmittedCwd || managed.session.cwd,
+        shell: managed.session.shell,
+        scrollback: renderer.captureNormal(
+          HIBERNATE_SCROLLBACK_LINES,
+          HIBERNATE_SCROLLBACK_MAX_CODE_UNITS,
+        ),
+      };
+      for (const client of managed.clients) {
+        if (!client.windowId) continue;
+        const key = `${managed.owner ?? ""}\u0000${client.windowId}`;
+        let entry = byKey.get(key);
+        if (!entry) {
+          entry = { owner: managed.owner, windowId: client.windowId, tabs: [] };
+          byKey.set(key, entry);
+        }
+        entry.tabs.push(tab);
+      }
+    }
+    return [...byKey.values()];
+  }
+
   clientProfile(ws: ClientSocket): { owner: SessionOwner; windowId: string } | null {
     return this.clientHub.clientProfile(ws);
   }
@@ -439,6 +478,12 @@ export class SessionManager {
   ): ManagedSession | null {
     if (!this.lifecyclePolicy.makeRoomForSession(this.sessions)) return null;
     const session = new Session(this.shimsDir ? { ...input, shimsDir: this.shimsDir } : input);
+    const hibernateRenderer = new CaptureRenderer(
+      session.cols,
+      session.rows,
+      HIBERNATE_SCROLLBACK_LINES,
+    );
+    hibernateRenderer.write(session.snapshotScrollback());
     const managed: ManagedSession = {
       session,
       id: session.id,
@@ -461,6 +506,7 @@ export class SessionManager {
       parkedAt: null,
       pinned: false,
       captureRenderer: undefined,
+      hibernateRenderer,
       resizeOwner: null,
       ptySizeCols: null,
       ptySizeRows: null,
@@ -607,6 +653,7 @@ export class SessionManager {
     if (!managed) return false;
     managed.session.resize(cols, rows);
     managed.captureRenderer?.resize(cols, rows);
+    managed.hibernateRenderer?.resize(cols, rows);
     return true;
   }
 
@@ -801,6 +848,7 @@ export class SessionManager {
     this.lifecyclePolicy.cancelGrace(managed);
     managed.captureRenderer?.dispose();
     managed.captureRenderer = undefined;
+    managed.hibernateRenderer?.dispose();
     deletePasteImagesForSession(managed.id);
     if (managed.outputBatchTimer !== null) {
       clearTimeout(managed.outputBatchTimer);
