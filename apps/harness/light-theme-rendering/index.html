@@ -5,17 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>localterm light-theme rendering diagnostic</title>
     <link rel="stylesheet" href="/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="/fonts.css" />
     <style>
-      @font-face {
-        font-family: "Geist Mono";
-        src: url("/fonts/geist-mono-latin-400-normal.woff2") format("woff2");
-        font-weight: 400;
-      }
-      @font-face {
-        font-family: "Geist Mono";
-        src: url("/fonts/geist-mono-latin-700-normal.woff2") format("woff2");
-        font-weight: 700;
-      }
       * {
         box-sizing: border-box;
       }
@@ -128,7 +119,7 @@
       }
       .renderer-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+        grid-template-columns: 1fr;
         gap: 10px;
       }
       .renderer-card {
@@ -208,19 +199,24 @@
     <header>
       <h1>Light-theme rendering diagnostic</h1>
       <label
+        >font
+        <select id="font"></select>
+      </label>
+      <label
         >theme
         <select id="theme">
+          <option value="tokyo-night-day">Tokyo Night Day</option>
           <option value="github-light">GitHub Light</option>
           <option value="solarized-light">Solarized Light</option>
           <option value="catppuccin-latte">Catppuccin Latte</option>
         </select>
       </label>
-      <label>font px <input id="font-size" type="number" min="10" max="24" value="14" /></label>
+      <label>font px <input id="font-size" type="number" min="10" max="24" value="13" /></label>
       <label
         >contrast floor
         <select id="contrast-floor">
           <option value="1">off (1.0)</option>
-          <option value="4.5">4.5:1</option>
+          <option value="4.5" selected>4.5:1 (LocalTerm light default)</option>
         </select>
       </label>
       <button id="run">Run diagnostic</button>
@@ -228,10 +224,17 @@
     <main>
       <div id="status">Ready.</div>
       <div id="summary">
-        Run the diagnostic to compare the current alpha-mask renderer with pinned upstream xterm.
+        Run the diagnostic to compare current WebGL with xterm Canvas and DOM references.
       </div>
       <div id="themes"></div>
     </main>
+    <script type="importmap">
+      {
+        "imports": {
+          "@xterm/addon-canvas": "/addon/canvas.mjs"
+        }
+      }
+    </script>
     <script type="module" src="/harness/main.mjs"></script>
   </body>
 </html>

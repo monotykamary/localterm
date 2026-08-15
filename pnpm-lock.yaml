@@ -11,7 +11,7 @@ overrides:
 
 patchedDependencies:
   '@xterm/addon-image@0.10.0-beta.287': 0f9b102a6ad3a1baec614261cff1e699a949b3cf7faddc45fc0222c7892b6b5a
-  '@xterm/addon-webgl@0.20.0-beta.290': 67cc5ea7a7ed2ac39416529e43053ba64cdd1a119d86d925b2b93a3d2ead692d
+  '@xterm/addon-webgl@0.20.0-beta.290': 7aa6580d10ebe82e4c44c1528b1f4cb0f9d5ddbaa279d5f933c0fe7d6c867a97
   node-pty@1.1.0: 055369749ed898a53d1d3c2b69c380d70a244e8d869a1df14bf514e4ae000556
 
 importers:
@@ -53,7 +53,14 @@ importers:
 
   apps/harness/alpha-mask: {}
 
-  apps/harness/light-theme-rendering: {}
+  apps/harness/light-theme-rendering:
+    dependencies:
+      '@xterm/addon-canvas':
+        specifier: 0.8.0-beta.48
+        version: 0.8.0-beta.48(@xterm/xterm@5.5.0)
+      pngjs:
+        specifier: 7.0.0
+        version: 7.0.0
 
   apps/terminal:
     dependencies:
@@ -140,7 +147,7 @@ importers:
         version: 0.13.0-beta.287(@xterm/xterm@6.1.0-beta.291)
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.290
-        version: 0.20.0-beta.290(patch_hash=67cc5ea7a7ed2ac39416529e43053ba64cdd1a119d86d925b2b93a3d2ead692d)(@xterm/xterm@6.1.0-beta.291)
+        version: 0.20.0-beta.290(patch_hash=7aa6580d10ebe82e4c44c1528b1f4cb0f9d5ddbaa279d5f933c0fe7d6c867a97)(@xterm/xterm@6.1.0-beta.291)
       '@xterm/xterm':
         specifier: 6.1.0-beta.291
         version: 6.1.0-beta.291
@@ -2650,6 +2657,11 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@xterm/addon-canvas@0.8.0-beta.48':
+    resolution: {integrity: sha512-zvT6Dhk6bdGYeQHaiXwODnnSEHN+ZqX15KuLlw8dE1kCkTbs5c5NgG5OmXsUAT2CfcIMuuoe7guK9q3cyclsWg==}
+    peerDependencies:
+      '@xterm/xterm': ^5.0.0
+
   '@xterm/addon-clipboard@0.3.0-beta.287':
     resolution: {integrity: sha512-MAsyVLLhhibrsIqAFERQGsvF9rRl7PO63ElMaIgkjY7FNX3CtFctZMH4Q0GC9ur1nX8A2yWdb9qmhrC/aHkTbw==}
     peerDependencies:
@@ -2692,6 +2704,9 @@ packages:
 
   '@xterm/headless@6.1.0-beta.287':
     resolution: {integrity: sha512-3Jjh1uM9r+euj8Qosm/9SuZIVIZKMMus/Ekk9Spav842WVoFH3F1APTeHl3VynHNi1uHdEbb6QrnHzKA/iJlBQ==}
+
+  '@xterm/xterm@5.5.0':
+    resolution: {integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==}
 
   '@xterm/xterm@6.1.0-beta.291':
     resolution: {integrity: sha512-Q6IjxogKIu7fBkXHcn4vQhfHvtwhIv/NN8LR0knCAxPA06/jXuHwreqX9Y/4zvzj7m8u6OBndOJDCUAxLmRfQQ==}
@@ -7899,6 +7914,10 @@ snapshots:
   '@voidzero-dev/vite-plus-win32-x64-msvc@0.2.8':
     optional: true
 
+  '@xterm/addon-canvas@0.8.0-beta.48(@xterm/xterm@5.5.0)':
+    dependencies:
+      '@xterm/xterm': 5.5.0
+
   '@xterm/addon-clipboard@0.3.0-beta.287(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.291
@@ -7927,11 +7946,13 @@ snapshots:
     dependencies:
       '@xterm/xterm': 6.1.0-beta.291
 
-  '@xterm/addon-webgl@0.20.0-beta.290(patch_hash=67cc5ea7a7ed2ac39416529e43053ba64cdd1a119d86d925b2b93a3d2ead692d)(@xterm/xterm@6.1.0-beta.291)':
+  '@xterm/addon-webgl@0.20.0-beta.290(patch_hash=7aa6580d10ebe82e4c44c1528b1f4cb0f9d5ddbaa279d5f933c0fe7d6c867a97)(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.291
 
   '@xterm/headless@6.1.0-beta.287': {}
+
+  '@xterm/xterm@5.5.0': {}
 
   '@xterm/xterm@6.1.0-beta.291': {}
 

@@ -30,6 +30,17 @@ export const reverseUnifiedPatch = (patchedSource, patchSource, filePath) => {
         break;
       }
       if (patchLine === "\\ No newline at end of file") continue;
+      // Tracked patch files omit the standard space marker on blank context lines.
+      if (patchLine === "") {
+        if (patchedLines[patchedIndex] !== "") {
+          throw new Error(
+            `Patch mismatch at ${filePath}:${patchedIndex + 1}: expected an empty line`,
+          );
+        }
+        restoredLines.push("");
+        patchedIndex += 1;
+        continue;
+      }
       const marker = patchLine[0];
       const content = patchLine.slice(1);
       if (marker === " " || marker === "+") {
