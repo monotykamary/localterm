@@ -1,5 +1,12 @@
 # localterm
 
+## 2.76.5
+
+### Patch Changes
+
+- e9ba915: Reduce WebGL glyph cache-miss work by bounding opaque Canvas readback and skipping exact background projection, while matching inverse and dark-theme text masks more closely to Canvas.
+  - @monotykamary/localterm-server@2.76.5
+
 ## 2.76.4
 
 ### Patch Changes
