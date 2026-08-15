@@ -1,5 +1,12 @@
 # localterm
 
+## 2.76.4
+
+### Patch Changes
+
+- 1a18af7: Match light-theme WebGL font shape and fullness to xterm Canvas and DOM by reconstructing opaque Canvas raster coverage and correcting framebuffer alpha blending, while keeping SGR faint text readable and colored emoji intact.
+  - @monotykamary/localterm-server@2.76.4
+
 ## 2.76.3
 
 ### Patch Changes
