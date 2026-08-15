@@ -1,5 +1,14 @@
 # @monotykamary/pi-localterm
 
+## 0.4.3
+
+### Patch Changes
+
+- Realign `@earendil-works/pi-tui` dev dependency with pi 0.84.2 so the
+  Kitty graphics capability override from `enableKittyImages()` reaches the
+  same module instance the running TUI reads. Fixes inline image previews in
+  pi outside localterm's release cadence.
+
 ## 0.4.2
 
 ### Patch Changes
