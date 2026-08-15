@@ -13,12 +13,15 @@ const requestedFontId = process.env.FONT;
 if (requestedFontId) harnessUrl.searchParams.set("font", requestedFontId);
 const requestedThemeId = process.env.THEME;
 if (requestedThemeId) harnessUrl.searchParams.set("theme", requestedThemeId);
+const requestedThemeScope = process.env.THEMES;
+if (requestedThemeScope) harnessUrl.searchParams.set("themes", requestedThemeScope);
 const requestedContrastFloor = process.env.CONTRAST_FLOOR;
 if (requestedContrastFloor) harnessUrl.searchParams.set("contrast", requestedContrastFloor);
 const devicePixelRatio = Number.parseFloat(process.env.DPR ?? "2");
 const screenshotPath = process.env.SCREENSHOT_PATH ?? "/tmp/localterm-light-theme-rendering.png";
 const detailScreenshotPath =
   process.env.DETAIL_SCREENSHOT_PATH ?? "/tmp/localterm-light-theme-rendering-detail.png";
+const DIAGNOSTIC_TIMEOUT_MS = 180_000;
 const MAX_NATIVE_CANVAS_INK_DELTA_PERCENT = 5;
 const MAX_NATIVE_CANVAS_VISIBLE_PIXEL_DELTA_PERCENT = 5;
 const MAX_NATIVE_CANVAS_DISTRIBUTION_DELTA_PERCENT = 5;
@@ -263,7 +266,7 @@ try {
             resolve({ report: window.__diagnosticReport, status: document.getElementById('status')?.textContent });
             return;
           }
-          if (window.__diagnosticError || performance.now() - startedAt > 90000) {
+          if (window.__diagnosticError || performance.now() - startedAt > ${DIAGNOSTIC_TIMEOUT_MS}) {
             resolve({ error: window.__diagnosticError ?? 'diagnostic timed out', status: document.getElementById('status')?.textContent });
             return;
           }
@@ -441,8 +444,12 @@ try {
       (measurement.canvasMask.patchedDistribution.meanVisibleCoverage -
         measurement.canvasMask.upstreamDistribution.meanVisibleCoverage) *
       100;
+    const faintReference = measurement.isLight
+      ? measurement.faintMask
+      : measurement.faintCanvasMask;
+    const faintReferenceName = measurement.isLight ? "upstream" : "Canvas";
     console.log(
-      `${measurement.name}: Canvas ink=${measurement.canvasMask.inkDeltaPercent >= 0 ? "+" : ""}${measurement.canvasMask.inkDeltaPercent.toFixed(1)}% visible=${measurement.canvasMask.visiblePixelDeltaPercent >= 0 ? "+" : ""}${measurement.canvasMask.visiblePixelDeltaPercent.toFixed(1)}% hard=${hardPixelDelta >= 0 ? "+" : ""}${hardPixelDelta.toFixed(1)}pp fuzzy=${fuzzyPixelDelta >= 0 ? "+" : ""}${fuzzyPixelDelta.toFixed(1)}pp mean=${meanCoverageDelta >= 0 ? "+" : ""}${meanCoverageDelta.toFixed(1)}pp error=${(measurement.canvasMask.visibleMeanAbsoluteCoverageDifference * 100).toFixed(1)}% half=${measurement.canvasMask.halfCoverageMaskChangedPercent.toFixed(1)}%/${measurement.canvasMask.halfCoveragePixelDeltaPercent >= 0 ? "+" : ""}${measurement.canvasMask.halfCoveragePixelDeltaPercent.toFixed(1)}% | framebuffer alpha=${measurement.translucentPixels} | faint ink=${measurement.faintMask.inkDeltaPercent >= 0 ? "+" : ""}${measurement.faintMask.inkDeltaPercent.toFixed(1)}% contrast=${measurement.faintContrastRatio.toFixed(2)} | inverse Canvas=${measurement.inverseMask.inkDeltaPercent >= 0 ? "+" : ""}${measurement.inverseMask.inkDeltaPercent.toFixed(1)}% | upstream footprint=${measurement.shapeMask.visiblePixelDeltaPercent >= 0 ? "+" : ""}${measurement.shapeMask.visiblePixelDeltaPercent.toFixed(1)}% | 4.5-floor pixels patched=${measurement.patchedContrastAdjustment.changedPixels}, upstream=${measurement.upstreamContrastAdjustment.changedPixels} | live-switch=${measurement.liveThemeSwitch.changedPixels}`,
+      `${measurement.name}: Canvas ink=${measurement.canvasMask.inkDeltaPercent >= 0 ? "+" : ""}${measurement.canvasMask.inkDeltaPercent.toFixed(1)}% visible=${measurement.canvasMask.visiblePixelDeltaPercent >= 0 ? "+" : ""}${measurement.canvasMask.visiblePixelDeltaPercent.toFixed(1)}% hard=${hardPixelDelta >= 0 ? "+" : ""}${hardPixelDelta.toFixed(1)}pp fuzzy=${fuzzyPixelDelta >= 0 ? "+" : ""}${fuzzyPixelDelta.toFixed(1)}pp mean=${meanCoverageDelta >= 0 ? "+" : ""}${meanCoverageDelta.toFixed(1)}pp error=${(measurement.canvasMask.visibleMeanAbsoluteCoverageDifference * 100).toFixed(1)}% half=${measurement.canvasMask.halfCoverageMaskChangedPercent.toFixed(1)}%/${measurement.canvasMask.halfCoveragePixelDeltaPercent >= 0 ? "+" : ""}${measurement.canvasMask.halfCoveragePixelDeltaPercent.toFixed(1)}% | framebuffer alpha=${measurement.translucentPixels} | faint ${faintReferenceName}=${faintReference.inkDeltaPercent >= 0 ? "+" : ""}${faintReference.inkDeltaPercent.toFixed(1)}% contrast=${measurement.faintContrastRatio.toFixed(2)} | inverse Canvas=${measurement.inverseMask.inkDeltaPercent >= 0 ? "+" : ""}${measurement.inverseMask.inkDeltaPercent.toFixed(1)}% | upstream footprint=${measurement.shapeMask.visiblePixelDeltaPercent >= 0 ? "+" : ""}${measurement.shapeMask.visiblePixelDeltaPercent.toFixed(1)}% | 4.5-floor pixels patched=${measurement.patchedContrastAdjustment.changedPixels}, upstream=${measurement.upstreamContrastAdjustment.changedPixels} | live-switch=${measurement.liveThemeSwitch.changedPixels}`,
     );
   }
   console.log(`\nScreenshot: ${screenshotPath}`);

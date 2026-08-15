@@ -1,7 +1,7 @@
 diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 --- a/lib/addon-webgl.mjs
 +++ b/lib/addon-webgl.mjs
-@@ -14,62 +14,5815 @@
+@@ -14,62 +14,5828 @@
   *  Copyright (c) Microsoft Corporation. All rights reserved.
   *  Licensed under the MIT License. See License.txt in the project root for license information.
   *--------------------------------------------------------------------------------------------*/
@@ -3274,10 +3274,15 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +        let D = R;
 +        ((R = E), (E = D));
 +      }
++      // Canvas antialiasing follows text polarity, so inverse masks use swapped canonical colors.
 +      let y = this._getBackgroundColor(E, F, _, p),
-+        rasterBackground = this._config.allowTransparency
-+          ? y.css
-+          : this._config.colors.background.css;
++        maskBackgroundColor = _
++          ? this._config.colors.foreground
++          : this._config.colors.background,
++        maskForegroundColor = _
++          ? this._config.colors.background
++          : this._config.colors.foreground,
++        rasterBackground = this._config.allowTransparency ? y.css : maskBackgroundColor.css;
 +      (this._config.allowTransparency
 +        ? this._tmpCtx.clearRect(0, 0, this._tmpCanvas.width, this._tmpCanvas.height)
 +        : ((this._tmpCtx.globalCompositeOperation = "copy"),
@@ -3291,7 +3296,7 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +      let t0 = n.length === 1 && ke(n.charCodeAt(0));
 +      let maskForeground = this._config.allowTransparency
 +        ? "#ffffff"
-+        : this._config.colors.foreground.css;
++        : maskForegroundColor.css;
 +      this._tmpCtx.fillStyle = maskForeground;
 +      this._tmpCtx.strokeStyle = maskForeground;
 +      let M = t0 ? 0 : B0 * 2,
@@ -3455,8 +3460,8 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +            this._config.deviceCellWidth,
 +            this._config.deviceCellHeight,
 +          ),
-+          this._config.colors.background,
-+          this._config.colors.foreground,
++          maskBackgroundColor,
++          maskForegroundColor,
 +        );
 +        if (b)
 +          for (
@@ -3474,8 +3479,8 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +                this._config.deviceCellWidth,
 +                this._config.deviceCellHeight,
 +              ),
-+              this._config.colors.background,
-+              this._config.colors.foreground,
++              maskBackgroundColor,
++              maskForegroundColor,
 +            )),
 +            !!b);
 +            D++
@@ -3498,11 +3503,11 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +          this._tmpCtx.stroke());
 +      }
 +      this._tmpCtx.restore();
-+      let q = this._tmpCtx.getImageData(0, 0, this._tmpCanvas.width, this._tmpCanvas.height),
++      let q = this._tmpCtx.getImageData(0, 0, L, T),
 +        A0;
 +      this._config.allowTransparency
 +        ? (A0 = Gt(q))
-+        : (A0 = fe(q, this._config.colors.background, this._config.colors.foreground));
++        : (A0 = fe(q, maskBackgroundColor, maskForegroundColor));
 +      if (A0) return tt;
 +      let I = this._findGlyphBoundingBox(q, this._workBoundingBox, L, t0, n0, M),
 +        O,
@@ -3715,21 +3720,29 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +    greenDelta = foregroundGreen - backgroundGreen,
 +    blueDelta = foregroundBlue - backgroundBlue,
 +    denominator = redDelta * redDelta + greenDelta * greenDelta + blueDelta * blueDelta,
++    outputPixels = new Uint32Array(i.data.buffer, i.data.byteOffset, i.data.byteLength / 4),
 +    isEmpty = !0;
-+  for (let offset = 0; offset < i.data.length; offset += 4) {
++  if (denominator === 0) {
++    outputPixels.fill(0);
++    return isEmpty;
++  }
++  for (let offset = 0, pixelIndex = 0; offset < i.data.length; offset += 4, pixelIndex++) {
++    if (
++      i.data[offset] === backgroundRed &&
++      i.data[offset + 1] === backgroundGreen &&
++      i.data[offset + 2] === backgroundBlue
++    ) {
++      outputPixels[pixelIndex] = 0;
++      continue;
++    }
 +    let alpha =
-+      denominator === 0
-+        ? 0
-+        : ((i.data[offset] - backgroundRed) * redDelta +
-+            (i.data[offset + 1] - backgroundGreen) * greenDelta +
-+            (i.data[offset + 2] - backgroundBlue) * blueDelta) /
-+          denominator;
++      ((i.data[offset] - backgroundRed) * redDelta +
++        (i.data[offset + 1] - backgroundGreen) * greenDelta +
++        (i.data[offset + 2] - backgroundBlue) * blueDelta) /
++      denominator;
 +    alpha = Math.max(0, Math.min(1, alpha));
 +    if (alpha <= 1 / 255) {
-+      i.data[offset] = 0;
-+      i.data[offset + 1] = 0;
-+      i.data[offset + 2] = 0;
-+      i.data[offset + 3] = 0;
++      outputPixels[pixelIndex] = 0;
 +      continue;
 +    }
 +    i.data[offset] = 255;
@@ -5877,31 +5890,30 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +};
 +export { Ct as WebglAddon };
 diff --git a/typings/addon-webgl.d.ts b/typings/addon-webgl.d.ts
-index 37acbb8a914e85e40e5489746d6908d2c5cfc935..6853b6c004028c0851915d4bdbc3a2ea2a04e249 100644
 --- a/typings/addon-webgl.d.ts
 +++ b/typings/addon-webgl.d.ts
-@@ -45,6 +45,11 @@ declare module '@xterm/addon-webgl' {
-      */
+@@ -46,6 +46,11 @@
      public dispose(): void;
  
-+    /**
+     /**
 +     * Sets whether emoji are rendered using the terminal foreground color.
 +     */
 +    public setEmojiColorsMuted(muted: boolean): void;
 +
-     /**
++    /**
       * Clears the terminal's texture atlas and triggers a redraw.
       */
-@@ -74,6 +79,12 @@ declare module '@xterm/addon-webgl' {
-      */
+     public clearTextureAtlas(): void;
+@@ -75,6 +80,12 @@
      customGlyphs?: boolean;
  
-+    /**
+     /**
 +     * Whether emoji are rendered using the terminal foreground color instead
 +     * of their native colors. The default is true.
 +     */
 +    muteEmojiColors?: boolean;
 +
-     /**
++    /**
       * Whether to enable the preserveDrawingBuffer flag when creating the WebGL
       * context. This may be useful in tests. This default is false.
+      */

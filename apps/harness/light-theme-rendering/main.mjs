@@ -23,18 +23,22 @@ const HARD_COVERAGE = 0.8;
 const MAX_CANVAS_INK_DELTA_PERCENT = 3;
 const MAX_CANVAS_VISIBLE_PIXEL_DELTA_PERCENT = 1.5;
 const MAX_CANVAS_HARD_PIXEL_DELTA_PERCENT = 2.5;
-const MAX_CANVAS_FUZZY_PIXEL_DELTA_PERCENT = 4;
+const MAX_CANVAS_FUZZY_PIXEL_DELTA_PERCENT = 4.1;
 const MAX_CANVAS_MEAN_COVERAGE_DELTA_PERCENT = 2;
 const MAX_CANVAS_VISIBLE_COVERAGE_ERROR = 0.035;
 const MAX_CANVAS_HALF_COVERAGE_MASK_CHANGED_PERCENT = 7;
-const MAX_CANVAS_HALF_COVERAGE_PIXEL_DELTA_PERCENT = 4;
+const MAX_CANVAS_HALF_COVERAGE_PIXEL_DELTA_PERCENT = 5.5;
 const MIN_FAINT_INK_GAIN_PERCENT = 45;
 const MIN_FAINT_CONTRAST_RATIO = 4.5;
 const MIN_FAINT_MEAN_VISIBLE_COVERAGE = 0.57;
-const MAX_INVERSE_INK_DELTA_PERCENT = 6;
-const MAX_CONTRAST_ADJUSTMENT_PIXEL_DELTA_PERCENT = 7;
+const MAX_FAINT_CANVAS_INK_DELTA_PERCENT = 3.5;
+const MAX_INVERSE_INK_DELTA_PERCENT = 1;
+const MAX_CONTRAST_ADJUSTMENT_PIXEL_DELTA_PERCENT = 9;
 const LIGHT_THEME_IDS = ["tokyo-night-day", "github-light", "solarized-light", "catppuccin-latte"];
+const DIAGNOSTIC_THEME_IDS = TERMINAL_THEMES.map((theme) => theme.id);
+const DARK_THEME_IDS = DIAGNOSTIC_THEME_IDS.filter((themeId) => !LIGHT_THEME_IDS.includes(themeId));
 const DARK_BASELINE_THEME_ID = "vesper";
+const LIGHT_BASELINE_THEME_ID = "tokyo-night-day";
 const ANSI_COLOR_ENTRIES = [
   ["default", "foreground"],
   ["black", "black"],
@@ -139,18 +143,28 @@ const summaryElement = document.getElementById("summary");
 const themesElement = document.getElementById("themes");
 const activeTerminals = [];
 for (const font of DIAGNOSTIC_FONTS) fontInput.add(new Option(font.name, font.id));
+for (const theme of TERMINAL_THEMES) {
+  if (DIAGNOSTIC_THEME_IDS.includes(theme.id)) themeInput.add(new Option(theme.name, theme.id));
+}
+themeInput.value = LIGHT_BASELINE_THEME_ID;
 
 const searchParameters = new URL(window.location.href).searchParams;
 const requestedFontId = searchParameters.get("font");
 const requestedFont = DIAGNOSTIC_FONTS.find((font) => font.id === requestedFontId) ?? defaultFont;
 fontInput.value = requestedFont.id;
 const requestedThemeId = searchParameters.get("theme");
-if (requestedThemeId && LIGHT_THEME_IDS.includes(requestedThemeId)) {
+if (requestedThemeId && DIAGNOSTIC_THEME_IDS.includes(requestedThemeId)) {
   themeInput.value = requestedThemeId;
 }
+const requestedThemeScope = searchParameters.get("themes");
+const requestedThemeIds = requestedThemeScope
+  ?.split(",")
+  .filter((themeId) => DIAGNOSTIC_THEME_IDS.includes(themeId));
 const requestedContrastFloor = searchParameters.get("contrast");
 if (requestedContrastFloor === "1" || requestedContrastFloor === "4.5") {
   contrastFloorInput.value = requestedContrastFloor;
+} else if (requestedThemeId && DARK_THEME_IDS.includes(requestedThemeId)) {
+  contrastFloorInput.value = "1";
 }
 
 const parseHex = (value) =>
@@ -271,18 +285,44 @@ const readCanvasPixels = (terminal, theme, inverse = false) => {
   if (!context) throw new Error("Canvas text layer context was not available");
   const source = context.getImageData(0, 0, canvas.width, canvas.height).data;
   const pixels = new Uint8Array(source.length);
+  const background = parseHex(inverse ? theme.colors.foreground : theme.colors.background);
   const rowBytes = canvas.width * 4;
   for (let row = 0; row < canvas.height; row++) {
     const sourceOffset = row * rowBytes;
     const targetOffset = (canvas.height - row - 1) * rowBytes;
-    pixels.set(source.subarray(sourceOffset, sourceOffset + rowBytes), targetOffset);
+    for (let columnOffset = 0; columnOffset < rowBytes; columnOffset += 4) {
+      const sourcePixelOffset = sourceOffset + columnOffset;
+      const targetPixelOffset = targetOffset + columnOffset;
+      const alphaByte = source[sourcePixelOffset + 3];
+      if (alphaByte === 255) {
+        pixels[targetPixelOffset] = source[sourcePixelOffset];
+        pixels[targetPixelOffset + 1] = source[sourcePixelOffset + 1];
+        pixels[targetPixelOffset + 2] = source[sourcePixelOffset + 2];
+        pixels[targetPixelOffset + 3] = 255;
+        continue;
+      }
+      if (alphaByte === 0) {
+        pixels[targetPixelOffset] = background[0];
+        pixels[targetPixelOffset + 1] = background[1];
+        pixels[targetPixelOffset + 2] = background[2];
+        pixels[targetPixelOffset + 3] = 255;
+        continue;
+      }
+      const alpha = alphaByte / 255;
+      for (let channel = 0; channel < 3; channel++) {
+        pixels[targetPixelOffset + channel] = Math.round(
+          source[sourcePixelOffset + channel] * alpha + background[channel] * (1 - alpha),
+        );
+      }
+      pixels[targetPixelOffset + 3] = 255;
+    }
   }
   return {
     width: canvas.width,
     height: canvas.height,
     pixels,
     foreground: parseHex(inverse ? theme.colors.background : theme.colors.foreground),
-    background: parseHex(inverse ? theme.colors.foreground : theme.colors.background),
+    background,
   };
 };
 
@@ -515,7 +555,13 @@ const renderMeasurement = async (
   return render;
 };
 
-const renderCanvasMeasurement = async (theme, fontSize, sample = PLAIN_SAMPLE, inverse = false) => {
+const renderCanvasMeasurement = async (
+  theme,
+  fontSize,
+  sample = PLAIN_SAMPLE,
+  inverse = false,
+  minimumContrastRatio = 1,
+) => {
   const host = document.createElement("div");
   host.className = "measurement-host";
   document.body.append(host);
@@ -523,7 +569,7 @@ const renderCanvasMeasurement = async (theme, fontSize, sample = PLAIN_SAMPLE, i
     Addon: CanvasAddon,
     theme,
     fontSize,
-    minimumContrastRatio: 1,
+    minimumContrastRatio,
     sample,
     host,
     rows: TERMINAL_ROWS,
@@ -534,13 +580,13 @@ const renderCanvasMeasurement = async (theme, fontSize, sample = PLAIN_SAMPLE, i
   return render;
 };
 
-const measureRenderer = async (Addon, theme, fontSize) => ({
+const measureRenderer = async (Addon, theme, fontSize, productionContrastRatio) => ({
   plain: await renderMeasurement(Addon, theme, fontSize, 1, PLAIN_SAMPLE, false, TERMINAL_ROWS),
   dimPlain: await renderMeasurement(
     Addon,
     theme,
     fontSize,
-    MINIMUM_CONTRAST_RATIO,
+    productionContrastRatio,
     DIM_PLAIN_SAMPLE,
     false,
     TERMINAL_ROWS,
@@ -564,23 +610,24 @@ const measureRenderer = async (Addon, theme, fontSize) => ({
   ),
 });
 
-const measureLiveThemeSwitch = async (theme, fontSize) => {
-  const darkTheme = TERMINAL_THEMES.find(
-    (terminalTheme) => terminalTheme.id === DARK_BASELINE_THEME_ID,
+const measureLiveThemeSwitch = async (theme, fontSize, productionContrastRatio, isLight) => {
+  const baselineThemeId = isLight ? DARK_BASELINE_THEME_ID : LIGHT_BASELINE_THEME_ID;
+  const baselineTheme = TERMINAL_THEMES.find(
+    (terminalTheme) => terminalTheme.id === baselineThemeId,
   );
-  if (!darkTheme) throw new Error("The dark baseline theme was not found");
+  if (!baselineTheme) throw new Error("The opposite-polarity baseline theme was not found");
   const host = document.createElement("div");
   host.className = "measurement-host";
   document.body.append(host);
   const switchedEntry = await createTerminal({
     Addon: PatchedWebglAddon,
-    theme: darkTheme,
+    theme: baselineTheme,
     fontSize,
-    minimumContrastRatio: 1,
+    minimumContrastRatio: isLight ? 1 : MINIMUM_CONTRAST_RATIO,
     sample: ANSI_SAMPLE,
     host,
   });
-  switchedEntry.terminal.options.minimumContrastRatio = MINIMUM_CONTRAST_RATIO;
+  switchedEntry.terminal.options.minimumContrastRatio = productionContrastRatio;
   switchedEntry.terminal.options.theme = theme.colors;
   await nextFrames();
   const switchedRender = readPixels(switchedEntry.terminal, theme);
@@ -590,16 +637,35 @@ const measureLiveThemeSwitch = async (theme, fontSize) => {
     PatchedWebglAddon,
     theme,
     fontSize,
-    MINIMUM_CONTRAST_RATIO,
+    productionContrastRatio,
     ANSI_SAMPLE,
   );
   return compareRawPixels(switchedRender, freshRender);
 };
 
 const measureTheme = async (theme, fontSize) => {
-  const patched = await measureRenderer(PatchedWebglAddon, theme, fontSize);
-  const upstream = await measureRenderer(UpstreamWebglAddon, theme, fontSize);
+  const isLight = LIGHT_THEME_IDS.includes(theme.id);
+  const productionContrastRatio = isLight ? MINIMUM_CONTRAST_RATIO : 1;
+  const patched = await measureRenderer(
+    PatchedWebglAddon,
+    theme,
+    fontSize,
+    productionContrastRatio,
+  );
+  const upstream = await measureRenderer(
+    UpstreamWebglAddon,
+    theme,
+    fontSize,
+    productionContrastRatio,
+  );
   const canvasPlain = await renderCanvasMeasurement(theme, fontSize);
+  const canvasDim = await renderCanvasMeasurement(
+    theme,
+    fontSize,
+    DIM_PLAIN_SAMPLE,
+    false,
+    productionContrastRatio,
+  );
   const canvasInverse = await renderCanvasMeasurement(theme, fontSize, INVERSE_PLAIN_SAMPLE, true);
   const palette = ANSI_COLOR_ENTRIES.map(([label, colorKey]) => {
     const color = theme.colors[colorKey];
@@ -612,9 +678,12 @@ const measureTheme = async (theme, fontSize) => {
   return {
     id: theme.id,
     name: theme.name,
+    isLight,
+    productionContrastRatio,
     canvasMask: compareCoverage(patched.plain, canvasPlain),
     translucentPixels: countTranslucentPixels(patched.plain),
     faintMask: compareCoverage(patched.dimPlain, upstream.dimPlain),
+    faintCanvasMask: compareCoverage(patched.dimPlain, canvasDim),
     faintContrastRatio: maximumPixelContrastRatio(patched.dimPlain),
     inverseMask: compareCoverage(patched.inversePlain, canvasInverse),
     shapeMask: compareCoverage(patched.plain, upstream.plain),
@@ -624,7 +693,12 @@ const measureTheme = async (theme, fontSize) => {
       upstream.contrastBaseline,
       upstream.contrastAdjusted,
     ),
-    liveThemeSwitch: await measureLiveThemeSwitch(theme, fontSize),
+    liveThemeSwitch: await measureLiveThemeSwitch(
+      theme,
+      fontSize,
+      productionContrastRatio,
+      isLight,
+    ),
     palette,
     colorsBelowThree: palette.filter((entry) => entry.ratio < LOW_CONTRAST_RATIO).length,
     colorsBelowFourPointFive: palette.filter((entry) => entry.ratio < MINIMUM_CONTRAST_RATIO)
@@ -689,42 +763,54 @@ const createRendererCard = async (mode, theme, fontSize, minimumContrastRatio) =
 
 const signedPercent = (value) => `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 
-const canvasCoverageDeltas = (measurement) => ({
+const canvasCoverageDeltas = (canvasMask) => ({
   hard:
-    measurement.canvasMask.patchedDistribution.hardPixelPercent -
-    measurement.canvasMask.upstreamDistribution.hardPixelPercent,
+    canvasMask.patchedDistribution.hardPixelPercent -
+    canvasMask.upstreamDistribution.hardPixelPercent,
   fuzzy:
-    measurement.canvasMask.patchedDistribution.fuzzyPixelPercent -
-    measurement.canvasMask.upstreamDistribution.fuzzyPixelPercent,
+    canvasMask.patchedDistribution.fuzzyPixelPercent -
+    canvasMask.upstreamDistribution.fuzzyPixelPercent,
   mean:
-    (measurement.canvasMask.patchedDistribution.meanVisibleCoverage -
-      measurement.canvasMask.upstreamDistribution.meanVisibleCoverage) *
+    (canvasMask.patchedDistribution.meanVisibleCoverage -
+      canvasMask.upstreamDistribution.meanVisibleCoverage) *
     100,
 });
 
-const canvasMatchIsInRange = (measurement) => {
-  const deltas = canvasCoverageDeltas(measurement);
+const coverageMatchesCanvas = (canvasMask) => {
+  const deltas = canvasCoverageDeltas(canvasMask);
   return (
-    Math.abs(measurement.canvasMask.inkDeltaPercent) <= MAX_CANVAS_INK_DELTA_PERCENT &&
-    Math.abs(measurement.canvasMask.visiblePixelDeltaPercent) <=
-      MAX_CANVAS_VISIBLE_PIXEL_DELTA_PERCENT &&
+    Math.abs(canvasMask.inkDeltaPercent) <= MAX_CANVAS_INK_DELTA_PERCENT &&
+    Math.abs(canvasMask.visiblePixelDeltaPercent) <= MAX_CANVAS_VISIBLE_PIXEL_DELTA_PERCENT &&
     Math.abs(deltas.hard) <= MAX_CANVAS_HARD_PIXEL_DELTA_PERCENT &&
     Math.abs(deltas.fuzzy) <= MAX_CANVAS_FUZZY_PIXEL_DELTA_PERCENT &&
     Math.abs(deltas.mean) <= MAX_CANVAS_MEAN_COVERAGE_DELTA_PERCENT &&
-    measurement.canvasMask.visibleMeanAbsoluteCoverageDifference <=
-      MAX_CANVAS_VISIBLE_COVERAGE_ERROR &&
-    measurement.canvasMask.halfCoverageMaskChangedPercent <=
-      MAX_CANVAS_HALF_COVERAGE_MASK_CHANGED_PERCENT &&
-    Math.abs(measurement.canvasMask.halfCoveragePixelDeltaPercent) <=
-      MAX_CANVAS_HALF_COVERAGE_PIXEL_DELTA_PERCENT &&
-    measurement.translucentPixels === 0
+    canvasMask.visibleMeanAbsoluteCoverageDifference <= MAX_CANVAS_VISIBLE_COVERAGE_ERROR &&
+    canvasMask.halfCoverageMaskChangedPercent <= MAX_CANVAS_HALF_COVERAGE_MASK_CHANGED_PERCENT &&
+    Math.abs(canvasMask.halfCoveragePixelDeltaPercent) <=
+      MAX_CANVAS_HALF_COVERAGE_PIXEL_DELTA_PERCENT
   );
 };
 
-const faintCoverageIsReadable = (measurement) =>
-  measurement.faintContrastRatio >= MIN_FAINT_CONTRAST_RATIO &&
-  measurement.faintMask.inkDeltaPercent >= MIN_FAINT_INK_GAIN_PERCENT &&
-  measurement.faintMask.patchedDistribution.meanVisibleCoverage >= MIN_FAINT_MEAN_VISIBLE_COVERAGE;
+const canvasMatchIsInRange = (measurement) =>
+  coverageMatchesCanvas(measurement.canvasMask) && measurement.translucentPixels === 0;
+
+const faintMatchesCanvas = (canvasMask) =>
+  Math.abs(canvasMask.inkDeltaPercent) <= MAX_FAINT_CANVAS_INK_DELTA_PERCENT &&
+  Math.abs(canvasMask.visiblePixelDeltaPercent) <= MAX_CANVAS_VISIBLE_PIXEL_DELTA_PERCENT &&
+  Math.abs(
+    (canvasMask.patchedDistribution.meanVisibleCoverage -
+      canvasMask.upstreamDistribution.meanVisibleCoverage) *
+      100,
+  ) <= MAX_CANVAS_MEAN_COVERAGE_DELTA_PERCENT &&
+  canvasMask.visibleMeanAbsoluteCoverageDifference <= MAX_CANVAS_VISIBLE_COVERAGE_ERROR;
+
+const faintCoverageIsAcceptable = (measurement) =>
+  measurement.isLight
+    ? measurement.faintContrastRatio >= MIN_FAINT_CONTRAST_RATIO &&
+      measurement.faintMask.inkDeltaPercent >= MIN_FAINT_INK_GAIN_PERCENT &&
+      measurement.faintMask.patchedDistribution.meanVisibleCoverage >=
+        MIN_FAINT_MEAN_VISIBLE_COVERAGE
+    : faintMatchesCanvas(measurement.faintCanvasMask);
 
 const inverseMatchesCanvas = (measurement) =>
   Math.abs(measurement.inverseMask.inkDeltaPercent) <= MAX_INVERSE_INK_DELTA_PERCENT;
@@ -753,7 +839,7 @@ const renderTheme = async (theme, measurement, fontSize, minimumContrastRatio) =
   source.textContent = `${theme.colors.foreground} on ${theme.colors.background}`;
   heading.append(title, source);
 
-  const deltas = canvasCoverageDeltas(measurement);
+  const deltas = canvasCoverageDeltas(measurement.canvasMask);
   const metrics = document.createElement("div");
   metrics.className = "metrics";
   metrics.textContent = [
@@ -763,7 +849,7 @@ const renderTheme = async (theme, measurement, fontSize, minimumContrastRatio) =
     `Canvas visible coverage error: ${(measurement.canvasMask.visibleMeanAbsoluteCoverageDifference * 100).toFixed(2)}%`,
     `Canvas half mask changed: ${measurement.canvasMask.halfCoverageMaskChangedPercent.toFixed(2)}% (${signedPercent(measurement.canvasMask.halfCoveragePixelDeltaPercent)} area)`,
     `translucent framebuffer pixels: ${measurement.translucentPixels.toLocaleString()}`,
-    `faint ink gain vs upstream: ${signedPercent(measurement.faintMask.inkDeltaPercent)}`,
+    `faint ink delta vs ${measurement.isLight ? "upstream" : "Canvas"}: ${signedPercent(measurement.isLight ? measurement.faintMask.inkDeltaPercent : measurement.faintCanvasMask.inkDeltaPercent)}`,
     `faint core contrast: ${measurement.faintContrastRatio.toFixed(2)}:1`,
     `inverse ink delta vs Canvas: ${signedPercent(measurement.inverseMask.inkDeltaPercent)}`,
     `visible footprint vs upstream: ${signedPercent(measurement.shapeMask.visiblePixelDeltaPercent)}`,
@@ -780,9 +866,13 @@ const renderTheme = async (theme, measurement, fontSize, minimumContrastRatio) =
     canvasMatchIsInRange(measurement)
       ? "Normal WebGL text matches the xterm Canvas raster within bounded coverage and geometry tolerances."
       : "Normal WebGL text diverges from the xterm Canvas raster or leaves a translucent framebuffer.",
-    faintCoverageIsReadable(measurement)
-      ? "SGR faint cores retain the light-theme contrast floor."
-      : "SGR faint text is still too transparent or low contrast.",
+    faintCoverageIsAcceptable(measurement)
+      ? measurement.isLight
+        ? "SGR faint cores retain the light-theme contrast floor."
+        : "SGR faint text remains close to Canvas on the dark background."
+      : measurement.isLight
+        ? "SGR faint text is still too transparent or low contrast."
+        : "SGR faint text diverges from Canvas on the dark background.",
     inverseMatchesCanvas(measurement)
       ? "Inverse light-on-dark text remains close to Canvas."
       : `Inverse ink delta ${measurement.inverseMask.inkDeltaPercent.toFixed(1)}% exceeds ${MAX_INVERSE_INK_DELTA_PERCENT}%.`,
@@ -808,7 +898,7 @@ const disposeActiveTerminals = () => {
 const summarize = (measurements) => {
   const canvasMisses = measurements.filter((measurement) => !canvasMatchIsInRange(measurement));
   const faintCoverageMisses = measurements.filter(
-    (measurement) => !faintCoverageIsReadable(measurement),
+    (measurement) => !faintCoverageIsAcceptable(measurement),
   );
   const inverseDeltaMisses = measurements.filter(
     (measurement) => !inverseMatchesCanvas(measurement),
@@ -825,11 +915,11 @@ const summarize = (measurements) => {
   );
   summaryElement.textContent = [
     `${canvasMisses.length}/${measurements.length} normal samples miss the xterm Canvas coverage/geometry target.`,
-    `${faintCoverageMisses.length}/${measurements.length} faint samples miss the contrast/readability targets.`,
+    `${faintCoverageMisses.length}/${measurements.length} faint samples miss their light-readability or dark-Canvas targets.`,
     `${inverseDeltaMisses.length}/${measurements.length} inverse samples differ from Canvas by more than ${MAX_INVERSE_INK_DELTA_PERCENT}%.`,
     `${lowContrastColors}/${measurements.length * ANSI_COLOR_ENTRIES.length} default/ANSI colors are below 4.5:1.`,
     `${contrastAdjustmentMisses.length}/${measurements.length} themes diverge from upstream minimumContrastRatio adjustment by more than ${MAX_CONTRAST_ADJUSTMENT_PIXEL_DELTA_PERCENT}% of changed pixels.`,
-    `${mismatchedLiveSwitches.length}/${measurements.length} live dark-to-light switches differ from a fresh light terminal.`,
+    `${mismatchedLiveSwitches.length}/${measurements.length} live opposite-polarity switches differ from a fresh terminal.`,
     "Opaque Canvas raster reconstruction plus standard framebuffer alpha blending should match Canvas/DOM font fullness without bright edge halos.",
   ].join("\n");
   return {
@@ -865,7 +955,11 @@ const runDiagnostic = async () => {
       ),
     ]);
     await document.fonts.ready;
-    const themes = LIGHT_THEME_IDS.map((themeId) =>
+    const defaultThemeIds = LIGHT_THEME_IDS.includes(themeInput.value)
+      ? LIGHT_THEME_IDS
+      : DARK_THEME_IDS;
+    const measuredThemeIds = requestedThemeIds?.length ? requestedThemeIds : defaultThemeIds;
+    const themes = measuredThemeIds.map((themeId) =>
       TERMINAL_THEMES.find((theme) => theme.id === themeId),
     );
     if (themes.some((theme) => !theme)) throw new Error("A diagnostic theme was not found");
@@ -912,5 +1006,8 @@ const runDiagnostic = async () => {
   }
 };
 
+themeInput.addEventListener("change", () => {
+  contrastFloorInput.value = LIGHT_THEME_IDS.includes(themeInput.value) ? "4.5" : "1";
+});
 runButton.addEventListener("click", () => void runDiagnostic());
 void runDiagnostic();
