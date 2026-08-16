@@ -1,5 +1,11 @@
 # @monotykamary/pi-localterm
 
+## 0.4.4
+
+### Patch Changes
+
+- 2e3e594: Statically import the extension activation so pi's loader resolves the bundled runtime imports (@earendil-works/pi-coding-agent, @earendil-works/pi-tui), fixing `Cannot find package` when pi starts inside LocalTerm.
+
 ## 0.4.3
 
 ### Patch Changes
