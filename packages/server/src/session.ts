@@ -38,6 +38,7 @@ import {
   TerminalModeState,
 } from "./utils/terminal-mode-state.js";
 import { terminalQueryResponder } from "./utils/terminal-query-responder.js";
+import { trimTrailingLineBreaks } from "./utils/trim-trailing-line-breaks.js";
 
 interface SessionEvents {
   output: [data: string];
@@ -158,7 +159,7 @@ export class Session extends EventEmitter<SessionEvents> {
     }
 
     if (input.replaySeed) {
-      const renderedRows = input.replaySeed.replace(/(?:\r\n|\r|\n)+$/, "");
+      const renderedRows = trimTrailingLineBreaks(input.replaySeed);
       if (renderedRows) {
         for (const row of renderedRows.split(/\r\n|\r|\n/)) {
           this.appendScrollback(`${row}\r\n`);
