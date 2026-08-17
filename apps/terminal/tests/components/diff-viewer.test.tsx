@@ -436,6 +436,28 @@ describe("DiffViewer", () => {
     expect(imageCalls).toHaveLength(1);
   });
 
+  it("bounds patch prefetching for large diffs", async () => {
+    const files = Array.from({ length: 100 }, (_, index) => ({
+      path: `src/file-${index}.ts`,
+      oldPath: null,
+      status: "modified" as const,
+      additions: 1,
+      deletions: 1,
+      binary: false,
+    }));
+    filesMock.mockResolvedValue({ isRepo: true, files });
+    patchMock.mockResolvedValue({ patch: null, patchOmitted: false, binary: false });
+
+    renderDiffViewer();
+
+    await vi.waitFor(() => expect(patchMock).toHaveBeenCalledTimes(6));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(patchMock).toHaveBeenCalledTimes(6);
+    expect(patchMock.mock.calls.map(([, path]) => path)).toEqual(
+      files.slice(0, 6).map((file) => file.path),
+    );
+  });
+
   it("opens a regular file in neovim via the open-in-editor callback", async () => {
     mockHappyPath();
     const onOpenInEditor = vi.fn();

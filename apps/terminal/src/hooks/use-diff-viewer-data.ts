@@ -310,11 +310,12 @@ export const useDiffViewerData = ({
     setSelectedPath(files[0]?.path ?? null);
   }, [displayFileList, files, selectedPath]);
 
-  // Unified prefetch: the selected file (priority 0), its neighbors (priority
-  // 1..N), and remaining uncached files (priority N+1+) all route through a
-  // single concurrency-limited queue. When the selected file's metadata
-  // changes (additions/deletions/status), the force flag invalidates its
-  // cached patch so the queue re-fetches it.
+  // Prefetch the selected file and a bounded set of neighbors through one
+  // concurrency-limited queue. Enqueuing the entire repository makes each
+  // patch fetch clone an ever-growing React cache and syntax-highlights files
+  // the user may never view, which overwhelms the client on large diffs. When
+  // the selected file's metadata changes (additions/deletions/status), the
+  // force flag invalidates its cached patch so the queue re-fetches it.
   useEffect(() => {
     if (files.length === 0 || !selectedPath) return;
     const queue = getOrCreatePrefetchQueue();
@@ -338,15 +339,6 @@ export const useDiffViewerData = ({
         if (previousPath) items.push({ path: previousPath, priority: offset });
         if (nextPath) items.push({ path: nextPath, priority: offset });
       }
-    }
-
-    for (const file of files) {
-      if (items.some((item) => item.path === file.path)) continue;
-      const distance = Math.abs(files.indexOf(file) - (selectedIndex >= 0 ? selectedIndex : 0));
-      items.push({
-        path: file.path,
-        priority: PATCH_PREFETCH_NEIGHBOR_RADIUS + distance,
-      });
     }
 
     queue.enqueue(items);
