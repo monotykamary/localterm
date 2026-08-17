@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.76.10
+
+### Patch Changes
+
+- 127c49f: Prevent daemon startup from hanging while restoring hibernated tabs whose scrollback contains a long run of CRLF line breaks.
+
 ## 2.76.9
 
 ### Patch Changes
