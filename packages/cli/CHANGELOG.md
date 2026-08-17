@@ -1,5 +1,12 @@
 # localterm
 
+## 2.76.8
+
+### Patch Changes
+
+- 847f02b: Stop reopening last workspace tabs via CDP on daemon start. Browser tab restore and session IDs already bring the same tabs back; the Settings toggle and `workspaceRestore` config knob are gone.
+  - @monotykamary/localterm-server@2.76.8
+
 ## 2.76.7
 
 ### Patch Changes
