@@ -72,6 +72,9 @@ import {
   AUTOMATION_AGENT_SESSIONS_DIRNAME,
   SERVER_STOP_GRACE_MS,
   SESSION_ID_QUERY_PARAM,
+  WORKSPACE_FILENAME,
+  WORKSPACE_RESTORE_SETTLE_MS,
+  WORKSPACE_SNAPSHOT_DEBOUNCE_MS,
   SESSION_ACTIVITY_WINDOW_MS,
   WINDOW_ID_QUERY_PARAM,
   WAIT_DEFAULT_TIMEOUT_MS,
@@ -114,6 +117,7 @@ import {
 } from "./git-diff.js";
 import { HeartbeatStore } from "./heartbeat-store.js";
 import { HibernateStore, type HibernateTab } from "./hibernate-store.js";
+import { WorkspaceStore } from "./workspace-store.js";
 import { createDefaultSecretBackend, type SecretBackend } from "./secret-backend.js";
 import { SecretStore } from "./secret-store.js";
 import { ProcessStore } from "./process-store.js";
@@ -471,6 +475,10 @@ interface DaemonContext {
   // the same reason as the CDP port.
   getGraceSeconds: () => number | null;
   applyGraceSeconds: (seconds: number | null) => number | null;
+  // Live workspace-restore toggle access for GET/PUT /api/config. Routed through
+  // ctx so buildApiRoutes can read/mutate the createServer-scoped store.
+  getWorkspaceRestore: () => boolean;
+  applyWorkspaceRestore: (enabled: boolean) => boolean;
   connectCdpNow: () => Promise<CdpConnectResult>;
   portsSnapshotProcesses: SnapshotProcesses;
   portsSnapshotListeners: SnapshotListeners;
@@ -573,6 +581,8 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     applyCdpPort,
     getGraceSeconds,
     applyGraceSeconds,
+    getWorkspaceRestore,
+    applyWorkspaceRestore,
     connectCdpNow,
     buildTabUrl,
     mintViewerCookie,
@@ -2087,6 +2097,7 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     context.json({
       cdpPort: getCdpPort(),
       graceSeconds: getGraceSeconds(),
+      workspaceRestore: getWorkspaceRestore(),
       defaultShell: getDefaultShell(),
       shells: listKnownShells(),
     }),
@@ -2100,6 +2111,10 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
         parsed.data.graceSeconds === undefined
           ? getGraceSeconds()
           : applyGraceSeconds(parsed.data.graceSeconds),
+      workspaceRestore:
+        parsed.data.workspaceRestore === undefined
+          ? getWorkspaceRestore()
+          : applyWorkspaceRestore(parsed.data.workspaceRestore),
       defaultShell: getDefaultShell(),
       shells: listKnownShells(),
     });
@@ -2187,10 +2202,14 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       onOutputActivity: () => caffeinateManager.noteOutputActivity(),
       onSessionActivity: () => {
         caffeinateManager.pokeAuto();
+        scheduleWorkspaceSnapshot();
         refreshHerdrThemeSyncState();
       },
       onSessionEvent: (event, cwd) => {
         sessionEventManager.onSessionEvent(event, cwd);
+        // A cwd change reshapes the workspace manifest (the tab's respawn cwd
+        // moves), so re-snapshot alongside the attach/detach-driven snapshot.
+        if (event === "cwd") scheduleWorkspaceSnapshot();
       },
       onAutomationExit: (automationId, runId, exitCode, log) => {
         automationStore.updateRun(automationId, runId, {
@@ -2282,9 +2301,10 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     path.join(stateDirectory, "caffeinate.json"),
   );
   const worktreeConfigStore = new WorktreeConfigStore(stateDirectory);
+  const workspaceStore = new WorkspaceStore(path.join(stateDirectory, WORKSPACE_FILENAME));
   const hibernateStore = new HibernateStore(path.join(stateDirectory, HIBERNATE_FILENAME));
   // Immutable shutdown snapshot for this daemon lifetime. Exact old session ids
-  // let surviving browser tabs recover only their own text.
+  // let surviving or CDP-restored browser tabs recover only their own text.
   const startupHibernateEntries = hibernateStore.read();
   // Per-process secret injection: a backend (macOS Keychain on darwin) holds
   // secret values; a secret is an identity + the env var it exports
@@ -2845,6 +2865,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     registry.rearmGrace();
     return next;
   };
+  // Persist + read the workspace-restore toggle. Read at restore time, so a
+  // `PUT /api/config` change takes effect on the next start (the restore runs
+  // once at startup, not live-reactively).
+  const getWorkspaceRestore = (): boolean => daemonConfigStore.getWorkspaceRestore();
+  const applyWorkspaceRestore = (enabled: boolean): boolean =>
+    daemonConfigStore.setWorkspaceRestore(enabled);
   // Explicit "Connect now" (Settings → Automation browser → Connect): drop any
   // live socket and await a fresh connect so the caller learns the outcome —
   // connected + which browser, or the error that explains a failure (e.g. a
@@ -2868,6 +2894,43 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     }
   };
 
+  // Workspace restore: reopen the user's last tabs via CDP on start (a
+  // tmux-resurrect/herdr-style restore of the *layout*; the shells themselves
+  // don't survive a stop). The manifest is snapshotted to disk — debounced on
+  // attach/detach churn (scheduleWorkspaceSnapshot, hooked into onSessionActivity)
+  // and flushed on graceful stop — so a restart, graceful or a crash, can reopen
+  // the same tabs. Triggered once per (owner, windowId) after the first desktop
+  // tab pairs with CDP, on a quiet window so surviving tabs (a daemon restart
+  // with the browser left open) reattach and are counted before the deficit is
+  // opened. Excludes automation-run tabs and dormant shells (filtered in
+  // SessionManager.workspaceEntries), so only tabs that were actively open
+  // come back. Opt out via Settings → Sessions (config.json workspaceRestore).
+  let workspaceSnapshotTimer: NodeJS.Timeout | null = null;
+  const scheduleWorkspaceSnapshot = (): void => {
+    if (workspaceSnapshotTimer !== null) clearTimeout(workspaceSnapshotTimer);
+    const timer = setTimeout(() => {
+      workspaceSnapshotTimer = null;
+      workspaceStore.write(registry.workspaceEntries());
+    }, WORKSPACE_SNAPSHOT_DEBOUNCE_MS);
+    timer.unref?.();
+    workspaceSnapshotTimer = timer;
+  };
+  const flushWorkspaceSnapshot = (): void => {
+    if (workspaceSnapshotTimer !== null) {
+      clearTimeout(workspaceSnapshotTimer);
+      workspaceSnapshotTimer = null;
+    }
+    workspaceStore.write(registry.workspaceEntries());
+  };
+
+  const buildSpawnTabUrl = (cwd: string, shell: string, sessionId?: string): string => {
+    const url = new URL(localOrigin ?? publicOrigin ?? `http://${FRIENDLY_HOSTNAME}:${actualPort}`);
+    if (cwd) url.searchParams.set("cwd", cwd);
+    if (shell) url.searchParams.set("shell", shell);
+    if (sessionId) url.searchParams.set(SESSION_ID_QUERY_PARAM, sessionId);
+    return url.toString();
+  };
+
   const hibernatedTabFor = (
     owner: SessionOwner,
     windowId: string,
@@ -2877,6 +2940,65 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     return startupHibernateEntries
       .find((entry) => entry.owner === owner && entry.windowId === windowId)
       ?.tabs.find((tab) => tab.sessionId === sessionId);
+  };
+
+  const restoredWorkspaceKeys = new Set<string>();
+  const workspaceRestoreTimers = new Map<string, NodeJS.Timeout>();
+  const scheduleWorkspaceRestore = (owner: SessionOwner, windowId: string): void => {
+    if (!windowId) return;
+    const key = `${owner ?? ""}\u0000${windowId}`;
+    if (restoredWorkspaceKeys.has(key)) return;
+    const existing = workspaceRestoreTimers.get(key);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      workspaceRestoreTimers.delete(key);
+      if (restoredWorkspaceKeys.has(key)) return;
+      restoredWorkspaceKeys.add(key);
+      void restoreWorkspace(owner, windowId);
+    }, WORKSPACE_RESTORE_SETTLE_MS);
+    timer.unref?.();
+    workspaceRestoreTimers.set(key, timer);
+  };
+  const restoreWorkspace = async (owner: SessionOwner, windowId: string): Promise<void> => {
+    if (!daemonConfigStore.getWorkspaceRestore()) return;
+    if (!cdpClient || !cdpClient.isConnected()) return;
+    const hibernatedEntry = startupHibernateEntries.find(
+      (candidate) => candidate.owner === owner && candidate.windowId === windowId,
+    );
+    const workspaceEntry = workspaceStore
+      .read()
+      .find((candidate) => candidate.owner === owner && candidate.windowId === windowId);
+    const manifest = hibernatedEntry?.tabs ?? workspaceEntry?.tabs ?? [];
+    if (manifest.length === 0) return;
+    const urlFor = (index: number): string => {
+      const tab = manifest[index];
+      const sessionId =
+        "sessionId" in tab && typeof tab.sessionId === "string" ? tab.sessionId : undefined;
+      return buildSpawnTabUrl(tab.cwd, tab.shell, sessionId);
+    };
+    const openCount = registry.attachedClientCount(owner, windowId);
+    if (openCount >= manifest.length) return;
+    if (openCount === 0) {
+      for (let index = 0; index < manifest.length; index += 1) {
+        await cdpClient.openBackgroundTab(urlFor(index));
+      }
+      return;
+    }
+    if (openCount === 1) {
+      // Browser was fully closed; repoint the lone bootstrap to the first tab.
+      const firstTargetId = [...wsToTargetId.entries()].find(([ws]) => {
+        const profile = registry.clientProfile(ws);
+        return profile !== null && profile.owner === owner && profile.windowId === windowId;
+      })?.[1];
+      if (firstTargetId) await cdpClient.navigateTab(firstTargetId, urlFor(0));
+      for (let index = 1; index < manifest.length; index += 1) {
+        await cdpClient.openBackgroundTab(urlFor(index));
+      }
+      return;
+    }
+    for (let index = openCount; index < manifest.length; index += 1) {
+      await cdpClient.openBackgroundTab(urlFor(index));
+    }
   };
 
   const updateCheckStore = new UpdateCheckStore({
@@ -2916,6 +3038,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     applyCdpPort,
     getGraceSeconds,
     applyGraceSeconds,
+    getWorkspaceRestore,
+    applyWorkspaceRestore,
     broadcastThemes,
     broadcastFonts,
     connectCdpNow,
@@ -3226,6 +3350,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
               const targetId = cdpClient?.findTargetIdForToken(token);
               if (targetId) {
                 wsToTargetId.set(ws, targetId);
+                // A desktop tab just paired with CDP — arm a one-shot restore
+                // for its (owner, windowId) so missing workspace tabs reopen
+                // once the reconnection burst settles. Phone PWA tabs never pair
+                // (no debug port), so restore stays scoped to the desktop.
+                const profile = registry.clientProfile(ws);
+                if (profile) scheduleWorkspaceRestore(profile.owner, profile.windowId);
               }
             }
             safeSend(ws, {
@@ -3380,6 +3510,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   const stop = (): Promise<void> => {
     if (stopPromise) return stopPromise;
     stopPromise = (async () => {
+      flushWorkspaceSnapshot();
       hibernateStore.write(await registry.hibernateEntries());
       automationScheduler.dispose();
       folderWatchManager.dispose();

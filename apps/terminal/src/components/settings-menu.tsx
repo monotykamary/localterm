@@ -94,6 +94,8 @@ interface SettingsMenuProps {
   onOpenInspect: () => void;
   graceSeconds: number | null;
   onGraceSecondsChange: (seconds: number | null) => void;
+  workspaceRestore: boolean;
+  onWorkspaceRestoreChange: (enabled: boolean) => void;
   notificationsPermission: NotificationPermission | "unsupported";
   onNotificationsPermissionRequest: () => void;
   sessionInfo?: TerminalSessionInfo | null;
@@ -166,6 +168,8 @@ export const SettingsMenu = ({
   onOpenInspect,
   graceSeconds,
   onGraceSecondsChange,
+  workspaceRestore,
+  onWorkspaceRestoreChange,
   notificationsPermission,
   onNotificationsPermissionRequest,
   sessionInfo,
@@ -386,6 +390,8 @@ export const SettingsMenu = ({
                     <SessionsSettingsSection
                       graceSeconds={graceSeconds}
                       onGraceSecondsChange={onGraceSecondsChange}
+                      workspaceRestore={workspaceRestore}
+                      onWorkspaceRestoreChange={onWorkspaceRestoreChange}
                     />
 
                     <Separator className="bg-border/40" />

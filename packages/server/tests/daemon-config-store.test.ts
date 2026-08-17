@@ -32,6 +32,7 @@ describe("DaemonConfigStore", () => {
       version: DAEMON_CONFIG_FILE_VERSION,
       cdpPort: 52860,
       graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
+      workspaceRestore: true,
     });
   });
 
@@ -69,20 +70,5 @@ describe("DaemonConfigStore", () => {
     fs.writeFileSync(filePath, JSON.stringify({ version: DAEMON_CONFIG_FILE_VERSION }));
     const store = new DaemonConfigStore(filePath);
     expect(store.getCdpPort()).toBeNull();
-  });
-
-  it("loads a legacy file that still has workspaceRestore", () => {
-    fs.writeFileSync(
-      filePath,
-      JSON.stringify({
-        version: DAEMON_CONFIG_FILE_VERSION,
-        cdpPort: 9222,
-        graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
-        workspaceRestore: false,
-      }),
-    );
-    const store = new DaemonConfigStore(filePath);
-    expect(store.getCdpPort()).toBe(9222);
-    expect(store.getGraceSeconds()).toBe(SESSION_GRACE_DEFAULT_SECONDS);
   });
 });

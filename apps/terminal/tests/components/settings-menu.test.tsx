@@ -66,6 +66,8 @@ interface SettingsMenuHarnessProps {
   onOpenInspect?: () => void;
   initialGraceSeconds?: number | null;
   onGraceSecondsChange?: (seconds: number | null) => void;
+  initialWorkspaceRestore?: boolean;
+  onWorkspaceRestoreChange?: (enabled: boolean) => void;
   initialMobileResume?: boolean;
   onMobileResumeChange?: (enabled: boolean) => void;
   onPaddingXChange?: (paddingX: number) => void;
@@ -133,6 +135,8 @@ const renderSettingsMenu = ({
   onOpenInspect = () => {},
   initialGraceSeconds = null,
   onGraceSecondsChange = () => {},
+  initialWorkspaceRestore = true,
+  onWorkspaceRestoreChange = () => {},
   initialMobileResume = true,
   onMobileResumeChange = () => {},
   onPaddingXChange = () => {},
@@ -202,6 +206,8 @@ const renderSettingsMenu = ({
         onOpenInspect={onOpenInspect}
         graceSeconds={initialGraceSeconds}
         onGraceSecondsChange={onGraceSecondsChange}
+        workspaceRestore={initialWorkspaceRestore}
+        onWorkspaceRestoreChange={onWorkspaceRestoreChange}
         mobileResume={initialMobileResume}
         onMobileResumeChange={onMobileResumeChange}
         paddingX={0}

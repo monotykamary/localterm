@@ -33,6 +33,7 @@ import { resolveNamedKeys } from "./utils/named-keys.js";
 import { deletePasteImagesForSession } from "./utils/paste-image-store.js";
 import type { ClientSocket } from "./utils/ws-socket.js";
 import type { HibernateEntry } from "./hibernate-store.js";
+import type { WorkspaceEntry } from "./workspace-store.js";
 
 export interface AutomationContext {
   automationId: string;
@@ -363,6 +364,10 @@ export class SessionManager {
     }));
   }
 
+  workspaceEntries(): WorkspaceEntry[] {
+    return this.clientHub.workspaceEntries(this.sessions.values());
+  }
+
   async hibernateEntries(): Promise<HibernateEntry[]> {
     const byKey = new Map<string, HibernateEntry>();
     for (const managed of this.sessions.values()) {
@@ -391,6 +396,14 @@ export class SessionManager {
       }
     }
     return [...byKey.values()];
+  }
+
+  clientProfile(ws: ClientSocket): { owner: SessionOwner; windowId: string } | null {
+    return this.clientHub.clientProfile(ws);
+  }
+
+  attachedClientCount(owner: SessionOwner, windowId: string): number {
+    return this.clientHub.attachedClientCount(this.sessions.values(), owner, windowId);
   }
 
   // Every live PTY whose current cwd is inside `targetPath` (or equals it). A

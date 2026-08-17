@@ -22,6 +22,12 @@ interface DaemonConfig {
   // `0` = reap an idle shell the moment its last viewer detaches. The daemon
   // reads it live, so a `PUT /api/config` re-arms already-dormant shells.
   graceSeconds: number | null;
+  // Whether the daemon reopens the user's last workspace tabs via CDP on start
+  // (a tmux-resurrect-style restore of the *layout*; the shells themselves
+  // don't survive a stop). Default on; opt-out from Settings → Sessions. Read
+  // at restore time, so a `PUT /api/config` change takes effect on the next
+  // start without a restart.
+  workspaceRestore: boolean;
   // Identity provider config — scopes the session registry per authenticated
   // user. `null` = no provider (single-authority mode, byte-identical to the
   // no-auth behavior). Read once at daemon start (the provider is built from
@@ -33,6 +39,7 @@ interface DaemonConfig {
 const DEFAULT_CONFIG: DaemonConfig = {
   cdpPort: null,
   graceSeconds: SESSION_GRACE_DEFAULT_SECONDS,
+  workspaceRestore: true,
   identity: null,
 };
 
@@ -79,6 +86,19 @@ export class DaemonConfigStore {
     return this.config.graceSeconds;
   }
 
+  getWorkspaceRestore(): boolean {
+    return this.config.workspaceRestore;
+  }
+
+  // Persists only on a real change. Read at restore time, so a toggle takes
+  // effect on the next start without a restart.
+  setWorkspaceRestore(enabled: boolean): boolean {
+    if (enabled === this.config.workspaceRestore) return this.config.workspaceRestore;
+    this.config = { ...this.config, workspaceRestore: enabled };
+    this.persist();
+    return this.config.workspaceRestore;
+  }
+
   getIdentity(): IdentityConfig | null {
     return this.config.identity;
   }
@@ -114,6 +134,7 @@ export class DaemonConfigStore {
     this.config = {
       cdpPort: parsed.data.cdpPort,
       graceSeconds: parsed.data.graceSeconds ?? SESSION_GRACE_DEFAULT_SECONDS,
+      workspaceRestore: parsed.data.workspaceRestore ?? true,
       identity: parsed.data.identity ?? null,
     };
   }
@@ -127,11 +148,13 @@ export class DaemonConfigStore {
       version: number;
       cdpPort: number | null;
       graceSeconds: number | null;
+      workspaceRestore: boolean;
       identity?: IdentityConfig;
     } = {
       version: DAEMON_CONFIG_FILE_VERSION,
       cdpPort: this.config.cdpPort,
       graceSeconds: this.config.graceSeconds,
+      workspaceRestore: this.config.workspaceRestore,
     };
     if (this.config.identity) payload.identity = this.config.identity;
     const tmpPath = `${this.filePath}.tmp`;

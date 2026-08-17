@@ -69,6 +69,8 @@ export interface LaunchSettingsSectionProps {
 export interface SessionsSettingsSectionProps {
   graceSeconds: number | null;
   onGraceSecondsChange: (seconds: number | null) => void;
+  workspaceRestore: boolean;
+  onWorkspaceRestoreChange: (enabled: boolean) => void;
 }
 
 export interface NotificationsSettingsSectionProps {
@@ -447,6 +449,8 @@ export const LaunchSettingsSection = ({
 export const SessionsSettingsSection = ({
   graceSeconds,
   onGraceSecondsChange,
+  workspaceRestore,
+  onWorkspaceRestoreChange,
 }: SessionsSettingsSectionProps) => (
   <Field orientation="vertical" className="gap-1.5">
     <FieldLabel className={SETTINGS_SECTION_LABEL_CLASSES}>Sessions</FieldLabel>
@@ -463,6 +467,25 @@ export const SessionsSettingsSection = ({
       </TooltipContent>
     </Tooltip>
     <GracePeriodField seconds={graceSeconds} onSecondsChange={onGraceSecondsChange} />
+    <div className="flex items-center justify-between gap-2">
+      <Tooltip>
+        <TooltipTrigger render={<span className={SETTINGS_ROW_LABEL_CLASSES} />}>
+          Reopen tabs on start
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={TOOLTIP_SIDE_OFFSET_PX} className="max-w-xs">
+          On start, reopen the browser tabs you had open last (in the same directories and shells)
+          via the automation browser's CDP connection — a tmux-resurrect-style restore of the
+          workspace layout. The shells themselves don't survive a stop; only the arrangement comes
+          back. Automation-run tabs and shells you'd closed are skipped. Needs a debug-enabled
+          browser so the daemon can drive tab creation.
+        </TooltipContent>
+      </Tooltip>
+      <Switch
+        aria-label="toggle reopen tabs on start"
+        checked={workspaceRestore}
+        onCheckedChange={onWorkspaceRestoreChange}
+      />
+    </div>
   </Field>
 );
 
