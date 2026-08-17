@@ -7,7 +7,6 @@ import {
   CAFFEINATE_BATTERY_LOW_WATER_MIN_PERCENT,
   CAFFEINATE_PREFERENCES_FILE_VERSION,
   DAEMON_CONFIG_FILE_VERSION,
-  WORKSPACE_FILE_VERSION,
   EXEC_MAX_OUTPUT_LIMIT_BYTES,
   EXEC_MAX_TIMEOUT_MS,
   MAX_AUTOMATION_CHANGED_FILES,
@@ -1764,29 +1763,13 @@ export const authSessionSchema = z.object({
   user: z.string().nullable(),
 });
 
-// Persisted workspace manifest (~/.localterm/workspace.json): per owner + per
-// browser-profile windowId, the open tabs ({cwd, shell}) so the daemon can
-// reopen them via CDP on the next start. `owner` is null in single-authority
-// mode; a string under an identity provider. `savedAt` bounds crash recovery
-// (the manifest is the last flushed snapshot, not the exact stop-time state).
-const workspaceTabSchema = z.object({ cwd: z.string(), shell: z.string() }).strict();
-const workspaceEntrySchema = z
-  .object({
-    owner: z.string().nullable(),
-    windowId: z.string(),
-    tabs: z.array(workspaceTabSchema),
-    savedAt: z.number().int(),
-  })
-  .strict();
-export const workspaceFileSchema = z
-  .object({ version: z.literal(WORKSPACE_FILE_VERSION), entries: z.array(workspaceEntrySchema) })
-  .strict();
-
 export const daemonConfigFileSchema = z
   .object({
     version: z.literal(DAEMON_CONFIG_FILE_VERSION),
     cdpPort: cdpPortSchema,
     graceSeconds: graceSecondsSchema.optional(),
+    // Legacy CDP tab-restore toggle. Ignored after session-id + browser restore
+    // replaced it; kept so existing config.json files still parse under .strict().
     workspaceRestore: z.boolean().optional(),
     identity: identityConfigSchema.optional(),
   })
@@ -1801,7 +1784,6 @@ export const daemonConfigSchema = z
   .object({
     cdpPort: cdpPortSchema,
     graceSeconds: graceSecondsSchema,
-    workspaceRestore: z.boolean(),
     defaultShell: z.string().min(1),
     shells: z.array(z.string().min(1)),
   })
@@ -1813,7 +1795,6 @@ export const updateDaemonConfigInputSchema = z
   .object({
     cdpPort: cdpPortSchema.optional(),
     graceSeconds: graceSecondsSchema.optional(),
-    workspaceRestore: z.boolean().optional(),
   })
   .strict();
 

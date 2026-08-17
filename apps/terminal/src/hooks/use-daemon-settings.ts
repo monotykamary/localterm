@@ -15,7 +15,6 @@ interface CdpStatus {
 export const useDaemonSettings = () => {
   const [cdpPort, setCdpPort] = useState<number | null>(null);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
-  const [workspaceRestore, setWorkspaceRestore] = useState(true);
   // The daemon's detected default shell (from `GET /api/config`), shown as the
   // Settings → Launch shell field's placeholder so the user knows what an
   // empty field falls back to. Lazily fetched when the Settings panel opens
@@ -25,7 +24,6 @@ export const useDaemonSettings = () => {
   const [cdpConnecting, setCdpConnecting] = useState(false);
   const cdpPortUpdateVersionRef = useRef(0);
   const graceSecondsUpdateVersionRef = useRef(0);
-  const workspaceRestoreUpdateVersionRef = useRef(0);
 
   const refreshCdpStatus = useCallback(() => {
     void fetchServerHealth().then((health) => {
@@ -63,19 +61,6 @@ export const useDaemonSettings = () => {
     });
   }, []);
 
-  // The workspace-restore toggle lives on the daemon; PUT the new value and
-  // adopt the confirmation. Takes effect on the next daemon start (restore
-  // runs once at startup, not live-reactively).
-  const handleWorkspaceRestoreChange = useCallback((next: boolean) => {
-    const updateVersion = ++workspaceRestoreUpdateVersionRef.current;
-    setWorkspaceRestore(next);
-    void updateDaemonConfig({ workspaceRestore: next }).then((confirmed) => {
-      if (confirmed && updateVersion === workspaceRestoreUpdateVersionRef.current) {
-        setWorkspaceRestore(confirmed.workspaceRestore);
-      }
-    });
-  }, []);
-
   // Explicit "Connect now": await the daemon's connect and fold the result
   // (including any error) into cdpStatus, so the field shows why a connection
   // failed rather than silently staying "Not connected".
@@ -103,7 +88,6 @@ export const useDaemonSettings = () => {
   const loadDaemonSettings = useCallback(() => {
     const cdpPortUpdateVersion = cdpPortUpdateVersionRef.current;
     const graceSecondsUpdateVersion = graceSecondsUpdateVersionRef.current;
-    const workspaceRestoreUpdateVersion = workspaceRestoreUpdateVersionRef.current;
     void fetchDaemonConfig().then((config) => {
       if (config) {
         if (cdpPortUpdateVersion === cdpPortUpdateVersionRef.current) {
@@ -111,9 +95,6 @@ export const useDaemonSettings = () => {
         }
         if (graceSecondsUpdateVersion === graceSecondsUpdateVersionRef.current) {
           setGraceSeconds(config.graceSeconds);
-        }
-        if (workspaceRestoreUpdateVersion === workspaceRestoreUpdateVersionRef.current) {
-          setWorkspaceRestore(config.workspaceRestore);
         }
         setDetectedDefaultShell(config.defaultShell);
       }
@@ -124,13 +105,11 @@ export const useDaemonSettings = () => {
   return {
     cdpPort,
     graceSeconds,
-    workspaceRestore,
     detectedDefaultShell,
     cdpStatus,
     cdpConnecting,
     handleCdpPortChange,
     handleGraceSecondsChange,
-    handleWorkspaceRestoreChange,
     handleCdpConnect,
     handleOpenInspect,
     loadDaemonSettings,

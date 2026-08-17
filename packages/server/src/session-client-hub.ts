@@ -15,7 +15,6 @@ import {
   TERMINAL_FOCUS_OUT_SEQUENCE,
 } from "./utils/terminal-mode-state.js";
 import type { ClientSocket } from "./utils/ws-socket.js";
-import type { WorkspaceEntry, WorkspaceTab } from "./workspace-store.js";
 
 interface SessionClientEntry {
   client: ManagedClient;
@@ -74,65 +73,6 @@ export class SessionClientHub {
           secondProfile.count - firstProfile.count ||
           firstProfile.windowId.localeCompare(secondProfile.windowId),
       );
-  }
-
-  // The persisted workspace manifest: every currently-open tab, grouped by
-  // (owner, windowId), recording the live cwd + shell to respawn it in. A
-  // session with N attached clients of one windowId contributes N tabs (each
-  // viewer is a tab). Automation-run sessions are skipped (their tabs are
-  // one-shot), and sessions with no clients (dormant/orphaned) contribute
-  // nothing — only tabs that are actively open are restored. Computed from
-  // in-memory state, so the daemon snapshots it to disk before a graceful
-  // stop (and debounced during life for crash recovery).
-  workspaceEntries(sessions: Iterable<ManagedSession>): WorkspaceEntry[] {
-    const byKey = new Map<string, WorkspaceEntry>();
-    const now = Date.now();
-    for (const managed of sessions) {
-      if (managed.automation) continue;
-      if (managed.clients.size === 0) continue;
-      const cwd = managed.session.lastEmittedCwd || managed.session.cwd;
-      const shell = managed.session.shell;
-      const tab: WorkspaceTab = { cwd, shell };
-      for (const client of managed.clients) {
-        if (!client.windowId) continue;
-        const key = `${managed.owner ?? ""}\u0000${client.windowId}`;
-        let entry = byKey.get(key);
-        if (!entry) {
-          entry = { owner: managed.owner, windowId: client.windowId, tabs: [], savedAt: now };
-          byKey.set(key, entry);
-        }
-        entry.tabs.push(tab);
-      }
-    }
-    return [...byKey.values()];
-  }
-
-  // The (owner, windowId) a socket's tab is viewing, for scoping a CDP
-  // workspace restore to the browser profile that just reconnected. Returns
-  // null when the socket isn't attached to a session (e.g. a transient
-  // mid-detach state).
-  clientProfile(ws: ClientSocket): { owner: SessionOwner; windowId: string } | null {
-    const entry = this.wsToClient.get(ws);
-    if (!entry) return null;
-    return { owner: entry.session.owner, windowId: entry.client.windowId };
-  }
-
-  // How many of a browser profile's tabs are currently attached to a (non-
-  // automation) session — the "already open" count the restore reconciles
-  // the persisted manifest against. Surviving tabs that reattach after a
-  // daemon restart are counted here so the daemon only opens the deficit.
-  attachedClientCount(
-    sessions: Iterable<ManagedSession>,
-    owner: SessionOwner,
-    windowId: string,
-  ): number {
-    let count = 0;
-    for (const managed of sessions) {
-      if (owner !== null && managed.owner !== owner) continue;
-      if (managed.automation) continue;
-      for (const client of managed.clients) if (client.windowId === windowId) count++;
-    }
-    return count;
   }
 
   // Attach `ws` to a live PTY by id. Returns the session to reattach to, or
