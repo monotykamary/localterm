@@ -1,5 +1,13 @@
 # localterm
 
+## 2.76.9
+
+### Patch Changes
+
+- 2cc1413: Restore CDP workspace tab reconciliation on daemon start. Browser session restoration alone does not reliably reopen localterm tabs, which can leave startup without a usable terminal after a daemon restart.
+- Updated dependencies [2cc1413]
+  - @monotykamary/localterm-server@2.76.9
+
 ## 2.76.8
 
 ### Patch Changes
