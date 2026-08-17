@@ -232,8 +232,8 @@ export const useDiffViewerData = ({
       filePath: string | null | undefined,
       force = false,
       priority = DIFF_SYNTAX_PRIORITY_SELECTED,
-    ) => {
-      if (!filePath || !cwd) return;
+    ): Promise<void> => {
+      if (!filePath || !cwd) return Promise.resolve();
       const existing = patchCacheRef.current[filePath];
       const inFlight = patchControllersRef.current.has(filePath);
       if (
@@ -241,8 +241,8 @@ export const useDiffViewerData = ({
         existing &&
         (existing.state === "loaded" || (existing.state === "loading" && inFlight))
       )
-        return;
-      if (force && existing?.state === "loading" && inFlight) return;
+        return Promise.resolve();
+      if (force && existing?.state === "loading" && inFlight) return Promise.resolve();
       const previousData = existing?.data;
       setPatchCache((previous) => ({
         ...previous,
@@ -251,7 +251,7 @@ export const useDiffViewerData = ({
       patchControllersRef.current.get(filePath)?.abort();
       const controller = new AbortController();
       patchControllersRef.current.set(filePath, controller);
-      void fetchGitDiffFilePatch(
+      return fetchGitDiffFilePatch(
         cwd,
         filePath,
         { mode: compareMode, base: baseOverride },
@@ -295,7 +295,7 @@ export const useDiffViewerData = ({
       prefetchQueueRef.current = new PrefetchQueue(
         PATCH_PREFETCH_CONCURRENCY,
         async (filePath, force, priority) => {
-          loadPatch(filePath, force, priority);
+          await loadPatch(filePath, force, priority);
         },
       );
     }

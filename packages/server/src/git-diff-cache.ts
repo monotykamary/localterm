@@ -28,6 +28,7 @@ export interface DiffCache {
 // Nested so a cwd can hold more than one comparison (the working-tree summary
 // is pushed on git-dirty while the viewer may be open in branch mode).
 const diffCacheByCwd = new Map<string, Map<string, DiffCache>>();
+const diffCacheGenerationByCwd = new Map<string, number>();
 
 const comparisonKey = (mode: GitDiffMode, base: string | null): string => `${mode}:${base ?? ""}`;
 
@@ -90,6 +91,10 @@ export const writeDiffCache = (
   pruneDiffCache();
 };
 
+export const getGitDiffCacheGeneration = (cwd: string): number =>
+  diffCacheGenerationByCwd.get(cwd) ?? 0;
+
 export const invalidateGitDiffCache = (cwd: string): void => {
   diffCacheByCwd.delete(cwd);
+  diffCacheGenerationByCwd.set(cwd, getGitDiffCacheGeneration(cwd) + 1);
 };

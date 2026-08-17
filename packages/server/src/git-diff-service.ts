@@ -18,7 +18,12 @@ import {
   resolveDefaultBase,
   verifyRef,
 } from "./git-branch-metadata.js";
-import { readDiffCache, writeDiffCache, type DiffCache } from "./git-diff-cache.js";
+import {
+  getGitDiffCacheGeneration,
+  readDiffCache,
+  writeDiffCache,
+  type DiffCache,
+} from "./git-diff-cache.js";
 import {
   buildUntrackedPatch,
   countLines,
@@ -352,6 +357,27 @@ const buildDiffCache = async (cwd: string, baseRef: string): Promise<DiffCache |
   };
 };
 
+const diffCacheBuilds = new Map<string, Promise<DiffCache | null>>();
+
+const diffCacheBuildKey = (cwd: string, options: GitDiffOptions): string =>
+  JSON.stringify([cwd, options.mode, options.base ?? null]);
+
+const buildCurrentDiffCache = async (
+  cwd: string,
+  options: GitDiffOptions,
+): Promise<DiffCache | null> => {
+  while (true) {
+    const generation = getGitDiffCacheGeneration(cwd);
+    const baseRef = await resolveEffectiveBaseRef(cwd, options);
+    if (baseRef === null) return null;
+
+    const cache = await buildDiffCache(cwd, baseRef);
+    if (generation !== getGitDiffCacheGeneration(cwd)) continue;
+    if (cache) writeDiffCache(cwd, options.mode, options.base ?? null, cache);
+    return cache;
+  }
+};
+
 const ensureDiffCache = async (cwd: string, options: GitDiffOptions): Promise<DiffCache | null> => {
   // Read the cache before resolving the base ref — that resolution does git work
   // (rev-parse + merge-base) on every call, so for the per-file patch endpoint
@@ -360,12 +386,17 @@ const ensureDiffCache = async (cwd: string, options: GitDiffOptions): Promise<Di
   const cached = readDiffCache(cwd, options.mode, options.base ?? null);
   if (cached) return cached;
 
-  const baseRef = await resolveEffectiveBaseRef(cwd, options);
-  if (baseRef === null) return null;
+  const key = diffCacheBuildKey(cwd, options);
+  const existing = diffCacheBuilds.get(key);
+  if (existing) return existing;
 
-  const cache = await buildDiffCache(cwd, baseRef);
-  if (cache) writeDiffCache(cwd, options.mode, options.base ?? null, cache);
-  return cache;
+  const build = buildCurrentDiffCache(cwd, options);
+  diffCacheBuilds.set(key, build);
+  try {
+    return await build;
+  } finally {
+    if (diffCacheBuilds.get(key) === build) diffCacheBuilds.delete(key);
+  }
 };
 
 export const getGitDiffSummary = async (
