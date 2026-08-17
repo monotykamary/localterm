@@ -1,5 +1,12 @@
 # localterm
 
+## 2.76.7
+
+### Patch Changes
+
+- 54730d7: Bound diff patch prefetching to the selected file and nearby files so large working trees do not trigger repository-wide syntax highlighting.
+  - @monotykamary/localterm-server@2.76.7
+
 ## 2.76.6
 
 ### Patch Changes
