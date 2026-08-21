@@ -1,7 +1,23 @@
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { PI_SETTINGS_FILENAME } from "../constants.js";
+
+// pi-config-directory resolution, reimplemented so the extension module never
+// imports @earendil-works/pi-coding-agent at load time (pi's loader makes that
+// import cost roughly a second of startup per extension).
+const DEFAULT_CONFIG_DIR_NAME = ".pi";
+const PI_CODING_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
+
+const expandTilde = (value: string): string => {
+  if (value === "~") return homedir();
+  return value.startsWith("~/") ? join(homedir(), value.slice(2)) : value;
+};
+
+const resolveAgentDir = (): string => {
+  const override = process.env[PI_CODING_AGENT_DIR_ENV];
+  return override ? expandTilde(override) : join(homedir(), DEFAULT_CONFIG_DIR_NAME, "agent");
+};
 
 interface ShellSettings {
   shellPath: string | undefined;
@@ -41,8 +57,9 @@ const readNonEmptyString = (settings: Record<string, unknown>, key: string): str
 // because both keys are top-level scalars. `paths` is overridable for tests so
 // they never touch the real pi settings.
 export const readPiShellSettings = (cwd: string, paths: ShellSettingsPaths = {}): ShellSettings => {
-  const globalSettingsPath = paths.globalSettingsPath ?? join(getAgentDir(), PI_SETTINGS_FILENAME);
-  const configDirName = paths.configDirName ?? CONFIG_DIR_NAME;
+  const globalSettingsPath =
+    paths.globalSettingsPath ?? join(resolveAgentDir(), PI_SETTINGS_FILENAME);
+  const configDirName = paths.configDirName ?? DEFAULT_CONFIG_DIR_NAME;
   const merged: Record<string, unknown> = {
     ...readJsonFile(globalSettingsPath),
     ...readJsonFile(join(cwd, configDirName, PI_SETTINGS_FILENAME)),

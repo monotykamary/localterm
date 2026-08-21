@@ -1,4 +1,3 @@
-import { CONFIG_DIR_NAME, createBashToolDefinition, createLocalBashOperations, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -169,6 +168,16 @@ const readLocaltermSecretValuesForPi = (stateDirectory = join(homedir(), LOCALTE
 };
 //#endregion
 //#region src/utils/read-pi-shell-settings.ts
+const DEFAULT_CONFIG_DIR_NAME = ".pi";
+const PI_CODING_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
+const expandTilde = (value) => {
+	if (value === "~") return homedir();
+	return value.startsWith("~/") ? join(homedir(), value.slice(2)) : value;
+};
+const resolveAgentDir = () => {
+	const override = process.env[PI_CODING_AGENT_DIR_ENV];
+	return override ? expandTilde(override) : join(homedir(), DEFAULT_CONFIG_DIR_NAME, "agent");
+};
 const isRecord = (value) => typeof value === "object" && value !== null;
 const readJsonFile = (filePath) => {
 	try {
@@ -183,8 +192,8 @@ const readNonEmptyString = (settings, key) => {
 	return typeof value === "string" && value.length > 0 ? value : void 0;
 };
 const readPiShellSettings = (cwd, paths = {}) => {
-	const globalSettingsPath = paths.globalSettingsPath ?? join(getAgentDir(), "settings.json");
-	const configDirName = paths.configDirName ?? CONFIG_DIR_NAME;
+	const globalSettingsPath = paths.globalSettingsPath ?? join(resolveAgentDir(), "settings.json");
+	const configDirName = paths.configDirName ?? DEFAULT_CONFIG_DIR_NAME;
 	const merged = {
 		...readJsonFile(globalSettingsPath),
 		...readJsonFile(join(cwd, configDirName, PI_SETTINGS_FILENAME))
@@ -275,22 +284,30 @@ const registerBashSecretScrub = (pi) => {
 	const { shellPath, commandPrefix } = readPiShellSettings(cwd);
 	let stripSet = new Set(readLocaltermSecretEnvVarsForPi());
 	let redactionValues = readLocaltermSecretValuesForPi();
-	pi.on("session_start", () => {
-		stripSet = new Set(readLocaltermSecretEnvVarsForPi());
-		redactionValues = readLocaltermSecretValuesForPi();
-	});
+	let installed = false;
 	const spawnHook = ({ command, cwd: spawnCwd, env }) => ({
 		command,
 		cwd: spawnCwd,
 		env: scrubEnv(env, stripSet)
 	});
-	const operations = wrapWithRedaction(createLocalBashOperations({ shellPath }), () => redactionValues);
-	pi.registerTool(createBashToolDefinition(cwd, {
-		operations,
-		spawnHook,
-		commandPrefix,
-		shellPath
-	}));
+	const install = () => {
+		if (installed) return;
+		installed = true;
+		import("@earendil-works/pi-coding-agent").then(({ createBashToolDefinition, createLocalBashOperations }) => {
+			const operations = wrapWithRedaction(createLocalBashOperations({ shellPath }), () => redactionValues);
+			pi.registerTool(createBashToolDefinition(cwd, {
+				operations,
+				spawnHook,
+				commandPrefix,
+				shellPath
+			}));
+		}).catch(() => {});
+	};
+	pi.on("session_start", () => {
+		stripSet = new Set(readLocaltermSecretEnvVarsForPi());
+		redactionValues = readLocaltermSecretValuesForPi();
+		install();
+	});
 };
 //#endregion
 //#region extensions/kitty-images.ts

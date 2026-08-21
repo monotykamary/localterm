@@ -7,7 +7,7 @@ describe("published extension entry", () => {
   it("keeps pi runtime imports in the entry module handled by pi's loader", async () => {
     const entry = await readFile(entryUrl, "utf8");
 
-    expect(entry).toContain('from "@earendil-works/pi-coding-agent"');
+    expect(entry).toContain('import("@earendil-works/pi-coding-agent")');
     expect(entry).toContain('from "@earendil-works/pi-tui"');
     expect(entry).not.toMatch(/\bimport\(["']\.\//u);
   });

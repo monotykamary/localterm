@@ -1,10 +1,4 @@
-import {
-  createBashToolDefinition,
-  createLocalBashOperations,
-  type BashOperations,
-  type BashSpawnHook,
-  type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
+import type { BashOperations, BashSpawnHook, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readLocaltermSecretEnvVarsForPi } from "../src/utils/read-localterm-secret-policy.js";
 import { readLocaltermSecretValuesForPi } from "../src/utils/read-secret-values.js";
 import { readPiShellSettings } from "../src/utils/read-pi-shell-settings.js";
@@ -72,10 +66,7 @@ export const registerBashSecretScrub = (pi: ExtensionAPI): void => {
 
   let stripSet = new Set<string>(readLocaltermSecretEnvVarsForPi());
   let redactionValues: readonly string[] = readLocaltermSecretValuesForPi();
-  pi.on("session_start", () => {
-    stripSet = new Set(readLocaltermSecretEnvVarsForPi());
-    redactionValues = readLocaltermSecretValuesForPi();
-  });
+  let installed = false;
 
   const spawnHook: BashSpawnHook = ({ command, cwd: spawnCwd, env }) => ({
     command,
@@ -83,12 +74,31 @@ export const registerBashSecretScrub = (pi: ExtensionAPI): void => {
     env: scrubEnv(env, stripSet),
   });
 
-  const operations = wrapWithRedaction(
-    createLocalBashOperations({ shellPath }),
-    () => redactionValues,
-  );
+  // The scrubbed bash tool wraps pi-core factories, and pi's loader re-evaluates
+  // the pi-coding-agent module graph for every extension that imports it at load
+  // time (~1s). Install on the first session_start instead: registration still
+  // precedes any agent dispatch, while startup itself never pays for the import.
+  const install = (): void => {
+    if (installed) return;
+    installed = true;
+    import("@earendil-works/pi-coding-agent")
+      .then(({ createBashToolDefinition, createLocalBashOperations }) => {
+        const operations = wrapWithRedaction(
+          createLocalBashOperations({ shellPath }),
+          () => redactionValues,
+        );
+        pi.registerTool(
+          createBashToolDefinition(cwd, { operations, spawnHook, commandPrefix, shellPath }),
+        );
+      })
+      .catch(() => {
+        // The built-in bash tool remains active; scrubbing is best-effort.
+      });
+  };
 
-  pi.registerTool(
-    createBashToolDefinition(cwd, { operations, spawnHook, commandPrefix, shellPath }),
-  );
+  pi.on("session_start", () => {
+    stripSet = new Set(readLocaltermSecretEnvVarsForPi());
+    redactionValues = readLocaltermSecretValuesForPi();
+    install();
+  });
 };
