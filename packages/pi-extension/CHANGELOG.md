@@ -1,5 +1,11 @@
 # @monotykamary/pi-localterm
 
+## 0.4.5
+
+### Patch Changes
+
+- bbff214: Pi-launch perf: register the scrubbed bash tool on first session start instead of at load, and resolve the pi agent dir in-process. Loading the extension no longer evaluates the whole pi-coding-agent module graph during startup (~1s).
+
 ## 0.4.4
 
 ### Patch Changes
