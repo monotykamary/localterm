@@ -370,6 +370,10 @@ export const MAX_PIXEL_FRAME_BYTES = 4 * MAX_PIXEL_FRAME_PIXELS;
 // Upper bound on a single incompleted APC chunk buffered while scanning PTY
 // output for kitty graphics sequences split across PTY data events.
 export const MAX_APC_BUFFER_BYTES = 64 * 1024;
+// Successful kitty frame-path realpath resolutions are cached by the output
+// coordinator; capped with insertion-order LRU eviction so an app minting a
+// fresh frame path per frame can't grow the map for the daemon's lifetime.
+export const KITTY_FRAME_REALPATH_CACHE_MAX_ENTRIES = 4_096;
 
 // Heartbeat: send a WS ping every N ms; if no pong arrives within the timeout
 // we tear down the socket. Without this, half-open connections (laptop sleep,

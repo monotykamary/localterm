@@ -365,6 +365,16 @@ export class Session extends EventEmitter<SessionEvents> {
     return this.modeState.restoreReplay(this.scrollbackChunks.join(""));
   }
 
+  // The replay ring without the live-mode restore prefix, for shutdown
+  // hibernation: snapshotScrollback()'s prefix re-enters the alternate screen
+  // up front, which would divert the ring's normal-buffer bytes into the alt
+  // buffer of a fresh renderer and leave captureNormal() with nothing.
+  // Parsing the raw stream in temporal order keeps the buffers faithful to
+  // what the PTY actually did.
+  rawScrollback(): string {
+    return this.scrollbackChunks.join("");
+  }
+
   private appendScrollback(data: string): void {
     if (!data) return;
     this.scrollbackChunks.push(data);

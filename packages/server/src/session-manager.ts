@@ -191,9 +191,6 @@ export interface ManagedSession {
   // the first capture; fed the session's live output thereafter and disposed on
   // teardown. Kept on the managed session so its lifecycle is bound to the PTY.
   captureRenderer: CaptureRenderer | undefined;
-  // Always-on, bounded renderer used only for graceful-shutdown hibernation.
-  // Its normal buffer excludes any currently-running alternate-screen TUI.
-  hibernateRenderer?: CaptureRenderer;
   resizeOwner: ManagedClient | null;
   // Last effective size broadcast to clients, or null before the active viewer
   // reports its dimensions. Tracked so resize activity that does not change the
@@ -367,17 +364,34 @@ export class SessionManager {
     const byKey = new Map<string, HibernateEntry>();
     for (const managed of this.sessions.values()) {
       if (managed.automation || managed.clients.size === 0) continue;
-      const renderer = managed.hibernateRenderer;
-      if (!renderer) continue;
-      await renderer.flush();
+      // Hydrate the shutdown snapshot on demand from the bounded raw replay
+      // ring instead of live-parsing every PTY chunk into an always-on
+      // per-session xterm: the loop awaits each session in turn, so just one
+      // parsed grid exists at a time and hibernation's steady-state cost is
+      // the 256KB ring rather than a 2000-line xterm per live session. The
+      // ring replays at the current PTY size — content written before a
+      // resize rewraps to it, the same view a fresh client attach renders.
+      const renderer = new CaptureRenderer(
+        managed.session.cols,
+        managed.session.rows,
+        HIBERNATE_SCROLLBACK_LINES,
+      );
+      let scrollback: string;
+      try {
+        renderer.write(managed.session.rawScrollback());
+        await renderer.flush();
+        scrollback = renderer.captureNormal(
+          HIBERNATE_SCROLLBACK_LINES,
+          HIBERNATE_SCROLLBACK_MAX_CODE_UNITS,
+        );
+      } finally {
+        renderer.dispose();
+      }
       const tab = {
         sessionId: managed.id,
         cwd: managed.session.lastEmittedCwd || managed.session.cwd,
         shell: managed.session.shell,
-        scrollback: renderer.captureNormal(
-          HIBERNATE_SCROLLBACK_LINES,
-          HIBERNATE_SCROLLBACK_MAX_CODE_UNITS,
-        ),
+        scrollback,
       };
       for (const client of managed.clients) {
         if (!client.windowId) continue;
@@ -465,12 +479,6 @@ export class SessionManager {
   ): ManagedSession | null {
     if (!this.lifecyclePolicy.makeRoomForSession(this.sessions)) return null;
     const session = new Session(this.shimsDir ? { ...input, shimsDir: this.shimsDir } : input);
-    const hibernateRenderer = new CaptureRenderer(
-      session.cols,
-      session.rows,
-      HIBERNATE_SCROLLBACK_LINES,
-    );
-    hibernateRenderer.write(session.snapshotScrollback());
     const managed: ManagedSession = {
       session,
       id: session.id,
@@ -493,7 +501,6 @@ export class SessionManager {
       parkedAt: null,
       pinned: false,
       captureRenderer: undefined,
-      hibernateRenderer,
       resizeOwner: null,
       ptySizeCols: null,
       ptySizeRows: null,
@@ -640,7 +647,6 @@ export class SessionManager {
     if (!managed) return false;
     managed.session.resize(cols, rows);
     managed.captureRenderer?.resize(cols, rows);
-    managed.hibernateRenderer?.resize(cols, rows);
     return true;
   }
 
@@ -835,7 +841,6 @@ export class SessionManager {
     this.lifecyclePolicy.cancelGrace(managed);
     managed.captureRenderer?.dispose();
     managed.captureRenderer = undefined;
-    managed.hibernateRenderer?.dispose();
     deletePasteImagesForSession(managed.id);
     if (managed.outputBatchTimer !== null) {
       clearTimeout(managed.outputBatchTimer);

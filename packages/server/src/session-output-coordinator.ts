@@ -3,6 +3,7 @@ import nodeFs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  KITTY_FRAME_REALPATH_CACHE_MAX_ENTRIES,
   MAX_AUTOMATION_LOG_LENGTH,
   MAX_OUTPUT_BYTES,
   OUTPUT_BATCH_FLUSH_BYTES,
@@ -65,16 +66,29 @@ export class SessionOutputCoordinator {
   // Kitty file-medium frame paths are validated against the real temp root
   // (apps report $TMPDIR-style paths, which are symlink-bearing on macOS).
   // realpath results are cached: the ring of frame files is long-lived and
-  // rewritten in place, so a per-frame lookup stays cheap.
+  // rewritten in place, so a per-frame lookup stays cheap. Insertion-order
+  // LRU capped at KITTY_FRAME_REALPATH_CACHE_MAX_ENTRIES so an app minting a
+  // fresh path per frame can't grow the map for the daemon's lifetime.
+  // Misses are never cached: a file that appears later is re-probed, and
+  // eviction only ever churns successful resolutions.
   private isAllowedFramePath(name: string): boolean {
-    let real = this.realpathCache.get(name);
-    if (real === undefined) {
-      try {
-        real = fs.realpathSync(name);
-      } catch {
-        return false;
-      }
-      this.realpathCache.set(name, real);
+    const cached = this.realpathCache.get(name);
+    if (cached !== undefined) {
+      this.realpathCache.delete(name);
+      this.realpathCache.set(name, cached);
+      return cached.startsWith(this.tmpdirRoot + path.sep);
+    }
+    let real: string;
+    try {
+      real = fs.realpathSync(name);
+    } catch {
+      return false;
+    }
+    this.realpathCache.set(name, real);
+    while (this.realpathCache.size > KITTY_FRAME_REALPATH_CACHE_MAX_ENTRIES) {
+      const oldest = this.realpathCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.realpathCache.delete(oldest);
     }
     return real.startsWith(this.tmpdirRoot + path.sep);
   }
@@ -156,9 +170,10 @@ export class SessionOutputCoordinator {
     if (managed.automation) this.appendAutomationLog(managed, output);
     this.noteOutputActivity(managed.session.pid);
     this.onOutputActivity();
-    // Keep rendered terminal models in lockstep with the bytes clients see.
+    // Keep the capture-pane terminal model in lockstep with the bytes
+    // clients see. Hibernation has no always-on renderer — it hydrates from
+    // the raw replay ring at shutdown (SessionManager.hibernateEntries).
     managed.captureRenderer?.write(output);
-    managed.hibernateRenderer?.write(output);
 
     if (output.length === 0) {
       await asyncTasks;
@@ -336,10 +351,7 @@ export class SessionOutputCoordinator {
   }
 
   private rendererBacklogBytes(managed: ManagedSession): number {
-    return Math.max(
-      managed.captureRenderer?.queuedBytes ?? 0,
-      managed.hibernateRenderer?.queuedBytes ?? 0,
-    );
+    return managed.captureRenderer?.queuedBytes ?? 0;
   }
 
   private clientBacklogBytes(client: ManagedClient): number {

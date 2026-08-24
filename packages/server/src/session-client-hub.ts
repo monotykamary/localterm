@@ -415,7 +415,6 @@ export class SessionClientHub {
     // Keep the capture renderer's grid at the PTY's effective size so a
     // capture-pane reflects the same line wrapping a viewer would see.
     managed.captureRenderer?.resize(cols, rows);
-    managed.hibernateRenderer?.resize(cols, rows);
     // One PTY can only have one size. Following the most recently focused or
     // interactive viewer makes a mobile-to-desktop handoff resize immediately
     // instead of leaving every viewer constrained by the phone. Passive wider

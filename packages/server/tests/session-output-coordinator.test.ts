@@ -69,7 +69,6 @@ describe("SessionOutputCoordinator", () => {
       automation: null,
       automationLog: "",
       captureRenderer: undefined,
-      hibernateRenderer: undefined,
       drainPollTimer: null,
       lastOutputAt: 0,
     } as unknown as ManagedSession;
@@ -89,11 +88,11 @@ describe("SessionOutputCoordinator", () => {
     return { coordinator, sendControl, writeInput };
   };
 
-  it("pauses the PTY until the hibernation renderer backlog drains", async () => {
+  it("pauses the PTY until the capture renderer backlog drains", async () => {
     vi.useFakeTimers();
     const { managed, session } = makeSession(true);
     const rendererBacklog = { queuedBytes: RENDERER_PENDING_PAUSE_HIGH_WATER_BYTES };
-    managed.hibernateRenderer = rendererBacklog as unknown as CaptureRenderer;
+    managed.captureRenderer = rendererBacklog as unknown as CaptureRenderer;
     const { coordinator } = makeCoordinator();
     try {
       managed.outputBatch = "output";
