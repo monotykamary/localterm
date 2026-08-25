@@ -22,6 +22,7 @@ import { getTerminalMinimumContrastRatio } from "@/utils/get-terminal-minimum-co
 import { preserveTerminalMouseWheelMagnitude } from "@/utils/preserve-terminal-mouse-wheel-magnitude";
 import { registerTerminalClipboard } from "@/utils/register-terminal-clipboard";
 import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider";
+import { KittyUnicodePlaceholderAddon } from "@/lib/terminal-runtime/kitty-unicode-placeholder-addon";
 import { createTerminalOutputScrollController } from "@/utils/create-terminal-output-scroll-controller";
 import type { TerminalOutputScrollController } from "@/utils/create-terminal-output-scroll-controller";
 import { outputBatcher } from "@/utils/write-terminal-output";
@@ -110,6 +111,7 @@ export const createTerminalSurface = ({
   terminal.loadAddon(new WebLinksAddon());
   const clipboardDisposable = registerTerminalClipboard(terminal);
   terminal.loadAddon(new ImageAddon());
+  terminal.loadAddon(new KittyUnicodePlaceholderAddon());
   terminal.loadAddon(new ProgressAddon());
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const graphemesProvider = (

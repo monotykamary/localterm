@@ -156,6 +156,34 @@ describe("SessionOutputCoordinator", () => {
     fs.rmSync(frameFile, { force: true });
   });
 
+  it("keeps placements and placeholder text behind asynchronous file expansion", async () => {
+    const imageFile = path.join(tmpdir, `kitty-ordered-${process.pid}.png`);
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAMAAAABCAMAAAAsPuSGAAAACVBMVEX/AAAA/wAAAP8tSs2KAAAADElEQVR4nGNgYGQCAAAIAAQ24LCmAAAAHXRFWHRTb2Z0d2FyZQBAbHVuYXBhaW50L3BuZy1jb2RlY/VDGR4AAAAASUVORK5CYII=",
+      "base64",
+    );
+    fs.writeFileSync(imageFile, png);
+    const { managed } = makeSession(true);
+    const { coordinator } = makeCoordinator();
+    const fileSequence = `${ESC}_Ga=t,f=100,t=f,U=1,i=42,q=2;${encode(imageFile)}${ESC}\\`;
+    const placementAndText = `${ESC}_Ga=p,U=1,i=42,p=7,c=2,r=1,q=2${ESC}\\PLACEHOLDERS`;
+
+    try {
+      const fileTask = coordinator.onSessionOutput(managed, fileSequence);
+      const placementTask = coordinator.onSessionOutput(managed, placementAndText);
+      await Promise.all([fileTask, placementTask]);
+
+      const directIndex = managed.outputBatch.indexOf("t=d,U=1,i=42");
+      const placementIndex = managed.outputBatch.indexOf("a=p,U=1,i=42");
+      expect(directIndex).toBeGreaterThanOrEqual(0);
+      expect(placementIndex).toBeGreaterThan(directIndex);
+      expect(managed.outputBatch.endsWith("PLACEHOLDERS")).toBe(true);
+    } finally {
+      coordinator.finishOutputBurst(managed);
+      fs.rmSync(imageFile, { force: true });
+    }
+  });
+
   it("brackets a size-split redraw until its idle boundary", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

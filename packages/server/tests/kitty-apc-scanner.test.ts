@@ -85,4 +85,62 @@ describe("KittyApcScanner", () => {
     expect(scan.frames).toEqual([]);
     expect(scan.output).toBe(shm);
   });
+  it("classifies ordered PNG file transmissions for direct browser conversion", () => {
+    const file = path.join(tmpdir, "kitty-inline.png");
+    fs.writeFileSync(
+      file,
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAMAAAABCAMAAAAsPuSGAAAACVBMVEX/AAAA/wAAAP8tSs2KAAAADElEQVR4nGNgYGQCAAAIAAQ24LCmAAAAHXRFWHRTb2Z0d2FyZQBAbHVuYXBhaW50L3BuZy1jb2RlY/VDGR4AAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
+    const sequence = `${ESC}_Ga=t,f=100,t=f,U=1,i=42,q=2;${encode(file)}${ESC}\\`;
+    const scanner = new KittyApcScanner(isAllowedPath);
+    const scan = scanner.push(`before${sequence}after`);
+
+    expect(scan.output).toBe(`before${sequence}after`);
+    expect(scan.outputParts).toEqual([
+      { kind: "text", text: "before" },
+      {
+        kind: "file",
+        transmission: {
+          controls: { a: "t", f: "100", t: "f", U: "1", i: "42", q: "2" },
+          original: sequence,
+          path: file,
+          temporary: false,
+        },
+      },
+      { kind: "text", text: "after" },
+    ]);
+    fs.rmSync(file, { force: true });
+  });
+
+  it("classifies temporary-file media separately from persistent files", () => {
+    const file = makeFile("kitty-temporary.rgb", 3);
+    const sequence = `${ESC}_Ga=t,f=24,s=1,v=1,t=t,i=8;${encode(file)}${ESC}\\`;
+    const scanner = new KittyApcScanner(isAllowedPath);
+    const scan = scanner.push(sequence);
+
+    expect(scan.outputParts[0]).toMatchObject({
+      kind: "file",
+      transmission: { path: file, temporary: true },
+    });
+    fs.rmSync(file, { force: true });
+  });
+
+  it("routes virtual and transmit-only RGBA files through ordered direct conversion", () => {
+    const file = makeFile("kitty-virtual-rgba.bin", 4);
+    const virtual = `${ESC}_Ga=T,f=32,s=1,v=1,t=f,U=1,i=51;${encode(file)}${ESC}\\`;
+    const transmitOnly = `${ESC}_Ga=t,f=32,s=1,v=1,t=f,i=52;${encode(file)}${ESC}\\`;
+    const scanner = new KittyApcScanner(isAllowedPath);
+
+    const virtualScan = scanner.push(virtual);
+    const transmitScan = scanner.push(transmitOnly);
+
+    expect(virtualScan.frames).toEqual([]);
+    expect(virtualScan.outputParts[0]).toMatchObject({ kind: "file" });
+    expect(transmitScan.frames).toEqual([]);
+    expect(transmitScan.outputParts[0]).toMatchObject({ kind: "file" });
+    fs.rmSync(file, { force: true });
+  });
 });

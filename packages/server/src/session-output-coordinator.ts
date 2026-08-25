@@ -16,7 +16,8 @@ import {
   WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES,
   WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
 } from "./constants.js";
-import { KittyApcScanner, type KittyMediumProbe } from "./kitty-apc-scanner.js";
+import { KittyApcScanner, type KittyApcScan, type KittyMediumProbe } from "./kitty-apc-scanner.js";
+import { expandKittyApcOutputParts } from "./kitty-file-transmission.js";
 import { KittyFrameFileRelay } from "./kitty-frame-file-relay.js";
 import type { ManagedClient, ManagedSession } from "./session-manager.js";
 import { SessionOutputTransport } from "./session-output-transport.js";
@@ -38,13 +39,14 @@ export class SessionOutputCoordinator {
   private readonly onOutputActivity: () => void;
   private readonly writeInput: (managed: ManagedSession, data: string) => void;
   private readonly frameRelay: KittyFrameFileRelay;
-  // The real temp root used to validate frame paths pointed at by kitty file
-  // medium messages (the scanner's allow-list). Resolved once: apps report
+  // The real temp root used to validate paths pointed at by Kitty file-medium
+  // messages (the scanner's allow-list). Resolved once: apps report
   // $TMPDIR-style paths (symlink-bearing on macOS), so only a realpath both
   // sides agree on is meaningful.
   private readonly tmpdirRoot: string;
   private readonly realpathCache = new Map<string, string>();
   private readonly scanners = new WeakMap<ManagedSession, KittyApcScanner>();
+  private readonly fileOutputQueues = new WeakMap<ManagedSession, Promise<void>>();
   // Sessions that have relayed at least one pixel frame since spawn — used to
   // scope screen-reset clears to apps that actually own an on-screen picture.
   private readonly frameSessions = new WeakSet<ManagedSession>();
@@ -63,7 +65,7 @@ export class SessionOutputCoordinator {
     this.tmpdirRoot = fs.realpathSync(os.tmpdir());
   }
 
-  // Kitty file-medium frame paths are validated against the real temp root
+  // Kitty file-medium paths are validated against the real temp root
   // (apps report $TMPDIR-style paths, which are symlink-bearing on macOS).
   // realpath results are cached: the ring of frame files is long-lived and
   // rewritten in place, so a per-frame lookup stays cheap. Insertion-order
@@ -71,7 +73,7 @@ export class SessionOutputCoordinator {
   // fresh path per frame can't grow the map for the daemon's lifetime.
   // Misses are never cached: a file that appears later is re-probed, and
   // eviction only ever churns successful resolutions.
-  private isAllowedFramePath(name: string): boolean {
+  private isAllowedKittyPath(name: string): boolean {
     const cached = this.realpathCache.get(name);
     if (cached !== undefined) {
       this.realpathCache.delete(name);
@@ -96,7 +98,7 @@ export class SessionOutputCoordinator {
   private scannerFor(managed: ManagedSession): KittyApcScanner {
     let scanner = this.scanners.get(managed);
     if (scanner) return scanner;
-    scanner = new KittyApcScanner((name) => this.isAllowedFramePath(name));
+    scanner = new KittyApcScanner((name) => this.isAllowedKittyPath(name));
     this.scanners.set(managed, scanner);
     return scanner;
   }
@@ -137,11 +139,32 @@ export class SessionOutputCoordinator {
     );
   }
 
-  async onSessionOutput(managed: ManagedSession, data: string): Promise<void> {
-    // kitty file-medium sequences: probes are answered by the daemon (and
-    // stripped so nothing else races a reply); named frame transmits pass
-    // through while their pixels are relayed over the WS frame channel.
+  onSessionOutput(managed: ManagedSession, data: string): Promise<void> {
     const scan = this.scannerFor(managed).push(data);
+    const pending = this.fileOutputQueues.get(managed);
+    const hasFileTransmission = scan.outputParts.some((part) => part.kind === "file");
+    if (!pending && !hasFileTransmission) {
+      return this.processScannedOutput(managed, scan, scan.output);
+    }
+
+    const task = (pending ?? Promise.resolve()).then(async () => {
+      const output = hasFileTransmission
+        ? await expandKittyApcOutputParts(scan.outputParts, this.tmpdirRoot)
+        : scan.output;
+      await this.processScannedOutput(managed, scan, output);
+    });
+    const tracked = task.finally(() => {
+      if (this.fileOutputQueues.get(managed) === tracked) this.fileOutputQueues.delete(managed);
+    });
+    this.fileOutputQueues.set(managed, tracked);
+    return tracked;
+  }
+
+  private async processScannedOutput(
+    managed: ManagedSession,
+    scan: KittyApcScan,
+    output: string,
+  ): Promise<void> {
     const probeTasks = scan.probes
       .map((probe) => this.maybeAnswerProbe(managed, probe))
       .filter((task) => task !== null);
@@ -159,7 +182,6 @@ export class SessionOutputCoordinator {
       this.frameRelay.cancel(managed);
       this.outputTransport.broadcast(managed, { type: "pixel-frames-clear" });
     }
-    const output = scan.output;
     const outputAtMs = Date.now();
     const didEndSynchronizedOutput = managed.synchronizedOutputEndDetector.push(output);
     if (output.length > 0 && managed.outputBurstStartedAtMs === null) {

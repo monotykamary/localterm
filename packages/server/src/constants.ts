@@ -370,9 +370,27 @@ export const MAX_PIXEL_FRAME_BYTES = 4 * MAX_PIXEL_FRAME_PIXELS;
 // Upper bound on a single incompleted APC chunk buffered while scanning PTY
 // output for kitty graphics sequences split across PTY data events.
 export const MAX_APC_BUFFER_BYTES = 64 * 1024;
-// Successful kitty frame-path realpath resolutions are cached by the output
+// Kitty file-medium images are rewritten to bounded direct APC chunks so browser
+// clients can consume the same protocol as native terminals.
+export const KITTY_GRAPHICS_DIRECT_CHUNK_BYTES = 4_096;
+export const KITTY_GRAPHICS_MAX_FILE_BYTES = 32 * 1024 * 1024;
+export const KITTY_GRAPHICS_FORMAT_RGB = 24;
+export const KITTY_GRAPHICS_FORMAT_RGBA = 32;
+export const KITTY_GRAPHICS_FORMAT_PNG = 100;
+export const KITTY_GRAPHICS_IMAGE_ID_MAX = 0xffffffff;
+export const KITTY_GRAPHICS_IMAGE_ID_HIGH_BYTE_MAX = 0xff;
+export const KITTY_IMAGE_ID_HIGH_BYTE_MULTIPLIER = 0x1000000;
+export const KITTY_GRAPHICS_RGB_CHANNELS = 3;
+export const KITTY_GRAPHICS_RGBA_CHANNELS = 4;
+export const KITTY_GRAPHICS_MAX_DECODED_BYTES = 32 * 1024 * 1024;
+export const KITTY_GRAPHICS_MAX_ENCODED_BYTES = 4 * Math.ceil(KITTY_GRAPHICS_MAX_DECODED_BYTES / 3);
+export const KITTY_GRAPHICS_MAX_IMAGE_PIXELS = MAX_PIXEL_FRAME_PIXELS;
+export const KITTY_GRAPHICS_MAX_STORED_IMAGES = 256;
+export const KITTY_UNICODE_PLACEHOLDER_CODE_POINT = 0x10eeee;
+export const KITTY_UNICODE_PLACEHOLDER_MAX_DIMENSION = 297;
+// Successful Kitty file-medium realpath resolutions are cached by the output
 // coordinator; capped with insertion-order LRU eviction so an app minting a
-// fresh frame path per frame can't grow the map for the daemon's lifetime.
+// fresh path per frame cannot grow the map for the daemon's lifetime.
 export const KITTY_FRAME_REALPATH_CACHE_MAX_ENTRIES = 4_096;
 
 // Heartbeat: send a WS ping every N ms; if no pong arrives within the timeout

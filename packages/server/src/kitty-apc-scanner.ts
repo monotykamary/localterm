@@ -1,4 +1,9 @@
-import { MAX_APC_BUFFER_BYTES } from "./constants.js";
+import {
+  KITTY_GRAPHICS_FORMAT_PNG,
+  KITTY_GRAPHICS_FORMAT_RGB,
+  KITTY_GRAPHICS_FORMAT_RGBA,
+  MAX_APC_BUFFER_BYTES,
+} from "./constants.js";
 
 export interface KittyPixelFrame {
   width: number;
@@ -13,32 +18,30 @@ export interface KittyMediumProbe {
   path: string;
 }
 
+export interface KittyFileTransmission {
+  controls: Readonly<Record<string, string>>;
+  original: string;
+  path: string;
+  temporary: boolean;
+}
+
+export type KittyApcOutputPart =
+  | { kind: "file"; transmission: KittyFileTransmission }
+  | { kind: "text"; text: string };
+
 export interface KittyApcScan {
-  // The input with medium probes removed (they are answered by the daemon, so
-  // leaking them to clients would race the terminal emulator's own reply).
-  // Everything else — including the file-medium transmits themselves — passes
-  // through verbatim.
   output: string;
+  outputParts: KittyApcOutputPart[];
   frames: KittyPixelFrame[];
   probes: KittyMediumProbe[];
-  // The app left the alternate screen (1049/1047/47) or hard-reset (ESC c) —
-  // any relayed pixel picture on screen is stale from this point on, so the
-  // client must clear its overlay.
   screenReset: boolean;
 }
 
 const ESC = "\x1b";
 const ESCAPE_START = ESC + "_";
 const ESCAPE_END = ESC + "\\";
-// The single final byte after ESC _ that identifies the kitty graphics protocol.
-const APC_FINAL_KITTY = 0x47; // 'G'
-
-// Screen-state transitions that invalidate an on-screen pixel picture: leaving
-// the alternate screen restores the pre-app main buffer (fresh content under
-// the overlay), and ESC c wipes the whole terminal state.
+const APC_FINAL_KITTY = 0x47;
 const SCREEN_RESET_SEQUENCES = ["\x1b[?1049l", "\x1b[?1047l", "\x1b[?47l", "\x1bc"];
-// A reset sequence can straddle two PTY data events; carry enough of the
-// previous chunk's tail to match any of them across the boundary.
 const SCREEN_RESET_TAIL_BYTES = 7;
 
 interface KittyFields {
@@ -48,38 +51,27 @@ interface KittyFields {
 const parseControl = (control: string): KittyFields => {
   const fields: KittyFields = {};
   for (const part of control.split(",")) {
-    const eq = part.indexOf("=");
-    if (eq === -1) continue;
-    fields[part.slice(0, eq)] = part.slice(eq + 1);
+    const equals = part.indexOf("=");
+    if (equals === -1) continue;
+    fields[part.slice(0, equals)] = part.slice(equals + 1);
   }
   return fields;
 };
 
 const toInt = (value: string | undefined): number | undefined => {
-  if (value === undefined) return undefined;
+  if (value === undefined || !/^-?\d+$/.test(value)) return undefined;
   const parsed = Number(value);
-  return Number.isInteger(parsed) ? parsed : undefined;
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 };
 
 const decodeName = (payload: string): string => Buffer.from(payload, "base64").toString("utf8");
 
 type Classification =
+  | { kind: "file"; transmission: Omit<KittyFileTransmission, "original"> }
   | { kind: "frame"; frame: KittyPixelFrame }
   | { kind: "probe"; probe: KittyMediumProbe }
   | { kind: "other" };
 
-// Scans PTY output for kitty graphics APCs that use the file medium (t=f): the
-// payload is a base64 filesystem path instead of inline pixel bytes. Detects:
-//
-//   1. Medium probes (a=q) — the app asking whether this terminal can read a
-//      named frame file. These are stripped from the stream and answered by the
-//      daemon so nothing else races an answer.
-//   2. Named transmits (a=T / a=t) — the app saying "display the pixels in this
-//      file". These pass through normally while the daemon relays the pixels
-//      over the WS pixel-frame channel.
-//
-// PTY data arrives chunked, so an APC sequence can span multiple pushes; the
-// incomplete tail is buffered until its ESC \\ terminator lands.
 export class KittyApcScanner {
   private partial = "";
   private resetTail = "";
@@ -90,76 +82,108 @@ export class KittyApcScanner {
     const buffer = this.partial + chunk;
     this.partial = "";
     let output = "";
+    const outputParts: KittyApcOutputPart[] = [];
     const frames: KittyPixelFrame[] = [];
     const probes: KittyMediumProbe[] = [];
     const screenReset = this.detectScreenReset(buffer);
+    const appendText = (text: string): void => {
+      if (!text) return;
+      output += text;
+      const previous = outputParts.at(-1);
+      if (previous?.kind === "text") previous.text += text;
+      else outputParts.push({ kind: "text", text });
+    };
+
     let from = 0;
     while (from < buffer.length) {
       const start = buffer.indexOf(ESCAPE_START, from);
       if (start === -1) {
-        output += buffer.slice(from);
+        appendText(buffer.slice(from));
         break;
       }
-      output += buffer.slice(from, start);
+      appendText(buffer.slice(from, start));
       const end = buffer.indexOf(ESCAPE_END, start + ESCAPE_START.length);
       if (end === -1) {
         const tail = buffer.slice(start);
-        if (tail.length <= MAX_APC_BUFFER_BYTES) {
-          this.partial = tail;
-        } else {
-          output += tail;
-        }
+        if (tail.length <= MAX_APC_BUFFER_BYTES) this.partial = tail;
+        else appendText(tail);
         break;
       }
+
       const after = end + ESCAPE_END.length;
+      const original = buffer.slice(start, after);
       const classification = this.classify(buffer.slice(start + ESCAPE_START.length, end));
       if (classification.kind === "probe") {
         probes.push(classification.probe);
+      } else if (classification.kind === "file") {
+        const transmission = { ...classification.transmission, original };
+        output += original;
+        outputParts.push({ kind: "file", transmission });
       } else {
         if (classification.kind === "frame") frames.push(classification.frame);
-        output += buffer.slice(start, after);
+        appendText(original);
       }
       from = after;
     }
-    return { output, frames, probes, screenReset };
+    return { output, outputParts, frames, probes, screenReset };
   }
 
-  // Match reset sequences against the chunk plus the carried tail so a sequence
-  // split across PTY reads still trips. Each push yields a single flag: multiple
-  // resets in one push collapse, and a boundary match only fires on the later
-  // push (the earlier one merely prepared the tail).
   private detectScreenReset(buffer: string): boolean {
-    const hay = this.resetTail + buffer;
-    this.resetTail = hay.slice(-SCREEN_RESET_TAIL_BYTES);
-    for (const sequence of SCREEN_RESET_SEQUENCES) {
-      if (hay.includes(sequence)) return true;
-    }
-    return false;
+    const haystack = this.resetTail + buffer;
+    this.resetTail = haystack.slice(-SCREEN_RESET_TAIL_BYTES);
+    return SCREEN_RESET_SEQUENCES.some((sequence) => haystack.includes(sequence));
   }
 
   private classify(body: string): Classification {
     if (body.charCodeAt(0) !== APC_FINAL_KITTY) return { kind: "other" };
     const content = body.slice(1);
-    const semi = content.indexOf(";");
-    const control = semi === -1 ? content : content.slice(0, semi);
-    const payload = semi === -1 ? "" : content.slice(semi + 1);
+    const semicolon = content.indexOf(";");
+    const control = semicolon === -1 ? content : content.slice(0, semicolon);
+    const payload = semicolon === -1 ? "" : content.slice(semicolon + 1);
     const fields = parseControl(control);
-    if (fields.t !== "f") return { kind: "other" };
-    const path_ = decodeName(payload);
-    if (!path_ || !this.isAllowedPath(path_)) return { kind: "other" };
+    if (fields.t !== "f" && fields.t !== "t") return { kind: "other" };
+    const path = decodeName(payload);
+    if (!path || !this.isAllowedPath(path)) return { kind: "other" };
     const imageId = toInt(fields.i);
-    if (imageId === undefined || imageId < 0) return { kind: "other" };
+    if (imageId === undefined || imageId <= 0) return { kind: "other" };
     if (fields.a === "q") {
-      return { kind: "probe", probe: { imageId, quiet: toInt(fields.q) ?? 0, path: path_ } };
+      return {
+        kind: "probe",
+        probe: { imageId, quiet: toInt(fields.q) ?? 0, path },
+      };
     }
-    if (fields.a === "T" || fields.a === "t") {
-      const width = toInt(fields.s);
-      const height = toInt(fields.v);
-      const format = toInt(fields.f);
-      // f=32 is the raw RGBA format the relay supports.
-      if (!width || !height || width <= 0 || height <= 0 || format !== 32) return { kind: "other" };
-      return { kind: "frame", frame: { width, height, imageId, path: path_ } };
+    if (fields.a !== "T" && fields.a !== "t") return { kind: "other" };
+
+    const width = toInt(fields.s);
+    const height = toInt(fields.v);
+    const parsedFormat = toInt(fields.f);
+    const format = fields.f === undefined ? KITTY_GRAPHICS_FORMAT_RGBA : parsedFormat;
+    if (
+      fields.t === "f" &&
+      fields.a === "T" &&
+      fields.U !== "1" &&
+      width !== undefined &&
+      height !== undefined &&
+      width > 0 &&
+      height > 0 &&
+      format === KITTY_GRAPHICS_FORMAT_RGBA
+    ) {
+      return { kind: "frame", frame: { width, height, imageId, path } };
     }
-    return { kind: "other" };
+    if (
+      format !== KITTY_GRAPHICS_FORMAT_RGB &&
+      format !== KITTY_GRAPHICS_FORMAT_RGBA &&
+      format !== KITTY_GRAPHICS_FORMAT_PNG
+    ) {
+      return { kind: "other" };
+    }
+    return {
+      kind: "file",
+      transmission: {
+        controls: fields,
+        path,
+        temporary: fields.t === "t",
+      },
+    };
   }
 }

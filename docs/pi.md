@@ -5,9 +5,14 @@ localterm. The `@monotykamary/pi-localterm` extension wires terminal-specific ca
 
 ## Kitty graphics + OSC 8 links
 
-localterm's xterm.js renderer supports the Kitty graphics protocol and OSC 8
-hyperlinks, but sets `TERM=xterm-256color` so pi-tui can't detect them. The
-extension force-enables them so images and links render in the browser.
+localterm's xterm.js renderer supports Kitty graphics and OSC 8 hyperlinks, but sets
+`TERM=xterm-256color` so pi-tui cannot detect them. The extension force-enables
+those capabilities. Graphics support includes direct and chunked PNG/RGB/RGBA,
+secure conversion of file and temporary-file media under the system temp root,
+ordinary placements, and `U=1` Unicode virtual placements. The latter keeps
+inline pi-math formulas and Neovim image cells attached to terminal text through
+wrapping, scrolling, edits, alternate buffers, and redraws without exposing the
+U+10EEEE protocol glyph.
 
 ## Secret scrubbing for pi's bash tool
 

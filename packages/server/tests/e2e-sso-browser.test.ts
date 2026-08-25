@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,11 @@ import { createServer, type RunningServer } from "../src/index.js";
 import { CdpClient } from "../src/cdp/cdp-client.js";
 import type { DetectedBrowser } from "../src/cdp/detect-chromium.js";
 import { signSessionToken } from "../src/identity/session-cookie.js";
-import { AUTH_COOKIE_NAME, AUTH_SECRET_FILENAME } from "../src/constants.js";
+import {
+  AUTH_COOKIE_NAME,
+  AUTH_SECRET_FILENAME,
+  LOCALTERM_PANE_TEXT_PROPERTY,
+} from "../src/constants.js";
 import type { SecretBackend } from "../src/secret-backend.js";
 
 // The browser-only SSO paths driven over raw CDP against a throwaway headless
@@ -19,10 +23,11 @@ import type { SecretBackend } from "../src/secret-backend.js";
 // are fully isolated (own user-data dir, own state dir, random port) and never
 // touch the localterm we're running in.
 //
-// Two flows: (1) the passkey WebAuthn ceremony end-to-end via a CDP virtual
-// authenticator (register → session → terminal mounts), and (2) capture-pane
-// --png in auth-gated mode — the daemon's CDP cookie mint against a real
-// browser (setCookie → tab → /ws attaches through the gate → xterm → PNG).
+// Three flows: (1) the passkey WebAuthn ceremony end-to-end via a CDP virtual
+// authenticator (register → session → terminal mounts), (2) live Kitty graphics
+// across direct, file, ordinary, and Unicode-placeholder placements, and (3)
+// capture-pane --png in auth-gated mode — the daemon's CDP cookie mint against
+// a real browser (setCookie → tab → /ws attaches through the gate → xterm → PNG).
 
 const CHROME_CANDIDATES = [
   process.env.LOCALTERM_CHROME_BIN,
@@ -266,6 +271,142 @@ d("e2e: passkey WebAuthn + CDP cookie mint (headless Chrome)", { tags: ["e2e"] }
     } finally {
       await driver.removeVirtualAuthenticator(sessionId!, authenticatorId!);
     }
+  }, 30000);
+
+  it("renders direct, file-medium, and ordinary Kitty placements without tofu", async () => {
+    const secret = readFileSync(path.join(stateDirectory, AUTH_SECRET_FILENAME), "utf8");
+    const token = signSessionToken(secret, "alice");
+    const cookie = `${AUTH_COOKIE_NAME}=${token}`;
+    const created = await fetch(`${daemonOrigin}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ cols: 80, rows: 24 }),
+    });
+    expect(created.status).toBe(201);
+    const { session } = (await created.json()) as { session: { id: string } };
+    const targetId = await driver.openForegroundTab(`${daemonOrigin}/`);
+    const browserSessionId = await driver.attachSession(targetId!);
+    expect(browserSessionId).toBeTruthy();
+    await evalIn(
+      driver,
+      browserSessionId!,
+      `document.cookie = ${JSON.stringify(`${AUTH_COOKIE_NAME}=${token}; Path=/; SameSite=Lax`)}; location.replace(${JSON.stringify(`${daemonOrigin}/?sid=${session.id}`)})`,
+    );
+    expect(
+      await pollFor(async () =>
+        Boolean(
+          await evalIn(driver, browserSessionId!, `document.querySelector(".xterm") !== null`),
+        ),
+      ),
+    ).toBe(true);
+
+    const readyExecution = await fetch(`${daemonOrigin}/api/sessions/${session.id}/exec`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ command: "printf __KITTY_E2E_READY__", timeoutMs: 10_000 }),
+    });
+    expect(readyExecution.status).toBe(200);
+    expect(
+      await pollFor(async () =>
+        String(
+          await evalIn(
+            driver,
+            browserSessionId!,
+            `window[${JSON.stringify(LOCALTERM_PANE_TEXT_PROPERTY)}]?.() ?? ""`,
+          ),
+        ).includes("__KITTY_E2E_READY__"),
+      ),
+    ).toBe(true);
+
+    const probePath = path.join(stateDirectory, "kitty-unicode-probe.mjs");
+    const releasePath = path.join(stateDirectory, "kitty-unicode-probe.release");
+    writeFileSync(
+      probePath,
+      `import fs from "node:fs";\nimport os from "node:os";\nimport path from "node:path";\nconst E="\\x1b";\nconst P=String.fromCodePoint(0x10eeee);\nconst D=["\\u0305","\\u030d","\\u030e"];\nconst png="iVBORw0KGgoAAAANSUhEUgAAAAMAAAABCAMAAAAsPuSGAAAACVBMVEX/AAAA/wAAAP8tSs2KAAAADElEQVR4nGNgYGQCAAAIAAQ24LCmAAAAHXRFWHRTb2Z0d2FyZQBAbHVuYXBhaW50L3BuZy1jb2RlY/VDGR4AAAAASUVORK5CYII=";\nconst directId=0x123456;\nlet responses="";\nlet protocolReady=false;\nconst releasePath=process.argv[2];\nconst releasePollMs=20;\nfs.watchFile(releasePath,{interval:releasePollMs},current=>{if(current.isFile())process.exit(0)});\nprocess.stdin.setEncoding("utf8");\nprocess.stdin.setRawMode?.(true);\nconst responseTimeoutMs=5000;\nconst timeout=setTimeout(()=>{console.error("kitty-response-timeout="+JSON.stringify(responses));process.exit(1)},responseTimeoutMs);\nprocess.stdin.on("data",data=>{if(protocolReady)return;responses+=data;if(responses.split(E+"\\\\").length-1<5)return;clearTimeout(timeout);const ok=responses.split(";OK").length-1===5;if(!ok){console.error("kitty-responses="+JSON.stringify(responses));process.exit(1);return}protocolReady=true;fs.rmSync(file,{force:true});process.stdout.write("\\r\\nkitty-probe-ready\\r\\n")});\nprocess.stdin.resume();\nprocess.stdout.write(E+"[2J"+E+"[Hdirect "+E+"_Ga=T,f=100,q=0,U=1,i="+directId+",p="+directId+",c=3,r=1;"+png+E+"\\\\"+E+"[38;2;18;52;86m"+E+"[58;2;18;52;86m"+P+D[0]+D[0]+P+D[0]+D[1]+P+D[0]+D[2]+E+"[39;59m direct-ok\\r\\n");\nconst file=path.join(os.tmpdir(),"localterm-kitty-e2e-"+process.pid+".png");\nfs.writeFileSync(file,Buffer.from(png,"base64"));\nconst encodedPath=Buffer.from(file).toString("base64");\nprocess.stdout.write("file "+E+"_Ga=t,f=100,t=f,U=1,i=42,q=0;"+encodedPath+E+"\\\\"+E+"_Ga=p,U=1,i=42,p=7,c=3,r=1,C=1,q=0"+E+"\\\\"+E+"[38;5;42m"+P+D[0]+D[0]+P+D[0]+D[1]+P+D[0]+D[2]+E+"[39m file-ok\\r\\n");\nprocess.stdout.write("normal "+E+"_Ga=t,f=100,i=77,q=0;"+png+E+"\\\\"+E+"_Ga=p,i=77,p=77,c=3,r=1,C=1,q=0"+E+"\\\\"+E+"[3C normal-ok\\r\\n");\n`,
+    );
+
+    const executionPromise = fetch(`${daemonOrigin}/api/sessions/${session.id}/exec`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        command: `node ${probePath} ${releasePath}`,
+        timeoutMs: 10_000,
+      }),
+    });
+
+    let lastRenderMetrics: { normal?: number; virtual?: number } | null = null;
+    const rendered = await pollFor(async () => {
+      const metrics = (await evalIn(
+        driver,
+        browserSessionId!,
+        `(() => {
+          const visiblePixels = (selector) => {
+            let maximum = 0;
+            for (const canvas of document.querySelectorAll(selector)) {
+              if (!(canvas instanceof HTMLCanvasElement)) continue;
+              const context = canvas.getContext("2d");
+              if (!context) continue;
+              const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+              let visible = 0;
+              for (let index = 3; index < pixels.length; index += 4) if (pixels[index] !== 0) visible++;
+              maximum = Math.max(maximum, visible);
+            }
+            return maximum;
+          };
+          return {
+            normal: visiblePixels(".xterm-image-layer-top"),
+            virtual: visiblePixels(".xterm-kitty-unicode-placeholder-layer"),
+            canvases: Array.from(document.querySelectorAll("canvas")).map((canvas) => ({
+              className: canvas.className,
+              height: canvas.height,
+              width: canvas.width,
+            })),
+          };
+        })()`,
+      )) as { normal?: number; virtual?: number } | null;
+      lastRenderMetrics = metrics;
+      const pane = String(
+        await evalIn(
+          driver,
+          browserSessionId!,
+          `window[${JSON.stringify(LOCALTERM_PANE_TEXT_PROPERTY)}]?.() ?? ""`,
+        ),
+      );
+      return (
+        pane.includes("kitty-probe-ready") &&
+        (metrics?.virtual ?? 0) > 20 &&
+        (metrics?.normal ?? 0) > 20
+      );
+    });
+    writeFileSync(releasePath, "release");
+    const execution = await executionPromise;
+    expect(execution.status).toBe(200);
+    const executionResult = (await execution.json()) as {
+      exitCode: number | null;
+      output: string;
+    };
+    expect(executionResult.exitCode, executionResult.output).toBe(0);
+
+    const diagnosticPane = await evalIn(
+      driver,
+      browserSessionId!,
+      `window[${JSON.stringify(LOCALTERM_PANE_TEXT_PROPERTY)}]?.() ?? ""`,
+    );
+    expect(rendered, JSON.stringify({ metrics: lastRenderMetrics, pane: diagnosticPane })).toBe(
+      true,
+    );
+
+    const pane = await evalIn(
+      driver,
+      browserSessionId!,
+      `window[${JSON.stringify(LOCALTERM_PANE_TEXT_PROPERTY)}]?.() ?? ""`,
+    );
+    expect(String(pane)).toContain("direct-ok");
+    expect(String(pane)).toContain("file-ok");
+    expect(String(pane)).toContain("normal-ok");
+    expect(String(pane)).not.toContain(String.fromCodePoint(0x10eeee));
+    expect(String(pane)).not.toContain("□");
+    await driver.closeTab(targetId!);
   }, 30000);
 
   it("capture-pane --png works in auth-gated mode (the CDP cookie mint, real browser)", async () => {
