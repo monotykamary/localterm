@@ -1,5 +1,13 @@
 # localterm
 
+## 2.77.1
+
+### Patch Changes
+
+- 213c848: Prevent leaked Kitty Unicode placeholders and truncated APC replay payloads from rendering as glyph garbage during image-heavy streaming and reconnects.
+- Updated dependencies [213c848]
+  - @monotykamary/localterm-server@2.77.1
+
 ## 2.77.0
 
 ### Minor Changes
