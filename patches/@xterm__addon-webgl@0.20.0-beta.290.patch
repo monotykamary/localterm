@@ -1,7 +1,7 @@
 diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 --- a/lib/addon-webgl.mjs
 +++ b/lib/addon-webgl.mjs
-@@ -14,62 +14,5828 @@
+@@ -14,62 +14,5836 @@
   *  Copyright (c) Microsoft Corporation. All rights reserved.
   *  Licensed under the MIT License. See License.txt in the project root for license information.
   *--------------------------------------------------------------------------------------------*/
@@ -3110,7 +3110,15 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +      return this._getFromCacheMap(this._cacheMap, e, t, r, s, a, o);
 +    }
 +    _getFromCacheMap(e, t, r, s, a, o, n) {
-+      let k = (s & 134217728 ? 1 : 0) | (r & 67108864 ? 2 : 0);
++      // k must cover every attribute bit _drawToCacheWithActiveCanvas bakes into a cached
++      // glyph (bold, italic, strikethrough, overline, invisible); a missing bit lets a styled
++      // variant poison the plain variant sharing this key. Colors resolve per vertex instead.
++      let k =
++        (s & 134217728 ? 1 : 0) |
++        (r & 67108864 ? 2 : 0) |
++        (s & 2147483648 ? 4 : 0) |
++        (r & 1073741824 ? 8 : 0) |
++        (s & 1073741824 ? 16 : 0);
 +      let fh = this._ltFontHash;
 +      if (fh === void 0) {
 +        let c = this._config;

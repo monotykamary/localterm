@@ -32,6 +32,19 @@ Open <http://127.0.0.1:4819/>. Select any built-in theme and bundled font to com
 
 Inspect thin strokes (`il1|`), dense stems (`MW@#%`), curves and diagonals, box drawing, blocks, Powerline symbols, wide fallbacks, colored emoji, Pi-style muted text, SGR faint text, and inverse cells. WebGL should have the same body as Canvas and DOM without pale pixels around its edges.
 
+## Strikethrough cache regression probe
+
+With the server not required, run:
+
+```bash
+pnpm --filter @monotykamary/localterm-harness-light-theme-rendering probe
+```
+
+The probe renders struck-then-plain and plain-then-struck pairs of the same words into a headless
+WebGL terminal and asserts pixel coverage of the mid-glyph band: struck spans must draw their
+full-width line and plain spans must not, regardless of rasterization order. It guards the glyph
+atlas cache key against missing any attribute bit that is baked into cached glyphs.
+
 ## Automated report
 
 With the server running:

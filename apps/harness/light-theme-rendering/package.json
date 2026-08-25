@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "serve": "node server.mjs",
-    "drive": "node drive.mjs"
+    "drive": "node drive.mjs",
+    "probe": "node strike-probe.mjs"
   },
   "dependencies": {
     "@xterm/addon-canvas": "0.8.0-beta.48",
