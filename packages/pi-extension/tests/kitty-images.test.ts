@@ -13,6 +13,9 @@ describe("enableKittyImages", () => {
   beforeEach(() => {
     capabilityMocks.getCapabilities.mockReset();
     capabilityMocks.setCapabilities.mockReset();
+    delete process.env.KITTY_WINDOW_ID;
+    delete process.env.LOCALTERM;
+    delete process.env.LOCALTERM_SESSION_ID;
   });
 
   it("enables Kitty images and hyperlinks synchronously", () => {
@@ -57,5 +60,44 @@ describe("enableKittyImages", () => {
     enableKittyImages();
 
     expect(capabilityMocks.setCapabilities).not.toHaveBeenCalled();
+  });
+
+  it("plants the Kitty identity env var under localterm for bundled pi's own detection", () => {
+    process.env.LOCALTERM_SESSION_ID = "test-session";
+    capabilityMocks.getCapabilities.mockReturnValue({
+      images: "kitty",
+      trueColor: true,
+      hyperlinks: true,
+    });
+
+    enableKittyImages();
+
+    expect(process.env.KITTY_WINDOW_ID).toBe("localterm");
+  });
+
+  it("does not plant the Kitty identity env var outside localterm", () => {
+    capabilityMocks.getCapabilities.mockReturnValue({
+      images: "kitty",
+      trueColor: true,
+      hyperlinks: true,
+    });
+
+    enableKittyImages();
+
+    expect(process.env.KITTY_WINDOW_ID).toBeUndefined();
+  });
+
+  it("keeps an existing KITTY_WINDOW_ID value", () => {
+    process.env.LOCALTERM = "1";
+    process.env.KITTY_WINDOW_ID = "42";
+    capabilityMocks.getCapabilities.mockReturnValue({
+      images: "kitty",
+      trueColor: true,
+      hyperlinks: true,
+    });
+
+    enableKittyImages();
+
+    expect(process.env.KITTY_WINDOW_ID).toBe("42");
   });
 });

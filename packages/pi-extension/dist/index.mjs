@@ -311,7 +311,14 @@ const registerBashSecretScrub = (pi) => {
 };
 //#endregion
 //#region extensions/kitty-images.ts
+const KITTY_IDENTITY_ENV = "KITTY_WINDOW_ID";
+const LOCALTERM_MARKER = "localterm";
+const plantKittyIdentityEnv = () => {
+	if (!process.env.LOCALTERM && !process.env.LOCALTERM_SESSION_ID) return;
+	process.env[KITTY_IDENTITY_ENV] ||= LOCALTERM_MARKER;
+};
 const enableKittyImages = () => {
+	plantKittyIdentityEnv();
 	const capabilities = getCapabilities();
 	if (capabilities.images === "kitty" && capabilities.hyperlinks) return;
 	setCapabilities({
