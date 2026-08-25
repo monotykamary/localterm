@@ -9,6 +9,8 @@ import {
   XTERM_BUFFER_CELL_CONTENT_INDEX,
   XTERM_BUFFER_CELL_SIZE,
   XTERM_BUFFER_COLOR_MODE_MASK,
+  XTERM_BUFFER_CONTENT_CODE_POINT_MASK,
+  XTERM_BUFFER_CONTENT_IS_COMBINED_MASK,
   XTERM_BUFFER_COLOR_MODE_PALETTE_16,
   XTERM_BUFFER_COLOR_MODE_PALETTE_256,
   XTERM_BUFFER_COLOR_MODE_RGB,
@@ -65,6 +67,7 @@ export interface KittyBufferLine {
   _combined: Record<number, string | undefined>;
   _data: Uint32Array;
   _extendedAttrs: Record<number, KittyPlaceholderExtendedAttributes | undefined>;
+  _invalidateStringCache(): void;
 }
 
 interface PendingPlaceholder {
@@ -262,6 +265,33 @@ const blankPlaceholderCell = (
 
 const updatePendingPlaceholder = (pending: PendingPlaceholder): void => {
   blankPlaceholderCell(pending, resolvePlaceholderMetadata(pending));
+};
+
+export const sanitizeKittyPlaceholderCells = (
+  line: KittyBufferLine | undefined,
+  startColumn: number,
+  endColumn: number,
+): boolean => {
+  if (!line) return false;
+  const columnCount = Math.floor(line._data.length / XTERM_BUFFER_CELL_SIZE);
+  const start = Math.max(0, startColumn);
+  const end = Math.min(columnCount, endColumn);
+  let sanitized = false;
+  for (let column = start; column < end; column += 1) {
+    const content = line._data[column * XTERM_BUFFER_CELL_SIZE + XTERM_BUFFER_CELL_CONTENT_INDEX]!;
+    const codePoint =
+      content & XTERM_BUFFER_CONTENT_IS_COMBINED_MASK
+        ? line._combined[column]?.codePointAt(0)
+        : content & XTERM_BUFFER_CONTENT_CODE_POINT_MASK;
+    if (codePoint !== KITTY_UNICODE_PLACEHOLDER_CODE_POINT) continue;
+    line._data[column * XTERM_BUFFER_CELL_SIZE + XTERM_BUFFER_CELL_CONTENT_INDEX] =
+      XTERM_BUFFER_SPACE_CODE_POINT |
+      (XTERM_BUFFER_SINGLE_CELL_WIDTH << XTERM_BUFFER_CONTENT_WIDTH_SHIFT);
+    delete line._combined[column];
+    sanitized = true;
+  }
+  if (sanitized) line._invalidateStringCache();
+  return sanitized;
 };
 
 export const installKittyPlaceholderPrintHandler = (terminal: XtermTerminal): (() => void) => {

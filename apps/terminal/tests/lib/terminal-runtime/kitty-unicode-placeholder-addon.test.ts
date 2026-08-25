@@ -93,6 +93,19 @@ describe("KittyUnicodePlaceholderAddon", () => {
     terminal.dispose();
   });
 
+  it("sanitizes raw placeholder cells that predate addon activation", async () => {
+    const terminal = new XtermTerminal({ allowProposedApi: true, cols: 10, rows: 2 });
+
+    await write(terminal, `${ESC}[38;5;9m${PLACEHOLDER}${ROW_0}${ROW_0}${ESC}[39m`);
+    expect(terminal.buffer.active.getLine(0)?.translateToString(false)).toContain(PLACEHOLDER);
+
+    terminal.loadAddon(new KittyUnicodePlaceholderAddon({ decodeImage: async () => source() }));
+    await write(terminal, "after");
+
+    expect(terminal.buffer.active.getLine(0)?.translateToString(false)).not.toContain(PLACEHOLDER);
+    terminal.dispose();
+  });
+
   it("supports chunked image.nvim transmission and inherited placeholder columns", async () => {
     const terminal = new XtermTerminal({ allowProposedApi: true, cols: 20, rows: 4 });
     const payloads: string[] = [];

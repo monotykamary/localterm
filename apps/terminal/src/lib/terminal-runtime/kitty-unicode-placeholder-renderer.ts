@@ -3,6 +3,7 @@ import type { IDisposable, Terminal as XtermTerminal } from "@xterm/xterm";
 import { KITTY_UNICODE_PLACEHOLDER_LAYER_CLASS } from "@/lib/constants";
 import {
   kittyPlaceholderMetadataAt,
+  sanitizeKittyPlaceholderCells,
   type KittyBufferLine,
 } from "@/lib/terminal-runtime/kitty-unicode-placeholder-buffer";
 import type {
@@ -43,20 +44,24 @@ export interface KittyUnicodePlaceholderRendererOptions {
 export class KittyUnicodePlaceholderRenderer implements IDisposable {
   private canvas: HTMLCanvasElement | undefined;
   private context: CanvasRenderingContext2D | undefined;
+  private disposed = false;
   private refreshPending = false;
+  private sanitizeRefreshPending = false;
   private readonly renderDisposable: IDisposable;
   private readonly writeParsedDisposable: IDisposable;
 
   constructor(private readonly options: KittyUnicodePlaceholderRendererOptions) {
     this.renderDisposable = options.terminal.onRender((range) => this.render(range));
     this.writeParsedDisposable = options.terminal.onWriteParsed(() => {
-      if (!this.refreshPending) return;
+      const sanitized = this.sanitizeRows({ start: 0, end: options.terminal.rows - 1 });
+      if (!this.refreshPending && !sanitized) return;
       this.refreshPending = false;
       options.terminal.refresh(0, options.terminal.rows - 1);
     });
   }
 
   dispose(): void {
+    this.disposed = true;
     this.renderDisposable.dispose();
     this.writeParsedDisposable.dispose();
     this.canvas?.remove();
@@ -103,8 +108,9 @@ export class KittyUnicodePlaceholderRenderer implements IDisposable {
   }
 
   private render(range: { end: number; start: number }): void {
-    const context = this.ensureCanvas();
     const terminal = this.options.terminal as XtermTerminalInternals;
+    if (this.sanitizeRows(range)) this.scheduleSanitizedRefresh();
+    const context = this.ensureCanvas();
     const dimensions = terminal.dimensions;
     if (!context || !dimensions) return;
 
@@ -147,6 +153,27 @@ export class KittyUnicodePlaceholderRenderer implements IDisposable {
     for (const drawCall of drawCalls) {
       this.drawCell(context, drawCall, cellWidth, cellHeight);
     }
+  }
+
+  private sanitizeRows(range: { end: number; start: number }): boolean {
+    const terminal = this.options.terminal as XtermTerminalInternals;
+    const buffer = terminal._core.buffer;
+    let sanitized = false;
+    for (let row = range.start; row <= range.end; row += 1) {
+      const line = buffer.lines.get(buffer.ydisp + row);
+      sanitized = sanitizeKittyPlaceholderCells(line, 0, terminal.cols) || sanitized;
+    }
+    return sanitized;
+  }
+
+  private scheduleSanitizedRefresh(): void {
+    if (this.sanitizeRefreshPending) return;
+    this.sanitizeRefreshPending = true;
+    queueMicrotask(() => {
+      this.sanitizeRefreshPending = false;
+      if (this.disposed) return;
+      this.options.terminal.refresh(0, this.options.terminal.rows - 1);
+    });
   }
 
   private drawCell(

@@ -38,6 +38,7 @@ import {
   TerminalModeState,
 } from "./utils/terminal-mode-state.js";
 import { terminalQueryResponder } from "./utils/terminal-query-responder.js";
+import { TerminalReplayBuffer } from "./utils/terminal-replay-buffer.js";
 import { trimTrailingLineBreaks } from "./utils/trim-trailing-line-breaks.js";
 
 interface SessionEvents {
@@ -87,10 +88,9 @@ export class Session extends EventEmitter<SessionEvents> {
   private pendingParse = "";
   // Scrollback ring buffer for attach-time replay. Appended on every PTY data
   // event regardless of attached clients so a tab switching to this session
-  // lands on recent output instead of a blank screen. Bounded by byte cap;
-  // oldest chunks are dropped as new output arrives.
-  private readonly scrollbackChunks: string[] = [];
-  private scrollbackBytes = 0;
+  // lands on recent output instead of a blank screen. APC-aware eviction drops
+  // an orphaned image-payload continuation instead of replaying it as text.
+  private readonly scrollback = new TerminalReplayBuffer(SESSION_SCROLLBACK_REPLAY_BYTES);
   // Live terminal mode state (alt-screen, mouse, bracketed paste, cursor hide,
   // Kitty keyboard) updated from every PTY chunk. snapshotScrollback() adds a
   // restore prefix from this so a switch into a long-running TUI re-enters the
@@ -362,7 +362,7 @@ export class Session extends EventEmitter<SessionEvents> {
   // that covers any query, present or future. The join cost is paid here (read
   // time, cold switch path) not on the hot output path.
   snapshotScrollback(): string {
-    return this.modeState.restoreReplay(this.scrollbackChunks.join(""));
+    return this.modeState.restoreReplay(this.scrollback.snapshot());
   }
 
   // The replay ring without the live-mode restore prefix, for shutdown
@@ -372,20 +372,11 @@ export class Session extends EventEmitter<SessionEvents> {
   // Parsing the raw stream in temporal order keeps the buffers faithful to
   // what the PTY actually did.
   rawScrollback(): string {
-    return this.scrollbackChunks.join("");
+    return this.scrollback.snapshot();
   }
 
   private appendScrollback(data: string): void {
-    if (!data) return;
-    this.scrollbackChunks.push(data);
-    this.scrollbackBytes += Buffer.byteLength(data, "utf8");
-    while (
-      this.scrollbackBytes > SESSION_SCROLLBACK_REPLAY_BYTES &&
-      this.scrollbackChunks.length > 1
-    ) {
-      const dropped = this.scrollbackChunks.shift();
-      if (dropped) this.scrollbackBytes -= Buffer.byteLength(dropped, "utf8");
-    }
+    this.scrollback.append(data);
   }
 
   private emitInitialMetadata(): void {
