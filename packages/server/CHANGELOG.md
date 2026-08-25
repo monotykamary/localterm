@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.77.0
+
+### Minor Changes
+
+- 51c1695: Add browser-native Kitty Unicode virtual placements, secure file-medium conversion, and persistent image cells for pi-math and Neovim image integrations.
+
 ## 2.76.12
 
 ## 2.76.11
