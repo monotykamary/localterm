@@ -15,6 +15,9 @@ const PLACEHOLDER = String.fromCodePoint(KITTY_UNICODE_PLACEHOLDER_CODE_POINT);
 const ROW_0 = "\u0305";
 const ROW_1 = "\u030d";
 const HIGH_2 = "\u030e";
+const COLUMN_33 = "\u0486";
+const COLUMN_34 = "\u0487";
+const COLUMN_35 = "\u0592";
 
 interface InternalTerminal extends XtermTerminal {
   _core: {
@@ -103,6 +106,28 @@ describe("KittyUnicodePlaceholderAddon", () => {
     await write(terminal, "after");
 
     expect(terminal.buffer.active.getLine(0)?.translateToString(false)).not.toContain(PLACEHOLDER);
+    terminal.dispose();
+  });
+
+  it("consumes coordinate diacritics without advancing the xterm cursor", async () => {
+    const terminal = new XtermTerminal({ allowProposedApi: true, cols: 20, rows: 2 });
+    const addon = new KittyUnicodePlaceholderAddon({ decodeImage: async () => source() });
+    terminal.loadAddon(addon);
+    const imageId = 0x123456;
+
+    await loadImage(terminal, imageId, imageId, 36, 1);
+    await write(
+      terminal,
+      `${ESC}[38;2;18;52;86m${ESC}[58;2;18;52;86m` +
+        `${PLACEHOLDER}${ROW_0}${COLUMN_33}` +
+        `${PLACEHOLDER}${ROW_0}${COLUMN_34}` +
+        `${PLACEHOLDER}${ROW_0}${COLUMN_35}${ESC}[39;59mend`,
+    );
+
+    expect(kittyPlaceholderMetadataAt(lineAt(terminal, 0), 0)?.imageColumn).toBe(33);
+    expect(kittyPlaceholderMetadataAt(lineAt(terminal, 0), 1)?.imageColumn).toBe(34);
+    expect(kittyPlaceholderMetadataAt(lineAt(terminal, 0), 2)?.imageColumn).toBe(35);
+    expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe("   end");
     terminal.dispose();
   });
 

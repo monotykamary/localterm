@@ -306,7 +306,6 @@ export const installKittyPlaceholderPrintHandler = (terminal: XtermTerminal): ((
       while (cursor < end && pending.diacritics.length < 3) {
         const index = kittyUnicodeDiacriticIndex(data[cursor]!);
         if (index === undefined) break;
-        originalPrint.call(inputHandler, data, cursor, cursor + 1);
         pending.diacritics.push(index);
         cursor += 1;
         updatePendingPlaceholder(pending);
@@ -332,7 +331,9 @@ export const installKittyPlaceholderPrintHandler = (terminal: XtermTerminal): ((
         diacritics.push(index);
         after += 1;
       }
-      originalPrint.call(inputHandler, data, placeholder, after);
+      // Coordinate diacritics are protocol metadata only. xterm assigns width to some
+      // canonical entries (notably U+0487), so printing them shifts every later tile.
+      originalPrint.call(inputHandler, data, placeholder, placeholder + 1);
 
       const buffer = internals._core.buffer;
       const column = Math.max(0, buffer.x - 1);
