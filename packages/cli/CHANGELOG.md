@@ -1,5 +1,12 @@
 # localterm
 
+## 2.77.2
+
+### Patch Changes
+
+- cb3e899: Keep Kitty Unicode coordinate diacritics out of xterm's width calculation so wide formula placeholders no longer shift and smear image tiles.
+  - @monotykamary/localterm-server@2.77.2
+
 ## 2.77.1
 
 ### Patch Changes
