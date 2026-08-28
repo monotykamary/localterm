@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.77.3
+
+### Patch Changes
+
+- 30c1131: Send DEL for legacy Backspace on macOS so tmux panes and raw CLI menus honor the PTY erase character instead of receiving a literal Ctrl-H.
+
 ## 2.77.2
 
 ## 2.77.1
