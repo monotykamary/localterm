@@ -10,7 +10,7 @@ This harness verifies WebGL text rendering across both terminal polarities:
 
 Canvas and DOM are diagnostic references only. LocalTerm continues to use the WebGL renderer in production.
 
-The server reconstructs the upstream addon in memory by reversing the repository's pnpm patch. Comparisons therefore use the exact same pinned package version without downloading or vendoring another bundle.
+The server reconstructs the upstream addon in memory by reversing the repository's source patch. Comparisons therefore use the exact same pinned package version without downloading or vendoring another bundle.
 
 ## Why Canvas reconstruction
 
@@ -25,7 +25,7 @@ The reconstruction runs only when a glyph misses the atlas cache. It reads the c
 ## Visual comparison
 
 ```bash
-pnpm --filter @monotykamary/localterm-harness-light-theme-rendering serve
+bun run --filter @monotykamary/localterm-harness-light-theme-rendering serve
 ```
 
 Open <http://127.0.0.1:4819/>. Select any built-in theme and bundled font to compare current WebGL, xterm Canvas, and xterm DOM. Selecting a light theme measures the four light palettes; selecting a dark theme measures all 16 dark palettes. The contrast-floor selector changes the visible cards between disabled `1` and `4.5`; automated measurements use LocalTerm's production value for each polarity.
@@ -37,7 +37,7 @@ Inspect thin strokes (`il1|`), dense stems (`MW@#%`), curves and diagonals, box 
 With the server not required, run:
 
 ```bash
-pnpm --filter @monotykamary/localterm-harness-light-theme-rendering probe
+bun run --filter @monotykamary/localterm-harness-light-theme-rendering probe
 ```
 
 The probe renders struck-then-plain and plain-then-struck pairs of the same words into a headless
@@ -50,7 +50,7 @@ atlas cache key against missing any attribute bit that is baked into cached glyp
 With the server running:
 
 ```bash
-pnpm --filter @monotykamary/localterm-harness-light-theme-rendering drive
+bun run --filter @monotykamary/localterm-harness-light-theme-rendering drive
 ```
 
 The driver uses Geist Mono at 13px, line height 1.2, and DPR 2 by default. It refreshes displayed terminals before capture and captures each renderer's native device pixels through CDP without resampling. It writes:
@@ -68,10 +68,10 @@ On light themes, SGR faint text must retain at least 4.5:1 core contrast, 57% me
 Use environment variables to probe another configuration or explicit theme set:
 
 ```bash
-FONT=inconsolata pnpm --filter @monotykamary/localterm-harness-light-theme-rendering drive
-DPR=1 pnpm --filter @monotykamary/localterm-harness-light-theme-rendering drive
-THEME=vesper pnpm --filter @monotykamary/localterm-harness-light-theme-rendering drive
-THEME=vesper THEMES=vesper,tokyo-night,nord,solarized-dark pnpm --filter @monotykamary/localterm-harness-light-theme-rendering drive
-CONTRAST_FLOOR=4.5 pnpm --filter @monotykamary/localterm-harness-light-theme-rendering drive
-HEADLESS=0 pnpm --filter @monotykamary/localterm-harness-light-theme-rendering drive
+FONT=inconsolata bun run --filter @monotykamary/localterm-harness-light-theme-rendering drive
+DPR=1 bun run --filter @monotykamary/localterm-harness-light-theme-rendering drive
+THEME=vesper bun run --filter @monotykamary/localterm-harness-light-theme-rendering drive
+THEME=vesper THEMES=vesper,tokyo-night,nord,solarized-dark bun run --filter @monotykamary/localterm-harness-light-theme-rendering drive
+CONTRAST_FLOOR=4.5 bun run --filter @monotykamary/localterm-harness-light-theme-rendering drive
+HEADLESS=0 bun run --filter @monotykamary/localterm-harness-light-theme-rendering drive
 ```

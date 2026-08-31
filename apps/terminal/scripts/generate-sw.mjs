@@ -1,7 +1,7 @@
 /**
  * Build-time script: injects the precache list and a content-hashed shell
  * version into scripts/sw-template.js, writing dist/sw.js. Run from
- * apps/terminal with `pnpm generate:sw` (also runs as the last `build` step).
+ * apps/terminal with `bun run generate:sw` (also runs as the last `build` step).
  * A new build changes the hashed asset URLs and content, so the version
  * changes and the service worker reinstalls + purges stale caches.
  */

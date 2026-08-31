@@ -22,13 +22,13 @@ const die = (message) => {
 
 if (!existsSync(macosDaemonLauncher) || !existsSync(macosSecretHelper)) {
   die(
-    `macOS native resources not found. build them with 'pnpm --filter @monotykamary/localterm build:macos-launcher'.`,
+    `macOS native resources not found. build them with 'bun run --filter @monotykamary/localterm build:macos-launcher'.`,
   );
 }
 
 if (!existsSync(terminalDistRoot)) {
   die(
-    `apps/terminal/dist not found. run 'pnpm build' before publishing so the bundled terminal UI ships with the CLI tarball.`,
+    `apps/terminal/dist not found. run 'bun run build' before publishing so the bundled terminal UI ships with the CLI tarball.`,
   );
 }
 

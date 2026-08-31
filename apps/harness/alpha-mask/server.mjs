@@ -7,9 +7,8 @@ import { dirname, join, resolve } from "node:path";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const harnessDir = join(repoRoot, "apps/harness/alpha-mask");
 
-// Resolve through the terminal app's dep graph so pnpm's patched-package symlinks
-// are followed; hardcoding .pnpm_hashes or the .pnpm_patches staging dir breaks
-// whenever the addon patch changes.
+// Resolve through the terminal app's dep graph so bun's patched-package symlinks
+// are followed; hardcoding .bun store paths breaks whenever the addon patch changes.
 const terminalRequire = createRequire(join(repoRoot, "apps/terminal/package.json"));
 const packageDir = (specifier) => dirname(terminalRequire.resolve(`${specifier}/package.json`));
 

@@ -86,7 +86,7 @@ const createAnsiLine = (baseCode) =>
     (name, index) => `\u001b[${baseCode + index}m${index} ${name.slice(0, 4).padEnd(4)}`,
   ).join(" ") + "\u001b[0m";
 const ANSI_SAMPLE_LINES = [
-  "\u001b[38;2;84;104;58m$\u001b[38;2;65;95;185m pnpm run start\u001b[0m 0123456789",
+  "\u001b[38;2;84;104;58m$\u001b[38;2;65;95;185m bun run start\u001b[0m 0123456789",
   createAnsiLine(30),
   createAnsiLine(90),
   "\u001b[1mBold default and colored text: MW@#% il1| 0689\u001b[22m",

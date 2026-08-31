@@ -7,7 +7,7 @@ Thanks for your interest in contributing! This document provides guidelines and 
 ### Prerequisites
 
 - Node.js >= 22
-- pnpm >= 8
+- bun >= 1.4
 
 ### Setup
 
@@ -24,7 +24,7 @@ cd localterm
 ni
 ```
 
-The `node-pty` native addon requires a C++ toolchain (Xcode Command Line Tools on macOS, `build-essential` on Linux) because a source-build patch is applied via `pnpm-workspace.yaml` → `patchedDependencies`. Prebuilds are not used.
+The `node-pty` native addon requires a C++ toolchain (Xcode Command Line Tools on macOS, `build-essential` on Linux) because a source-build patch is applied via `package.json` → `patchedDependencies`. Prebuilds are not used.
 
 3. Build all packages:
 
@@ -50,7 +50,7 @@ packages/     # libraries, tools
 ### Running Tests
 
 ```bash
-pnpm test
+bun run test
 ```
 
 ### Linting & Formatting
@@ -63,49 +63,41 @@ nr format      # Format code
 
 ### Dev server
 
-`pnpm dev` runs the terminal's Vite dev server through portless at
+`bun run dev` runs the terminal's Vite dev server through portless at
 `https://dev.localterm.localhost` (the daemon's `https://localterm.localhost`
 hostname is reserved for the built daemon). The two `tsc --watch` packages keep
-running in parallel via turbo. Escape hatch: `pnpm dev:app` runs `vp dev`
+running in parallel via turbo. Escape hatch: `bun run dev:app` runs `vp dev`
 without portless.
 
 ### `localterm` binary from the working copy
 
-Iterating via `pnpm cli` is fast but leaves no `localterm` binary on PATH, so
+Iterating via `bun run cli` is fast but leaves no `localterm` binary on PATH, so
 anything that calls `localterm ...` (scripts, docs, muscle memory) won't work.
 Link the CLI globally from your checkout to get the binary without giving up
 live rebuilds:
 
 ```bash
-pnpm setup                         # once, if PNPM_HOME isn't configured yet
-pnpm link --global ./packages/cli  # from the repo root, so the workspace dep resolves
+cd packages/cli
+bun link                           # shim lands in ~/.bun/bin
 ```
 
 The shim runs `packages/cli/dist/index.js` straight out of the checkout, so
-`pnpm build` / `pnpm dev` rebuilds land on the next `localterm` call — no
-reinstall. Unlink with `pnpm remove --global @monotykamary/localterm`.
+`bun run build` / `bun run dev` rebuilds land on the next `localterm` call — no
+reinstall. Unlink with `bun unlink` (from `packages/cli`).
 
 Two gotchas:
 
-- `pnpm link` also writes a `link:` dependency into `package.json`,
-  `packages/cli/package.json`, and `pnpm-workspace.yaml` (and rewrites the
-  latter's `allowBuilds`). Those are side effects, not intended edits — revert
-  them so they don't get committed; the global shim lives in
-  `~/Library/pnpm/bin` and is unaffected:
-
-  ```bash
-  git checkout -- package.json packages/cli/package.json pnpm-workspace.yaml pnpm-lock.yaml
-  rm -f packages/cli/pnpm-workspace.yaml
-  ```
+- `bun link` does not touch `package.json` or workspace files, so there is
+  nothing to revert afterward; the shim lives in `~/.bun/bin`.
 
 - `prepack` (the `apps/terminal/dist` → `packages/cli/terminal` copy that ships
-  the UI with the tarball) runs only on `pnpm pack` / `pnpm publish`, **not** on
-  `pnpm build`. After a terminal-UI change, sync it manually; pure cli/server TS
-  changes just need `pnpm build` since `localterm` reads `dist` live:
+  the UI with the tarball) runs only on `bun pm pack` / `bun publish`, **not** on
+  `bun run build`. After a terminal-UI change, sync it manually; pure cli/server TS
+  changes just need `bun run build` since `localterm` reads `dist` live:
 
   ```bash
-  pnpm build
-  pnpm --filter @monotykamary/localterm run prepack
+  bun run build
+  bun run --filter @monotykamary/localterm prepack
   ```
 
 ## Code Style

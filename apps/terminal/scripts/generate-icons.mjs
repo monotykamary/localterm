@@ -1,7 +1,7 @@
 /**
  * Build-time script: rasterizes public/icons/icon.svg into the PNG sizes the
  * PWA manifest references. The single SVG is the source of truth; run from
- * apps/terminal with `pnpm generate:icons` after editing the SVG.
+ * apps/terminal with `bun run generate:icons` after editing the SVG.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";

@@ -33,7 +33,7 @@
     "dev": "vp pack extensions/index.ts --format esm --out-dir dist --deps.never-bundle @earendil-works/pi-coding-agent --deps.never-bundle @earendil-works/pi-tui --watch",
     "test": "vp test --run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepack": "pnpm run build"
+    "prepack": "bun run build"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.2",

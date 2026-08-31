@@ -11,8 +11,8 @@ weight as `~400 (normal)` / `~700 (bold)` / `heavier` / `lighter`.
 ## Why this shape
 
 - The patched alpha-mask bundle is resolved through the terminal app's dependency graph
-  (`createRequire` from `apps/terminal/package.json`), so pnpm's patched-package symlink
-  is followed to the real file regardless of how the addon's `patch_hash` changes.
+  (`createRequire` from `apps/terminal/package.json`), so bun's patched-package symlink
+  is followed to the real file regardless of how the addon's patch changes.
 - The atlas cache is module-scoped, so every `Terminal` in one page shares a
   single atlas — mimicking in-app terminal tabs in one JS context.
 - It captures per-tab: ink ratio, calibrated weight classification, char
@@ -27,14 +27,14 @@ weight as `~400 (normal)` / `~700 (bold)` / `heavier` / `lighter`.
 
 ```bash
 # terminal A: static server
-pnpm --filter @monotykamary/localterm-harness-alpha-mask serve
+bun run --filter @monotykamary/localterm-harness-alpha-mask serve
 # -> http://127.0.0.1:4817/
 
 # terminal B: drive it headless via CDP and print the verdict
-pnpm --filter @monotykamary/localterm-harness-alpha-mask drive
+bun run --filter @monotykamary/localterm-harness-alpha-mask drive
 ```
 
-`HEADLESS=0 pnpm ... drive` launches a visible Chrome for eyeballing.
+`HEADLESS=0 bun run ... drive` launches a visible Chrome for eyeballing.
 `CHROME_PATH=/path/to/chrome` overrides the browser (point it at the Dia binary
 to run inside the real environment).
 

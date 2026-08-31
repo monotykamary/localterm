@@ -4,6 +4,7 @@
   "private": true,
   "workspaces": [
     "apps/*",
+    "apps/harness/*",
     "packages/*"
   ],
   "type": "module",
@@ -26,10 +27,10 @@
     "doctor:react:changed": "react-doctor --yes --no-telemetry --scope lines --base main --include-untracked --no-dead-code --no-supply-chain",
     "format": "vp fmt",
     "format:check": "vp fmt --check",
-    "check": "pnpm run format:check && pnpm run lint && pnpm run lint:range && pnpm run typecheck",
+    "check": "bun run format:check && bun run lint && bun run lint:range && bun run typecheck",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "pnpm build && changeset publish"
+    "release": "bun run build && changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",
@@ -43,9 +44,33 @@
     "typescript": "^7.0.2",
     "vite-plus": "^0.2.8"
   },
-  "engines": {
-    "node": ">=24",
-    "pnpm": ">=8"
+  "overrides": {
+    "@fontsource/geist-mono": "5.2.7",
+    "@voidzero-dev/vite-plus-core": "^0.2.8",
+    "vite": "npm:@voidzero-dev/vite-plus-core@^0.2.8"
   },
-  "packageManager": "pnpm@11.20.0"
+  "devEngines": {
+    "packageManager": {
+      "name": "bun",
+      "version": "^1.4.0"
+    }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "patchedDependencies": {
+    "@xterm/addon-image@0.10.0-beta.287": "patches/@xterm__addon-image@0.10.0-beta.287.patch",
+    "@xterm/addon-webgl@0.20.0-beta.290": "patches/@xterm__addon-webgl@0.20.0-beta.290.patch",
+    "node-pty@1.1.0": "patches/node-pty@1.1.0.patch"
+  },
+  "trustedDependencies": [
+    "@parcel/watcher",
+    "@google/genai",
+    "esbuild",
+    "node-pty",
+    "protobufjs",
+    "sharp",
+    "spawn-sync",
+    "unrs-resolver"
+  ]
 }
