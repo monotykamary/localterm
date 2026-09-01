@@ -2953,7 +2953,9 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       return {
         onOpen(_event, ws) {
           const remoteAddress = extractRemoteAddress(ws.raw);
-          if (!remoteAddress || !isLoopbackRemoteAddress(remoteAddress)) {
+          // Same as /ws: a missing address on a loopback bind is still local.
+          // Reject only a present non-loopback peer.
+          if (remoteAddress ? !isLoopbackRemoteAddress(remoteAddress) : !isLoopbackBind) {
             ws.close(WS_CLOSE_POLICY_VIOLATION, "extension relay is loopback-only");
             return;
           }
@@ -2962,7 +2964,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             return;
           }
           inbound = createInboundCdpSocket({
-            readyState: ws.readyState,
+            readyState: WS_READY_STATE_OPEN,
             send: (raw) => {
               ws.send(raw);
             },

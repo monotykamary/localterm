@@ -183,6 +183,41 @@ describe("createNetworkPolicyMiddleware (loopback bind)", () => {
     });
     expect(response.status).toBe(403);
   });
+
+  it("rejects chrome-extension Origin on ordinary routes", async () => {
+    const response = await probe({
+      host: "127.0.0.1:3417",
+      origin: "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
+    });
+    expect(response.status).toBe(403);
+  });
+});
+
+describe("createNetworkPolicyMiddleware (extension relay Origin)", () => {
+  const app = new Hono();
+  app.use("*", createNetworkPolicyMiddleware("127.0.0.1"));
+  app.get("/extension", (context) => context.json({ ok: true }));
+  app.get("/ws", (context) => context.json({ ok: true }));
+
+  it("allows chrome-extension Origin on /extension", async () => {
+    const response = await app.request("http://127.0.0.1/extension", {
+      headers: {
+        host: "127.0.0.1:3417",
+        origin: "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
+      },
+    });
+    expect(response.status).toBe(200);
+  });
+
+  it("does not allow chrome-extension Origin on /ws", async () => {
+    const response = await app.request("http://127.0.0.1/ws", {
+      headers: {
+        host: "127.0.0.1:3417",
+        origin: "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
+      },
+    });
+    expect(response.status).toBe(403);
+  });
 });
 
 describe("createNetworkPolicyMiddleware (0.0.0.0 bind)", () => {

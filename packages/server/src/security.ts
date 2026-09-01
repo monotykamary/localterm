@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from "hono";
-import { LOOPBACK_HOSTS } from "./constants.js";
+import { CDP_EXTENSION_PATH, LOOPBACK_HOSTS } from "./constants.js";
 
 const stripPort = (hostHeader: string | undefined): string | null => {
   if (!hostHeader) return null;
@@ -27,6 +27,21 @@ const originHostname = (originHeader: string | undefined): string | null => {
     return null;
   }
 };
+
+/** MV3 workers send `Origin: chrome-extension://<id>` (not a loopback host). */
+const isUnpackedExtensionOrigin = (originHeader: string | undefined): boolean => {
+  if (!originHeader) return false;
+  try {
+    const protocol = new URL(originHeader).protocol;
+    return protocol === "chrome-extension:" || protocol === "moz-extension:";
+  } catch {
+    return false;
+  }
+};
+
+const isExtensionRelayRequest = (context: Context): boolean =>
+  context.req.path === CDP_EXTENSION_PATH &&
+  isUnpackedExtensionOrigin(context.req.header("origin"));
 
 const isLoopback = (hostname: string | null): boolean => {
   if (!hostname) return false;
@@ -87,7 +102,7 @@ const enforceLoopback = (context: Context): Response | null => {
     return new Response("forbidden: non-loopback host", { status: 403 });
   }
   const origin = context.req.header("origin");
-  if (origin !== undefined) {
+  if (origin !== undefined && !isExtensionRelayRequest(context)) {
     const originHost = originHostname(origin);
     if (!isLoopback(originHost)) {
       return new Response("forbidden: cross-origin", { status: 403 });
@@ -135,7 +150,7 @@ export const createNetworkPolicyMiddleware = (
       return new Response("forbidden: host not allowed", { status: 403 });
     }
     const origin = context.req.header("origin");
-    if (origin !== undefined) {
+    if (origin !== undefined && !isExtensionRelayRequest(context)) {
       const originHost = originHostname(origin);
       const originAccepted =
         originHost !== null &&
