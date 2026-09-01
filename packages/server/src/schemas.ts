@@ -87,6 +87,8 @@ export const cdpHealthSchema = z
     // DevToolsActivePort file or the explicit `/json/version` probe). Surfaced
     // so the settings UI can show which endpoint the daemon attached to.
     port: z.number().int().positive().optional(),
+    // `extension` = unpacked Chrome relay on `/extension`; `cdp` = remote-debugging WS.
+    transport: z.enum(["extension", "cdp"]).optional(),
   })
   .nullable();
 
@@ -122,6 +124,7 @@ export const cdpConnectResultSchema = z
     connected: z.boolean(),
     browser: z.string().optional(),
     port: z.number().int().positive().optional(),
+    transport: z.enum(["extension", "cdp"]).optional(),
     error: z.string().optional(),
   })
   .strict();

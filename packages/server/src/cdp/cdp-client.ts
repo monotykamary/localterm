@@ -1,9 +1,10 @@
 /**
  * Persistent Chrome DevTools Protocol client for opening background tabs.
  *
- * One WebSocket to a debug-enabled Chromium browser, established once and kept
- * open for the daemon's lifetime, so the user only clears the browser's
- * remote-debugging prompt a single time (at `start`) instead of on every run.
+ * One wire to Chromium, established once and kept open for the daemon's
+ * lifetime. Prefers the unpacked Chrome extension relay, then falls back to
+ * remote-debugging so the user only clears that prompt a single time (at
+ * `start`) instead of on every run.
  *
  * `Target.createTarget({ background: true })` creates the tab *behind* the
  * active one — a true background tab that never steals focus. The `background`
@@ -15,10 +16,15 @@
  * resolves null so the caller can fall back to the OS opener.
  */
 
+import { CDP_EXTENSION_WAIT_MS } from "../constants.js";
 import { CdpConnection, CdpReplyError } from "./cdp-connection.js";
+import type { CdpSocket } from "./cdp-socket.js";
 import { CDP_CLOSE_SETTLE_MS } from "./constants.js";
 import { detectChromiumBrowsers, type DetectedBrowser } from "./detect-chromium.js";
+import { waitForExtension } from "./extension-hub.js";
 import { TargetRegistry } from "./target-registry.js";
+
+export type CdpTransport = "extension" | "cdp";
 
 export interface CdpClientOptions {
   /** Override browser detection (tests). Defaults to detectChromiumBrowsers. */
@@ -58,20 +64,26 @@ export interface CdpClientOptions {
    * later is fine.
    */
   tabUrlFilter?: (candidateUrl: string) => boolean;
+  /** How long auto-connect waits for the extension before falling back
+   *  to remote debugging. Default CDP_EXTENSION_WAIT_MS. */
+  extensionWaitMs?: number;
 }
 
 export class CdpClient {
   private connecting: Promise<void> | undefined;
   private readonly detect: () => Promise<DetectedBrowser[]>;
+  private readonly extensionWaitMs: number;
   private readonly connection: CdpConnection;
   private readonly targetRegistry: TargetRegistry;
   /** Serializes closeTab() so concurrent closes don't orphan tabs. */
   private closeQueue: Promise<void> = Promise.resolve();
-  /** The browser the live socket is attached to, for diagnostics. */
+  /** The browser the live remote-debugging socket is attached to. */
   connectedBrowser: DetectedBrowser | undefined;
+  private transportName: CdpTransport | undefined;
 
   constructor(options: CdpClientOptions = {}) {
     this.detect = options.detect ?? detectChromiumBrowsers;
+    this.extensionWaitMs = options.extensionWaitMs ?? CDP_EXTENSION_WAIT_MS;
     this.connection = new CdpConnection({
       connectTimeoutMs: options.connectTimeoutMs,
       callTimeoutMs: options.callTimeoutMs,
@@ -84,6 +96,7 @@ export class CdpClient {
       platform: options.platform,
       onDisconnect: () => {
         this.connectedBrowser = undefined;
+        this.transportName = undefined;
         this.targetRegistry.clear();
       },
     });
@@ -95,6 +108,22 @@ export class CdpClient {
 
   isConnected(): boolean {
     return this.connection.isConnected();
+  }
+
+  getTransport(): CdpTransport | undefined {
+    return this.isConnected() ? this.transportName : undefined;
+  }
+
+  /** Plug an inbound extension socket. Favors the extension even if a
+   *  remote-debugging WS is already open (pending calls reject and reconnect). */
+  adoptExtension(socket: CdpSocket): void {
+    this.targetRegistry.clear();
+    this.connection.attach(socket);
+    this.connectedBrowser = undefined;
+    this.transportName = "extension";
+    void this.targetRegistry.observeTargets().catch(() => {
+      /* discovery is best-effort */
+    });
   }
 
   /**
@@ -112,16 +141,47 @@ export class CdpClient {
     return this.connecting;
   }
 
+  private bindExtension(): void {
+    this.connectedBrowser = undefined;
+    this.transportName = "extension";
+    void this.targetRegistry.observeTargets().catch(() => {
+      /* discovery is best-effort; tabs fall back to window.close() */
+    });
+  }
+
   private async establish(): Promise<void> {
+    if (this.connection.takeExtensionIfPresent()) {
+      this.bindExtension();
+      return;
+    }
+    try {
+      const socket = await waitForExtension(this.extensionWaitMs);
+      this.connection.attach(socket);
+      this.bindExtension();
+      return;
+    } catch {
+      if (this.connection.takeExtensionIfPresent()) {
+        this.bindExtension();
+        return;
+      }
+    }
+
     const browsers = await this.detect();
     if (browsers.length === 0) {
-      throw new Error("no debug-enabled Chromium browser detected");
+      throw new Error(
+        "no debug-enabled Chromium browser detected. Load the localterm Chrome extension or enable remote debugging",
+      );
     }
     const errors: string[] = [];
     for (const browser of browsers) {
+      if (this.connection.takeExtensionIfPresent()) {
+        this.bindExtension();
+        return;
+      }
       try {
         await this.connection.open(browser.wsUrl, browser.name);
         this.connectedBrowser = browser;
+        this.transportName = "cdp";
         // Kick off ambient tab observation on the live socket. Fire-and-get:
         // discovery fails soft (closeTab falls back to window.close()), and the
         // connect() promise should resolve as soon as the socket is usable,
@@ -131,6 +191,7 @@ export class CdpClient {
         });
         return;
       } catch (error) {
+        if (this.isConnected() && this.transportName === "extension") return;
         errors.push(`${browser.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
@@ -505,6 +566,7 @@ export class CdpClient {
   close(): void {
     this.connection.close();
     this.connectedBrowser = undefined;
+    this.transportName = undefined;
     this.targetRegistry.clear();
   }
 }

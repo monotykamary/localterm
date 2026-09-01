@@ -506,6 +506,9 @@ export const CDP_HEARTBEAT_GRACE_MS = 15_000;
 // WebSocket creation — a live WS opens in ~100ms, so "still CONNECTING at
 // 600ms" reliably means the prompt is blocking it.
 export const CDP_AUTO_ALLOW_DELAY_MS = 600;
+export const CDP_EXTENSION_WAIT_MS = 500;
+export const CDP_EXTENSION_PATH = "/extension";
+export const CDP_EXTENSION_BROWSER_NAME = "Chrome extension";
 // Foreground value reported when a TUI is on the alternate screen but no shell
 // hook named the program. Shells without a preexec hook (sh/dash) have no
 // foreground-start signal, so the alt-screen enter/exit is the only marker

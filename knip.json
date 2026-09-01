@@ -37,7 +37,8 @@
         "src/terminal-themes.ts",
         "src/terminal-fonts.ts",
         "vitest.config.ts"
-      ]
+      ],
+      "ignore": ["extension/**"]
     },
     "packages/cli": {
       "entry": ["src/index.ts", "vitest.config.ts"]

@@ -22,7 +22,8 @@
     "directory": "packages/server"
   },
   "files": [
-    "dist"
+    "dist",
+    "extension"
   ],
   "os": [
     "darwin",

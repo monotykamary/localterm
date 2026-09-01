@@ -22,7 +22,10 @@ import {
   type SnapshotProcesses,
 } from "./caffeinate-process-match.js";
 import { CdpClient } from "./cdp/cdp-client.js";
+import { createInboundCdpSocket } from "./cdp/cdp-socket.js";
+import { setExtensionClient } from "./cdp/extension-hub.js";
 import type { DetectedBrowser } from "./cdp/detect-chromium.js";
+import { isLoopbackRemoteAddress } from "./utils/is-loopback-remote-address.js";
 import { detectWithExplicitPort } from "./cdp/discover-explicit-endpoint.js";
 import { DaemonConfigStore } from "./daemon-config-store.js";
 import {
@@ -43,6 +46,8 @@ import {
   AUTOMATION_WATCH_DEBOUNCE_MS,
   AUTOMATION_WATCH_POST_RUN_GRACE_MS,
   AUTOMATION_WEBHOOK_DEBOUNCE_MS,
+  CDP_EXTENSION_BROWSER_NAME,
+  CDP_EXTENSION_PATH,
   DEFAULT_HOST,
   DEFAULT_PORT,
   FRIENDLY_HOSTNAME,
@@ -616,8 +621,12 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
       cdp: cdpClient
         ? {
             connected: cdpClient.isConnected(),
-            browser: cdpClient.connectedBrowser?.name,
+            browser:
+              cdpClient.getTransport() === "extension"
+                ? CDP_EXTENSION_BROWSER_NAME
+                : cdpClient.connectedBrowser?.name,
             port: cdpClient.connectedBrowser?.port,
+            transport: cdpClient.getTransport(),
           }
         : null,
     }),
@@ -2857,8 +2866,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
       await cdpClient.connect();
       return {
         connected: true,
-        browser: cdpClient.connectedBrowser?.name,
+        browser:
+          cdpClient.getTransport() === "extension"
+            ? CDP_EXTENSION_BROWSER_NAME
+            : cdpClient.connectedBrowser?.name,
         port: cdpClient.connectedBrowser?.port,
+        transport: cdpClient.getTransport(),
       };
     } catch (error) {
       return {
@@ -2932,6 +2945,49 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
   };
   const api = buildApiRoutes(ctx);
   app.route("/api", api);
+
+  app.get(
+    CDP_EXTENSION_PATH,
+    upgradeWebSocket(() => {
+      let inbound: ReturnType<typeof createInboundCdpSocket> | undefined;
+      return {
+        onOpen(_event, ws) {
+          const remoteAddress = extractRemoteAddress(ws.raw);
+          if (!remoteAddress || !isLoopbackRemoteAddress(remoteAddress)) {
+            ws.close(WS_CLOSE_POLICY_VIOLATION, "extension relay is loopback-only");
+            return;
+          }
+          if (!cdpClient) {
+            ws.close(WS_CLOSE_POLICY_VIOLATION, "CDP disabled");
+            return;
+          }
+          inbound = createInboundCdpSocket({
+            readyState: ws.readyState,
+            send: (raw) => {
+              ws.send(raw);
+            },
+            close: () => {
+              ws.close();
+            },
+          });
+          setExtensionClient(inbound);
+          cdpClient.adoptExtension(inbound);
+        },
+        onMessage(event) {
+          const data = typeof event.data === "string" ? event.data : String(event.data ?? "");
+          inbound?.ingest(data);
+        },
+        onClose() {
+          inbound?.ingestClose();
+          inbound = undefined;
+        },
+        onError() {
+          inbound?.ingestClose();
+          inbound = undefined;
+        },
+      };
+    }),
+  );
 
   app.get(
     "/ws",
@@ -3365,10 +3421,12 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     void cdpClient
       .connect()
       .then(() => {
-        if (cdpClient.connectedBrowser) {
-          console.log(
-            `automation run tabs will open in the background via ${cdpClient.connectedBrowser.name} (CDP)`,
-          );
+        const via =
+          cdpClient.getTransport() === "extension"
+            ? CDP_EXTENSION_BROWSER_NAME
+            : cdpClient.connectedBrowser?.name;
+        if (via) {
+          console.log(`automation run tabs will open in the background via ${via} (CDP)`);
         }
       })
       .catch(() => {

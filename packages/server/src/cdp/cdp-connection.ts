@@ -5,12 +5,14 @@ import {
   CDP_HEARTBEAT_INTERVAL_MS,
   CDP_HEARTBEAT_TIMEOUT_MS,
 } from "../constants.js";
+import type { CdpSocket } from "./cdp-socket.js";
 import {
   CDP_WEBSOCKET_CONNECTING_STATE,
   CDP_WEBSOCKET_OPEN_STATE,
   DEFAULT_CDP_CALL_TIMEOUT_MS,
   DEFAULT_CDP_CONNECT_TIMEOUT_MS,
 } from "./constants.js";
+import { getExtensionClient } from "./extension-hub.js";
 
 // Cheap browser-level CDP round-trip used as a transport liveness probe by the
 // keepalive: no session, no side effects, minimal reply.
@@ -42,8 +44,25 @@ interface CdpConnectionOptions {
  * the browser's remote-debugging consent dialog on every automation run. */
 export class CdpReplyError extends Error {}
 
+const wrapBrowserSocket = (ws: WebSocket): CdpSocket => ({
+  get readyState() {
+    return ws.readyState;
+  },
+  send(data: string) {
+    ws.send(data);
+  },
+  close() {
+    ws.close();
+  },
+  addEventListener(type, listener) {
+    ws.addEventListener(type, (event: Event) => {
+      listener({ data: type === "message" ? (event as MessageEvent).data : undefined });
+    });
+  },
+});
+
 export class CdpConnection {
-  private ws: WebSocket | undefined;
+  private ws: CdpSocket | undefined;
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   private readonly connectTimeoutMs: number;
@@ -120,16 +139,11 @@ export class CdpConnection {
         settled = true;
         clearTimeout(timer);
         clearAllow();
-        this.ws = ws;
-        this.startHeartbeat();
+        this.attach(wrapBrowserSocket(ws));
         resolve();
       });
-      ws.addEventListener("message", (event: MessageEvent) => this.onMessage(String(event.data)));
       ws.addEventListener("error", () => {
-        if (settled) {
-          this.failPending(ws, new Error("CDP websocket error"));
-          return;
-        }
+        if (settled) return;
         settled = true;
         clearTimeout(timer);
         clearAllow();
@@ -138,7 +152,6 @@ export class CdpConnection {
       ws.addEventListener("close", () => {
         clearTimeout(timer);
         clearAllow();
-        this.failPending(ws, new Error("CDP websocket closed"));
         if (!settled) {
           settled = true;
           reject(new Error("websocket closed before open"));
@@ -147,8 +160,39 @@ export class CdpConnection {
     });
   }
 
+  takeExtensionIfPresent(): boolean {
+    const ext = getExtensionClient();
+    if (!ext) return false;
+    this.attach(ext);
+    return true;
+  }
+
+  attach(socket: CdpSocket): void {
+    if (this.ws === socket) return;
+    const prev = this.ws;
+    this.ws = socket;
+    socket.addEventListener("message", (event) => {
+      if (this.ws !== socket) return;
+      this.onMessage(String(event.data ?? ""));
+    });
+    socket.addEventListener("close", () => {
+      this.failPending(socket, new Error("CDP websocket closed"));
+    });
+    socket.addEventListener("error", () => {
+      this.failPending(socket, new Error("CDP websocket error"));
+    });
+    this.startHeartbeat();
+    if (prev) {
+      try {
+        prev.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   /** Reject in-flight calls, drop the socket, and clear ambient state. */
-  private failPending(ws: WebSocket, error: Error): void {
+  private failPending(ws: CdpSocket, error: Error): void {
     if (this.ws !== ws) return;
     this.stopHeartbeat();
     this.ws = undefined;

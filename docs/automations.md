@@ -56,7 +56,14 @@ running for jobs to fire.
 
 ## Browser detection
 
-Enable remote debugging by launching your browser with
+**Preferred:** load the unpacked Chrome extension at
+`packages/server/extension` (`chrome://extensions` → Developer mode → Load
+unpacked). The worker relays CDP to the daemon over
+`ws://127.0.0.1:3417/extension` — no `--remote-debugging-port`, no Allow popup.
+`connect()` uses it when the worker is attached. If the daemon is not on port
+3417, change `DEFAULT_PORT` in `extension/sw.js` to match.
+
+**Fallback:** enable remote debugging by launching your browser with
 `--remote-debugging-port=9222` (e.g.
 `open -na "Google Chrome" --args --remote-debugging-port=9222`), or by toggling
 "Discover network targets" in `chrome://inspect`. localterm auto-detects any

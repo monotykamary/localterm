@@ -229,7 +229,7 @@ const CdpPortField = ({
     ? `Connected — ${status?.browser ?? "debug-enabled browser"}`
     : status?.error
       ? `Not connected — ${status.error}`
-      : "Not connected — launch a Chromium browser with remote debugging on.";
+      : "Not connected — load the localterm Chrome extension, or enable remote debugging.";
 
   return (
     <div className="flex flex-col gap-1.5">
