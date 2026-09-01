@@ -61,7 +61,11 @@ running for jobs to fire.
 unpacked). The worker relays CDP to the daemon over
 `ws://127.0.0.1:3417/extension` — no `--remote-debugging-port`, no Allow popup.
 `connect()` uses it when the worker is attached. If the daemon is not on port
-3417, change `DEFAULT_PORT` in `extension/sw.js` to match.
+3417, change `DEFAULT_PORT` in `extension/sw.js` to match. After a permission
+change (`tabGroups`), reload the unpacked extension. The worker exposes extra
+`Chrome.*` commands (tab groups, pin/mute/move, windows) and
+`Browser.getWindowForTarget` / `getWindowBounds` / `setWindowBounds` on top of
+the usual CDP `Target.*` / page domains.
 
 **Fallback:** enable remote debugging by launching your browser with
 `--remote-debugging-port=9222` (e.g.

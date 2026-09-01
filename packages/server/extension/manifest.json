@@ -3,7 +3,7 @@
   "name": "localterm",
   "version": "2.77.3",
   "description": "CDP relay for localterm. Preferred connect path; remote debugging remains the fallback.",
-  "permissions": ["debugger", "tabs", "alarms"],
+  "permissions": ["debugger", "tabs", "tabGroups", "contentSettings", "alarms"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
   "background": {
     "service_worker": "sw.js"
