@@ -1,5 +1,15 @@
 # localterm-server
 
+## 2.78.0
+
+### Minor Changes
+
+- 055cbec: Prefer an unpacked Chrome extension CDP relay over remote debugging for automation tabs. `session.connect()` uses `ws://127.0.0.1:3417/extension` when the worker is attached, then falls back to `DevToolsActivePort`. Load `packages/server/extension` unpacked; `/api/health` reports `cdp.transport`. The network policy allows `chrome-extension://` Origin on `/extension` only (MV3 workers are otherwise 403'd as cross-origin).
+
+### Patch Changes
+
+- d199384: Unpacked Chrome extension: tab groups, pin/mute/move/discard, window bounds, richer TargetInfo, OOPIF/worker targets via `chrome.debugger.getTargets`, and `Browser.grantPermissions` via contentSettings. Reload the extension after `tabGroups` / `contentSettings`.
+
 ## 2.77.3
 
 ### Patch Changes

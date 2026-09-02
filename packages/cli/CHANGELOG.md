@@ -1,5 +1,14 @@
 # localterm
 
+## 2.78.0
+
+### Patch Changes
+
+- 765790e: Prevent long-running synchronized TUIs from retaining stale rows until a page refresh when xterm's pending render frame loses the race with the next DEC 2026 update.
+- Updated dependencies [055cbec]
+- Updated dependencies [d199384]
+  - @monotykamary/localterm-server@2.78.0
+
 ## 2.77.3
 
 ### Patch Changes
