@@ -165,6 +165,12 @@
       },
     },
   },
+  "trustedDependencies": [
+    "@google/genai",
+    "sharp",
+    "node-pty",
+    "protobufjs",
+  ],
   "patchedDependencies": {
     "@xterm/addon-image@0.10.0-beta.287": "patches/@xterm__addon-image@0.10.0-beta.287.patch",
     "@xterm/addon-webgl@0.20.0-beta.290": "patches/@xterm__addon-webgl@0.20.0-beta.290.patch",
