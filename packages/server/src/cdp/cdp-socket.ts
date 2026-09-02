@@ -1,6 +1,6 @@
 export type CdpSocketEventType = "message" | "close" | "error" | "open";
 
-export interface CdpSocketEvent {
+interface CdpSocketEvent {
   data?: unknown;
 }
 
