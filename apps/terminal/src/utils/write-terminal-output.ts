@@ -47,8 +47,10 @@ const isDocumentHidden = (): boolean => typeof document !== "undefined" && docum
 // xterm exposes synchronous redraw internally but not through its public API.
 // Consume the render range its parser already queued instead of requesting a
 // second full render; canceling that range's rAF prevents duplicate GPU work.
+// Work around xtermjs/xterm.js#6071: before the batcher admits a successor
+// DEC 2026 frame, commit a completed frame whose render rAF has not run yet.
 // Missing internals degrade to xterm's normal scheduled render.
-const flushPendingInteractiveRender = (terminal: XtermTerminal): void => {
+const flushPendingXtermRender = (terminal: XtermTerminal): void => {
   const renderDebouncer = (terminal as XtermTerminalWithCore)._core?._renderService
     ?._renderDebouncer;
   if (!renderDebouncer?._innerRefresh) return;
@@ -443,6 +445,7 @@ class OutputBatcher {
     }
     this.synchronizedFrameReleaseId = null;
     this.awaitingSynchronizedFrameRender = false;
+    flushPendingXtermRender(terminal);
     const didRenderImmediately = this.flushPending();
     if (!isDocumentHidden() && !didRenderImmediately) this.armKeepWarm();
   };
@@ -469,7 +472,7 @@ class OutputBatcher {
 
   private flushInteractiveRender = (terminal: XtermTerminal) => {
     if (this.terminal !== terminal || !this.interactiveRenderingEnabled) return;
-    flushPendingInteractiveRender(terminal);
+    flushPendingXtermRender(terminal);
   };
 
   private flushPending = (

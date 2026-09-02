@@ -389,6 +389,40 @@ describe("OutputBatcher synchronized-output pacing", () => {
     batcher.detach();
   });
 
+  it("commits a stalled xterm render before releasing the next frame", () => {
+    const writes: Uint8Array[] = [];
+    const deferredWriteCallbacks: Array<() => void> = [];
+    let renderFlushCount = 0;
+    const batcher = new OutputBatcher();
+    batcher.attach(
+      createFakeTerminal(writes, {
+        pendingRenderFrameId: PENDING_RENDER_FRAME_ID,
+        onRenderFlush: () => {
+          renderFlushCount += 1;
+        },
+        deferredWriteCallbacks,
+      }),
+    );
+    const incompleteSecondFrame = withoutSynchronizedOutputEnd(synchronizedFrame("second"));
+
+    batcher.pushBytes(synchronizedFrame("first"));
+    batcher.pushBytes(incompleteSecondFrame);
+    deferredWriteCallbacks.shift()?.();
+    const releaseFrame = pendingCb;
+
+    expect(releaseFrame).toBeTruthy();
+    expect(renderFlushCount).toBe(0);
+    expect(writes).toHaveLength(1);
+
+    releaseFrame!(performance.now());
+
+    expect(canceledFrameIds).toContain(PENDING_RENDER_FRAME_ID);
+    expect(renderFlushCount).toBe(1);
+    expect(writes).toHaveLength(2);
+    expect(Array.from(writes[1])).toEqual(Array.from(incompleteSecondFrame));
+    batcher.detach();
+  });
+
   it("preempts a pending render wait only after multiple newer frames complete", () => {
     const writes: Uint8Array[] = [];
     const deferredWriteCallbacks: Array<() => void> = [];
