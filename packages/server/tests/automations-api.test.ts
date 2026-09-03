@@ -727,19 +727,26 @@ describe("automations REST API", { tags: ["integration"] }, () => {
       try {
         // Claim the run so the command runs; the OSC marker fires
         // automation-exit, which stores the ANSI-stripped PTY output as the
-        // run's log.
+        // run's log. The log no longer rides the list — the list is the
+        // log-stripped wire projection (no `log` key, `hasLog` instead); the
+        // log view fetches it from the on-demand endpoint.
         await vi.waitFor(
           async () => {
             const automation = (
               (await (await fetch(`${base}`)).json()) as {
-                automations: Array<{ runs: Array<{ status: string; log: string | null }> }>;
+                automations: Array<{ runs: Array<Record<string, unknown>> }>;
               }
             ).automations[0];
             const latest = automation.runs[0];
             expect(latest?.status).toBe("completed");
-            expect(latest?.log).not.toBeNull();
-            expect(latest?.log).toContain("shell-out-marker");
-            expect(latest?.log).toContain("shell-err-marker");
+            expect(latest).not.toHaveProperty("log");
+            expect(latest?.hasLog).toBe(true);
+            const logResponse = (await (
+              await fetch(`${base}/${created.automation.id}/runs/${run.runId}/log`)
+            ).json()) as { log: string | null };
+            expect(logResponse.log).not.toBeNull();
+            expect(logResponse.log).toContain("shell-out-marker");
+            expect(logResponse.log).toContain("shell-err-marker");
           },
           { timeout: 30_000, interval: 100 },
         );
@@ -752,6 +759,17 @@ describe("automations REST API", { tags: ["integration"] }, () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 90_000);
+
+  it("serves a run's log on demand and 404s unknown runs", async () => {
+    const created = await request("POST", "", createInput());
+    const automationId = (created.body.automation as { id: string }).id;
+    const knownAutomation = await request("GET", `/${automationId}/runs/does-not-exist/log`);
+    expect(knownAutomation.status).toBe(404);
+    expect(knownAutomation.body.error).toBe("not_found");
+    const missingAutomation = await request("GET", `/missing/runs/does-not-exist/log`);
+    expect(missingAutomation.status).toBe(404);
+    expect(missingAutomation.body.error).toBe("not_found");
+  });
 
   it("creates an agent automation and stores the runner", async () => {
     const created = await request("POST", "", {

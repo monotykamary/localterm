@@ -1,5 +1,5 @@
 import type {
-  AutomationRunRecord,
+  AutomationRunWireRecord,
   AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
 import { TRIAGE_THREAD_MIN_RUNS } from "@/lib/constants";
@@ -7,20 +7,20 @@ import { triageDateBandLabel } from "@/utils/triage-date-bands";
 
 export interface TriageRunEntry {
   automation: AutomationWithNextRun;
-  run: AutomationRunRecord;
+  run: AutomationRunWireRecord;
 }
 
 interface TriageInlineRow {
   kind: "inline";
   automation: AutomationWithNextRun;
-  run: AutomationRunRecord;
+  run: AutomationRunWireRecord;
   latestTimestamp: number;
 }
 
 interface TriageThreadRow {
   kind: "thread";
   automation: AutomationWithNextRun;
-  runs: AutomationRunRecord[];
+  runs: AutomationRunWireRecord[];
   latestTimestamp: number;
   unreadCount: number;
 }
@@ -32,7 +32,7 @@ export interface TriageSection {
   rows: TriageRow[];
 }
 
-const runTimestamp = (run: AutomationRunRecord): number =>
+const runTimestamp = (run: AutomationRunWireRecord): number =>
   run.finishedAt ?? run.startedAt ?? run.scheduledFor;
 
 const BAND_ORDER = ["Today", "Yesterday", "This week", "Earlier"] as const;
@@ -44,7 +44,7 @@ const BAND_ORDER = ["Today", "Yesterday", "This week", "Earlier"] as const;
 export const groupTriageRuns = (entries: TriageRunEntry[], nowMs: number): TriageSection[] => {
   const buckets = new Map<
     string,
-    { automation: AutomationWithNextRun; runs: AutomationRunRecord[] }
+    { automation: AutomationWithNextRun; runs: AutomationRunWireRecord[] }
   >();
   for (const entry of entries) {
     const existing = buckets.get(entry.automation.id);

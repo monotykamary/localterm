@@ -3,7 +3,7 @@ import {
   compileScheduleAll,
   nextCronOccurrence,
   parseCronExpression,
-  type AutomationRunRecord,
+  type AutomationRunWireRecord,
   type AutomationWithNextRun,
   type SecretEntryResponse,
 } from "@monotykamary/localterm-server/protocol";
@@ -477,7 +477,7 @@ export const AutomationsModal = ({
   // Open the full-pane log page for a run, marking it read first so opening
   // from either the Triage inbox or the per-automation history clears the
   // unread badge (it's the same log entry).
-  const openRunLog = async (automationId: string, run: AutomationRunRecord) => {
+  const openRunLog = async (automationId: string, run: AutomationRunWireRecord) => {
     setLogView({ automationId, runId: run.runId });
     if (run.unread) {
       await markAutomationRunRead(automationId, run.runId);

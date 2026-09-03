@@ -1,4 +1,4 @@
-import type { AutomationRunRecord } from "@monotykamary/localterm-server/protocol";
+import type { AutomationRunWireRecord } from "@monotykamary/localterm-server/protocol";
 
-export const getAutomationRunTimestamp = (run: AutomationRunRecord): number =>
+export const getAutomationRunTimestamp = (run: AutomationRunWireRecord): number =>
   run.finishedAt ?? run.startedAt ?? run.scheduledFor;

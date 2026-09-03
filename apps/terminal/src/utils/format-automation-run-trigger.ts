@@ -1,6 +1,6 @@
-import type { AutomationRunRecord } from "@monotykamary/localterm-server/protocol";
+import type { AutomationRunWireRecord } from "@monotykamary/localterm-server/protocol";
 
-export const formatAutomationRunTrigger = (trigger: AutomationRunRecord["trigger"]): string =>
+export const formatAutomationRunTrigger = (trigger: AutomationRunWireRecord["trigger"]): string =>
   trigger === "manual"
     ? "manual"
     : trigger === "watch"

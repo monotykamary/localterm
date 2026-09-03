@@ -1929,6 +1929,20 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     return context.json({ ok: true });
   });
 
+  // On-demand run log: the automations list/broadcast strips logs (they made
+  // every lifecycle event push over a megabyte of JSON to each tab), so the
+  // log view fetches the stored log here when a run is opened.
+  api.get("/automations/:id/runs/:runId/log", (context) => {
+    const automation = automationStore.get(context.req.param("id"));
+    const run = automation?.runs.find(
+      (candidate) => candidate.runId === context.req.param("runId"),
+    );
+    if (!automation || !run) {
+      return context.json({ error: "not_found" }, HTTP_STATUS_NOT_FOUND);
+    }
+    return context.json({ log: run.log });
+  });
+
   // Triage inbox: mark a single agent run's findings as read (the user opened
   // it). Idempotent — a missing/already-read run is a no-op success.
   api.post("/automations/:id/runs/:runId/read", (context) => {
@@ -2516,6 +2530,13 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
 
   const toAutomationWithNextRun = (automation: Automation, from: Date): AutomationWithNextRun => ({
     ...automation,
+    // Stored runs embed their full logs; the wire projection swaps in the
+    // log-stripped records (see automationRunWireSchema) so list/broadcast
+    // payloads stay small.
+    runs: automation.runs.map((run) => {
+      const { log, ...wire } = run;
+      return { ...wire, hasLog: log !== null || wire.findings !== null };
+    }),
     nextRunAt: computeNextAutomationRunAt(automation, from),
     cron:
       automation.trigger.kind === "schedule" ? compileSchedule(automation.trigger.schedule) : null,

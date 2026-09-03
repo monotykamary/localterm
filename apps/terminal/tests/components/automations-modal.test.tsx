@@ -1,5 +1,5 @@
 import type {
-  AutomationRunRecord,
+  AutomationRunWireRecord,
   AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -40,6 +40,18 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 }
 
 const PI_HARNESS = { kind: "pi", extensions: true, skills: true, contextFiles: true } as const;
+
+// Served by the stubbed on-demand log endpoint for the agent-run test below —
+// the wire list carries only hasLog, so the log view fetches the transcript.
+const agentRunTranscript = [
+  { type: "user", text: "user request" },
+  {
+    type: "assistant",
+    text: "**assistant response**",
+    thinking: "**assistant thinking**",
+  },
+  { type: "tool", name: "read", input: "src/app.ts", text: "tool output" },
+];
 
 const automation = (overrides: Partial<AutomationWithNextRun> = {}): AutomationWithNextRun => ({
   id: "automation-1",
@@ -93,6 +105,12 @@ describe("AutomationsModal", () => {
             { status: 200, headers: { "content-type": "application/json" } },
           );
         }
+        if (url.includes("/runs/agent-run/log")) {
+          return new Response(JSON.stringify({ log: agentRunTranscript }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
         return new Response(JSON.stringify({ automations: [] }), { status: 200 });
       }),
     );
@@ -129,7 +147,7 @@ describe("AutomationsModal", () => {
       findings: null,
       changedFiles: [],
       unread: false,
-      log: null,
+      hasLog: false,
     };
     renderModal([automation({ runs: [run] })]);
     const clearButton = await screen.findByLabelText("clear nightly build run history");
@@ -227,7 +245,7 @@ describe("AutomationsModal", () => {
   });
 
   it("uses theme-aware colors for agent transcript entries", async () => {
-    const run: AutomationRunRecord = {
+    const run: AutomationRunWireRecord = {
       runId: "agent-run",
       scheduledFor: 1000,
       startedAt: 1000,
@@ -239,15 +257,7 @@ describe("AutomationsModal", () => {
       findings: "review findings",
       changedFiles: [],
       unread: false,
-      log: [
-        { type: "user", text: "user request" },
-        {
-          type: "assistant",
-          text: "**assistant response**",
-          thinking: "**assistant thinking**",
-        },
-        { type: "tool", name: "read", input: "src/app.ts", text: "tool output" },
-      ],
+      hasLog: true,
     };
     renderModal([
       automation({
@@ -393,7 +403,7 @@ const threadAutomation = (): AutomationWithNextRun =>
         findings: "Summary of work.",
         changedFiles: [],
         unread: false,
-        log: [{ type: "assistant", text: "hello" }],
+        hasLog: true,
       },
     ],
   });

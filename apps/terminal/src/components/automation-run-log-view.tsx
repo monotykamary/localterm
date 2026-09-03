@@ -1,5 +1,6 @@
 import type {
   AgentSessionEntry,
+  AutomationRunLog,
   AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
 import { ArrowUpRight, ChevronDown, ChevronLeft, ExternalLink, Sparkles } from "lucide-react";
@@ -11,6 +12,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { RUN_LOG_AT_BOTTOM_THRESHOLD_PX, TOOL_OUTPUT_PREVIEW_LINES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { fetchAgentSession } from "@/utils/fetch-agent-session";
+import { fetchAutomationRunLog } from "@/utils/fetch-automation-run-log";
 import { fetchAgentSessionUrl } from "@/utils/fetch-agent-session-url";
 import { formatRelativeTime } from "@/utils/format-relative-time";
 import { getAutomationRunTimestamp } from "@/utils/get-automation-run-timestamp";
@@ -141,6 +143,9 @@ export const AutomationRunLogView = ({
   onOpenAutomation,
 }: AutomationRunLogViewProps) => {
   const [sessionEntries, setSessionEntries] = useState<AgentSessionEntry[] | null>(null);
+  // undefined = fetch in flight; a value (null included) = the stored log as
+  // served by the on-demand endpoint. The list/broadcast no longer embeds logs.
+  const [fetchedLog, setFetchedLog] = useState<AutomationRunLog | undefined>(undefined);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const handleOpenFile = useCallback((filePath: string) => setPreviewPath(filePath), []);
@@ -183,6 +188,23 @@ export const AutomationRunLogView = ({
     };
   }, [automationId, runId, isThread]);
 
+  // Non-thread run logs no longer ride the automations broadcast — fetch the
+  // stored log on demand, mirroring the thread-mode fetch above.
+  useEffect(() => {
+    if (isThread) {
+      setFetchedLog(undefined);
+      return;
+    }
+    let cancelled = false;
+    setFetchedLog(undefined);
+    void fetchAutomationRunLog(automationId, runId).then((log) => {
+      if (!cancelled) setFetchedLog(log);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [automationId, runId, isThread]);
+
   // Logs open at the top; a hovering "scroll to bottom" button covers the
   // rest. A scroll listener plus a ResizeObserver over the container and its
   // content keep that button's visibility in sync with manual scrolling,
@@ -218,8 +240,8 @@ export const AutomationRunLogView = ({
     );
   }
   const badge = runStatusBadge(run.status, run.exitCode);
-  const entries = Array.isArray(run.log) ? run.log : null;
-  const textLog = typeof run.log === "string" ? run.log : run.findings;
+  const entries = Array.isArray(fetchedLog) ? fetchedLog : null;
+  const textLog = typeof fetchedLog === "string" ? fetchedLog : run.findings;
   const displayEntries: AgentSessionEntry[] | null = isThread ? sessionEntries : entries;
   const showScrollButton = !isAtBottom;
   return (
@@ -267,7 +289,7 @@ export const AutomationRunLogView = ({
       </div>
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto p-3">
         <div ref={scrollContentRef} className="min-h-full">
-          {isThread && displayEntries === null ? (
+          {displayEntries === null && (isThread || fetchedLog === undefined) ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <Spinner className="size-4" aria-label="loading session" />
             </div>

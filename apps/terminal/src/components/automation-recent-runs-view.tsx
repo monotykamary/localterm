@@ -1,5 +1,5 @@
 import type {
-  AutomationRunRecord,
+  AutomationRunWireRecord,
   AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
 import { ArrowUpRight, ChevronDown, Eraser } from "lucide-react";
@@ -19,25 +19,25 @@ type TriageFilter = (typeof TRIAGE_FILTERS)[number];
 
 interface AutomationRecentRun {
   automation: AutomationWithNextRun;
-  run: AutomationRunRecord;
+  run: AutomationRunWireRecord;
 }
 
 interface TriageRunRowProps {
   automation: AutomationWithNextRun;
-  run: AutomationRunRecord;
+  run: AutomationRunWireRecord;
   nowMs: number;
-  onOpenLog: (automationId: string, run: AutomationRunRecord) => void;
-  onSelect: (automationId: string, run: AutomationRunRecord) => void;
+  onOpenLog: (automationId: string, run: AutomationRunWireRecord) => void;
+  onSelect: (automationId: string, run: AutomationRunWireRecord) => void;
 }
 
 interface TriageThreadRowProps {
   automation: AutomationWithNextRun;
-  runs: AutomationRunRecord[];
+  runs: AutomationRunWireRecord[];
   latestTimestamp: number;
   unreadCount: number;
   nowMs: number;
-  onOpenLog: (automationId: string, run: AutomationRunRecord) => void;
-  onSelect: (automationId: string, run: AutomationRunRecord) => void;
+  onOpenLog: (automationId: string, run: AutomationRunWireRecord) => void;
+  onSelect: (automationId: string, run: AutomationRunWireRecord) => void;
 }
 
 interface AutomationRecentRunsViewProps {
@@ -45,8 +45,8 @@ interface AutomationRecentRunsViewProps {
   nowMs: number;
   filter: TriageFilter;
   onFilterChange: (filter: TriageFilter) => void;
-  onSelect: (automationId: string, run: AutomationRunRecord) => void;
-  onOpenLog: (automationId: string, run: AutomationRunRecord) => void;
+  onSelect: (automationId: string, run: AutomationRunWireRecord) => void;
+  onOpenLog: (automationId: string, run: AutomationRunWireRecord) => void;
   onMarkAllRead: () => void;
   onClearHistory: () => void;
 }

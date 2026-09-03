@@ -1320,47 +1320,54 @@ export const automationRunStatusSchema = z.enum([
 // Retained for the derived wire `lastRun`; status widened to include "skipped".
 export const automationLastRunStatusSchema = automationRunStatusSchema;
 
+export const automationRunLogSchema = z
+  .union([
+    z.string().max(MAX_AUTOMATION_LOG_LENGTH),
+    z.array(agentLogEntrySchema).max(MAX_AUTOMATION_LOG_ENTRIES),
+  ])
+  .nullable();
+
+const automationRunRecordShape = {
+  runId: z.string().min(1),
+  // The intended minute boundary (ms). Equals startedAt for manual runs;
+  // stable identity/sort key.
+  scheduledFor: z.number().int().nonnegative(),
+  // Launch-attempt time; null for a "skipped" (never-launched) run.
+  startedAt: z.number().int().nonnegative().nullable(),
+  // Terminal time; null while launched/running.
+  finishedAt: z.number().int().nonnegative().nullable(),
+  status: automationRunStatusSchema,
+  exitCode: z.number().int().nullable(),
+  trigger: z.enum(["schedule", "manual", "watch", "event", "webhook"]),
+  // false for manual + skipped; true for scheduled + watch launches.
+  countsTowardLimit: z.boolean(),
+  // Agent-runner findings: the truncated final assistant text (pi harness, via
+  // get_last_assistant_text) or stdout (custom harness), shown as the Triage
+  // row preview + a quick detail glance. null for shell runs and agent runs
+  // that produced no output. The agent runner truncates before storing; the
+  // max is a defensive cap.
+  findings: z.string().max(MAX_AUTOMATION_FINDINGS_LENGTH).nullable().default(null),
+  // Files whose working-tree status changed across an agent run (git status
+  // diff before vs after), capped. Empty for shell runs and non-repo cwds.
+  changedFiles: z.array(z.string().min(1)).max(MAX_AUTOMATION_CHANGED_FILES).default([]),
+  // Triage unread flag for agent runs with findings or a log; cleared when the
+  // user opens the run. Always false for shell runs (no findings to triage).
+  unread: z.boolean().default(false),
+};
+
+// Stored run record (automations.json): the shared shape plus the full log.
 export const automationRunRecordSchema = z
-  .object({
-    runId: z.string().min(1),
-    // The intended minute boundary (ms). Equals startedAt for manual runs;
-    // stable identity/sort key.
-    scheduledFor: z.number().int().nonnegative(),
-    // Launch-attempt time; null for a "skipped" (never-launched) run.
-    startedAt: z.number().int().nonnegative().nullable(),
-    // Terminal time; null while launched/running.
-    finishedAt: z.number().int().nonnegative().nullable(),
-    status: automationRunStatusSchema,
-    exitCode: z.number().int().nullable(),
-    trigger: z.enum(["schedule", "manual", "watch", "event", "webhook"]),
-    // false for manual + skipped; true for scheduled + watch launches.
-    countsTowardLimit: z.boolean(),
-    // Agent-runner findings: the truncated final assistant text (pi harness, via
-    // get_last_assistant_text) or stdout (custom harness), shown as the Triage
-    // row preview + a quick detail glance. null for shell runs and agent runs
-    // that produced no output. The agent runner truncates before storing; the
-    // max is a defensive cap.
-    findings: z.string().max(MAX_AUTOMATION_FINDINGS_LENGTH).nullable().default(null),
-    // Files whose working-tree status changed across an agent run (git status
-    // diff before vs after), capped. Empty for shell runs and non-repo cwds.
-    changedFiles: z.array(z.string().min(1)).max(MAX_AUTOMATION_CHANGED_FILES).default([]),
-    // Triage unread flag for agent runs with findings or a log; cleared when the
-    // user opens the run. Always false for shell runs (no findings to triage).
-    unread: z.boolean().default(false),
-    // Full per-run log: a tail-bounded ANSI-stripped PTY-output string for
-    // shell runs and custom-harness agent runs (stdout+stderr), or a structured
-    // user/assistant/tool transcript for pi-harness agent runs (so the UI can
-    // hide thinking behind a toggle). Discriminated at runtime by
-    // Array.isArray (array = pi transcript). null for runs that produced no
-    // output.
-    log: z
-      .union([
-        z.string().max(MAX_AUTOMATION_LOG_LENGTH),
-        z.array(agentLogEntrySchema).max(MAX_AUTOMATION_LOG_ENTRIES),
-      ])
-      .nullable()
-      .default(null),
-  })
+  .object({ ...automationRunRecordShape, log: automationRunLogSchema.default(null) })
+  .strict();
+
+// Wire projection of a run record served by the automations list and the
+// {type:"automations"} broadcast: the stored shape minus the log, plus a
+// `hasLog` flag so the UI can offer "view log" without fetching. The log text
+// itself is served on demand by GET /automations/:id/runs/:runId/log —
+// broadcasting it on every lifecycle event pushed over a megabyte of JSON to
+// every connected tab on each automation run.
+export const automationRunWireSchema = z
+  .object({ ...automationRunRecordShape, hasLog: z.boolean() })
   .strict();
 
 export const automationLastRunSchema = z
@@ -1426,6 +1433,9 @@ export const automationSchema = z.object(automationStoredShape).strict();
 export const automationWithNextRunSchema = z
   .object({
     ...automationStoredShape,
+    // Overrides the spread's stored run records with the log-stripped wire
+    // projection; see automationRunWireSchema.
+    runs: z.array(automationRunWireSchema).max(AUTOMATION_RUN_HISTORY_SCHEMA_MAX),
     nextRunAt: z.number().int().nullable(),
     cron: z.string().min(1).nullable(),
     lastRun: automationLastRunSchema.nullable(),
@@ -1564,6 +1574,8 @@ export const resetAutomationInputSchema = z
 export const automationsListResponseSchema = z
   .object({ automations: z.array(automationWithNextRunSchema) })
   .strict();
+
+export const automationRunLogResponseSchema = z.object({ log: automationRunLogSchema }).strict();
 
 const automationsMessageSchema = z
   .object({

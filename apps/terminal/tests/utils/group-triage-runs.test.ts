@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import type {
-  AutomationRunRecord,
+  AutomationRunWireRecord,
   AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
 import { groupTriageRuns } from "../../src/utils/group-triage-runs";
@@ -27,8 +27,8 @@ const makeAutomation = (id: string, name = id): AutomationWithNextRun => ({
 });
 
 const makeRun = (
-  overrides: Partial<AutomationRunRecord> & { runId: string; scheduledFor: number },
-): AutomationRunRecord => ({
+  overrides: Partial<AutomationRunWireRecord> & { runId: string; scheduledFor: number },
+): AutomationRunWireRecord => ({
   startedAt: null,
   finishedAt: null,
   status: "completed",
@@ -38,7 +38,7 @@ const makeRun = (
   findings: null,
   changedFiles: [],
   unread: false,
-  log: null,
+  hasLog: false,
   ...overrides,
 });
 

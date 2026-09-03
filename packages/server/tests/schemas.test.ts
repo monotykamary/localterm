@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import { MAX_FOREGROUND_LENGTH, MAX_INPUT_BYTES, MAX_TITLE_LENGTH } from "../src/constants.js";
 import {
+  automationRunLogResponseSchema,
+  automationRunRecordSchema,
+  automationRunWireSchema,
   clientToServerMessageSchema,
   serverToClientMessageSchema,
   updateFontsInputSchema,
@@ -470,5 +473,41 @@ describe("font input schemas", () => {
       }).success,
     ).toBe(true);
     expect(migrateFontsInputSchema.safeParse({ activeFontId: "custom" }).success).toBe(false);
+  });
+});
+
+describe("automation run wire projection", () => {
+  const storedRun = {
+    runId: "r1",
+    scheduledFor: 1,
+    startedAt: 1,
+    finishedAt: 2,
+    status: "completed",
+    exitCode: 0,
+    trigger: "schedule",
+    countsTowardLimit: true,
+    findings: null,
+    changedFiles: [],
+    unread: false,
+    log: "the full log",
+  };
+
+  it("keeps the log on the stored record", () => {
+    const parsed = automationRunRecordSchema.safeParse(storedRun);
+    expect(parsed.success && parsed.data.log).toBe("the full log");
+  });
+
+  it("strips the log from the wire projection and requires hasLog", () => {
+    const { log, ...wire } = storedRun;
+    expect(log).toBe("the full log");
+    expect(automationRunWireSchema.safeParse(wire).success).toBe(false);
+    expect(automationRunWireSchema.safeParse({ ...wire, hasLog: true }).success).toBe(true);
+    expect(automationRunWireSchema.safeParse({ ...storedRun, hasLog: true }).success).toBe(false);
+  });
+
+  it("serves the stored log in the on-demand log response", () => {
+    expect(automationRunLogResponseSchema.safeParse({ log: null }).success).toBe(true);
+    expect(automationRunLogResponseSchema.safeParse({ log: "text" }).success).toBe(true);
+    expect(automationRunLogResponseSchema.safeParse({}).success).toBe(false);
   });
 });

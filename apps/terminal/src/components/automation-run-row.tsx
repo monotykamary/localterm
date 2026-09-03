@@ -1,4 +1,4 @@
-import type { AutomationRunRecord } from "@monotykamary/localterm-server/protocol";
+import type { AutomationRunWireRecord } from "@monotykamary/localterm-server/protocol";
 import { cn } from "@/lib/utils";
 import { findFirstFindingsLine } from "@/utils/find-first-findings-line";
 import { formatAutomationRunTrigger } from "@/utils/format-automation-run-trigger";
@@ -8,15 +8,15 @@ import { runStatusBadge } from "@/utils/run-status-badge";
 import { formatClockTime } from "@/utils/schedule-builder";
 
 interface AutomationRunRowProps {
-  run: AutomationRunRecord;
+  run: AutomationRunWireRecord;
   nowMs: number;
-  onOpenLog: (run: AutomationRunRecord) => void;
+  onOpenLog: (run: AutomationRunWireRecord) => void;
 }
 
 export const AutomationRunRow = ({ run, nowMs, onOpenLog }: AutomationRunRowProps) => {
   const badge = runStatusBadge(run.status, run.exitCode);
   const preview = findFirstFindingsLine(run.findings);
-  const hasLog = Boolean(run.log || run.findings);
+  const hasLog = run.hasLog;
   return (
     <button
       type="button"

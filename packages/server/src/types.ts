@@ -6,6 +6,8 @@ import type {
   automationRunLimitSchema,
   automationRunRecordSchema,
   automationRunStatusSchema,
+  automationRunWireSchema,
+  automationRunLogSchema,
   automationRunnerSchema,
   automationScheduleSchema,
   automationSchema,
@@ -189,6 +191,8 @@ export type AutomationRunLimit = z.infer<typeof automationRunLimitSchema>;
 export type AutomationLifecycle = z.infer<typeof automationLifecycleSchema>;
 export type AutomationRunStatus = z.infer<typeof automationRunStatusSchema>;
 export type AutomationRunRecord = z.infer<typeof automationRunRecordSchema>;
+export type AutomationRunWireRecord = z.infer<typeof automationRunWireSchema>;
+export type AutomationRunLog = z.infer<typeof automationRunLogSchema>;
 export type Automation = z.infer<typeof automationSchema>;
 export type AutomationV1 = z.infer<typeof automationV1Schema>;
 export type AutomationV2 = z.infer<typeof automationV2Schema>;

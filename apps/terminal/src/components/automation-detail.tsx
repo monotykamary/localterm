@@ -1,5 +1,5 @@
 import type {
-  AutomationRunRecord,
+  AutomationRunWireRecord,
   AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
 import {
@@ -40,7 +40,7 @@ interface AutomationDetailProps {
   armedClearThread: boolean;
   onClearHistory: () => void;
   armedClear: boolean;
-  onOpenLog: (run: AutomationRunRecord) => void;
+  onOpenLog: (run: AutomationRunWireRecord) => void;
 }
 
 export const AutomationDetail = ({
