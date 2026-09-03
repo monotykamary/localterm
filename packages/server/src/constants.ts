@@ -184,7 +184,8 @@ export const MAX_THEME_IMPORT_TEXT_LENGTH = 256 * 1024;
 // ("JetBrainsMono Nerd Font Mono"), capped to bound a runaway value.
 export const MAX_FONT_ID_LENGTH = 64;
 export const MAX_CUSTOM_FONT_FAMILY_LENGTH = 128;
-export const MAX_PROCESS_REQUESTED_SECRETS = 32;
+// Matches MAX_SECRETS so a process can always reference every configured secret.
+export const MAX_PROCESS_REQUESTED_SECRETS = MAX_SECRETS;
 export const MAX_SECRET_VALUE_LENGTH = 8192;
 // Versioned plaintext shape the age-encrypted export wraps. Independent of
 // SECRETS_FILE_VERSION (the on-disk policy file): the export is a portable

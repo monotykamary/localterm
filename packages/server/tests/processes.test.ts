@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { MAX_PROCESS_REQUESTED_SECRETS } from "../src/constants.js";
 import { createServer, type RunningServer } from "../src/index.js";
 import type { SecretBackend } from "../src/secret-backend.js";
 
@@ -172,6 +173,20 @@ describe("processes API + shim generation", () => {
     const { status, body } = await putProcess(baseUrl, "pi", ["ghost"]);
     expect(status).toBe(400);
     expect(body).toEqual({ error: "invalid_secret" });
+  });
+
+  it("accepts MAX_PROCESS_REQUESTED_SECRETS entries but rejects one more as an invalid body", async () => {
+    const { baseUrl } = setupResult;
+    // Ghost names keep the focus on the length cap: at the limit the body is
+    // valid and validation moves on to unknown names (invalid_secret); one
+    // more entry fails the array length before names are ever checked.
+    const ghosts = (count: number) => Array.from({ length: count }, (_, index) => `ghost_${index}`);
+    const at = await putProcess(baseUrl, "pi", ghosts(MAX_PROCESS_REQUESTED_SECRETS));
+    expect(at.status).toBe(400);
+    expect(at.body).toEqual({ error: "invalid_secret" });
+    const over = await putProcess(baseUrl, "pi", ghosts(MAX_PROCESS_REQUESTED_SECRETS + 1));
+    expect(over.status).toBe(400);
+    expect(over.body).toEqual({ error: "invalid_body" });
   });
 
   it("rejects an invalid process name or body", async () => {
