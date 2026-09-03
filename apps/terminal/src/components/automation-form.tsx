@@ -9,6 +9,7 @@ import { AutomationScheduleBuilder } from "@/components/automation-schedule-buil
 import { EventTriggerSelector } from "@/components/event-trigger-selector";
 import { NumberStepper } from "@/components/number-stepper";
 import { SecretSelector } from "@/components/secret-selector";
+import { MAX_PROCESS_REQUESTED_SECRETS } from "@/lib/constants";
 import { SettingsSelect } from "@/components/settings-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -412,6 +413,7 @@ export const AutomationForm = ({
           <SecretSelector
             selected={form.requestedSecrets}
             options={secrets}
+            maxSelected={MAX_PROCESS_REQUESTED_SECRETS}
             onChange={(requestedSecrets) => onChange({ ...form, requestedSecrets })}
           />
         )}

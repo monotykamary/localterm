@@ -1,5 +1,6 @@
 import type { SecretEntryResponse } from "@monotykamary/localterm-server/protocol";
 import { SecretSelector } from "@/components/secret-selector";
+import { MAX_PROCESS_REQUESTED_SECRETS } from "@/lib/constants";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -82,6 +83,7 @@ export const ProcessEditForm = ({
               <SecretSelector
                 selected={form.requestedSecrets}
                 options={secrets}
+                maxSelected={MAX_PROCESS_REQUESTED_SECRETS}
                 onChange={(requestedSecrets) => onChange({ ...form, requestedSecrets })}
               />
             )}

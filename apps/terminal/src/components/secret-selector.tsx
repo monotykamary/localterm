@@ -9,6 +9,9 @@ interface SecretSelectorProps {
   options: SecretEntryResponse[];
   onChange: (selected: string[]) => void;
   placeholder?: string;
+  // Server-enforced cap on how many secrets may be selected; when set, the
+  // picker blocks further adds at the limit and shows a running count.
+  maxSelected?: number;
 }
 
 export const SecretSelector = ({
@@ -16,7 +19,9 @@ export const SecretSelector = ({
   options,
   onChange,
   placeholder = "Select secrets…",
+  maxSelected,
 }: SecretSelectorProps) => {
+  const atLimit = maxSelected !== undefined && selected.length >= maxSelected;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -52,6 +57,7 @@ export const SecretSelector = ({
   }, [open]);
 
   const addSecret = (name: string) => {
+    if (atLimit) return;
     onChange([...selected, name]);
     setQuery("");
     inputRef.current?.focus();
@@ -137,6 +143,16 @@ export const SecretSelector = ({
       <PopoverContent className="w-80 gap-0 p-0" align="start" initialFocus={inputRef}>
         <div className="flex items-center gap-1.5 border-b border-border/40 px-2 py-1.5">
           <Search className="size-3 text-muted-foreground" aria-hidden="true" />
+          {maxSelected !== undefined ? (
+            <span
+              className={cn(
+                "text-[10px] tabular-nums",
+                atLimit ? "text-destructive" : "text-muted-foreground/60",
+              )}
+            >
+              {selected.length}/{maxSelected}
+            </span>
+          ) : null}
           <input
             ref={inputRef}
             type="text"
@@ -155,7 +171,11 @@ export const SecretSelector = ({
         >
           {filteredOptions.length === 0 ? (
             <p className="px-2 py-2 text-center text-xs text-muted-foreground">
-              {query.trim().length > 0 ? "No secrets match your search." : "All secrets selected."}
+              {query.trim().length > 0
+                ? "No secrets match your search."
+                : atLimit
+                  ? `Secret limit reached (${maxSelected}).`
+                  : "All secrets selected."}
             </p>
           ) : (
             filteredOptions.map((secret, index) => (

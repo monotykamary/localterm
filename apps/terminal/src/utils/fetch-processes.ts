@@ -15,13 +15,22 @@ export const fetchProcesses = async (signal?: AbortSignal): Promise<Process[] | 
   }
 };
 
-// Upsert a process's requested secrets. Returns the stored process on success,
-// null on failure. The server validates every requested name exists in the
-// secret store (rejects with invalid_secret) and the shim is regenerated.
+export type PutProcessResult =
+  | { ok: true; process: Process }
+  | {
+      ok: false;
+      // The server's error code (invalid_name / invalid_body / invalid_secret /
+      // capacity), or null when the request failed without a response.
+      error: string | null;
+    };
+
+// Upsert a process's requested secrets. The server validates every requested
+// name exists in the secret store (rejects with invalid_secret) and the shim
+// is regenerated. Names only over the wire — values never appear.
 export const putProcess = async (
   name: string,
   requestedSecrets: string[],
-): Promise<Process | null> => {
+): Promise<PutProcessResult> => {
   try {
     const response = await fetch(
       new URL(`${PROCESSES_ENDPOINT}/${encodeURIComponent(name)}`, window.location.href),
@@ -31,11 +40,14 @@ export const putProcess = async (
         body: JSON.stringify({ requestedSecrets }),
       },
     );
-    if (!response.ok) return null;
-    const body = (await response.json()) as { process?: Process };
-    return body.process ?? null;
+    const body = (await response.json().catch(() => null)) as {
+      process?: Process;
+      error?: string;
+    } | null;
+    if (!response.ok) return { ok: false, error: body?.error ?? null };
+    return body?.process ? { ok: true, process: body.process } : { ok: false, error: null };
   } catch {
-    return null;
+    return { ok: false, error: null };
   }
 };
 

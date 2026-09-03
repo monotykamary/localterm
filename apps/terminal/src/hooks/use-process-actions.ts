@@ -1,5 +1,6 @@
 import type { Process } from "@monotykamary/localterm-server/protocol";
 import { useCallback, useState } from "react";
+import { MAX_PROCESS_REQUESTED_SECRETS } from "@/lib/constants";
 import { deleteProcess, putProcess } from "@/utils/fetch-processes";
 
 // A process's name is the shim filename and the identity the delete cascade
@@ -25,6 +26,22 @@ interface ProcessActions {
   reset: () => void;
   clearArmedDelete: () => void;
 }
+
+// The daemon rejects a save for several distinct reasons; name each one so the
+// user fixes the actual cause instead of guessing.
+const PROCESS_SAVE_ERROR_TEXT: Record<string, string> = {
+  invalid_name: "Enter a valid binary name (letters, numbers, . _ + -).",
+  invalid_body: "The daemon rejected the request body.",
+  invalid_secret: "A selected secret no longer exists. Deselect it and save again.",
+  capacity: "The daemon's process limit is reached. Delete a process to add another.",
+};
+const PROCESS_SAVE_UNREACHABLE =
+  "Couldn't save — the daemon didn't respond. Check that it's running.";
+
+const describeProcessSaveError = (error: string | null): string =>
+  error === null
+    ? PROCESS_SAVE_UNREACHABLE
+    : (PROCESS_SAVE_ERROR_TEXT[error] ?? PROCESS_SAVE_UNREACHABLE);
 
 const EMPTY_PROCESS_FORM: ProcessEditFormState = {
   originalName: null,
@@ -60,14 +77,18 @@ export const useProcessActions = (refresh: () => Promise<void>): ProcessActions 
       setFormError("Enter a binary name (e.g. pi).");
       return;
     }
+    if (form.requestedSecrets.length > MAX_PROCESS_REQUESTED_SECRETS) {
+      setFormError(
+        `A process can expose at most ${MAX_PROCESS_REQUESTED_SECRETS} secrets — deselect ${form.requestedSecrets.length - MAX_PROCESS_REQUESTED_SECRETS}.`,
+      );
+      return;
+    }
     setIsSaving(true);
     setFormError(null);
     const result = await putProcess(name, form.requestedSecrets);
     setIsSaving(false);
-    if (!result) {
-      setFormError(
-        "Couldn't save. Check the binary name and that every selected secret still exists.",
-      );
+    if (!result.ok) {
+      setFormError(describeProcessSaveError(result.error));
       return;
     }
     setForm(null);
