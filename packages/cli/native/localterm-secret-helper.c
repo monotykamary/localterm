@@ -34,7 +34,8 @@ extern char **environ;
 
 #define KEYCHAIN_ACCOUNT "localterm"
 #define SERVICE_PREFIX "localterm:"
-#define MAX_MAPPINGS 32
+// Keep this aligned with MAX_SECRETS in packages/server/src/constants.ts.
+#define MAX_MAPPINGS 64
 #define MAX_NAME_LENGTH 64
 #define MAX_ENV_LENGTH 64
 #define MAX_VALUE_LENGTH 8192

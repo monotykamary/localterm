@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
+import { MAX_PROCESS_REQUESTED_SECRETS } from "@monotykamary/localterm-server/constants";
 
 const describeOnMac = process.platform === "darwin" ? describe : describe.skip;
 const TEST_BATCH_TIMEOUT_MS = 1_000;
@@ -157,12 +158,24 @@ describeOnMac("localterm-secret-helper", () => {
     expect(readFileSync(outputPath, "utf8")).toBe("synthetic-alpha");
   });
 
-  it("rejects invalid mappings and more than 32 mappings", () => {
-    expect(run(["lowercase", "alpha"], "exit 0").status).toBe(64);
-    const tooMany = Array.from({ length: 33 }, (_, index) => [
+  it("matches the process secret-mapping boundary", () => {
+    const atLimit = Array.from({ length: MAX_PROCESS_REQUESTED_SECRETS }, (_, index) => [
+      `VALUE_${index}`,
+      `name${index}`,
+    ]).flat();
+    const lastIndex = MAX_PROCESS_REQUESTED_SECRETS - 1;
+    const accepted = run(atLimit, `printf %s "$VALUE_${lastIndex}"`);
+    expect(accepted.status, accepted.stderr).toBe(0);
+    expect(accepted.stdout).toBe(`synthetic-name${lastIndex}`);
+
+    const tooMany = Array.from({ length: MAX_PROCESS_REQUESTED_SECRETS + 1 }, (_, index) => [
       `VALUE_${index}`,
       `name${index}`,
     ]).flat();
     expect(run(tooMany, "exit 0").status).toBe(64);
+  });
+
+  it("rejects invalid mappings", () => {
+    expect(run(["lowercase", "alpha"], "exit 0").status).toBe(64);
   });
 });
