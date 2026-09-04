@@ -1,5 +1,12 @@
 # localterm
 
+## 2.79.3
+
+### Patch Changes
+
+- 7cdcb2d: Pin kleur dependency to exact 4.1.5 in the CLI package
+  - @monotykamary/localterm-server@2.79.3
+
 ## 2.79.2
 
 ### Patch Changes
