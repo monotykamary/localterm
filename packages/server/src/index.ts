@@ -323,6 +323,13 @@ export interface ServerOptions {
    */
   caffeinateSnapshotProcesses?: SnapshotProcesses;
   /**
+   * Override the opt-in mouse-jiggle action (fired on an interval while the
+   * keep-awake assertion is held). Defaults to the platform one-shot command
+   * (JXA on macOS, xdotool on Linux). Injectable so tests never post real
+   * input events.
+   */
+  caffeinateMouseJiggle?: () => void;
+  /**
    * Override how keep-awake reads the machine's battery. Defaults to a real
    * `pmset -g batt` read on macOS and a sysfs read on Linux. Injectable so
    * tests can drive the battery floor deterministically without shelling out or
@@ -2372,6 +2379,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     store: caffeinatePreferencesStore,
     listSessionPids: () => registry.pids(),
     snapshotProcesses: options.caffeinateSnapshotProcesses,
+    mouseJiggle: options.caffeinateMouseJiggle,
     batteryProbe: options.caffeinateBatteryProbe,
     hasRecentOutput: (pids, withinMs) => registry.hasRecentOutput(pids, withinMs),
     hasPeerClient: () => registry.hasPeerClient(),
@@ -2619,6 +2627,7 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
     activityGate: caffeinateManager.activityGate,
     peerKeepAwake: caffeinateManager.peerKeepAwake,
     peerActive: caffeinateManager.peerActive,
+    mouseJiggle: caffeinateManager.mouseJiggle,
     batteryThreshold: caffeinateManager.batteryThreshold,
     defaultCommands: [...caffeinateManager.defaultCommands],
     commands: caffeinateManager.commands,
@@ -3289,6 +3298,8 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
             caffeinateManager.setActivityGate(parsed.data.enabled);
           } else if (parsed.data.type === "caffeinate-peer-keep-awake") {
             caffeinateManager.setPeerKeepAwake(parsed.data.enabled);
+          } else if (parsed.data.type === "caffeinate-mouse-jiggle") {
+            caffeinateManager.setMouseJiggle(parsed.data.enabled);
           } else if (parsed.data.type === "caffeinate-battery-threshold") {
             caffeinateManager.setBatteryThreshold(parsed.data.percent);
           } else if (parsed.data.type === "identify") {

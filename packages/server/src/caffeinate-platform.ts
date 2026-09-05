@@ -2,8 +2,11 @@ import { spawn } from "node:child_process";
 import {
   CAFFEINATE_ARGS,
   CAFFEINATE_BINARY,
+  CAFFEINATE_MOUSE_JIGGLE_OFFSET_PX,
+  OSASCRIPT_BINARY,
   SYSTEMD_INHIBIT_ARGS,
   SYSTEMD_INHIBIT_BINARY,
+  XDOTOOL_BINARY,
 } from "./constants.js";
 import type { CaffeinateProcessHandle } from "./caffeinate-controller.js";
 import { findBinaryOnPath } from "./utils/find-binary-on-path.js";
@@ -92,3 +95,64 @@ const spawnKeepAwakeProcess = (): CaffeinateProcessHandle => {
 // `systemd-inhibit … tail -f /dev/null` on Linux. Injected by tests that never
 // want to hold a real power assertion.
 export const defaultCaffeinateSpawn = (): CaffeinateProcessHandle => spawnKeepAwakeProcess();
+
+export interface MouseJiggleSpawnTarget {
+  binary: string;
+  args: readonly string[];
+}
+
+// One jiggle = the cursor moves OFFSET_PX away and immediately back, so the
+// net position is unchanged and the pair reads as a single imperceptible flick
+// of activity to input watchers. Pure like keepAwakeSpawnTarget so tests can
+// assert the per-platform target without spawning anything.
+const macOSJiggleScript = (offsetPx: number): string =>
+  [
+    'ObjC.import("CoreGraphics");',
+    "const loc = $.CGEventGetLocation($.CGEventCreate($()));",
+    `const target = { x: loc.x - ${offsetPx}, y: loc.y };`,
+    "$.CGEventPost($.kCGHIDEventTap, $.CGEventCreateMouseEvent($(), $.kCGEventMouseMoved, target, 0));",
+    "$.CGEventPost($.kCGHIDEventTap, $.CGEventCreateMouseEvent($(), $.kCGEventMouseMoved, loc, 0));",
+  ].join("\n");
+
+export const mouseJiggleSpawnTarget = (
+  platform: NodeJS.Platform = process.platform,
+): MouseJiggleSpawnTarget | null => {
+  // macOS: JXA posts CoreGraphics mouse-moved events (no helper binary needed;
+  // osascript ships with the OS).
+  if (platform === "darwin") {
+    return {
+      binary: OSASCRIPT_BINARY,
+      args: ["-l", "JavaScript", "-e", macOSJiggleScript(CAFFEINATE_MOUSE_JIGGLE_OFFSET_PX)],
+    };
+  }
+  // Linux: xdotool chains both relative moves in one invocation. Absent on
+  // minimal installs — a failed spawn is swallowed by the jiggler, never fatal.
+  if (platform === "linux") {
+    return {
+      binary: XDOTOOL_BINARY,
+      args: [
+        "mousemove_relative",
+        "--",
+        `-${CAFFEINATE_MOUSE_JIGGLE_OFFSET_PX}`,
+        "0",
+        "mousemove_relative",
+        "--",
+        `${CAFFEINATE_MOUSE_JIGGLE_OFFSET_PX}`,
+        "0",
+      ],
+    };
+  }
+  return null;
+};
+
+// The default jiggle strategy: fire-and-forget the platform one-shot jiggle
+// command. Detached + unref'd so a slow osascript never holds the daemon's
+// exit; a missing binary (xdotool on a minimal Linux) surfaces as an `error`
+// event that is swallowed — the jiggler keeps its timer either way.
+export const defaultMouseJiggle = (): void => {
+  const target = mouseJiggleSpawnTarget();
+  if (target === null) return;
+  const child = spawn(target.binary, [...target.args], { stdio: "ignore", detached: true });
+  child.on("error", () => {});
+  child.unref();
+};

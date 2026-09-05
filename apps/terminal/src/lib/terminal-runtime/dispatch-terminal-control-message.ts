@@ -41,6 +41,7 @@ export interface TerminalControlMessageCallbacks {
   setCaffeinateCommands: (value: string[]) => void;
   setCaffeinateActivityGate: (value: boolean) => void;
   setCaffeinatePeerKeepAwake: (value: boolean) => void;
+  setCaffeinateMouseJiggle: (value: boolean) => void;
   setCaffeinateBatteryThreshold: (value: number | null) => void;
   setCaffeinateActiveTrigger: (value: string | null) => void;
   setGitDiffSummary: (summary: GitDiffSummary | null) => void;
@@ -106,6 +107,7 @@ export const dispatchTerminalControlMessage = (
     callbacks.setCaffeinateCommands(message.commands);
     callbacks.setCaffeinateActivityGate(message.activityGate);
     callbacks.setCaffeinatePeerKeepAwake(message.peerKeepAwake);
+    callbacks.setCaffeinateMouseJiggle(message.mouseJiggle);
     callbacks.setCaffeinateBatteryThreshold(message.batteryThreshold);
     callbacks.setCaffeinateActiveTrigger(message.activeTrigger);
   } else if (message.type === "cwd") {

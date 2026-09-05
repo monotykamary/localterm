@@ -8,7 +8,10 @@ import {
   type CaffeinateProcessHandle,
 } from "../src/caffeinate-controller.js";
 import { CaffeinateManager } from "../src/caffeinate-manager.js";
-import { CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS } from "../src/constants.js";
+import {
+  CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS,
+  CAFFEINATE_MOUSE_JIGGLE_INTERVAL_MS,
+} from "../src/constants.js";
 import { CaffeinatePreferencesStore } from "../src/caffeinate-preferences-store.js";
 import type { ProcessSnapshotEntry } from "../src/caffeinate-process-match.js";
 
@@ -595,5 +598,120 @@ describe("CaffeinateManager battery floor", () => {
     expect(probed).toBe(false);
     expect(spawned).toHaveLength(0);
     manager.dispose();
+  });
+
+  it("jiggles the mouse on an interval while keep-awake is active and opted in", async () => {
+    vi.useFakeTimers();
+    try {
+      let jiggles = 0;
+      const { controller } = createFakeController(true);
+      const manager = new CaffeinateManager({
+        controller,
+        store,
+        listSessionPids: () => [],
+        snapshotProcesses: async () => [],
+        batteryProbe: async () => batteryStatus,
+        mouseJiggle: () => (jiggles += 1),
+      });
+      manager.setMouseJiggle(true);
+      // Inactive keep-awake: opt-in alone never jiggles.
+      expect(jiggles).toBe(0);
+
+      manager.setMode("on");
+      await manager.pollBatteryNow();
+      expect(controller.active).toBe(true);
+      // The jiggler fires once immediately on activation...
+      expect(jiggles).toBe(1);
+      // ...then once per interval.
+      await vi.advanceTimersByTimeAsync(CAFFEINATE_MOUSE_JIGGLE_INTERVAL_MS * 2);
+      expect(jiggles).toBe(3);
+
+      // Opting out stops the timer at once.
+      manager.setMouseJiggle(false);
+      await vi.advanceTimersByTimeAsync(CAFFEINATE_MOUSE_JIGGLE_INTERVAL_MS * 3);
+      expect(jiggles).toBe(3);
+      manager.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never jiggles without the opt-in even while keep-awake is active", async () => {
+    vi.useFakeTimers();
+    try {
+      let jiggles = 0;
+      const { controller } = createFakeController(true);
+      const manager = new CaffeinateManager({
+        controller,
+        store,
+        listSessionPids: () => [],
+        snapshotProcesses: async () => [],
+        batteryProbe: async () => batteryStatus,
+        mouseJiggle: () => (jiggles += 1),
+      });
+      manager.setMode("on");
+      await manager.pollBatteryNow();
+      expect(controller.active).toBe(true);
+      await vi.advanceTimersByTimeAsync(CAFFEINATE_MOUSE_JIGGLE_INTERVAL_MS * 2);
+      expect(jiggles).toBe(0);
+      manager.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops jiggling when keep-awake releases", async () => {
+    vi.useFakeTimers();
+    try {
+      let jiggles = 0;
+      const { controller } = createFakeController(true);
+      const manager = new CaffeinateManager({
+        controller,
+        store,
+        listSessionPids: () => [],
+        snapshotProcesses: async () => [],
+        batteryProbe: async () => batteryStatus,
+        mouseJiggle: () => (jiggles += 1),
+      });
+      manager.setMouseJiggle(true);
+      manager.setMode("on");
+      await manager.pollBatteryNow();
+      expect(jiggles).toBe(1);
+
+      // Releasing the assertion (mode off) must also release the jiggle.
+      manager.setMode("off");
+      const afterRelease = jiggles;
+      await vi.advanceTimersByTimeAsync(CAFFEINATE_MOUSE_JIGGLE_INTERVAL_MS * 2);
+      expect(jiggles).toBe(afterRelease);
+      manager.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("suppresses the jiggle under the battery floor like the assertion itself", async () => {
+    vi.useFakeTimers();
+    try {
+      let jiggles = 0;
+      const { controller } = createFakeController(true);
+      const manager = new CaffeinateManager({
+        controller,
+        store,
+        listSessionPids: () => [],
+        snapshotProcesses: async () => [],
+        batteryProbe: async () => batteryStatus,
+        mouseJiggle: () => (jiggles += 1),
+      });
+      manager.setMouseJiggle(true);
+      batteryStatus = { percent: 10, isOnBattery: true, minutesToEmpty: 60 };
+      manager.setMode("on");
+      await manager.pollBatteryNow();
+      expect(controller.active).toBe(false);
+      await vi.advanceTimersByTimeAsync(CAFFEINATE_MOUSE_JIGGLE_INTERVAL_MS * 2);
+      expect(jiggles).toBe(0);
+      manager.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

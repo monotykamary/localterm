@@ -40,6 +40,8 @@ export const CAFFEINATE_ARGS: readonly string[] = ["-dims"];
 // whole process group releases the inhibitor AND reaps the orphaned tail —
 // a plain child.kill() of just systemd-inhibit would release the lock (it's
 // tied to the registrar's D-Bus lifetime) but leave tail reparented to init.
+export const OSASCRIPT_BINARY = "osascript";
+export const XDOTOOL_BINARY = "xdotool";
 export const SYSTEMD_INHIBIT_BINARY = "systemd-inhibit";
 export const SYSTEMD_INHIBIT_ARGS: readonly string[] = [
   "--what=idle:sleep:handle-lid-switch",
@@ -58,7 +60,7 @@ export const CAFFEINATE_AUTO_DEFAULT_COMMANDS: readonly string[] = [
   "opencode",
   "pi",
 ];
-export const CAFFEINATE_PREFERENCES_FILE_VERSION = 4;
+export const CAFFEINATE_PREFERENCES_FILE_VERSION = 5;
 export const DAEMON_CONFIG_FILE_VERSION = 1;
 // Graceful-shutdown hibernation: rendered normal-buffer text, safe SGR styling,
 // and the tab's exact old session id. Terminal control state is never persisted.
@@ -109,6 +111,14 @@ export const CAFFEINATE_BATTERY_POLL_MAX_INTERVAL_MS = 15 * 60_000;
 // against the OS estimate being stale-high.
 export const CAFFEINATE_BATTERY_POLL_TIME_FRACTION = 2;
 export const CAFFEINATE_BATTERY_READ_TIMEOUT_MS = 2_000;
+// Opt-in mouse jiggle: while the keep-awake assertion is held, nudge the cursor
+// 1px away and immediately back (net zero) so apps that watch raw input events
+// (Slack/Teams presence, away-detectors) keep seeing activity even though the
+// OS power assertion alone never sees a keystroke. Fires on a fixed interval
+// while keep-awake is active; the nudge must be perceptually invisible, so the
+// offset is a single pixel and the pair completes within one event batch.
+export const CAFFEINATE_MOUSE_JIGGLE_INTERVAL_MS = 30_000;
+export const CAFFEINATE_MOUSE_JIGGLE_OFFSET_PX = 1;
 
 // Per-process secret injection. Secret values live in a backend (macOS Keychain
 // on darwin via `security`; an encrypted file for non-darwin is a later phase),

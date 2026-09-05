@@ -3,6 +3,7 @@ import { CaffeinateAutomaticDetector } from "./caffeinate-automatic-detector.js"
 import { defaultBatteryProbe, type BatteryProbe } from "./caffeinate-battery.js";
 import { CaffeinateBatteryGuard } from "./caffeinate-battery-guard.js";
 import type { CaffeinateController } from "./caffeinate-controller.js";
+import { MouseJiggler } from "./caffeinate-mouse-jiggler.js";
 import type { CaffeinatePreferencesStore } from "./caffeinate-preferences-store.js";
 import { defaultSnapshotProcesses, type SnapshotProcesses } from "./caffeinate-process-match.js";
 import { CAFFEINATE_AUTO_DEFAULT_COMMANDS } from "./constants.js";
@@ -36,6 +37,9 @@ export interface CaffeinateManagerOptions {
   // hook name matches, so triggers that are children of the foreground command
   // (make -> ffmpeg) or running in an unhooked shell (sh/dash) keep working.
   foregroundNames?: () => Map<number, string>;
+  // Injectable jiggle action for tests; defaults to the platform's one-shot
+  // mouse-nudge command. Never holds real input events under test.
+  mouseJiggle?: () => void;
   // Injectable battery probe for tests; defaults to a real `pmset` read on
   // macOS and a sysfs read on Linux. The battery floor is enforced on an
   // adaptive schedule that mirrors the activity gate's design: status-driven (a
@@ -63,7 +67,7 @@ interface CaffeinateManagerEvents {
 // held for the peer's lifetime and bypassing the activity gate, since an
 // idle-but-attached phone is exactly the state you want to hold the machine
 // awake for. Emits `change` whenever any broadcastable field
-// (mode/active/commands/batteryThreshold/peerKeepAwake) moves.
+// (mode/active/commands/batteryThreshold/peerKeepAwake/mouseJiggle) moves.
 //
 // Automatic detection is event-driven: it never polls on a timer. A `ps`
 // snapshot is taken only when no session's hook foreground name matches a
@@ -92,6 +96,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
   private readonly store: CaffeinatePreferencesStore;
   private readonly automaticDetector: CaffeinateAutomaticDetector;
   private readonly batteryGuard: CaffeinateBatteryGuard;
+  private readonly mouseJiggler: MouseJiggler;
   readonly defaultCommands: readonly string[];
   private disposed = false;
 
@@ -123,6 +128,7 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
       emitChange: () => this.emit("change"),
       recompute: () => this.recompute(),
     });
+    this.mouseJiggler = new MouseJiggler({ jiggle: options.mouseJiggle });
 
     // An unexpected death of the caffeinate process flips controller state; pass
     // that through so every tab rebroadcasts the authoritative `active`.
@@ -170,6 +176,10 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     return this.automaticDetector.peerActive;
   }
 
+  get mouseJiggle(): boolean {
+    return this.store.getMouseJiggle();
+  }
+
   setMode(mode: CaffeinateMode): void {
     if (this.disposed) return;
     this.store.setMode(mode);
@@ -200,6 +210,16 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     // The trigger set changed; re-derive automatic detection immediately so a
     // peer that was already attached engages (or releases) at once.
     if (this.mode === "automatic" && this.supported) void this.automaticDetector.poll();
+    this.emit("change");
+  }
+
+  // Set the persisted opt-in mouse-jiggle switch. Persists immediately (so
+  // every tab stays in lockstep via the broadcast) and re-derives activation so
+  // the jiggler starts (or stops) at once rather than on the next state move.
+  setMouseJiggle(enabled: boolean): void {
+    if (this.disposed) return;
+    this.store.setMouseJiggle(enabled);
+    this.recompute();
     this.emit("change");
   }
 
@@ -238,13 +258,19 @@ export class CaffeinateManager extends EventEmitter<CaffeinateManagerEvents> {
     this.disposed = true;
     this.automaticDetector.dispose();
     this.batteryGuard.dispose();
+    this.mouseJiggler.dispose();
     this.controller.dispose();
     this.removeAllListeners();
   }
 
   private recompute(): void {
     const wantActive = this.modeWantsActive();
-    this.controller.setActive(this.batteryGuard.shouldActivate(wantActive));
+    const active = this.batteryGuard.shouldActivate(wantActive);
+    this.controller.setActive(active);
+    // The jiggle is additive to the power assertion: it only makes sense while
+    // the machine is actually being held awake, so it follows the controller
+    // (including the battery floor's suppression) gated on the opt-in switch.
+    this.mouseJiggler.setActive(active && this.mouseJiggle);
   }
 
   private modeWantsActive(): boolean {

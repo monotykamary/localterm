@@ -2,12 +2,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
-import { detectCaffeinateSupported, keepAwakeSpawnTarget } from "../src/caffeinate-platform.js";
+import {
+  detectCaffeinateSupported,
+  keepAwakeSpawnTarget,
+  mouseJiggleSpawnTarget,
+} from "../src/caffeinate-platform.js";
 import {
   CAFFEINATE_ARGS,
   CAFFEINATE_BINARY,
+  OSASCRIPT_BINARY,
   SYSTEMD_INHIBIT_ARGS,
   SYSTEMD_INHIBIT_BINARY,
+  XDOTOOL_BINARY,
 } from "../src/constants.js";
 
 describe("keepAwakeSpawnTarget", () => {
@@ -30,6 +36,30 @@ describe("keepAwakeSpawnTarget", () => {
   it("has no keep-awake implementation off macOS/Linux", () => {
     expect(keepAwakeSpawnTarget("win32")).toBeNull();
     expect(keepAwakeSpawnTarget("freebsd")).toBeNull();
+  });
+});
+
+describe("mouseJiggleSpawnTarget", () => {
+  it("targets an osascript JXA one-liner on macOS", () => {
+    const target = mouseJiggleSpawnTarget("darwin");
+    expect(target?.binary).toBe(OSASCRIPT_BINARY);
+    expect(target?.args[0]).toBe("-l");
+    expect(target?.args[1]).toBe("JavaScript");
+    expect(target?.args[2]).toBe("-e");
+    expect(target?.args[3]).toContain("CGEventPost");
+  });
+
+  it("targets paired relative xdotool moves on Linux (net zero cursor drift)", () => {
+    const target = mouseJiggleSpawnTarget("linux");
+    expect(target?.binary).toBe(XDOTOOL_BINARY);
+    expect(target?.args.filter((arg) => arg === "mousemove_relative")).toHaveLength(2);
+    expect(target?.args).toContain("-1");
+    expect(target?.args).toContain("1");
+  });
+
+  it("has no jiggle implementation off macOS/Linux", () => {
+    expect(mouseJiggleSpawnTarget("win32")).toBeNull();
+    expect(mouseJiggleSpawnTarget("freebsd")).toBeNull();
   });
 });
 

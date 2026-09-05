@@ -22,6 +22,7 @@ const caffeinateState = (overrides: Record<string, unknown> = {}) => ({
   activityGate: true,
   peerKeepAwake: true,
   peerActive: false,
+  mouseJiggle: false,
   batteryThreshold: 20,
   defaultCommands: [...CAFFEINATE_AUTO_DEFAULT_COMMANDS],
   commands: [],
@@ -234,7 +235,25 @@ describe("createServer caffeinate broadcast", { tags: ["integration"] }, () => {
         fs.readFileSync(path.join(stateDirectory, "caffeinate.json"), "utf8"),
       );
       expect(persisted.peerKeepAwake).toBe(false);
-      expect(persisted.version).toBe(4);
+      expect(persisted.version).toBe(5);
+    } finally {
+      await closeWs(tab.socket);
+    }
+  });
+
+  it("broadcasts and persists the opt-in mouse-jiggle toggle", async () => {
+    const tab = await connect(server.port);
+    try {
+      await tab.waitFor((message) => hasType(message, "caffeinate"));
+      tab.socket.send(JSON.stringify({ type: "caffeinate-mouse-jiggle", enabled: true }));
+      const state = await tab.waitFor(
+        (message) => hasType(message, "caffeinate") && message.mouseJiggle === true,
+      );
+      expect(state).toEqual(caffeinateState({ mouseJiggle: true }));
+      const persisted = JSON.parse(
+        fs.readFileSync(path.join(stateDirectory, "caffeinate.json"), "utf8"),
+      );
+      expect(persisted.mouseJiggle).toBe(true);
     } finally {
       await closeWs(tab.socket);
     }

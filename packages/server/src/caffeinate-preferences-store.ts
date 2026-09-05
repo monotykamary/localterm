@@ -23,6 +23,10 @@ interface CaffeinatePreferences {
   // `null` disables the battery floor; otherwise 5–50. Defaults on so a
   // machine left unplugged stops keeping itself awake before it dies.
   batteryThreshold: number | null;
+  // Opt-in: nudge the cursor 1px and back on an interval while the keep-awake
+  // assertion is held, so input-watching apps see activity. Off by default —
+  // moving the user's cursor, even imperceptibly, is not a default behavior.
+  mouseJiggle: boolean;
 }
 
 // Default to "automatic": keep-awake follows recognized programs out of the box
@@ -36,6 +40,7 @@ const DEFAULT_PREFERENCES: CaffeinatePreferences = {
   peerKeepAwake: true,
   commands: [],
   batteryThreshold: CAFFEINATE_BATTERY_LOW_WATER_PERCENT_DEFAULT,
+  mouseJiggle: false,
 };
 
 // Trim, drop empties, cap length, memo by lowercased form (keeping the first
@@ -78,6 +83,10 @@ export class CaffeinatePreferencesStore {
     return this.preferences.batteryThreshold;
   }
 
+  getMouseJiggle(): boolean {
+    return this.preferences.mouseJiggle;
+  }
+
   setActivityGate(enabled: boolean): boolean {
     if (enabled === this.preferences.activityGate) return this.preferences.activityGate;
     this.preferences = { ...this.preferences, activityGate: enabled };
@@ -90,6 +99,13 @@ export class CaffeinatePreferencesStore {
     this.preferences = { ...this.preferences, peerKeepAwake: enabled };
     this.persist();
     return this.preferences.peerKeepAwake;
+  }
+
+  setMouseJiggle(enabled: boolean): boolean {
+    if (enabled === this.preferences.mouseJiggle) return this.preferences.mouseJiggle;
+    this.preferences = { ...this.preferences, mouseJiggle: enabled };
+    this.persist();
+    return this.preferences.mouseJiggle;
   }
 
   setBatteryThreshold(percent: number | null): number | null {
@@ -156,6 +172,10 @@ export class CaffeinatePreferencesStore {
       }
       if (record.version === 3) {
         if (record.peerKeepAwake === undefined) record.peerKeepAwake = true;
+        record.version = 4;
+      }
+      if (record.version === 4) {
+        if (record.mouseJiggle === undefined) record.mouseJiggle = false;
         record.version = CAFFEINATE_PREFERENCES_FILE_VERSION;
       }
     }
@@ -170,6 +190,7 @@ export class CaffeinatePreferencesStore {
       peerKeepAwake: parsed.data.peerKeepAwake,
       commands: sanitizeCommands(parsed.data.commands),
       batteryThreshold: parsed.data.batteryThreshold,
+      mouseJiggle: parsed.data.mouseJiggle,
     };
   }
 
@@ -181,6 +202,7 @@ export class CaffeinatePreferencesStore {
       activityGate: this.preferences.activityGate,
       peerKeepAwake: this.preferences.peerKeepAwake,
       batteryThreshold: this.preferences.batteryThreshold,
+      mouseJiggle: this.preferences.mouseJiggle,
       commands: this.preferences.commands,
     };
     const tmpPath = `${this.filePath}.tmp`;

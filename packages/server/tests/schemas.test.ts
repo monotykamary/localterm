@@ -381,6 +381,7 @@ describe("serverToClientMessageSchema", () => {
       activityGate: true,
       peerKeepAwake: true,
       peerActive: false,
+      mouseJiggle: false,
       batteryThreshold: 20,
       defaultCommands: ["claude", "codex"],
       commands: ["ollama"],

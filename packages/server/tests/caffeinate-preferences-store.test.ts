@@ -28,6 +28,7 @@ describe("CaffeinatePreferencesStore", () => {
     expect(store.getMode()).toBe("automatic");
     expect(store.getActivityGate()).toBe(true);
     expect(store.getPeerKeepAwake()).toBe(true);
+    expect(store.getMouseJiggle()).toBe(false);
     expect(store.getCommands()).toEqual([]);
   });
 
@@ -36,17 +37,19 @@ describe("CaffeinatePreferencesStore", () => {
     expect(store.getBatteryThreshold()).toBe(20);
   });
 
-  it("persists mode, activity gate, peer keep-awake, and commands across reloads", () => {
+  it("persists mode, activity gate, peer keep-awake, mouse jiggle, and commands across reloads", () => {
     const store = new CaffeinatePreferencesStore(filePath);
     store.setMode("on");
     store.setActivityGate(false);
     store.setPeerKeepAwake(false);
+    store.setMouseJiggle(true);
     store.setCommands(["ollama"]);
 
     const reloaded = new CaffeinatePreferencesStore(filePath);
     expect(reloaded.getMode()).toBe("on");
     expect(reloaded.getActivityGate()).toBe(false);
     expect(reloaded.getPeerKeepAwake()).toBe(false);
+    expect(reloaded.getMouseJiggle()).toBe(true);
     expect(reloaded.getCommands()).toEqual(["ollama"]);
   });
 
@@ -133,6 +136,24 @@ describe("CaffeinatePreferencesStore", () => {
     expect(store.getPeerKeepAwake()).toBe(true);
     expect(store.getMode()).toBe("on");
     expect(store.getBatteryThreshold()).toBe(20);
+    expect(store.getCommands()).toEqual(["ollama"]);
+  });
+
+  it("migrates v4 files by defaulting mouseJiggle to false", () => {
+    fs.mkdirSync(dir, { recursive: true });
+    const v4 = {
+      version: 4,
+      mode: "on",
+      activityGate: true,
+      peerKeepAwake: false,
+      batteryThreshold: 20,
+      commands: ["ollama"],
+    };
+    fs.writeFileSync(filePath, JSON.stringify(v4), "utf8");
+    const store = new CaffeinatePreferencesStore(filePath);
+    expect(store.getMouseJiggle()).toBe(false);
+    expect(store.getPeerKeepAwake()).toBe(false);
+    expect(store.getMode()).toBe("on");
     expect(store.getCommands()).toEqual(["ollama"]);
   });
 });

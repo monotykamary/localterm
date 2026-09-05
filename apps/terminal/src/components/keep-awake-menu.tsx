@@ -20,6 +20,8 @@ interface KeepAwakeMenuProps {
   activityGate: boolean;
   peerKeepAwake: boolean;
   peerActive: boolean;
+  mouseJiggle: boolean;
+  jiggleActive: boolean;
   batteryThreshold: number | null;
   defaultCommands: readonly string[];
   commands: readonly string[];
@@ -28,6 +30,7 @@ interface KeepAwakeMenuProps {
   onCommandsChange: (commands: string[]) => void;
   onActivityGateChange: (enabled: boolean) => void;
   onPeerKeepAwakeChange: (enabled: boolean) => void;
+  onMouseJiggleChange: (enabled: boolean) => void;
   onBatteryThresholdChange: (percent: number | null) => void;
   onPopoverOpenChange?: (open: boolean) => void;
   onClose?: () => void;
@@ -87,6 +90,8 @@ export const KeepAwakeMenu = ({
   activityGate,
   peerKeepAwake,
   peerActive,
+  mouseJiggle,
+  jiggleActive,
   batteryThreshold,
   defaultCommands,
   commands,
@@ -95,6 +100,7 @@ export const KeepAwakeMenu = ({
   onCommandsChange,
   onActivityGateChange,
   onPeerKeepAwakeChange,
+  onMouseJiggleChange,
   onBatteryThresholdChange,
   onPopoverOpenChange,
   onClose,
@@ -225,6 +231,32 @@ export const KeepAwakeMenu = ({
               {MODE_DESCRIPTION[mode]}
             </p>
           </Field>
+
+          <Separator className="bg-border/40" />
+          <div
+            className="flex items-center justify-between gap-2"
+            style={jiggleActive ? accentVarStyle : undefined}
+          >
+            <div className="flex flex-col gap-0.5">
+              <span
+                className="text-[11px] font-medium text-foreground/90 transition-colors duration-200"
+                style={jiggleActive ? { color: CAFFEINATE_ACCENT_COLOR } : undefined}
+              >
+                Mouse jiggle
+              </span>
+              <p className="text-[10px] leading-snug text-muted-foreground">
+                Nudge the cursor 1px and back while keep awake is active, so input-watching apps
+                stay active.
+              </p>
+            </div>
+            <Switch
+              size="sm"
+              checked={mouseJiggle}
+              onCheckedChange={onMouseJiggleChange}
+              aria-label="toggle mouse jiggle"
+              className={jiggleActive ? ACCENT_CHECKED_CLASS : undefined}
+            />
+          </div>
 
           <Separator className="bg-border/40" />
           <Field orientation="vertical" className="gap-1.5">

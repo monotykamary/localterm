@@ -175,6 +175,7 @@ interface TerminalRuntimeActionRefs {
   setCaffeinateCommandsRef: CurrentRef<((commands: string[]) => void) | null>;
   setCaffeinateActivityGateRef: CurrentRef<((enabled: boolean) => void) | null>;
   setCaffeinatePeerKeepAwakeRef: CurrentRef<((enabled: boolean) => void) | null>;
+  setCaffeinateMouseJiggleRef: CurrentRef<((enabled: boolean) => void) | null>;
   setCaffeinateBatteryThresholdRef: CurrentRef<((percent: number | null) => void) | null>;
   qrPeerAttachedRef: CurrentRef<(() => void) | null>;
 }
@@ -266,6 +267,7 @@ export const useTerminalRuntime = ({
     setCaffeinateCommandsRef,
     setCaffeinateActivityGateRef,
     setCaffeinatePeerKeepAwakeRef,
+    setCaffeinateMouseJiggleRef,
     setCaffeinateBatteryThresholdRef,
     qrPeerAttachedRef,
   } = actionRefs;
@@ -487,6 +489,8 @@ export const useTerminalRuntime = ({
       send({ type: "caffeinate-activity-gate", enabled });
     setCaffeinatePeerKeepAwakeRef.current = (enabled: boolean) =>
       send({ type: "caffeinate-peer-keep-awake", enabled });
+    setCaffeinateMouseJiggleRef.current = (enabled: boolean) =>
+      send({ type: "caffeinate-mouse-jiggle", enabled });
     setCaffeinateBatteryThresholdRef.current = (percent: number | null) =>
       send({ type: "caffeinate-battery-threshold", percent });
 

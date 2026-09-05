@@ -502,6 +502,16 @@ const caffeinatePeerKeepAwakeInputMessageSchema = z
   })
   .strict();
 
+// Toggle the opt-in mouse jiggle. While the keep-awake assertion is held, the
+// daemon nudges the cursor 1px and back on an interval so input-watching apps
+// (presence/away detectors) keep seeing activity. Off by default.
+const caffeinateMouseJiggleInputMessageSchema = z
+  .object({
+    type: z.literal("caffeinate-mouse-jiggle"),
+    enabled: z.boolean(),
+  })
+  .strict();
+
 // Toggle the activity gate for automatic mode. When enabled (the default),
 // caffeinate only stays active while a recognized program is producing output;
 // after CAFFEINATE_ACTIVITY_GATE_DEBOUNCE_MS of silence caffeinate releases.
@@ -582,6 +592,7 @@ export const clientToServerMessageSchema = z.discriminatedUnion("type", [
   caffeinateCommandsInputMessageSchema,
   caffeinateActivityGateInputMessageSchema,
   caffeinatePeerKeepAwakeInputMessageSchema,
+  caffeinateMouseJiggleInputMessageSchema,
   caffeinateBatteryThresholdInputMessageSchema,
   identifyMessageSchema,
   readyMessageSchema,
@@ -1676,6 +1687,7 @@ const caffeinateStateMessageSchema = z
     activityGate: z.boolean(),
     peerKeepAwake: z.boolean(),
     peerActive: z.boolean(),
+    mouseJiggle: z.boolean(),
     batteryThreshold: z
       .number()
       .int()
@@ -1695,6 +1707,7 @@ export const caffeinatePreferencesFileSchema = z
     mode: caffeinateModeSchema,
     activityGate: z.boolean(),
     peerKeepAwake: z.boolean(),
+    mouseJiggle: z.boolean(),
     batteryThreshold: z
       .number()
       .int()

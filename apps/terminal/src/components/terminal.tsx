@@ -234,6 +234,7 @@ export const Terminal = () => {
   const setCaffeinateCommandsRef = useRef<((commands: string[]) => void) | null>(null);
   const setCaffeinateActivityGateRef = useRef<((enabled: boolean) => void) | null>(null);
   const setCaffeinatePeerKeepAwakeRef = useRef<((enabled: boolean) => void) | null>(null);
+  const setCaffeinateMouseJiggleRef = useRef<((enabled: boolean) => void) | null>(null);
   const setCaffeinateBatteryThresholdRef = useRef<((percent: number | null) => void) | null>(null);
   const toolbarHoverTimeoutRef = useRef<number | null>(null);
   const qrPeerAttachedRef = useRef<(() => void) | null>(null);
@@ -401,6 +402,9 @@ export const Terminal = () => {
   // Default on (the server's authoritative peer keep-awake default overwrites
   // this on the first WS frame).
   const [caffeinatePeerKeepAwake, setCaffeinatePeerKeepAwake] = useState(true);
+  // Default off (the server's authoritative opt-in default overwrites this on
+  // the first WS frame).
+  const [caffeinateMouseJiggle, setCaffeinateMouseJiggle] = useState(false);
   // Default null = guard off on the client seed; the server's authoritative
   // threshold (which defaults to 20% on) overwrites this on the first WS frame.
   const [caffeinateBatteryThreshold, setCaffeinateBatteryThreshold] = useState<number | null>(null);
@@ -512,6 +516,7 @@ export const Terminal = () => {
       setCaffeinateCommandsRef,
       setCaffeinateActivityGateRef,
       setCaffeinatePeerKeepAwakeRef,
+      setCaffeinateMouseJiggleRef,
       setCaffeinateBatteryThresholdRef,
       qrPeerAttachedRef,
     },
@@ -549,6 +554,7 @@ export const Terminal = () => {
       setCaffeinateCommands,
       setCaffeinateActivityGate,
       setCaffeinatePeerKeepAwake,
+      setCaffeinateMouseJiggle,
       setCaffeinateBatteryThreshold,
       setCaffeinateActiveTrigger,
       setGitDiffSummary,
@@ -585,6 +591,10 @@ export const Terminal = () => {
 
   const handleCaffeinatePeerKeepAwakeChange = useCallback((enabled: boolean) => {
     setCaffeinatePeerKeepAwakeRef.current?.(enabled);
+  }, []);
+
+  const handleCaffeinateMouseJiggleChange = useCallback((enabled: boolean) => {
+    setCaffeinateMouseJiggleRef.current?.(enabled);
   }, []);
 
   const handleCaffeinateBatteryThresholdChange = useCallback((percent: number | null) => {
@@ -1110,6 +1120,8 @@ export const Terminal = () => {
                   activityGate: caffeinateActivityGate,
                   peerKeepAwake: caffeinatePeerKeepAwake,
                   peerActive: caffeinatePeerActive,
+                  mouseJiggle: caffeinateMouseJiggle,
+                  jiggleActive: caffeinateActive && caffeinateMouseJiggle,
                   batteryThreshold: caffeinateBatteryThreshold,
                   defaultCommands: caffeinateDefaultCommands,
                   commands: caffeinateCommands,
@@ -1118,6 +1130,7 @@ export const Terminal = () => {
                   onCommandsChange: handleCaffeinateCommandsChange,
                   onActivityGateChange: handleCaffeinateActivityGateChange,
                   onPeerKeepAwakeChange: handleCaffeinatePeerKeepAwakeChange,
+                  onMouseJiggleChange: handleCaffeinateMouseJiggleChange,
                   onBatteryThresholdChange: handleCaffeinateBatteryThresholdChange,
                   onPopoverOpenChange: handleKeepAwakePopoverOpenChange,
                   onClose: refocusTerminalRef.current ?? undefined,
