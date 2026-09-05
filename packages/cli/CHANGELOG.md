@@ -1,5 +1,13 @@
 # localterm
 
+## 2.79.4
+
+### Patch Changes
+
+- Add an opt-in mouse jiggle to keep awake: while the keep-awake assertion is held, the daemon nudges the cursor 1px and back on a 30s interval so input-watching apps (presence/away detectors) keep seeing activity. Off by default; toggled from the keep-awake menu.
+- Updated dependencies
+  - @monotykamary/localterm-server@2.79.4
+
 ## 2.79.3
 
 ### Patch Changes
