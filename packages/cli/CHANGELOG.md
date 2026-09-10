@@ -1,5 +1,12 @@
 # localterm
 
+## 2.79.5
+
+### Patch Changes
+
+- Fix npm/npx and bunx installation by publishing an exact server dependency instead of an unresolved workspace protocol. Add regression coverage for local-only dependencies in public package manifests and synchronized CLI/server versions.
+  - @monotykamary/localterm-server@2.79.5
+
 ## 2.79.4
 
 ### Patch Changes
