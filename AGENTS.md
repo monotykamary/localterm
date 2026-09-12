@@ -46,6 +46,48 @@ timeouts to paper over flakes. Fix from first principles
   rather than exporting around the check.
 - React Doctor errors are blocking; fix diagnostics rather than suppressing.
 
+## Release packaging: verify what consumers receive
+
+Release 2.79.4 shipped the CLI with a `workspace:*` server dependency; it worked
+inside this monorepo but could not resolve for registry consumers. Release
+2.79.5 fixed it by publishing an exact server version. A green workspace build
+or test run alone does **not** prove a package is publishable.
+
+- Keep `@monotykamary/localterm` and `@monotykamary/localterm-server` in the
+  Changesets fixed release group. Use `bun run version`, then
+  `bun install --ignore-scripts --lockfile-only` to refresh the lockfile.
+  The private monorepo root version is not the CLI release version.
+- `packages/cli/package.json` must pin its server dependency to the **exact
+  released version**, matching both package versions. Never change it back to
+  `workspace:*`. No published runtime dependency, optional dependency, or peer
+  dependency may use `workspace:`, `file:`, or `link:`. Local protocols in
+  private workspace packages are a different case.
+- Keep `packages/cli/tests/publish-manifest.test.ts` green. It checks the
+  local-only protocol ban and exact CLI/server version alignment; do not weaken
+  it to make a version bump pass.
+- Build before packing. Run `bun pm pack --destination <temp-dir>` from each
+  package directory, not the private root. Let the CLI prepack hook run: it
+  copies the built terminal UI, README, and LICENSE and checks native resources.
+- Inspect **the tarballs**, not only the source manifests. Check package names
+  and versions, runtime dependency protocols, the exact server pin, all server
+  export targets, CLI entry points, terminal HTML/assets, and executable native
+  resources. Every new production import needs a shipped runtime dependency.
+- Smoke-test installation in a fresh directory outside the monorepo, without
+  workspace links or a global LocalTerm install masking missing dependencies.
+  CLI `--version`/`--help` and importing server modules do not require starting
+  a daemon. A test-only dependency override is not proof of registry resolution.
+- Publish the **inspected tarballs** with `bun publish --access public <tarball>`.
+  Publish the server first and confirm that exact version is available from the
+  registry before publishing the CLI that depends on it. Never rely on Bun to
+  rewrite a workspace protocol during publishing.
+- Verify registry versions, dependency metadata, and tarball integrity afterward.
+  Commit the version/changelog/lockfile changes and push the release commits and
+  matching package-version tags. Never republish different bytes under an
+  existing version; fix forward with a new version.
+- Do not restart or update a running LocalTerm daemon as a release smoke test.
+  The repository's `bun run start` actually invokes `localterm restart` and can
+  terminate the very session doing the release. Use isolated consumer checks.
+
 ## Conventions
 
 - Kebab-case files; `interface` over `type` for object shapes
