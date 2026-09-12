@@ -1,5 +1,12 @@
 # localterm
 
+## 2.79.6
+
+### Patch Changes
+
+- Allow selecting and copying terminal text on touch devices, and paste with a long-press. Short taps still open the on-screen keyboard; flicks still scroll.
+  - @monotykamary/localterm-server@2.79.6
+
 ## 2.79.5
 
 ### Patch Changes
