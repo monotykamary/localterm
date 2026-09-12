@@ -3,6 +3,12 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import { GIT_DIRTY_THROTTLE_MS, GIT_WATCHER_MAX_REFS } from "./constants.js";
 import { Throttle } from "./utils/throttle.js";
+import {
+  watchWithRecovery,
+  type WatchFactory,
+  type WatchSubscription,
+  type FileWatchOptions,
+} from "./utils/watch-with-recovery.js";
 
 export interface GitDirResult {
   gitDir: string;
@@ -239,11 +245,15 @@ export const classifyGitChanges = (
 };
 
 export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
-  private watchers: fs.FSWatcher[] = [];
+  private watchers: WatchSubscription[] = [];
   private throttle: Throttle | null = null;
   private disposed = false;
   private gitDir: string | null = null;
   private lastSnapshot: GitSnapshot | null = null;
+
+  constructor(private readonly watchFactory?: WatchFactory) {
+    super();
+  }
 
   start(cwd: string): void {
     this.stop();
@@ -263,22 +273,22 @@ export class GitDiffWatcher extends EventEmitter<GitDiffWatcherEvents> {
       this.emitRefEventsIfNeeded();
     }, GIT_DIRTY_THROTTLE_MS);
 
-    const watch = (target: string, options?: fs.WatchOptions | BufferEncoding | null) => {
-      try {
-        const watcher = fs.watch(target, options ?? {}, (event: string) => {
-          if (this.disposed) return;
-          if (event === "change" || event === "rename") {
-            this.throttledEmit();
-          }
-        });
-        this.watchers.push(watcher);
-      } catch {
-        /* target doesn't exist or isn't watchable */
-      }
+    const watch = (target: string, options: FileWatchOptions = { recursive: false }) => {
+      this.watchers.push(
+        watchWithRecovery(
+          target,
+          options,
+          (event) => {
+            if (this.disposed) return;
+            if (event === "change" || event === "rename") this.throttledEmit();
+          },
+          this.watchFactory,
+        ),
+      );
     };
 
     watch(gitDir);
-    watch(repoRoot, { recursive: true });
+    watch(repoRoot, { recursive: true, ignoredDirectories: ["node_modules"] });
 
     const refsDir = path.join(gitDir, "refs");
     try {

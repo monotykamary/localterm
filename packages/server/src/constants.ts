@@ -278,6 +278,10 @@ export const TERMINAL_ALTERNATE_SCREEN_PRIVATE_MODE_CODES: readonly number[] = [
 export const MAX_COLS = 1000;
 export const MAX_ROWS = 1000;
 export const MAX_CONCURRENT_SESSIONS = 64;
+export const FILE_WATCH_RETRY_INITIAL_MS = 1_000;
+export const FILE_WATCH_RETRY_MAX_MS = 30_000;
+// Charge tiny output events for their retained queue entry as well as text.
+export const SESSION_OUTPUT_QUEUE_ENTRY_MIN_BYTES = 256;
 // Shells localterm installs prompt hooks (osc7, git-dirty, automation-exit)
 // into via prepareOsc7Hook. An initial command for one of these runs via the
 // hook (eval) instead of a PTY write, so it never goes through the line

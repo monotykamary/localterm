@@ -846,7 +846,7 @@ export class SessionManager {
       clearTimeout(managed.outputBatchTimer);
       managed.outputBatchTimer = null;
     }
-    this.outputCoordinator.stopDrainPoll(managed);
+    this.outputCoordinator.disposeSession(managed);
     this.gitEventBridge.dispose(managed);
     this.clientHub.tearDown(managed);
     this.sessions.delete(managed.id);

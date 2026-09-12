@@ -1,6 +1,12 @@
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
+import { watchFilesystem } from "./utils/watch-filesystem.js";
+import {
+  watchWithRecovery,
+  type WatchFactory,
+  type WatchSubscription,
+} from "./utils/watch-with-recovery.js";
 
 export interface ProcessActivityWatcherEvents {
   // Emitted (debounced per cwd) after a watched program's shim overwrote its
@@ -8,18 +14,6 @@ export interface ProcessActivityWatcherEvents {
   // (the binary name); `cwd` is the directory the command ran in.
   activity: [program: string, cwd: string];
 }
-
-// Minimal handle the watcher needs; fs.FSWatcher satisfies it.
-interface WatchHandle {
-  close: () => void;
-  unref?: () => void;
-}
-
-type WatchFn = (
-  target: string,
-  options: { recursive: boolean },
-  listener: (event: string, filename: string | null) => void,
-) => WatchHandle;
 
 export interface ProcessActivityWatcherOptions {
   // Directory holding one activity file per watched program (named for the
@@ -32,9 +26,9 @@ export interface ProcessActivityWatcherOptions {
   // Quiet period (ms) after the last write for a given cwd before emitting —
   // coalesces a burst (e.g. `gh pr merge && gh pr checks`) into one refresh.
   debounceMs: number;
-  // Watch factory; defaults to fs.watch. Injectable so tests drive synthetic
+  // Watch factory; injectable so tests drive synthetic
   // events deterministically instead of waiting on real filesystem timing.
-  watch?: WatchFn;
+  watch?: WatchFactory;
   // Reads the cwd out of an activity file. Injectable so tests don't depend on
   // real disk writes. Defaults to reading + trimming the file (null on any
   // failure, e.g. the file is mid-write or absent).
@@ -45,7 +39,7 @@ export interface ProcessActivityWatcherOptions {
 // process-tree walker can't reliably catch — they exit before a `ps` snapshot
 // can observe them. Each watched program's PATH shim overwrites its activity
 // file with the shell's $PWD after the real binary exits; this watcher keeps
-// one fs.watch on the activity dir (no polling), filters to the watched
+// one subscription on the activity dir (no polling), filters to the watched
 // filenames, and emits a per-cwd-debounced `activity` event. Single-file
 // overwrite means zero accumulation and no housekeeping; the rare cost is that
 // near-simultaneous invocations in different cwds may coalesce to the latest
@@ -54,10 +48,10 @@ export class ProcessActivityWatcher extends EventEmitter<ProcessActivityWatcherE
   private readonly activityDir: string;
   private readonly programSet: ReadonlySet<string>;
   private readonly debounceMs: number;
-  private readonly watch: WatchFn;
+  private readonly watch: WatchFactory | undefined;
   private readonly readCwd: (file: string) => string | null;
   private readonly timers = new Map<string, NodeJS.Timeout>();
-  private handle: WatchHandle | null = null;
+  private handle: WatchSubscription | null = null;
   private disposed = false;
 
   constructor(options: ProcessActivityWatcherOptions) {
@@ -67,8 +61,10 @@ export class ProcessActivityWatcher extends EventEmitter<ProcessActivityWatcherE
     this.debounceMs = options.debounceMs;
     this.watch =
       options.watch ??
-      ((target, watchOptions, listener) =>
-        fs.watch(target, watchOptions, (event, filename) => listener(event, filename)));
+      ((target, watchOptions, listener) => {
+        fs.mkdirSync(target, { recursive: true, mode: 0o700 });
+        return watchFilesystem(target, watchOptions, listener);
+      });
     this.readCwd =
       options.readCwd ??
       ((file) => {
@@ -81,18 +77,12 @@ export class ProcessActivityWatcher extends EventEmitter<ProcessActivityWatcherE
       });
 
     if (this.programSet.size === 0) return;
-    // Only ensure the dir exists for the real fs.watch path — an injected
-    // (test) watch never touches the filesystem, so a virtual target is fine.
-    const useDefaultWatch = options.watch === undefined;
-    try {
-      if (useDefaultWatch) fs.mkdirSync(this.activityDir, { recursive: true, mode: 0o700 });
-      this.handle = this.watch(this.activityDir, { recursive: false }, (event, filename) =>
-        this.onFsEvent(event, filename),
-      );
-      this.handle.unref?.();
-    } catch {
-      // dir not watchable right now — no detection until the daemon restarts.
-    }
+    this.handle = watchWithRecovery(
+      this.activityDir,
+      { recursive: false },
+      (event, filename) => this.onFsEvent(event, filename),
+      this.watch,
+    );
   }
 
   private onFsEvent(_event: string, filename: string | null): void {

@@ -11,6 +11,11 @@ import {
   type GitSnapshot,
 } from "./git-diff-watcher.js";
 import { Throttle } from "./utils/throttle.js";
+import {
+  watchWithRecovery,
+  type WatchFactory,
+  type WatchSubscription,
+} from "./utils/watch-with-recovery.js";
 
 interface AutomationGitWatcherEvents {
   // Emitted (per affected repo) once a ref change under a watched cwd tree is
@@ -20,25 +25,14 @@ interface AutomationGitWatcherEvents {
   refEvent: [eventName: GitRefEventName, repoRoot: string];
 }
 
-interface WatchHandle {
-  close: () => void;
-  unref?: () => void;
-}
-
-type WatchFn = (
-  target: string,
-  options: { recursive: boolean },
-  listener: (event: string, filename: string | null) => void,
-) => WatchHandle;
-
 interface AutomationGitWatcherOptions {
   // Per-repo classify throttle: a leading edge emits on the first event of a
   // burst, a trailing flush re-snapshots so the final (post-commit) state is
   // always classified — mirrors GitDiffWatcher. Reuses GIT_DIRTY_THROTTLE_MS.
   throttleMs: number;
-  // Watch factory; defaults to fs.watch. Injectable so tests fire synthetic
+  // Watch factory; injectable so tests fire synthetic
   // events deterministically instead of waiting on real filesystem timing.
-  watch?: WatchFn;
+  watch?: WatchFactory;
 }
 
 interface RepoState {
@@ -48,7 +42,7 @@ interface RepoState {
 }
 
 interface WatchEntry {
-  handle: WatchHandle | null;
+  handle: WatchSubscription | null;
   // Repos known under this cwd, keyed by gitDir. Seeded eagerly at arm time for
   // repos that already exist (so the first change after arming classifies
   // against a real baseline instead of the post-change state), and grown
@@ -110,7 +104,7 @@ const isInsideNodeModules = (absolutePath: string): boolean =>
 // The per-session GitDiffWatcher only fires when a localterm PTY is live in the
 // affected repo: a commit from a non-localterm process (a headless agent, an
 // editor, an SSH session) or in a repo with no open tab produces no event.
-// This watcher arms one recursive fs.watch per watched cwd — the unique cwds
+// This watcher arms one recursive subscription per cwd — the unique cwds
 // of enabled, active event automations that select at least one git event —
 // and on `.git` changes classifies the affected repo, reusing buildGitSnapshot
 // + classifyGitChanges, emitting ref events that feed SessionEventManager
@@ -130,17 +124,14 @@ const isInsideNodeModules = (absolutePath: string): boolean =>
 // batch) emits the refs that "appeared" against the empty baseline.
 export class AutomationGitWatcher extends EventEmitter<AutomationGitWatcherEvents> {
   private readonly entries = new Map<string, WatchEntry>();
-  private readonly watch: WatchFn;
+  private readonly watch: WatchFactory | undefined;
   private readonly throttleMs: number;
   private disposed = false;
 
   constructor(options: AutomationGitWatcherOptions) {
     super();
     this.throttleMs = options.throttleMs;
-    this.watch =
-      options.watch ??
-      ((target, watchOptions, listener) =>
-        fs.watch(target, watchOptions, (event, filename) => listener(event, filename)));
+    this.watch = options.watch;
   }
 
   // Reconcile live watchers with the desired set of event-automation cwds.
@@ -170,19 +161,12 @@ export class AutomationGitWatcher extends EventEmitter<AutomationGitWatcherEvent
 
   private startEntry(cwd: string): void {
     const entry: WatchEntry = { handle: null, repos: new Map() };
-    try {
-      const handle = this.watch(cwd, { recursive: true }, (event, filename) =>
-        this.onFsEvent(cwd, event, filename),
-      );
-      handle.unref?.();
-      entry.handle = handle;
-    } catch {
-      // cwd doesn't exist, or recursive watch is unavailable / exceeds inotify
-      // limits on this platform. Eager-seeding still runs below so existing
-      // repos get a baseline; the per-session GitDiffWatcher covers live
-      // changes, and a later sync (after the dir exists or limits free) retries
-      // the watch.
-    }
+    entry.handle = watchWithRecovery(
+      cwd,
+      { recursive: true, ignoredDirectories: ["node_modules"] },
+      (event, filename) => this.onFsEvent(cwd, event, filename),
+      this.watch,
+    );
     this.discoverExistingRepos(entry, cwd);
     this.entries.set(cwd, entry);
   }

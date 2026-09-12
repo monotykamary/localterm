@@ -1,25 +1,15 @@
 import { EventEmitter } from "node:events";
-import fs from "node:fs";
+import {
+  watchWithRecovery,
+  type WatchFactory,
+  type WatchSubscription,
+} from "./utils/watch-with-recovery.js";
 import picomatch from "picomatch";
 import type { Automation } from "./types.js";
 
 interface FolderWatchManagerEvents {
   due: [automation: Automation];
 }
-
-// Minimal handle the manager needs from a watcher; fs.FSWatcher satisfies it.
-interface WatchHandle {
-  close: () => void;
-  unref?: () => void;
-}
-
-// Arms a native (or, in tests, fake) watch on a directory; the listener is
-// invoked on any change inside it.
-type WatchFn = (
-  target: string,
-  options: { recursive: boolean },
-  listener: (event: string, filename: string | null) => void,
-) => WatchHandle;
 
 interface FolderWatchManagerOptions {
   // Quiet period (ms) after the last filesystem event before firing — coalesces
@@ -38,13 +28,13 @@ interface FolderWatchManagerOptions {
   // the debounce window (disabled, limit reached, switched to a schedule) is
   // honored instead of the snapshot captured when the watch started.
   getAutomation: (automationId: string) => Automation | null;
-  // Watch factory; defaults to fs.watch. Injectable so tests drive synthetic
+  // Watch factory; injectable so tests drive synthetic
   // events deterministically instead of waiting on real filesystem timing.
-  watch?: WatchFn;
+  watch?: WatchFactory;
 }
 
 interface WatchEntry {
-  watchers: WatchHandle[];
+  watchers: WatchSubscription[];
   // recursive flag + cwd + filter; the watch is torn down and rebuilt when any
   // of these change.
   signature: string;
@@ -62,21 +52,18 @@ const signatureOf = (automation: Automation): string =>
     ? `${automation.trigger.recursive}:${automation.cwd}:${automation.trigger.filter ?? ""}`
     : automation.cwd;
 
-// Event-driven folder triggers for automations: one native fs.watch per "watch"
+// Event-driven folder triggers for automations: one subscription per "watch"
 // automation, on its cwd. No polling — mirrors GitDiffWatcher. A burst of events
 // is coalesced by a trailing debounce, and a launch is suppressed while a prior
 // run is still in-flight (at most one run per automation at a time).
 export class FolderWatchManager extends EventEmitter<FolderWatchManagerEvents> {
   private readonly entries = new Map<string, WatchEntry>();
-  private readonly watch: WatchFn;
+  private readonly watch: WatchFactory | undefined;
   private disposed = false;
 
   constructor(private readonly options: FolderWatchManagerOptions) {
     super();
-    this.watch =
-      options.watch ??
-      ((target, watchOptions, listener) =>
-        fs.watch(target, watchOptions, (event, filename) => listener(event, filename)));
+    this.watch = options.watch;
   }
 
   // Reconcile the live watchers with the desired set (enabled + active + watch).
@@ -117,17 +104,14 @@ export class FolderWatchManager extends EventEmitter<FolderWatchManagerEvents> {
       postRunGraceTimer: null,
       postRunGraceActive: false,
     };
-    try {
-      const watcher = this.watch(automation.cwd, { recursive }, (event, filename) => {
-        this.onFsEvent(automation.id, event, filename);
-      });
-      // Don't keep the daemon alive on the watch alone (the http server does).
-      watcher.unref?.();
-      entry.watchers.push(watcher);
-    } catch {
-      // cwd doesn't exist or isn't watchable right now — leave the entry empty;
-      // a later sync (after the directory is fixed) retries.
-    }
+    entry.watchers.push(
+      watchWithRecovery(
+        automation.cwd,
+        { recursive },
+        (event, filename) => this.onFsEvent(automation.id, event, filename),
+        this.watch,
+      ),
+    );
     this.entries.set(automation.id, entry);
   }
 

@@ -12,6 +12,7 @@ import {
   OUTPUT_SYNCHRONIZED_FRAME_TIMEOUT_MS,
   RENDERER_PENDING_PAUSE_HIGH_WATER_BYTES,
   RENDERER_PENDING_RESUME_LOW_WATER_BYTES,
+  SESSION_OUTPUT_QUEUE_ENTRY_MIN_BYTES,
   WS_OUTBOUND_DRAIN_POLL_MS,
   WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES,
   WS_OUTBOUND_RESUME_LOW_WATER_BYTES,
@@ -25,6 +26,7 @@ import { getBufferedAmount } from "./utils/ws-socket.js";
 import { stripAnsi } from "./utils/strip-ansi.js";
 
 interface SessionOutputCoordinatorOptions {
+  expandFileOutput?: typeof expandKittyApcOutputParts;
   outputTransport: SessionOutputTransport;
   noteOutputActivity: (pid: number) => void;
   onOutputActivity: () => void;
@@ -33,7 +35,21 @@ interface SessionOutputCoordinatorOptions {
   writeInput: (managed: ManagedSession, data: string) => void;
 }
 
+interface QueuedSessionOutput {
+  scan: KittyApcScan;
+  bytes: number;
+  resolve: () => void;
+}
+
+interface SessionOutputQueue {
+  pending: QueuedSessionOutput[];
+  bytes: number;
+  active: boolean;
+  disposed: boolean;
+}
+
 export class SessionOutputCoordinator {
+  private readonly expandFileOutput: typeof expandKittyApcOutputParts;
   private readonly outputTransport: SessionOutputTransport;
   private readonly noteOutputActivity: (pid: number) => void;
   private readonly onOutputActivity: () => void;
@@ -46,7 +62,8 @@ export class SessionOutputCoordinator {
   private readonly tmpdirRoot: string;
   private readonly realpathCache = new Map<string, string>();
   private readonly scanners = new WeakMap<ManagedSession, KittyApcScanner>();
-  private readonly fileOutputQueues = new WeakMap<ManagedSession, Promise<void>>();
+  private readonly fileOutputQueues = new WeakMap<ManagedSession, SessionOutputQueue>();
+  private readonly disposedSessions = new WeakSet<ManagedSession>();
   // Sessions that have relayed at least one pixel frame since spawn — used to
   // scope screen-reset clears to apps that actually own an on-screen picture.
   private readonly frameSessions = new WeakSet<ManagedSession>();
@@ -56,11 +73,13 @@ export class SessionOutputCoordinator {
     noteOutputActivity,
     onOutputActivity,
     writeInput,
+    expandFileOutput = expandKittyApcOutputParts,
   }: SessionOutputCoordinatorOptions) {
     this.outputTransport = outputTransport;
     this.noteOutputActivity = noteOutputActivity;
     this.onOutputActivity = onOutputActivity;
     this.writeInput = writeInput;
+    this.expandFileOutput = expandFileOutput;
     this.frameRelay = new KittyFrameFileRelay(outputTransport);
     this.tmpdirRoot = fs.realpathSync(os.tmpdir());
   }
@@ -131,7 +150,7 @@ export class SessionOutputCoordinator {
     } catch {
       readable = false;
     }
-    if (probe.quiet >= 2) return;
+    if (this.disposedSessions.has(managed) || probe.quiet >= 2) return;
     if (readable && probe.quiet === 1) return;
     this.writeInput(
       managed,
@@ -139,25 +158,82 @@ export class SessionOutputCoordinator {
     );
   }
 
-  onSessionOutput(managed: ManagedSession, data: string): Promise<void> {
-    const scan = this.scannerFor(managed).push(data);
-    const pending = this.fileOutputQueues.get(managed);
-    const hasFileTransmission = scan.outputParts.some((part) => part.kind === "file");
-    if (!pending && !hasFileTransmission) {
-      return this.processScannedOutput(managed, scan, scan.output);
+  async onSessionOutput(managed: ManagedSession, data: string): Promise<void> {
+    if (this.disposedSessions.has(managed)) return;
+    managed.lastOutputAt = Date.now();
+    try {
+      const scan = this.scannerFor(managed).push(data);
+      let queue = this.fileOutputQueues.get(managed);
+      if (!queue && !scan.outputParts.some((part) => part.kind === "file")) {
+        await this.processScannedOutput(managed, scan, scan.output);
+        return;
+      }
+      if (!queue) {
+        queue = { pending: [], bytes: 0, active: false, disposed: false };
+        this.fileOutputQueues.set(managed, queue);
+      }
+      const bytes = Math.max(Buffer.byteLength(data, "utf8"), SESSION_OUTPUT_QUEUE_ENTRY_MIN_BYTES);
+      const task = new Promise<void>((resolve) => queue.pending.push({ scan, bytes, resolve }));
+      queue.bytes += bytes;
+      // File I/O precedes transport and renderer accounting. Charge it at
+      // admission, including the in-flight entry, so a slow read pauses the PTY.
+      this.maybePauseForBacklog(managed);
+      this.drainOutputQueue(managed, queue);
+      await task;
+    } catch (error) {
+      this.reportOutputError(managed, error);
     }
+  }
 
-    const task = (pending ?? Promise.resolve()).then(async () => {
-      const output = hasFileTransmission
-        ? await expandKittyApcOutputParts(scan.outputParts, this.tmpdirRoot)
-        : scan.output;
-      await this.processScannedOutput(managed, scan, output);
-    });
-    const tracked = task.finally(() => {
-      if (this.fileOutputQueues.get(managed) === tracked) this.fileOutputQueues.delete(managed);
-    });
-    this.fileOutputQueues.set(managed, tracked);
-    return tracked;
+  private reportOutputError(managed: ManagedSession, error: unknown): void {
+    if (this.disposedSessions.has(managed)) return;
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`session output processing failed (${managed.id}): ${message}`);
+  }
+
+  private drainOutputQueue(managed: ManagedSession, queue: SessionOutputQueue): void {
+    if (queue.active || queue.disposed) return;
+    // A queued path can expand into megabytes. Pausing new PTY reads is not
+    // enough: stop expansion too while the renderer or a viewer is backed up.
+    if (this.downstreamBacklogged(managed)) {
+      this.maybePauseForBacklog(managed);
+      return;
+    }
+    const entry = queue.pending.shift();
+    if (!entry) return;
+    queue.active = true;
+    void (async () => {
+      try {
+        const output = await this.expandFileOutput(entry.scan.outputParts, this.tmpdirRoot);
+        if (!queue.disposed) await this.processScannedOutput(managed, entry.scan, output);
+      } catch (error) {
+        this.reportOutputError(managed, error);
+      } finally {
+        queue.bytes = Math.max(0, queue.bytes - entry.bytes);
+        queue.active = false;
+        entry.resolve();
+        if (!queue.disposed && queue.pending.length > 0) this.drainOutputQueue(managed, queue);
+        else if (this.fileOutputQueues.get(managed) === queue)
+          this.fileOutputQueues.delete(managed);
+      }
+    })();
+  }
+
+  disposeSession(managed: ManagedSession): void {
+    this.disposedSessions.add(managed);
+    const queue = this.fileOutputQueues.get(managed);
+    if (queue) {
+      queue.disposed = true;
+      for (const entry of queue.pending.splice(0)) entry.resolve();
+      queue.bytes = 0;
+      this.fileOutputQueues.delete(managed);
+    }
+    this.frameRelay.cancel(managed);
+    this.frameSessions.delete(managed);
+    this.scanners.delete(managed);
+    this.clearOutputBatchTimer(managed);
+    this.stopDrainPoll(managed);
+    managed.outputBatch = "";
   }
 
   private async processScannedOutput(
@@ -165,6 +241,7 @@ export class SessionOutputCoordinator {
     scan: KittyApcScan,
     output: string,
   ): Promise<void> {
+    if (this.disposedSessions.has(managed)) return;
     const probeTasks = scan.probes
       .map((probe) => this.maybeAnswerProbe(managed, probe))
       .filter((task) => task !== null);
@@ -196,6 +273,7 @@ export class SessionOutputCoordinator {
     // clients see. Hibernation has no always-on renderer — it hydrates from
     // the raw replay ring at shutdown (SessionManager.hibernateEntries).
     managed.captureRenderer?.write(output);
+    this.maybePauseForBacklog(managed);
 
     if (output.length === 0) {
       await asyncTasks;
@@ -327,24 +405,26 @@ export class SessionOutputCoordinator {
         );
       }
     }
-    this.maybePauseAfterFlush(managed);
+    this.maybePauseForBacklog(managed);
   }
 
-  private maybePauseAfterFlush(managed: ManagedSession): void {
-    if (managed.session.isPaused) return;
-    if (this.rendererBacklogBytes(managed) >= RENDERER_PENDING_PAUSE_HIGH_WATER_BYTES) {
-      managed.session.pause();
-      this.ensureDrainPoll(managed);
-      return;
-    }
+  private downstreamBacklogged(managed: ManagedSession): boolean {
+    if (this.rendererBacklogBytes(managed) >= RENDERER_PENDING_PAUSE_HIGH_WATER_BYTES) return true;
     for (const client of managed.clients) {
-      if (client.pending) continue;
-      if (this.clientBacklogBytes(client) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES) {
-        managed.session.pause();
-        this.ensureDrainPoll(managed);
-        return;
-      }
+      if (!client.pending && this.clientBacklogBytes(client) >= WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES)
+        return true;
     }
+    return false;
+  }
+
+  private maybePauseForBacklog(managed: ManagedSession): void {
+    if (
+      (this.fileOutputQueues.get(managed)?.bytes ?? 0) < WS_OUTBOUND_PAUSE_HIGH_WATER_BYTES &&
+      !this.downstreamBacklogged(managed)
+    )
+      return;
+    if (!managed.session.isPaused) managed.session.pause();
+    this.ensureDrainPoll(managed);
   }
 
   private ensureDrainPoll(managed: ManagedSession): void {
@@ -354,7 +434,11 @@ export class SessionOutputCoordinator {
         this.stopDrainPoll(managed);
         return;
       }
-      let allLow = this.rendererBacklogBytes(managed) <= RENDERER_PENDING_RESUME_LOW_WATER_BYTES;
+      const queue = this.fileOutputQueues.get(managed);
+      if (queue) this.drainOutputQueue(managed, queue);
+      let allLow =
+        (queue?.bytes ?? 0) <= WS_OUTBOUND_RESUME_LOW_WATER_BYTES &&
+        this.rendererBacklogBytes(managed) <= RENDERER_PENDING_RESUME_LOW_WATER_BYTES;
       if (allLow) {
         for (const client of managed.clients) {
           if (client.pending) continue;

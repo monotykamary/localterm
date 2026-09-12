@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { FolderWatchManager } from "../src/folder-watch-manager.js";
 import type { Automation } from "../src/types.js";
@@ -14,14 +15,14 @@ const makeFakeWatch = () => {
     target: string,
     _options: { recursive: boolean },
     listener: (event: string, filename: string | null) => void,
-  ): { close: () => void } => {
+  ) => {
     const record = { listener };
     armed.set(target, record);
-    return {
+    return Object.assign(new EventEmitter(), {
       close: () => {
         if (armed.get(target) === record) armed.delete(target);
       },
-    };
+    });
   };
   return {
     watch,

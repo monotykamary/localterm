@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -53,13 +54,13 @@ const makeFakeWatch = () => {
     target: string,
     _options: { recursive: boolean },
     listener: (event: string, filename: string | null) => void,
-  ): { close: () => void } => {
+  ) => {
     armed.set(target, listener);
-    return {
+    return Object.assign(new EventEmitter(), {
       close: () => {
         armed.delete(target);
       },
-    };
+    });
   };
   return {
     watch,

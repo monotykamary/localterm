@@ -14,7 +14,7 @@ export class SessionLifecyclePolicy {
       // A dormant, non-pinned session can be evicted to make room. Pinned
       // sessions hold their slots (never silently reaped), so a full cap of
       // pinned sessions surfaces a real capacity error instead of a steal.
-      if (managed.clients.size === 0 && !managed.pinned) return false;
+      if (this.canEvict(managed)) return false;
     }
     return true;
   }
@@ -79,13 +79,16 @@ export class SessionLifecyclePolicy {
     return managed.hasForeground ? "alive-quiet" : "ready";
   }
 
+  private canEvict(managed: ManagedSession): boolean {
+    // Losing a viewer does not make its running command disposable.
+    return managed.clients.size === 0 && !managed.pinned && this.computeState(managed) === "ready";
+  }
+
   private evictOldestDormant(sessions: ReadonlyMap<string, ManagedSession>): void {
     let oldest: ManagedSession | null = null;
     let oldestKey = Infinity;
     for (const managed of sessions.values()) {
-      if (managed.clients.size > 0) continue;
-      // Pinned sessions are never silently evicted — they're explicitly held.
-      if (managed.pinned) continue;
+      if (!this.canEvict(managed)) continue;
       // Evict the parked session whose grace fires soonest (armed earliest); a
       // parked session with no timer is a fresh spawn nobody attached yet —
       // yield it only after all armed ones.
