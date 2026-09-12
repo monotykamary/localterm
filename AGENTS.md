@@ -84,7 +84,11 @@ or test run alone does **not** prove a package is publishable.
   cwd-sensitive even when the archive already contains the executable.
   Publish the server first and confirm that exact version is available from the
   registry before publishing the CLI that depends on it. Never rely on Bun to
-  rewrite a workspace protocol during publishing.
+  rewrite a workspace protocol during publishing. A publish acknowledgement is
+  not download readiness: metadata and tarballs can take minutes to propagate.
+  Check the registry's `?write=true` package metadata and download its actual
+  `dist.tarball` URL. Retry bounded, read-only verification on temporary 404s;
+  do not blindly republish a version that the registry has already accepted.
 - Verify registry versions, dependency metadata, and tarball integrity afterward.
   Commit the version/changelog/lockfile changes and push the release commits and
   matching package-version tags. Never republish different bytes under an
