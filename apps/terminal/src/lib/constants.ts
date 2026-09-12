@@ -13,6 +13,10 @@ export const TERMINAL_FONT_SIZE_STEP_PX = 1;
 // to prevent output-anchor restoration from fighting mobile scroll gestures.
 export const XTERM_TOUCH_SCROLL_EVENT = "-xterm-gesturechange";
 export const TERMINAL_TAP_MOVEMENT_THRESHOLD_PX = 10;
+// Hold still this long on a touch device to treat the gesture as a right-click:
+// release pastes, or drag after the hold to select and copy. Shorter taps still
+// open the on-screen keyboard; movement before this delay still scrolls.
+export const TERMINAL_LONG_PRESS_MS = 500;
 export const TERMINAL_KEYBOARD_VIEWPORT_HEIGHT_CHANGE_PX = 150;
 export const TERMINAL_VIEWPORT_WIDTH_STABLE_PX = 20;
 export const XTERM_DEFAULT_SCROLL_SENSITIVITY = 1;
