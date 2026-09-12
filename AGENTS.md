@@ -76,7 +76,12 @@ or test run alone does **not** prove a package is publishable.
   workspace links or a global LocalTerm install masking missing dependencies.
   CLI `--version`/`--help` and importing server modules do not require starting
   a daemon. A test-only dependency override is not proof of registry resolution.
-- Publish the **inspected tarballs** with `bun publish --access public <tarball>`.
+  For Bun, use `--linker hoisted --backend copyfile --cache-dir ./package-cache`
+  and verify resolved realpaths stay inside the consumer directory: the default
+  linker can otherwise reuse the global virtual store.
+- Publish the **inspected tarballs** from their corresponding package directories
+  with `bun publish --access public <tarball>`; Bun's bin-path validation is
+  cwd-sensitive even when the archive already contains the executable.
   Publish the server first and confirm that exact version is available from the
   registry before publishing the CLI that depends on it. Never rely on Bun to
   rewrite a workspace protocol during publishing.
