@@ -45,6 +45,12 @@ timeouts to paper over flakes. Fix from first principles
 - `lint:dead` gates unused files/exports/deps (knip) — delete dead code
   rather than exporting around the check.
 - React Doctor errors are blocking; fix diagnostics rather than suppressing.
+- Watcher backend changes require the real-backend safety probes after building:
+  `bun run --cwd packages/server test:integration tests/watch-filesystem-integration.test.ts`.
+  Mocked outer watcher errors and server imports do not prove native error
+  ownership or descriptor safety. macOS launchd defaults to 256 open files;
+  per-file recursive watching can exhaust that budget. Chokidar 4's
+  nonpersistent branch does not attach native asynchronous error handlers.
 
 ## Release packaging: verify what consumers receive
 
