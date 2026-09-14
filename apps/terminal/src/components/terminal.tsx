@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { ToastProvider, Toaster, useToast } from "@/components/ui/toast";
 import { AmbientActionSearchToolbar } from "@/components/ambient-action-search-toolbar";
 import { ConnectionStatusDialog } from "@/components/connection-status-dialog";
+import { FilePreviewModal } from "@/components/file-preview-modal";
 import { KeyboardFloatingButton } from "@/components/keyboard-floating-button";
 import { type CaffeinateMode } from "@/components/keep-awake-menu";
 import { TerminalOverlays } from "@/components/terminal-overlays";
@@ -56,6 +57,7 @@ import { detectCtrlNTakeoverSupported } from "@/utils/detect-ctrl-n-takeover-sup
 import { detectLikelyKeepAwakeSupported } from "@/utils/detect-likely-keep-awake-supported";
 import { shellQuoteArg } from "@/utils/shell-quote-arg";
 import { buildFileUrl } from "@/utils/build-file-url";
+import type { ResolvedTerminalLink } from "@/utils/resolve-terminal-link";
 
 import { LocalEcho } from "@/lib/local-echo";
 import { isCoarsePointer } from "@/utils/is-coarse-pointer";
@@ -320,6 +322,7 @@ export const Terminal = () => {
     NotificationPermission | "unsupported"
   >("Notification" in window ? Notification.permission : "unsupported");
   const [liveCwd, setLiveCwd] = useState<string | null>(null);
+  const [linkPreview, setLinkPreview] = useState<{ cwd: string; path: string } | null>(null);
   const [foregroundProcess, setForegroundProcess] = useState<string | null>(null);
   const liveCwdRef = useRef<string | null>(null);
   const wsConnectedRef = useRef(false);
@@ -474,6 +477,17 @@ export const Terminal = () => {
     if (summaryBranch !== branchInfo.currentBranch) refreshBranchInfo();
   }, [summaryBranch, branchInfo, refreshBranchInfo]);
 
+  // Clicking an OSC 8 link the pane printed: http(s) opens a tab, a file
+  // (absolute file:// from pi's tool output, or a cwd-relative markdown href)
+  // previews in place through the daemon's read-only /api/file routes.
+  const handleOpenTerminalLink = useCallback((link: ResolvedTerminalLink) => {
+    if (link.kind === "external") {
+      window.open(link.url, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (link.kind === "file") setLinkPreview({ cwd: link.cwd, path: link.path });
+  }, []);
+
   useTerminalRuntime({
     refs: {
       containerRef,
@@ -562,6 +576,7 @@ export const Terminal = () => {
       setPushedPr,
       applyThemesState,
       applyFontsState,
+      openTerminalLink: handleOpenTerminalLink,
     },
     isMac,
     isTouchDevice,
@@ -1234,6 +1249,17 @@ export const Terminal = () => {
         onOpenNewShell={openNewShell}
         onRetryConnection={triggerManualReconnect}
       />
+      {linkPreview ? (
+        <FilePreviewModal
+          cwd={linkPreview.cwd}
+          filePath={linkPreview.path}
+          onClose={() => {
+            setLinkPreview(null);
+            refocusTerminalRef.current?.();
+          }}
+        />
+      ) : null}
+
       <ToastProvider>
         <Toaster />
       </ToastProvider>

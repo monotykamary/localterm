@@ -2850,3 +2850,69 @@ describe("Terminal default launch directory", () => {
     expect(fakeWebSockets[0].url).not.toContain("cwd=");
   });
 });
+
+describe("Terminal link clicking", () => {
+  interface FakeLinkHandler {
+    activate: (event: MouseEvent, uri: string, range: unknown) => void;
+  }
+
+  const activateLink = async (uri: string) => {
+    const linkHandler = fakeXterms[0]?.getOptions().linkHandler as FakeLinkHandler | undefined;
+    if (!linkHandler) throw new Error("the terminal surface installed no link handler");
+    await act(async () => {
+      linkHandler.activate(new MouseEvent("mouseup"), uri, {
+        start: { x: 1, y: 1 },
+        end: { x: 2, y: 1 },
+      });
+    });
+  };
+
+  const renderAttachedTerminal = () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireMessage({ type: "cwd", cwd: "/Users/tester/project" });
+    });
+  };
+
+  it("previews a cwd-relative link pi printed against the pane's live cwd", async () => {
+    renderAttachedTerminal();
+
+    await activateLink("experiments/vietnam-imports/reports/index.html");
+
+    expect(
+      screen.getByRole("dialog", {
+        name: "file preview experiments/vietnam-imports/reports/index.html",
+      }),
+    ).toBeDefined();
+    const requestedUrl = String(vi.mocked(fetch).mock.calls.at(-1)?.[0]);
+    expect(requestedUrl).toContain("/api/file/content");
+    expect(requestedUrl).toContain("cwd=%2FUsers%2Ftester%2Fproject");
+    expect(requestedUrl).toContain("path=experiments%2Fvietnam-imports%2Freports%2Findex.html");
+  });
+
+  it("previews an absolute file link from tool output", async () => {
+    renderAttachedTerminal();
+
+    await activateLink("file:///Users/tester/project/reports/VIABILITY.md");
+
+    expect(screen.getByRole("dialog", { name: "file preview VIABILITY.md" })).toBeDefined();
+    const requestedUrl = String(vi.mocked(fetch).mock.calls.at(-1)?.[0]);
+    expect(requestedUrl).toContain("cwd=%2FUsers%2Ftester%2Fproject%2Freports");
+    expect(requestedUrl).toContain("path=VIABILITY.md");
+  });
+
+  it("opens http links in a new tab and ignores schemes a pane must not launch", async () => {
+    renderAttachedTerminal();
+
+    await activateLink("https://example.com/dashboard");
+    expect(window.open).toHaveBeenCalledWith(
+      "https://example.com/dashboard",
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    await activateLink("mailto:someone@example.com");
+    expect(window.open).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});

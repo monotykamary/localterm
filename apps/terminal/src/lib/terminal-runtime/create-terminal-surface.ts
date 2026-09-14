@@ -23,6 +23,10 @@ import { preserveTerminalMouseWheelMagnitude } from "@/utils/preserve-terminal-m
 import { registerTerminalClipboard } from "@/utils/register-terminal-clipboard";
 import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider";
 import { KittyUnicodePlaceholderAddon } from "@/lib/terminal-runtime/kitty-unicode-placeholder-addon";
+import {
+  createTerminalLinkHandler,
+  createTerminalWebLinksHandler,
+} from "@/lib/terminal-runtime/create-terminal-link-handler";
 import { createTerminalOutputScrollController } from "@/utils/create-terminal-output-scroll-controller";
 import type { TerminalOutputScrollController } from "@/utils/create-terminal-output-scroll-controller";
 import { outputBatcher } from "@/utils/write-terminal-output";
@@ -51,6 +55,7 @@ interface CreateTerminalSurfaceOptions {
   fitAddonRef: CurrentRef<FitAddon | null>;
   searchAddonRef: CurrentRef<SearchAddon | null>;
   webglAddonRef: CurrentRef<WebglAddon | null>;
+  openLink: (uri: string) => void;
   setSearchResults: (value: TerminalSearchResultState) => void;
 }
 
@@ -77,12 +82,14 @@ export const createTerminalSurface = ({
   fitAddonRef,
   searchAddonRef,
   webglAddonRef,
+  openLink,
   setSearchResults,
 }: CreateTerminalSurfaceOptions): TerminalSurface => {
   const terminal = new XtermTerminal({
     allowProposedApi: true,
     cursorBlink: initialCursorBlink,
     cursorStyle: initialCursorStyle,
+    linkHandler: createTerminalLinkHandler(openLink),
     fontFamily: familyForFont(initialFont, initialNerdFontEnabled),
     fontSize: initialFontSize,
     lineHeight: initialLineHeight,
@@ -108,7 +115,7 @@ export const createTerminalSurface = ({
   const fitAddon = new FitAddon();
   fitAddonRef.current = fitAddon;
   terminal.loadAddon(fitAddon);
-  terminal.loadAddon(new WebLinksAddon());
+  terminal.loadAddon(new WebLinksAddon(createTerminalWebLinksHandler(openLink)));
   const clipboardDisposable = registerTerminalClipboard(terminal);
   terminal.loadAddon(new ImageAddon());
   terminal.loadAddon(new KittyUnicodePlaceholderAddon());

@@ -14,6 +14,11 @@ inline pi-math formulas and Neovim image cells attached to terminal text through
 wrapping, scrolling, edits, alternate buffers, and redraws without exposing the
 U+10EEEE protocol glyph.
 
+Clicking one of those links opens `http(s)` URLs in a new browser tab. pi's
+`file://` links — every path in tool output — and the repo-relative hrefs a
+model writes in markdown resolve against the shell's live cwd and open in the
+read-only file preview; other schemes are ignored.
+
 ## Secret scrubbing for pi's bash tool
 
 localterm injects each secret only into the shimmed process's env (pi's), but

@@ -63,6 +63,7 @@ import { resolveResumeSession } from "@/utils/resolve-resume-session";
 import { setTabFaviconState } from "@/utils/set-tab-favicon-state";
 
 import { createTerminalSurface } from "@/lib/terminal-runtime/create-terminal-surface";
+import { resolveTerminalLink, type ResolvedTerminalLink } from "@/utils/resolve-terminal-link";
 import { createPixelFrameOverlay } from "@/lib/terminal-runtime/create-pixel-frame-overlay";
 import {
   createTerminalOutputSession,
@@ -205,6 +206,7 @@ interface TerminalRuntimeCallbacks extends TerminalControlMessageCallbacks {
   setLiveCwd: (cwd: string | null) => void;
   setForegroundProcess: (process: string | null) => void;
   setSearchResults: (value: TerminalSearchResultState) => void;
+  openTerminalLink: (link: ResolvedTerminalLink) => void;
 }
 
 interface UseTerminalRuntimeOptions {
@@ -297,6 +299,7 @@ export const useTerminalRuntime = ({
     setGitDiffSummary,
     setForegroundProcess,
     setSearchResults,
+    openTerminalLink,
   } = callbacks;
   const resizeScrollRestoreRef = useRef<ResizeScrollRestoreState | null>(null);
 
@@ -371,6 +374,10 @@ export const useTerminalRuntime = ({
       fitAddonRef,
       searchAddonRef,
       webglAddonRef,
+      openLink: (uri) => {
+        const link = resolveTerminalLink(uri, liveCwdRef.current);
+        if (link.kind !== "unsupported") openTerminalLink(link);
+      },
       setSearchResults,
     });
     const { terminal, fitAddon, outputScrollController } = terminalSurface;
