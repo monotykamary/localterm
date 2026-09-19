@@ -73,9 +73,12 @@ export const SYSTEMD_OPERATION_TIMEOUT_MS = 10_000;
 
 // Minimal system PATH baked into the launchd plist for the daemon. The daemon
 // needs only system binaries (caffeinate, ps, security, xattr, codesign) plus
-// `portless` (its dir is appended at install time); `git` runs via /usr/bin/git
-// (Apple-signed, cached). Baking the full user PATH leaks homebrew/mise binaries
-// that syspolicyd re-assesses per PTY — a launchd agent has no GUI provenance.
+// `portless` (its dir is appended at install time); `git` is resolved to an
+// absolute path by the server (see resolveGitBinary — /usr/bin/git is preferred
+// but not usable when it is the license-gated Xcode shim, so this PATH alone is
+// not a sufficient place to find git). Baking the full user PATH leaks
+// homebrew/mise binaries that syspolicyd re-assesses per PTY — a launchd agent
+// has no GUI provenance.
 export const DAEMON_BASE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
 export const PORTLESS_RESOLVE_TIMEOUT_MS = 5_000;
 

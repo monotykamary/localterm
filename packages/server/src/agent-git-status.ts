@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { MAX_AUTOMATION_CHANGED_FILES } from "./constants.js";
+import { resolveGitBinary } from "./utils/resolve-git-binary.js";
 
 const parseGitStatus = (output: string): Set<string> => {
   const set = new Set<string>();
@@ -18,7 +19,7 @@ const parseGitStatus = (output: string): Set<string> => {
 
 export const gitStatusSet = (cwd: string): Set<string> => {
   try {
-    const result = spawnSync("git", ["-C", cwd, "status", "--porcelain"], {
+    const result = spawnSync(resolveGitBinary(), ["-C", cwd, "status", "--porcelain"], {
       encoding: "utf8",
       timeout: 5000,
     });
