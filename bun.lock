@@ -124,7 +124,7 @@
     },
     "packages/pi-extension": {
       "name": "@monotykamary/pi-localterm",
-      "version": "0.4.7",
+      "version": "0.4.8",
       "devDependencies": {
         "@earendil-works/pi-coding-agent": "^0.84.2",
         "@earendil-works/pi-tui": "^0.84.2",
