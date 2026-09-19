@@ -7,6 +7,7 @@ const LOCALTERM_STATE_DIRNAME = ".localterm";
 const SECRETS_FILENAME = "secrets.json";
 const PROCESSES_FILENAME = "processes.json";
 const PI_SETTINGS_FILENAME = "settings.json";
+const FABRIC_BASH_MIDDLEWARE = Symbol.for("pi-fabric:bash-middleware:v1");
 const SECRET_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const PROCESS_NAME_PATTERN = /^[A-Za-z0-9_.+-]+$/;
 const ENV_VAR_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
@@ -271,13 +272,15 @@ const wrapWithRedaction = (operations, getValues) => ({ exec: async (command, cw
 	const emit = (text) => {
 		if (text.length > 0) onData(Buffer.from(text, "utf8"));
 	};
-	const result = await operations.exec(command, cwd, {
-		...rest,
-		onData: (data) => emit(redactor.push(decoder.decode(data, { stream: true })))
-	});
-	emit(redactor.push(decoder.decode()));
-	emit(redactor.finish());
-	return result;
+	try {
+		return await operations.exec(command, cwd, {
+			...rest,
+			onData: (data) => emit(redactor.push(decoder.decode(data, { stream: true })))
+		});
+	} finally {
+		emit(redactor.push(decoder.decode()));
+		emit(redactor.finish());
+	}
 } });
 const registerBashSecretScrub = (pi) => {
 	const cwd = process.cwd();
@@ -294,13 +297,22 @@ const registerBashSecretScrub = (pi) => {
 		if (installed) return;
 		installed = true;
 		import("@earendil-works/pi-coding-agent").then(({ createBashToolDefinition, createLocalBashOperations }) => {
-			const operations = wrapWithRedaction(createLocalBashOperations({ shellPath }), () => redactionValues);
-			pi.registerTool(createBashToolDefinition(cwd, {
-				operations,
+			const wrapOperations = (operations) => wrapWithRedaction(operations, () => redactionValues);
+			const options = {
 				spawnHook,
 				commandPrefix,
 				shellPath
-			}));
+			};
+			const operations = wrapOperations(createLocalBashOperations({ shellPath }));
+			const definition = createBashToolDefinition(cwd, {
+				...options,
+				operations
+			});
+			pi.registerTool(Object.assign(definition, { [FABRIC_BASH_MIDDLEWARE]: {
+				version: 1,
+				options,
+				wrapOperations
+			} }));
 		}).catch(() => {});
 	};
 	pi.on("session_start", () => {

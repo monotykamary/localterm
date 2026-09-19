@@ -1,4 +1,5 @@
 import type { BashOperations, BashSpawnHook, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { FABRIC_BASH_MIDDLEWARE } from "../src/constants.js";
 import { readLocaltermSecretEnvVarsForPi } from "../src/utils/read-localterm-secret-policy.js";
 import { readLocaltermSecretValuesForPi } from "../src/utils/read-secret-values.js";
 import { readPiShellSettings } from "../src/utils/read-pi-shell-settings.js";
@@ -50,13 +51,15 @@ const wrapWithRedaction = (
       if (text.length > 0) onData(Buffer.from(text, "utf8"));
     };
 
-    const result = await operations.exec(command, cwd, {
-      ...rest,
-      onData: (data: Buffer) => emit(redactor.push(decoder.decode(data, { stream: true }))),
-    });
-    emit(redactor.push(decoder.decode()));
-    emit(redactor.finish());
-    return result;
+    try {
+      return await operations.exec(command, cwd, {
+        ...rest,
+        onData: (data: Buffer) => emit(redactor.push(decoder.decode(data, { stream: true }))),
+      });
+    } finally {
+      emit(redactor.push(decoder.decode()));
+      emit(redactor.finish());
+    }
   },
 });
 
@@ -83,12 +86,17 @@ export const registerBashSecretScrub = (pi: ExtensionAPI): void => {
     installed = true;
     import("@earendil-works/pi-coding-agent")
       .then(({ createBashToolDefinition, createLocalBashOperations }) => {
-        const operations = wrapWithRedaction(
-          createLocalBashOperations({ shellPath }),
-          () => redactionValues,
-        );
+        const wrapOperations = (operations: BashOperations): BashOperations =>
+          wrapWithRedaction(operations, () => redactionValues);
+        const options = { spawnHook, commandPrefix, shellPath };
+        const operations = wrapOperations(createLocalBashOperations({ shellPath }));
+        const definition = createBashToolDefinition(cwd, { ...options, operations });
+        // A host-local capability, not a dependency on Fabric or a load-order race.
+        // Without a compatible Fabric, Pi executes this same scrubbed tool normally.
         pi.registerTool(
-          createBashToolDefinition(cwd, { operations, spawnHook, commandPrefix, shellPath }),
+          Object.assign(definition, {
+            [FABRIC_BASH_MIDDLEWARE]: { version: 1, options, wrapOperations },
+          }),
         );
       })
       .catch(() => {

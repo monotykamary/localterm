@@ -15,6 +15,9 @@ export const PI_PROCESS_NAME = "pi";
 // user's configured shell + command prefix.
 export const PI_SETTINGS_FILENAME = "settings.json";
 
+// Host-local opt-in; matches pi-fabric/protocol without requiring Fabric to be installed.
+export const FABRIC_BASH_MIDDLEWARE = Symbol.for("pi-fabric:bash-middleware:v1");
+
 // Canonical validation patterns — mirror localterm-server's zod schemas so a
 // malformed or hostile policy file can never trick the scrub into deleting an
 // unrelated env var. An env var in particular must match the strict uppercase

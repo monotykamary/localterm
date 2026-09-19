@@ -62,6 +62,23 @@ For untrusted or unmonitored agents, **don't wire secrets to the `pi` process at
 
 The scrub overrides pi's built-in `bash` tool **by name** (extensions apply after the built-in in pi's tool registry). It reconstructs the tool via `createBashToolDefinition` and preserves a user's configured `shellPath` and `shellCommandPrefix` (read from `~/.pi/agent/settings.json` + `<cwd>/.pi/settings.json`) so the override is behavior-identical to the built-in apart from the env scrub. If another extension also overrides `bash`, only the first-registered one wins — that's a pi-level constraint.
 
+## Fabric background-shell integration
+
+With pi-fabric 0.92.33 or newer, nested `pi.bash` calls use Fabric's local process
+runner while retaining this extension's environment scrub and streaming output
+redaction. Fabric owns automatic backgrounding, `background: true`, `cwd`, PIDs,
+hard timeouts, cancellation, and session cleanup. Output is redacted **before**
+Fabric records previews or background logs; Pi's own credentials remain intact.
+
+The registered bash definition carries the host-local
+`Symbol.for("pi-fabric:bash-middleware:v1")` capability. No Fabric dependency,
+second tool registration, or load-order handshake is needed. Without compatible
+Fabric, the same standalone scrubbed/redacted bash implementation runs as before.
+Policy refresh on `session_start` applies to future commands through either path.
+
+Both packages must be updated, then `/reload` Pi to load the rebuilt extensions.
+This remains defense-in-depth, not protection against deliberate secret recovery.
+
 ## Requirements
 
 - pi ≥ 0.80.7 (uses `agent_settled`, the shared extension event bus, the `spawnHook` tool option, and the `createBashToolDefinition` export).
