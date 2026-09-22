@@ -1,5 +1,13 @@
 # localterm
 
+## 2.79.11
+
+### Patch Changes
+
+- 140fa50: Fix thin terminal borders disappearing on low-DPI displays by scanning cropped glyph images with their own dimensions instead of the reusable scratch canvas's dimensions.
+- Updated dependencies [140fa50]
+  - @monotykamary/localterm-server@2.79.11
+
 ## 2.79.10
 
 ### Patch Changes
