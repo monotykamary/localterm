@@ -20,7 +20,9 @@ LocalTerm instead rasterizes monochrome text on an opaque 2D canvas using canoni
 
 Fractional glyph coverage requires separate RGB and alpha blend factors. Keeping the destination alpha opaque prevents the browser compositor from adding the background twice and producing bright, fuzzy edge pixels.
 
-The reconstruction runs only when a glyph misses the atlas cache. It reads the calculated glyph raster bounds rather than the larger reusable scratch canvas and clears exact background pixels through a packed fast path. Cached frame rendering does not execute this code.
+The reconstruction runs only when a glyph misses the atlas cache. It reads the calculated glyph raster bounds rather than the larger reusable scratch canvas and clears exact background pixels through a packed fast path. The subsequent bounds scan must use the cropped image's row stride and clamp its search to that image; using the scratch canvas's dimensions can discard single-pixel borders at DPR 1. Cached frame rendering does not execute this code.
+
+Deterministic bounds regressions run with `bun run --cwd apps/terminal test tests/utils/xterm-glyph-bounds.test.ts`. When changing this path, run the browser diagnostic at both `DPR=1` and `DPR=2`; a high-DPI-only check can hide missing thin strokes.
 
 ## Visual comparison
 

@@ -1,7 +1,7 @@
 diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 --- a/lib/addon-webgl.mjs
 +++ b/lib/addon-webgl.mjs
-@@ -14,62 +14,5836 @@
+@@ -14,62 +14,5837 @@
   *  Copyright (c) Microsoft Corporation. All rights reserved.
   *  Licensed under the MIT License. See License.txt in the project root for license information.
   *--------------------------------------------------------------------------------------------*/
@@ -3603,13 +3603,14 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +      );
 +    }
 +    _findGlyphBoundingBox(e, t, r, s, a, o) {
++      // Cropped readbacks have their own stride and bounds, not the scratch canvas's.
 +      t.top = 0;
-+      let n = s ? this._config.deviceCellHeight : this._tmpCanvas.height,
-+        L = s ? this._config.deviceCellWidth : r,
++      let n = s ? Math.min(this._config.deviceCellHeight, e.height) : e.height,
++        L = Math.min(s ? this._config.deviceCellWidth : r, e.width),
 +        T = !1;
 +      for (let h = 0; h < n; h++) {
 +        for (let d = 0; d < L; d++) {
-+          let _ = h * this._tmpCanvas.width * 4 + d * 4 + 3;
++          let _ = h * e.width * 4 + d * 4 + 3;
 +          if (e.data[_] !== 0) {
 +            ((t.top = h), (T = !0));
 +            break;
@@ -3618,9 +3619,9 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +        if (T) break;
 +      }
 +      ((t.left = 0), (T = !1));
-+      for (let h = 0; h < o + L; h++) {
++      for (let h = 0; h < Math.min(o + L, e.width); h++) {
 +        for (let d = 0; d < n; d++) {
-+          let _ = d * this._tmpCanvas.width * 4 + h * 4 + 3;
++          let _ = d * e.width * 4 + h * 4 + 3;
 +          if (e.data[_] !== 0) {
 +            ((t.left = h), (T = !0));
 +            break;
@@ -3629,9 +3630,9 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +        if (T) break;
 +      }
 +      ((t.right = L), (T = !1));
-+      for (let h = o + L - 1; h >= o; h--) {
++      for (let h = Math.min(o + L, e.width) - 1; h >= o; h--) {
 +        for (let d = 0; d < n; d++) {
-+          let _ = d * this._tmpCanvas.width * 4 + h * 4 + 3;
++          let _ = d * e.width * 4 + h * 4 + 3;
 +          if (e.data[_] !== 0) {
 +            ((t.right = h), (T = !0));
 +            break;
@@ -3642,7 +3643,7 @@ diff --git a/lib/addon-webgl.mjs b/lib/addon-webgl.mjs
 +      ((t.bottom = n), (T = !1));
 +      for (let h = n - 1; h >= 0; h--) {
 +        for (let d = 0; d < L; d++) {
-+          let _ = h * this._tmpCanvas.width * 4 + d * 4 + 3;
++          let _ = h * e.width * 4 + d * 4 + 3;
 +          if (e.data[_] !== 0) {
 +            ((t.bottom = h), (T = !0));
 +            break;
