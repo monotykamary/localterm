@@ -35,6 +35,7 @@ const EXT_TO_LANG: Record<string, string> = {
   cjs: "javascript",
   py: "python",
   pyw: "python",
+  bend: "bend",
   css: "css",
   scss: "scss",
   less: "less",

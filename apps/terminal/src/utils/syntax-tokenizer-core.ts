@@ -15,6 +15,7 @@ const LANG_LOADERS: Record<string, () => Promise<unknown>> = {
   javascript: () => import("@shikijs/langs/javascript"),
   jsx: () => import("@shikijs/langs/jsx"),
   python: () => import("@shikijs/langs/python"),
+  bend: () => import("./bend-grammar"),
   css: () => import("@shikijs/langs/css"),
   scss: () => import("@shikijs/langs/scss"),
   less: () => import("@shikijs/langs/less"),
