@@ -1,5 +1,15 @@
 # localterm
 
+## 2.80.0
+
+### Minor Changes
+
+- fe20cc6: Add Bend 2 syntax highlighting for `.bend` files in diff views, including laws, proofs, types, literals, and comments in dark and light themes.
+
+### Patch Changes
+
+- @monotykamary/localterm-server@2.80.0
+
 ## 2.79.11
 
 ### Patch Changes
