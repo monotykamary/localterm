@@ -1,5 +1,11 @@
 # localterm-server
 
+## 2.80.1
+
+### Patch Changes
+
+- 0015e1d: Fix macOS PTY descriptor leaks that eventually prevent new shells from opening. Ship the patched macOS backend for registry installs, clean up failed startups, and report spawn failures instead of leaving blank terminals.
+
 ## 2.80.0
 
 ## 2.79.11
