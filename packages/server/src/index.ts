@@ -58,6 +58,7 @@ import {
   HTTP_STATUS_ACCEPTED,
   HTTP_STATUS_BAD_REQUEST,
   HTTP_STATUS_CONFLICT,
+  HTTP_STATUS_SERVICE_UNAVAILABLE,
   HTTP_STATUS_CREATED,
   HTTP_STATUS_NOT_FOUND,
   HTTP_STATUS_PAYLOAD_TOO_LARGE,
@@ -83,6 +84,7 @@ import {
   WS_BACKPRESSURE_THRESHOLD_BYTES,
   WS_CLOSE_BACKPRESSURE,
   WS_CLOSE_CAPACITY_REACHED,
+  WS_CLOSE_SPAWN_FAILED,
   WS_CLOSE_POLICY_VIOLATION,
   WS_HEARTBEAT_GRACE_MS,
   WS_HEARTBEAT_INTERVAL_MS,
@@ -103,6 +105,7 @@ import { openChromeInspect } from "./utils/open-chrome-inspect.js";
 import { readServerVersion } from "./utils/read-server-version.js";
 import { UpdateCheckStore, type LatestVersionFetcher } from "./update-check-store.js";
 import { ServerErrorException, serverError } from "./errors.js";
+import { SessionSpawnError } from "./session-spawn-error.js";
 import { AutomationGitWatcher } from "./automation-git-watcher.js";
 import { FolderWatchManager } from "./folder-watch-manager.js";
 import { SessionEventManager } from "./session-event-manager.js";
@@ -730,17 +733,27 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
     if (registry.atCapacity()) {
       return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
     }
-    const id = registry.spawnDetached(
-      {
-        cwd,
-        cols: parsed.data.cols,
-        rows: parsed.data.rows,
-        shell: resolveShellOverride(parsed.data.shell),
-        initialCommand: parsed.data.command,
-      },
-      parsed.data.pinned ?? true,
-      ownerFor(context),
-    );
+    let id: string | null;
+    try {
+      id = registry.spawnDetached(
+        {
+          cwd,
+          cols: parsed.data.cols,
+          rows: parsed.data.rows,
+          shell: resolveShellOverride(parsed.data.shell),
+          initialCommand: parsed.data.command,
+        },
+        parsed.data.pinned ?? true,
+        ownerFor(context),
+      );
+    } catch (error) {
+      if (!(error instanceof SessionSpawnError)) throw error;
+      console.error(error);
+      return context.json(
+        { error: "spawn_failed", message: error.message },
+        HTTP_STATUS_SERVICE_UNAVAILABLE,
+      );
+    }
     if (!id) return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
     if (parsed.data.name) registry.setTitleById(id, parsed.data.name, ownerFor(context));
     const session = registry.list(ownerFor(context)).find((item) => item.id === id);
@@ -924,17 +937,27 @@ const buildApiRoutes = (ctx: DaemonContext): Hono => {
       return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
     }
     const owner = ownerFor(context);
-    const id = registry.spawnDetached(
-      {
-        cwd,
-        cols: parsed.data.cols,
-        rows: parsed.data.rows,
-        shell: resolveShellOverride(parsed.data.shell),
-        env: parsed.data.env,
-      },
-      false,
-      owner,
-    );
+    let id: string | null;
+    try {
+      id = registry.spawnDetached(
+        {
+          cwd,
+          cols: parsed.data.cols,
+          rows: parsed.data.rows,
+          shell: resolveShellOverride(parsed.data.shell),
+          env: parsed.data.env,
+        },
+        false,
+        owner,
+      );
+    } catch (error) {
+      if (!(error instanceof SessionSpawnError)) throw error;
+      console.error(error);
+      return context.json(
+        { error: "spawn_failed", message: error.message },
+        HTTP_STATUS_SERVICE_UNAVAILABLE,
+      );
+    }
     if (!id) return context.json({ error: "capacity" }, HTTP_STATUS_CONFLICT);
     const result: ExecResult | null = await registry.execInSession(
       id,
@@ -3154,22 +3177,38 @@ export const createServer = async (options: ServerOptions = {}): Promise<Running
                   redactValues: claimedRun.redactionValues ?? [],
                 }
               : undefined;
-            const spawned = registry.spawnAndAttach(
-              ws,
-              {
-                cwd: hibernatedTab?.cwd ?? sessionCwd,
-                shell: hibernatedTab?.shell ?? requestedShell,
-                replaySeed: hibernatedTab?.scrollback,
-                initialCommand:
-                  claimedRun && claimedRun.runner.kind === "shell"
-                    ? claimedRun.runner.command
-                    : requestedInitialCommand,
-                env: claimedRun?.env,
-              },
-              automation,
-              owner,
-              requestedWindowId,
-            );
+            let spawned: ManagedSession | null;
+            try {
+              spawned = registry.spawnAndAttach(
+                ws,
+                {
+                  cwd: hibernatedTab?.cwd ?? sessionCwd,
+                  shell: hibernatedTab?.shell ?? requestedShell,
+                  replaySeed: hibernatedTab?.scrollback,
+                  initialCommand:
+                    claimedRun && claimedRun.runner.kind === "shell"
+                      ? claimedRun.runner.command
+                      : requestedInitialCommand,
+                  env: claimedRun?.env,
+                },
+                automation,
+                owner,
+                requestedWindowId,
+              );
+            } catch (error) {
+              if (!(error instanceof SessionSpawnError)) throw error;
+              console.error(error);
+              if (claimedRun) {
+                automationStore.updateRun(claimedRun.automationId, claimedRun.runId, {
+                  status: "failed",
+                  finishedAt: Date.now(),
+                });
+                runTabHandles.delete(claimedRun.runId);
+                broadcastAutomations();
+              }
+              ws.close(WS_CLOSE_SPAWN_FAILED, error.message);
+              return;
+            }
             if (!spawned) {
               ws.close(WS_CLOSE_CAPACITY_REACHED, "session capacity reached");
               return;

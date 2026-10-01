@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { DIFF_VIEWER_REALTIME_REFRESH_DEBOUNCE_MS } from "../../src/lib/constants";
 import type {
   GitBranchInfo,
@@ -9,6 +9,32 @@ import type {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { DiffViewer } from "../../src/components/diff-viewer";
 import type { SyntaxHighlightColorScheme } from "../../src/utils/syntax-highlight";
+import type { TokenizeDocumentsRequest } from "../../src/utils/syntax-tokenizer-core";
+
+// Grammar correctness has its own tests. Keep cold Shiki imports from leaving
+// background token jobs alive across this component suite's cache cleanup.
+vi.mock("../../src/utils/syntax-tokenizer-core", () => ({
+  tokenizeDocuments: vi.fn(async (request: TokenizeDocumentsRequest) => {
+    const side = (text: string | null, maxLines: number) => {
+      if (text === null) return null;
+      const lines = text.split("\n");
+      const quads = (maxLines > 0 ? lines.slice(0, maxLines) : lines).map((line) => [
+        0,
+        line.length,
+        0,
+        0,
+      ]);
+      return {
+        dark: { palette: ["#dddddd"], lines: quads },
+        light: { palette: ["#111111"], lines: quads },
+      };
+    };
+    return {
+      old: side(request.oldText, request.oldMaxLines),
+      next: side(request.newText, request.newMaxLines),
+    };
+  }),
+}));
 
 vi.mock("../../src/utils/fetch-git-diff", () => ({
   fetchGitDiffFiles: vi.fn(),
@@ -76,7 +102,7 @@ import {
   fetchGitDiffFiles,
 } from "../../src/utils/fetch-git-diff";
 import { clearDiffFileContentsCache } from "../../src/utils/diff-file-contents";
-import { clearSyntaxTokenCache } from "../../src/utils/syntax-token-manager";
+import { clearSyntaxTokenCache, requestSyntaxTokens } from "../../src/utils/syntax-token-manager";
 
 const filesMock = vi.mocked(fetchGitDiffFiles);
 const patchMock = vi.mocked(fetchGitDiffFilePatch);
@@ -200,6 +226,7 @@ const renderDiffViewer = ({
   );
 
 afterEach(() => {
+  cleanup();
   filesMock.mockReset();
   patchMock.mockReset();
   contentsMock.mockReset();
@@ -241,11 +268,21 @@ describe("DiffViewer", () => {
     const { rerender } = renderDiffViewer({ syntaxHighlightColorScheme: "dark" });
 
     await screen.findByText("BETA", {}, { timeout: 5000 });
-    let darkColor = "";
-    await vi.waitFor(() => {
-      darkColor = screen.getByText("BETA").style.color;
-      expect(darkColor).not.toBe("");
+    // Await the actual token job, not a wall-clock poll of Shiki's cold import.
+    await act(async () => {
+      await requestSyntaxTokens({
+        langId: "typescript",
+        documents: {
+          oldText: CONTENTS["src/app.ts"].oldContent,
+          newText: CONTENTS["src/app.ts"].newContent,
+        },
+        oldMaxLines: 3,
+        newMaxLines: 3,
+        priority: 0,
+      });
     });
+    const darkColor = screen.getByText("BETA").style.color;
+    expect(darkColor).not.toBe("");
 
     rerender(
       <DiffViewer
@@ -257,11 +294,9 @@ describe("DiffViewer", () => {
       />,
     );
 
-    await vi.waitFor(() => {
-      const lightColor = screen.getByText("BETA").style.color;
-      expect(lightColor).not.toBe("");
-      expect(lightColor).not.toBe(darkColor);
-    });
+    const lightColor = screen.getByText("BETA").style.color;
+    expect(lightColor).not.toBe("");
+    expect(lightColor).not.toBe(darkColor);
     expect(contentsMock).toHaveBeenCalledTimes(1);
     expect(contentsMock.mock.calls[0]?.slice(0, 2)).toEqual(["/repo", "src/app.ts"]);
   });

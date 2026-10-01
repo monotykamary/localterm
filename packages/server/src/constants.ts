@@ -545,6 +545,7 @@ export const HTTP_STATUS_NOT_FOUND = 404;
 export const HTTP_STATUS_BAD_REQUEST = 400;
 export const HTTP_STATUS_ACCEPTED = 202;
 export const HTTP_STATUS_CONFLICT = 409;
+export const HTTP_STATUS_SERVICE_UNAVAILABLE = 503;
 export const HTTP_STATUS_PAYLOAD_TOO_LARGE = 413;
 export const HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE = 415;
 
@@ -821,6 +822,7 @@ export const WS_READY_STATE_OPEN = 1;
 export const WS_CLOSE_POLICY_VIOLATION = 1008;
 export const WS_CLOSE_BACKPRESSURE = 4429;
 export const WS_CLOSE_CAPACITY_REACHED = 4503;
+export const WS_CLOSE_SPAWN_FAILED = 4500;
 
 // Ambient tab provenance over the WS handshake. The daemon's CDP client injects
 // a unique token into every page-type target on our origin (via

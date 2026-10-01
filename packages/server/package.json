@@ -23,7 +23,8 @@
   },
   "files": [
     "dist",
-    "extension"
+    "extension",
+    "vendor/node-pty"
   ],
   "os": [
     "darwin",
@@ -68,6 +69,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "node ../../scripts/prepare-server-publish.mjs",
     "dev": "tsc -p tsconfig.build.json --watch",
     "test": "vp test --run --tagsFilter '!integration && !e2e'",
     "test:integration": "vp test --run --tagsFilter integration",

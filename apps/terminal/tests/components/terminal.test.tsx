@@ -585,6 +585,20 @@ describe("Terminal modal", () => {
     expect(screen.queryByText(/disconnected · code 4429/i)).not.toBeNull();
   });
 
+  it("shows a failed shell allocation before any session frame and does not retry automatically", () => {
+    render(<Terminal />);
+    act(() => {
+      fakeWebSockets[0]?.fireOpen();
+      fakeWebSockets[0]?.fireClose(
+        4500,
+        "Failed to start shell; terminal resources may be exhausted.",
+      );
+      vi.advanceTimersByTime(5000);
+    });
+    expect(screen.queryByText(/terminal resources may be exhausted/i)).not.toBeNull();
+    expect(fakeWebSockets).toHaveLength(1);
+  });
+
   it("blocks the auto-reconnect loop after the shell exits", () => {
     render(<Terminal />);
     act(() => {

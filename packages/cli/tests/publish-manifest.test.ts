@@ -6,6 +6,8 @@ interface PackageManifest {
   name: string;
   version: string;
   private?: boolean;
+  files?: string[];
+  scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
@@ -26,6 +28,12 @@ describe("publish manifests", () => {
       }
     });
   }
+
+  it("ships the patched macOS PTY backend instead of relying on workspace patches", () => {
+    const server = manifests.find((manifest) => manifest.name === "@monotykamary/localterm-server");
+    expect(server?.files).toContain("vendor/node-pty");
+    expect(server?.scripts?.prepack).toBe("node ../../scripts/prepare-server-publish.mjs");
+  });
 
   it("pins the CLI to the server version in the fixed release group", () => {
     const cli = manifests.find((manifest) => manifest.name === "@monotykamary/localterm");

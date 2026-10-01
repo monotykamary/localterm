@@ -3,7 +3,8 @@ import { EventEmitter } from "node:events";
 import { rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn, type IPty } from "node-pty";
+import type { IPty } from "node-pty";
+import { spawnPty } from "./pty-backend.js";
 import {
   ALT_SCREEN_FOREGROUND,
   DEFAULT_COLS,
@@ -23,6 +24,7 @@ import { buildPtyEnvironment } from "./build-pty-environment.js";
 import { ensureSpawnHelperExecutable } from "./ensure-spawn-helper-executable.js";
 import { getDefaultShell } from "./default-shell.js";
 import { ShellHookBuilder } from "./shell-hook-builder.js";
+import { SessionSpawnError } from "./session-spawn-error.js";
 import type { SpawnPtyInput } from "./types.js";
 import { formatWorkingDirectoryTitle } from "./utils/format-working-directory-title.js";
 import { parseAltScreenFromChunk } from "./utils/parse-alt-screen.js";
@@ -167,13 +169,18 @@ export class Session extends EventEmitter<SessionEvents> {
       }
     }
 
-    this.pty = spawn(this.shell, shellArgs, {
-      name: TERM_TYPE,
-      cols: this.currentCols,
-      rows: this.currentRows,
-      cwd: this.cwd,
-      env,
-    });
+    try {
+      this.pty = spawnPty(this.shell, shellArgs, {
+        name: TERM_TYPE,
+        cols: this.currentCols,
+        rows: this.currentRows,
+        cwd: this.cwd,
+        env,
+      });
+    } catch (error) {
+      this.cleanUpHookFiles();
+      throw new SessionSpawnError(error);
+    }
 
     this.pty.onData((data) => {
       // Intercept standalone DA1/DA2 identity queries: answer them from the

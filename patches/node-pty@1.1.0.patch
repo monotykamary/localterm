@@ -141,11 +141,126 @@ index 17f1d980e62e017d77058627a7a15c4c29f9470c..2f5b37f624a713a72017c33e3296b33c
 +fs.rmSync(PREBUILDS_ROOT, { recursive: true, force: true });
 +console.log('\x1b[33m> Rebuilding from source (prebuilds removed)\x1b[0m');
 +process.exit(1);
+diff --git a/src/unix/darwin-spawn.h b/src/unix/darwin-spawn.h
+new file mode 100644
+index 0000000..243fd7a
+--- /dev/null
++++ b/src/unix/darwin-spawn.h
+@@ -0,0 +1,74 @@
++#pragma once
++#include "scoped-fd.h"
++
++static void
++pty_posix_spawn(char** argv, char** env,
++                const struct termios *termp,
++                const struct winsize *winp,
++                int* master, pid_t* pid, int* err) {
++  *master = -1;
++  *pid = -1;
++  *err = [&]() -> int {
++    // Reserve missing stdio slots without consuming extra PTYs. The last
++    // open can be above stderr; it must be closed too (even at index zero).
++    PtyScopedFd low_fds[3];
++    for (auto& fd : low_fds) {
++      fd.reset(open("/dev/null", O_RDWR));
++      if (fd.get() == -1) return errno;
++      if (fd.get() > STDERR_FILENO) break;
++    }
++
++    PtyScopedFd master_fd(posix_openpt(O_RDWR));
++    if (master_fd.get() == -1) return errno;
++    if (grantpt(master_fd.get()) == -1 || unlockpt(master_fd.get()) == -1) return errno;
++
++    // ptsname() uses shared storage; TIOCPTYGNAME is thread-safe.
++    char slave_name[128];
++    if (ioctl(master_fd.get(), TIOCPTYGNAME, slave_name) == -1) return errno;
++    PtyScopedFd slave_fd(open(slave_name, O_RDWR | O_NOCTTY));
++    if (slave_fd.get() == -1) return errno;
++    if (termp && tcsetattr(slave_fd.get(), TCSANOW, termp) == -1) return errno;
++    if (winp && ioctl(slave_fd.get(), TIOCSWINSZ, winp) == -1) return errno;
++
++    posix_spawn_file_actions_t acts;
++    int result = posix_spawn_file_actions_init(&acts);
++    if (result != 0) return result;
++    posix_spawnattr_t attrs;
++    result = posix_spawnattr_init(&attrs);
++    if (result != 0) {
++      posix_spawn_file_actions_destroy(&acts);
++      return result;
++    }
++
++    result = [&]() -> int {
++      int error;
++      for (int target = STDIN_FILENO; target <= STDERR_FILENO; ++target) {
++        error = posix_spawn_file_actions_adddup2(&acts, slave_fd.get(), target);
++        if (error != 0) return error;
++      }
++      error = posix_spawn_file_actions_addclose(&acts, slave_fd.get());
++      if (error != 0) return error;
++      error = posix_spawn_file_actions_addclose(&acts, master_fd.get());
++      if (error != 0) return error;
++      error = posix_spawnattr_setflags(&attrs, POSIX_SPAWN_CLOEXEC_DEFAULT |
++          POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSID);
++      if (error != 0) return error;
++      sigset_t signals;
++      sigfillset(&signals);
++      error = posix_spawnattr_setsigdefault(&attrs, &signals);
++      if (error != 0) return error;
++      sigemptyset(&signals);
++      error = posix_spawnattr_setsigmask(&attrs, &signals);
++      if (error != 0) return error;
++      do {
++        error = posix_spawn(pid, argv[0], &acts, &attrs, argv, env);
++      } while (error == EINTR);
++      return error;
++    }();
++
++    posix_spawnattr_destroy(&attrs);
++    posix_spawn_file_actions_destroy(&acts);
++    if (result == 0) *master = master_fd.release();
++    return result;
++  }();
++}
 diff --git a/src/unix/pty.cc b/src/unix/pty.cc
-index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..58cdd45fcd38b86edba119516bccf6ffc58afb6c 100644
+index 7b4b9e1..6958c29 100644
 --- a/src/unix/pty.cc
 +++ b/src/unix/pty.cc
-@@ -504,11 +504,11 @@ Napi::Value PtyResize(const Napi::CallbackInfo& info) {
+@@ -25,6 +25,7 @@
+ #include <stdlib.h>
+ #include <unistd.h>
+ #include <thread>
++#include "scoped-fd.h"
+ 
+ #include <sys/types.h>
+ #include <sys/stat.h>
+@@ -131,11 +132,12 @@ void SetupExitCallback(Napi::Env env, Napi::Function cb, pid_t pid) {
+     };
+ 
+     int ret;
+-    int stat_loc;
++    int stat_loc = 0;
+ #if defined(__APPLE__)
+     // Based on
+     // https://source.chromium.org/chromium/chromium/src/+/main:base/process/kill_mac.cc;l=35-69?
+-    int kq = HANDLE_EINTR(kqueue());
++    PtyScopedFd kqueue_fd(HANDLE_EINTR(kqueue()));
++    int kq = kqueue_fd.get();
+     struct kevent change = {0};
+     EV_SET(&change, pid, EVFILT_PROC, EV_ADD, NOTE_EXIT, 0, NULL);
+     ret = HANDLE_EINTR(kevent(kq, &change, 1, NULL, 0, NULL));
+@@ -370,9 +372,10 @@ Napi::Value PtyFork(const Napi::CallbackInfo& info) {
+   int err = -1;
+   pty_posix_spawn(argv, env, term, &winp, &master, &pid, &err);
+   if (err != 0) {
+-    throw Napi::Error::New(napiEnv, "posix_spawnp failed.");
++    throw Napi::Error::New(napiEnv, std::string("posix_spawnp failed: ") + strerror(err));
+   }
+   if (pty_nonblock(master) == -1) {
++    close(master);
+     throw Napi::Error::New(napiEnv, "Could not set master fd to nonblocking.");
+   }
+ #else
+@@ -504,11 +507,11 @@ Napi::Value PtyResize(const Napi::CallbackInfo& info) {
    Napi::Env env(info.Env());
    Napi::HandleScope scope(env);
  
@@ -159,7 +274,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..58cdd45fcd38b86edba119516bccf6ff
    }
  
    int fd = info[0].As<Napi::Number>().Int32Value();
-@@ -516,8 +516,8 @@ Napi::Value PtyResize(const Napi::CallbackInfo& info) {
+@@ -516,8 +519,8 @@ Napi::Value PtyResize(const Napi::CallbackInfo& info) {
    struct winsize winp;
    winp.ws_col = info[1].As<Napi::Number>().Int32Value();
    winp.ws_row = info[2].As<Napi::Number>().Int32Value();
@@ -170,6 +285,140 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..58cdd45fcd38b86edba119516bccf6ff
  
    if (ioctl(fd, TIOCSWINSZ, &winp) == -1) {
      switch (errno) {
+@@ -684,104 +687,7 @@ pty_getproc(int fd, char *tty) {
+ #endif
+ 
+ #if defined(__APPLE__)
+-static void
+-pty_posix_spawn(char** argv, char** env,
+-                const struct termios *termp,
+-                const struct winsize *winp,
+-                int* master,
+-                pid_t* pid,
+-                int* err) {
+-  int low_fds[3];
+-  size_t count = 0;
+-
+-  for (; count < 3; count++) {
+-    low_fds[count] = posix_openpt(O_RDWR);
+-    if (low_fds[count] >= STDERR_FILENO)
+-      break;
+-  }
+-
+-  int flags = POSIX_SPAWN_CLOEXEC_DEFAULT |
+-              POSIX_SPAWN_SETSIGDEF |
+-              POSIX_SPAWN_SETSIGMASK |
+-              POSIX_SPAWN_SETSID;
+-  *master = posix_openpt(O_RDWR);
+-  if (*master == -1) {
+-    return;
+-  }
+-
+-  int res = grantpt(*master) || unlockpt(*master);
+-  if (res == -1) {
+-    return;
+-  }
+-
+-  // Use TIOCPTYGNAME instead of ptsname() to avoid threading problems.
+-  int slave;
+-  char slave_pty_name[128];
+-  res = ioctl(*master, TIOCPTYGNAME, slave_pty_name);
+-  if (res == -1) {
+-    return;
+-  }
+-
+-  slave = open(slave_pty_name, O_RDWR | O_NOCTTY);
+-  if (slave == -1) {
+-    return;
+-  }
+-
+-  if (termp) {
+-    res = tcsetattr(slave, TCSANOW, termp);
+-    if (res == -1) {
+-      return;
+-    };
+-  }
+-
+-  if (winp) {
+-    res = ioctl(slave, TIOCSWINSZ, winp);
+-    if (res == -1) {
+-      return;
+-    }
+-  }
+-
+-  posix_spawn_file_actions_t acts;
+-  posix_spawn_file_actions_init(&acts);
+-  posix_spawn_file_actions_adddup2(&acts, slave, STDIN_FILENO);
+-  posix_spawn_file_actions_adddup2(&acts, slave, STDOUT_FILENO);
+-  posix_spawn_file_actions_adddup2(&acts, slave, STDERR_FILENO);
+-  posix_spawn_file_actions_addclose(&acts, slave);
+-  posix_spawn_file_actions_addclose(&acts, *master);
+-
+-  posix_spawnattr_t attrs;
+-  posix_spawnattr_init(&attrs);
+-  *err = posix_spawnattr_setflags(&attrs, flags);
+-  if (*err != 0) {
+-    goto done;
+-  }
+-
+-  sigset_t signal_set;
+-  /* Reset all signal the child to their default behavior */
+-  sigfillset(&signal_set);
+-  *err = posix_spawnattr_setsigdefault(&attrs, &signal_set);
+-  if (*err != 0) {
+-    goto done;
+-  }
+-
+-  /* Reset the signal mask for all signals */
+-  sigemptyset(&signal_set);
+-  *err = posix_spawnattr_setsigmask(&attrs, &signal_set);
+-  if (*err != 0) {
+-    goto done;
+-  }
+-
+-  do
+-    *err = posix_spawn(pid, argv[0], &acts, &attrs, argv, env);
+-  while (*err == EINTR);
+-done:
+-  posix_spawn_file_actions_destroy(&acts);
+-  posix_spawnattr_destroy(&attrs);
+-
+-  for (; count > 0; count--) {
+-    close(low_fds[count]);
+-  }
+-}
++#include "darwin-spawn.h"
+ #endif
+ 
+ /**
+diff --git a/src/unix/scoped-fd.h b/src/unix/scoped-fd.h
+new file mode 100644
+index 0000000..b2371db
+--- /dev/null
++++ b/src/unix/scoped-fd.h
+@@ -0,0 +1,22 @@
++#pragma once
++
++// Each native descriptor has one owner, including failed-spawn paths.
++class PtyScopedFd {
++ public:
++  explicit PtyScopedFd(int fd = -1) : fd_(fd) {}
++  ~PtyScopedFd() { reset(); }
++  PtyScopedFd(const PtyScopedFd&) = delete;
++  PtyScopedFd& operator=(const PtyScopedFd&) = delete;
++  int get() const { return fd_; }
++  int release() {
++    int fd = fd_;
++    fd_ = -1;
++    return fd;
++  }
++  void reset(int fd = -1) {
++    if (fd_ >= 0) close(fd_);
++    fd_ = fd;
++  }
++ private:
++  int fd_;
++};
 diff --git a/typings/node-pty.d.ts b/typings/node-pty.d.ts
 index 6f050ff1d97b8d3477be7ee95d2af516bd9517b7..d9f23f6b4eb4784576c9e348976e10d827cc8951 100644
 --- a/typings/node-pty.d.ts

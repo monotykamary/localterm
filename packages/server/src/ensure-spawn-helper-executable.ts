@@ -1,9 +1,7 @@
 import { chmodSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { createRequire } from "node:module";
 import path from "node:path";
-
-const requireCjs = createRequire(import.meta.url);
+import { resolveNodePtyDirectory } from "./utils/resolve-node-pty-directory.js";
 const SPAWN_HELPER_MODE = 0o755;
 
 let alreadyEnsured = false;
@@ -77,8 +75,7 @@ export const ensureSpawnHelperExecutable = (): void => {
   alreadyEnsured = true;
   let nodePtyDir: string;
   try {
-    const ptyEntry = requireCjs.resolve("node-pty");
-    nodePtyDir = path.dirname(path.dirname(ptyEntry));
+    nodePtyDir = resolveNodePtyDirectory();
   } catch {
     return;
   }
