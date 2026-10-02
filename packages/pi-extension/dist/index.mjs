@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { getCapabilities, setCapabilities } from "@earendil-works/pi-tui";
+import { resetCapabilitiesCache } from "@earendil-works/pi-tui";
 //#region src/constants.ts
 const LOCALTERM_STATE_DIRNAME = ".localterm";
 const SECRETS_FILENAME = "secrets.json";
@@ -323,21 +323,11 @@ const registerBashSecretScrub = (pi) => {
 };
 //#endregion
 //#region extensions/kitty-images.ts
-const KITTY_IDENTITY_ENV = "KITTY_WINDOW_ID";
-const LOCALTERM_MARKER = "localterm";
-const plantKittyIdentityEnv = () => {
-	if (!process.env.LOCALTERM && !process.env.LOCALTERM_SESSION_ID) return;
-	process.env[KITTY_IDENTITY_ENV] ||= LOCALTERM_MARKER;
-};
 const enableKittyImages = () => {
-	plantKittyIdentityEnv();
-	const capabilities = getCapabilities();
-	if (capabilities.images === "kitty" && capabilities.hyperlinks) return;
-	setCapabilities({
-		...capabilities,
-		images: "kitty",
-		hyperlinks: true
-	});
+	if (process.env.LOCALTERM !== "1") return;
+	if (!process.env.PI_IMAGE_PROTOCOL || process.env.PI_IMAGE_PROTOCOL === "auto") process.env.PI_IMAGE_PROTOCOL = "kitty";
+	if (!process.env.PI_HYPERLINKS || process.env.PI_HYPERLINKS === "auto") process.env.PI_HYPERLINKS = "1";
+	resetCapabilitiesCache();
 };
 //#endregion
 //#region extensions/activation.ts

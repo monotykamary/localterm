@@ -3,18 +3,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { AGENT_NOTIFY_EXCERPT_MAX_CHARS } from "../src/constants.js";
 import { extractAssistantExcerpt, formatAgentEndBody } from "../src/utils/agent-notify-body.js";
 
-// AssistantMessage carries api/provider/model/usage/stopReason/timestamp
-// fields from the transitive @earendil-works/pi-ai package, which pi-extension
-// can't import directly. The fixtures below fill those with literal placeholder
-// values and annotate against the importable AgentEndEvent["messages"][number]
-// so TypeScript still type-checks every field without a cast. The content
-// block union mirrors TextContent | ThinkingContent | ToolCall structurally.
-type ContentBlock =
-  | { type: "text"; text: string }
-  | { type: "thinking"; thinking: string }
-  | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> };
-
 type AgentEndMessage = AgentEndEvent["messages"][number];
+type ContentBlock = Extract<AgentEndMessage, { role: "assistant" }>["content"][number];
 
 const assistant = (content: ContentBlock[]): AgentEndMessage => ({
   role: "assistant",

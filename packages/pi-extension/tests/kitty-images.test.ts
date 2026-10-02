@@ -1,103 +1,75 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-
-const capabilityMocks = vi.hoisted(() => ({
-  getCapabilities: vi.fn(),
-  setCapabilities: vi.fn(),
-}));
-
-vi.mock("@earendil-works/pi-tui", () => capabilityMocks);
-
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  detectCapabilities,
+  getCapabilities,
+  resetCapabilitiesCache,
+  setCapabilityOverrides,
+} from "@earendil-works/pi-tui";
 import { enableKittyImages } from "../extensions/kitty-images.js";
 
-describe("enableKittyImages", () => {
+describe("enableKittyImages with Pi v1", () => {
   beforeEach(() => {
-    capabilityMocks.getCapabilities.mockReset();
-    capabilityMocks.setCapabilities.mockReset();
-    delete process.env.KITTY_WINDOW_ID;
-    delete process.env.LOCALTERM;
-    delete process.env.LOCALTERM_SESSION_ID;
+    for (const key of [
+      "KITTY_WINDOW_ID",
+      "TERM_PROGRAM",
+      "GHOSTTY_RESOURCES_DIR",
+      "WEZTERM_PANE",
+      "ITERM_SESSION_ID",
+      "TMUX",
+      "PI_IMAGE_PROTOCOL",
+      "PI_HYPERLINKS",
+    ]) {
+      vi.stubEnv(key, undefined);
+    }
+    vi.stubEnv("LOCALTERM", "1");
+    vi.stubEnv("TERM", "xterm-256color");
+    setCapabilityOverrides({});
+    resetCapabilitiesCache();
   });
 
-  it("enables Kitty images and hyperlinks synchronously", () => {
-    capabilityMocks.getCapabilities.mockReturnValue({
-      images: null,
-      trueColor: true,
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    setCapabilityOverrides({});
+    resetCapabilitiesCache();
+  });
+
+  it("enables images for both fresh detection and an already-cached TUI", () => {
+    getCapabilities();
+    enableKittyImages();
+    expect(getCapabilities()).toMatchObject({ images: "kitty", hyperlinks: true });
+    expect(detectCapabilities()).toMatchObject({ images: "kitty", hyperlinks: true });
+    expect(process.env.KITTY_WINDOW_ID).toBeUndefined();
+    expect(process.env.WEZTERM_PANE).toBeUndefined();
+  });
+
+  it("resolves auto to LocalTerm capabilities", () => {
+    vi.stubEnv("PI_IMAGE_PROTOCOL", "auto");
+    vi.stubEnv("PI_HYPERLINKS", "auto");
+    enableKittyImages();
+    expect(detectCapabilities()).toMatchObject({ images: "kitty", hyperlinks: true });
+  });
+
+  it.each(["none", "iterm2"])("preserves the explicit %s image override", (protocol) => {
+    vi.stubEnv("PI_IMAGE_PROTOCOL", protocol);
+    vi.stubEnv("PI_HYPERLINKS", "0");
+    enableKittyImages();
+    expect(process.env.PI_IMAGE_PROTOCOL).toBe(protocol);
+    expect(getCapabilities()).toMatchObject({
+      images: protocol === "none" ? null : protocol,
       hyperlinks: false,
     });
-
-    enableKittyImages();
-
-    expect(capabilityMocks.setCapabilities).toHaveBeenCalledWith({
-      images: "kitty",
-      trueColor: true,
-      hyperlinks: true,
-    });
   });
 
-  it("replaces a different image protocol with Kitty", () => {
-    capabilityMocks.getCapabilities.mockReturnValue({
-      images: "iterm2",
-      trueColor: false,
-      hyperlinks: true,
-    });
-
+  it("does not override Pi terminal settings", () => {
+    setCapabilityOverrides({ images: null, hyperlinks: false });
     enableKittyImages();
-
-    expect(capabilityMocks.setCapabilities).toHaveBeenCalledWith({
-      images: "kitty",
-      trueColor: false,
-      hyperlinks: true,
-    });
+    expect(getCapabilities()).toMatchObject({ images: null, hyperlinks: false });
   });
 
-  it("does not rewrite capabilities that are already enabled", () => {
-    capabilityMocks.getCapabilities.mockReturnValue({
-      images: "kitty",
-      trueColor: true,
-      hyperlinks: true,
-    });
-
+  it("is inert outside LocalTerm", () => {
+    vi.stubEnv("LOCALTERM", undefined);
     enableKittyImages();
-
-    expect(capabilityMocks.setCapabilities).not.toHaveBeenCalled();
-  });
-
-  it("plants the Kitty identity env var under localterm for bundled pi's own detection", () => {
-    process.env.LOCALTERM_SESSION_ID = "test-session";
-    capabilityMocks.getCapabilities.mockReturnValue({
-      images: "kitty",
-      trueColor: true,
-      hyperlinks: true,
-    });
-
-    enableKittyImages();
-
-    expect(process.env.KITTY_WINDOW_ID).toBe("localterm");
-  });
-
-  it("does not plant the Kitty identity env var outside localterm", () => {
-    capabilityMocks.getCapabilities.mockReturnValue({
-      images: "kitty",
-      trueColor: true,
-      hyperlinks: true,
-    });
-
-    enableKittyImages();
-
-    expect(process.env.KITTY_WINDOW_ID).toBeUndefined();
-  });
-
-  it("keeps an existing KITTY_WINDOW_ID value", () => {
-    process.env.LOCALTERM = "1";
-    process.env.KITTY_WINDOW_ID = "42";
-    capabilityMocks.getCapabilities.mockReturnValue({
-      images: "kitty",
-      trueColor: true,
-      hyperlinks: true,
-    });
-
-    enableKittyImages();
-
-    expect(process.env.KITTY_WINDOW_ID).toBe("42");
+    expect(process.env.PI_IMAGE_PROTOCOL).toBeUndefined();
+    expect(process.env.PI_HYPERLINKS).toBeUndefined();
   });
 });

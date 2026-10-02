@@ -18,6 +18,7 @@
     "test": "turbo run test",
     "test:integration": "turbo run test:integration --concurrency=2",
     "test:e2e": "turbo run test:e2e --concurrency=2",
+    "test:e2e:pi-images": "bun harness/pi-images/probe.mjs",
     "typecheck": "turbo run typecheck",
     "lint": "node scripts/lint.mjs",
     "lint:fix": "node scripts/lint.mjs --fix",

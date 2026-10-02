@@ -2,7 +2,7 @@
 
 A [pi](https://github.com/earendil-works/pi-coding-agent) extension that integrates [localterm](https://github.com/monotykamary/localterm) with pi. Three features, all inert outside localterm:
 
-1. **Kitty graphics + OSC 8 links** — localterm renders xterm.js with Kitty graphics and web-link support, but sets `TERM=xterm-256color` and strips terminal-identity env vars so applications do not infer unrelated emulator features. pi-tui therefore reports images/hyperlinks as unsupported. This extension detects `LOCALTERM=1` (injected into every localterm PTY) and force-enables those capabilities. Localterm handles ordinary Kitty placements, direct/chunked payloads, temp-root file media, and `U=1` Unicode virtual placements used by pi-math and Neovim image integrations.
+1. **Kitty graphics + OSC 8 links** — localterm renders xterm.js with Kitty graphics and web-link support, but sets `TERM=xterm-256color` and strips terminal-identity env vars so applications do not infer unrelated emulator features. pi-tui therefore reports images/hyperlinks as unsupported. This extension detects `LOCALTERM=1` (injected into every localterm PTY) and defaults Pi v1's `PI_IMAGE_PROTOCOL` and `PI_HYPERLINKS` overrides to Kitty and enabled. Explicit environment overrides and Pi's `terminal.images` / `terminal.hyperlinks` settings remain authoritative; it does not spoof another terminal's identity. Localterm handles ordinary Kitty placements, direct/chunked payloads, temp-root file media, and `U=1` Unicode virtual placements used by pi-math and Neovim image integrations.
 2. **Secret scrubbing for the agent's bash tool** — localterm injects a secret only into the shimmed process's env (pi's), not its parent shell. But pi's bash tool spawns commands with `{ ...process.env }`, so without this the agent's commands would inherit every secret pi received. This extension overrides the `bash` tool with a spawn hook that deletes the `pi` process's localterm-managed secret env vars from each command's child env only — pi's own `process.env` (and its provider calls) keep them.
 3. **Desktop notifications on agent completion** — pi's only notification primitive is `ctx.ui.notify`, an in-TUI banner invisible once you switch away from the pi tab. localterm already has an OSC 9 (`ESC ] 9 ; MESSAGE BEL`) → browser desktop-notification pipeline (opt-in via "Desktop alerts" in Settings). The extension writes an OSC 9 on `agent_settled`, reusing that pipeline so a user who stepped away gets an OS notification only after the agent has no automatic retry, compaction, or queued continuation left. It also coordinates with `@monotykamary/pi-retry` through Pi's shared extension event bus so that extension's delayed hidden retries do not produce intermediate notifications. Threshold-gated (turns ≥ 30 s) so quick back-and-forth doesn't spam a focused user; TUI-mode-guarded so `json`/`rpc`/`-p` stdout isn't polluted with OSC bytes. Note: emitting OSC 9 also fires localterm's `notification` automation trigger, so a `notification`-event automation will fire on agent completion.
 
@@ -44,6 +44,20 @@ Or, for a project-only install, add the same path to `<cwd>/.pi/settings.json` i
 
 The extension auto-activates only inside localterm (`LOCALTERM=1`); outside localterm it registers nothing and pi behaves exactly as default.
 
+## Pi v1 fullscreen images
+
+Pi v1 defaults to fullscreen mode and reuses uploaded Kitty images when scrolling.
+LocalTerm's patched image addon preserves uploads across placement-only deletion,
+keeps image tiles through line clears, and separates normal/alternate-buffer
+state. The fix ships in LocalTerm's terminal UI, not only this extension. Update
+LocalTerm as well as the extension, reload the browser UI, and start a fresh Pi
+process so both bundled and extension-visible capability caches use the new
+overrides. Existing Pi settings such as `terminal.showImages: false` are unchanged.
+
+For an older LocalTerm UI, `pi --tui-mode regular` avoids the fullscreen redraw
+path while you arrange the update. The browser regression probe is documented in
+[`harness/pi-images`](../../harness/pi-images/README.md).
+
 ## How the scrub works
 
 localterm stores secret **policy** (names + the env var each exports) in `~/.localterm/secrets.json` and per-process wiring (`pi` → which secret names it receives) in `~/.localterm/processes.json`. **Only names and env vars — never values** (values live in the macOS Keychain). The extension reads those two files to find the env-var names the `pi` process is wired to, and strips exactly those from each bash-tool child's environment.
@@ -81,7 +95,7 @@ This remains defense-in-depth, not protection against deliberate secret recovery
 
 ## Requirements
 
-- pi ≥ 0.80.7 (uses `agent_settled`, the shared extension event bus, the `spawnHook` tool option, and the `createBashToolDefinition` export).
+- pi ≥ 1.0.0 (uses the documented Pi capability overrides, `agent_settled`, the shared extension event bus, the `spawnHook` tool option, and `createBashToolDefinition`). Older Pi installations should keep pi-localterm 0.4.x.
 - localterm with `LOCALTERM=1` in the PTY environment (v0.7+). The scrub additionally needs localterm's secrets/processes policy files on the same machine.
 
 ## License
