@@ -8,20 +8,27 @@ import type { ILinkHandler } from "@xterm/xterm";
 // Everything a pane prints is untrusted input, so the handler only forwards the
 // raw URI: resolveTerminalLink narrows it to http(s) or a previewable file, and
 // unknown schemes are dropped instead of being handed to the OS.
-export const createTerminalLinkHandler = (openLink: (uri: string) => void): ILinkHandler => ({
+export const createTerminalLinkHandler = (
+  openLink: (uri: string) => void,
+  isApplicationMouseEvent: (event: MouseEvent) => boolean,
+): ILinkHandler => ({
   allowNonHttpProtocols: true,
-  activate: (event, uri) => {
-    event.preventDefault();
-    openLink(uri);
-  },
+  activate: createTerminalWebLinksHandler(openLink, isApplicationMouseEvent),
 });
 
 // Bare http(s) text still comes from WebLinksAddon's regex provider; routing it
 // through the same opener keeps one activation path (and skips the addon's own
 // window.open popup trick).
 export const createTerminalWebLinksHandler =
-  (openLink: (uri: string) => void): ((event: MouseEvent, uri: string) => void) =>
+  (
+    openLink: (uri: string) => void,
+    isApplicationMouseEvent: (event: MouseEvent) => boolean,
+  ): ((event: MouseEvent, uri: string) => void) =>
   (event, uri) => {
+    // A mouse-reporting application owns the gesture, regardless of its name or
+    // screen buffer. preventDefault does not stop xterm's PTY reports, so opening
+    // here as well can create a second tab. Native selection overrides stay local.
+    if (isApplicationMouseEvent(event)) return;
     event.preventDefault();
     openLink(uri);
   };

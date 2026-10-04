@@ -61,6 +61,13 @@ const clickLinkOnLine = async (
 };
 
 const installBrowserStubs = () => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+    () =>
+      ({
+        measureText: (text: string) => ({ width: text.length * 6 }),
+        clearRect: () => undefined,
+      }) as never,
+  );
   // jsdom has no canvas for xterm's renderers, and every render path is
   // decoupled from the buffer model the link providers read — freeze the render
   // clock rather than teaching jsdom to paint.
@@ -113,11 +120,265 @@ const createSurface = (openLink: (uri: string) => void) => {
   };
 };
 
+const writeTerminal = (terminal: XtermTerminal, data: string) =>
+  new Promise<void>((resolve) => terminal.write(data, resolve));
+
+const installMouseGeometry = (terminal: XtermTerminal) => {
+  // Exercise xterm's real DOM listeners and protocol encoder; only layout is
+  // missing in jsdom. Coordinates are one-based for links, zero-based for reports.
+  const { _mouseCoordsService } = (
+    terminal as unknown as {
+      _core: {
+        _mouseCoordsService: {
+          getCoords: () => [number, number];
+          getMouseReportCoords: () => { col: number; row: number; x: number; y: number };
+        };
+      };
+    }
+  )._core;
+  vi.spyOn(_mouseCoordsService, "getCoords").mockImplementation(() => [2, 1]);
+  vi.spyOn(_mouseCoordsService, "getMouseReportCoords").mockReturnValue({
+    col: 1,
+    row: 0,
+    x: 10,
+    y: 10,
+  });
+};
+
+const clickTerminal = (terminal: XtermTerminal, modifiers: MouseEventInit = {}) => {
+  const screen = terminal.element?.querySelector(".xterm-screen");
+  if (!screen) throw new Error("xterm screen missing");
+  for (const type of ["mousemove", "mousedown", "mouseup", "click"]) {
+    screen.dispatchEvent(
+      new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        buttons: type === "mousedown" ? 1 : 0,
+        clientX: 10,
+        clientY: 10,
+        detail: 1,
+        ...modifiers,
+      }),
+    );
+  }
+};
+
+const EXTERNAL_URL = "https://example.com/dashboard";
+const LINK_OUTPUTS = [
+  { name: "bare URL", data: EXTERNAL_URL },
+  { name: "OSC 8 label", data: `\u001b]8;;${EXTERNAL_URL}\u001b\\Dashboard\u001b]8;;\u001b\\` },
+  {
+    name: "OSC 8 URL overlapping the web-link provider",
+    data: `\u001b]8;;${EXTERNAL_URL}\u001b\\${EXTERNAL_URL}\u001b]8;;\u001b\\`,
+  },
+];
+
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
+const BUFFER_MODES = [
+  { name: "normal", enter: "" },
+  { name: "alternate", enter: "\u001b[?1049h" },
+];
+const MOUSE_ENCODINGS = [
+  { name: "legacy", enable: "", press: '\u001b[M "!', release: '\u001b[M#"!' },
+  { name: "SGR", enable: "\u001b[?1006h", press: "\u001b[<0;2;1M", release: "\u001b[<0;2;1m" },
+];
+const ALL_LINK_OUTPUTS = [
+  ...LINK_OUTPUTS.map((link) => ({ ...link, uri: EXTERNAL_URL })),
+  ...["file:///Users/me/project/report.md", "reports/index.html"].map((uri) => ({
+    name: uri,
+    uri,
+    data: `\u001b]8;;${uri}\u001b\\Report\u001b]8;;\u001b\\`,
+  })),
+];
+
 describe("createTerminalSurface link handling", () => {
+  describe.each(BUFFER_MODES)("$name buffer", ({ enter }) => {
+    it.each(ALL_LINK_OUTPUTS)(
+      "opens $name locally without mouse tracking",
+      async ({ data, uri }) => {
+        const openLink = vi.fn();
+        const { surface, dispose } = createSurface(openLink);
+        try {
+          installMouseGeometry(surface.terminal);
+          await writeTerminal(surface.terminal, enter + data);
+          clickTerminal(surface.terminal);
+          expect(openLink).toHaveBeenCalledExactlyOnceWith(uri);
+        } finally {
+          dispose();
+        }
+      },
+    );
+
+    describe.each(MOUSE_ENCODINGS)("$name mouse encoding", ({ enable, press, release }) => {
+      describe.each([9, 1000, 1002, 1003])("tracking mode %i", (mode) => {
+        it.each(ALL_LINK_OUTPUTS)(
+          "delegates $name and restores local handling dynamically",
+          async ({ data, uri }) => {
+            const openLink = vi.fn();
+            const { surface, dispose } = createSurface(openLink);
+            try {
+              const { terminal } = surface;
+              installMouseGeometry(terminal);
+              const input: string[] = [];
+              terminal.onData((report) => input.push(report));
+              terminal.onBinary((report) => input.push(report));
+              await writeTerminal(terminal, enter + data);
+              clickTerminal(terminal);
+              expect(openLink).toHaveBeenCalledExactlyOnceWith(uri);
+              openLink.mockClear();
+
+              await writeTerminal(terminal, `\u001b[?${mode}h${enable}`);
+              clickTerminal(terminal);
+              expect(openLink).not.toHaveBeenCalled();
+              expect(input).toContain(press);
+              if (mode === 9) expect(input).not.toContain(release);
+              else expect(input).toContain(release);
+
+              await writeTerminal(terminal, `\u001b[?${mode}l\u001b[?1006l`);
+              input.length = 0;
+              clickTerminal(terminal);
+              expect(openLink).toHaveBeenCalledExactlyOnceWith(uri);
+              expect(input).toEqual([]);
+            } finally {
+              dispose();
+            }
+          },
+        );
+      });
+    });
+  });
+
+  it("does not mistake leaving the alternate screen for disabling mouse reporting", async () => {
+    const openLink = vi.fn();
+    const { surface, dispose } = createSurface(openLink);
+    try {
+      const { terminal } = surface;
+      installMouseGeometry(terminal);
+      await writeTerminal(terminal, EXTERNAL_URL + "\u001b[?1049h\u001b[?1002h\u001b[?1049l");
+      expect(terminal.buffer.active.type).toBe("normal");
+      clickTerminal(terminal);
+      expect(openLink).not.toHaveBeenCalled();
+      terminal.reset();
+      await writeTerminal(terminal, EXTERNAL_URL);
+      expect(terminal.modes.mouseTrackingMode).toBe("none");
+      // Reset clears the hover cache; the frozen render clock cannot refill it.
+      await clickLinkOnLine(terminal, 1, EXTERNAL_URL, openLink);
+      expect(openLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+    } finally {
+      dispose();
+    }
+  });
+
+  describe.each([
+    { name: "Shift selection", modifiers: { shiftKey: true }, requireAlt: false },
+    { name: "unmodified Alt-gated selection", modifiers: {}, requireAlt: true },
+  ])("native $name", ({ modifiers, requireAlt }) => {
+    it.each(LINK_OUTPUTS)(
+      "opens $name locally without forwarding the gesture",
+      async ({ data }) => {
+        const openLink = vi.fn();
+        const { surface, dispose } = createSurface(openLink);
+        try {
+          const { terminal } = surface;
+          installMouseGeometry(terminal);
+          terminal.options.mouseEventsRequireAlt = requireAlt;
+          const input = vi.fn();
+          terminal.onData(input);
+          await writeTerminal(terminal, "\u001b[?1002h\u001b[?1006h" + data);
+          clickTerminal(terminal, modifiers);
+          expect(openLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+          expect(input).not.toHaveBeenCalled();
+        } finally {
+          dispose();
+        }
+      },
+    );
+  });
+
+  it("delegates Alt-gated application clicks when Alt is held", async () => {
+    const openLink = vi.fn();
+    const { surface, dispose } = createSurface(openLink);
+    try {
+      const { terminal } = surface;
+      installMouseGeometry(terminal);
+      terminal.options.mouseEventsRequireAlt = true;
+      const input = vi.fn();
+      terminal.onData(input);
+      await writeTerminal(terminal, "\u001b[?1002h\u001b[?1006h" + EXTERNAL_URL);
+      clickTerminal(terminal, { altKey: true });
+      expect(openLink).not.toHaveBeenCalled();
+      expect(input).toHaveBeenCalledWith("\u001b[<0;2;1M");
+      expect(input).toHaveBeenCalledWith("\u001b[<0;2;1m");
+    } finally {
+      dispose();
+    }
+  });
+  it.each(LINK_OUTPUTS)(
+    "opens a $name once without application mouse tracking",
+    async ({ data }) => {
+      const openLink = vi.fn();
+      const { surface, dispose } = createSurface(openLink);
+      try {
+        const { terminal } = surface;
+        installMouseGeometry(terminal);
+        const input = vi.fn();
+        terminal.onData(input);
+        await writeTerminal(terminal, data);
+
+        clickTerminal(terminal);
+
+        expect(openLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+        expect(input).not.toHaveBeenCalled();
+      } finally {
+        dispose();
+      }
+    },
+  );
+
+  describe.each([1000, 1002, 1003])("application mouse mode %i", (mode) => {
+    it.each(LINK_OUTPUTS)(
+      "leaves $name activation to the application until tracking ends",
+      async ({ data }) => {
+        const openLink = vi.fn();
+        const applicationOpenLink = vi.fn();
+        const { surface, dispose } = createSurface(openLink);
+        try {
+          const { terminal } = surface;
+          installMouseGeometry(terminal);
+          const input: string[] = [];
+          terminal.onData((report) => {
+            input.push(report);
+            // Pi's fullscreen TUI activates the pressed link on mouse release.
+            if (report === "\u001b[<0;2;1m") applicationOpenLink(EXTERNAL_URL);
+          });
+          await writeTerminal(terminal, `\u001b[?${mode}h\u001b[?1006h${data}`);
+
+          clickTerminal(terminal);
+
+          expect(openLink).not.toHaveBeenCalled();
+          expect(applicationOpenLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+          expect(input).toContain("\u001b[<0;2;1M");
+          expect(input).toContain("\u001b[<0;2;1m");
+
+          await writeTerminal(terminal, `\u001b[?${mode}l\u001b[?1006l`);
+          input.length = 0;
+          applicationOpenLink.mockClear();
+          clickTerminal(terminal);
+
+          expect(openLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+          expect(applicationOpenLink).not.toHaveBeenCalled();
+          expect(input).toEqual([]);
+        } finally {
+          dispose();
+        }
+      },
+    );
+  });
   it("hands non-http OSC 8 links to the opener instead of dropping them", async () => {
     const openLink = vi.fn();
     const { surface, dispose } = createSurface(openLink);

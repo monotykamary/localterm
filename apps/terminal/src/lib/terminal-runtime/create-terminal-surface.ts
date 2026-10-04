@@ -21,6 +21,7 @@ import { generateExtendedPalette } from "@/utils/generate-extended-palette";
 import { getTerminalMinimumContrastRatio } from "@/utils/get-terminal-minimum-contrast-ratio";
 import { preserveTerminalMouseWheelMagnitude } from "@/utils/preserve-terminal-mouse-wheel-magnitude";
 import { registerTerminalClipboard } from "@/utils/register-terminal-clipboard";
+import { isTerminalApplicationMouseEvent } from "@/utils/is-terminal-application-mouse-event";
 import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider";
 import { KittyUnicodePlaceholderAddon } from "@/lib/terminal-runtime/kitty-unicode-placeholder-addon";
 import {
@@ -85,11 +86,13 @@ export const createTerminalSurface = ({
   openLink,
   setSearchResults,
 }: CreateTerminalSurfaceOptions): TerminalSurface => {
+  const isApplicationMouseEvent = (event: MouseEvent): boolean =>
+    isTerminalApplicationMouseEvent(terminal, event);
   const terminal = new XtermTerminal({
     allowProposedApi: true,
     cursorBlink: initialCursorBlink,
     cursorStyle: initialCursorStyle,
-    linkHandler: createTerminalLinkHandler(openLink),
+    linkHandler: createTerminalLinkHandler(openLink, isApplicationMouseEvent),
     fontFamily: familyForFont(initialFont, initialNerdFontEnabled),
     fontSize: initialFontSize,
     lineHeight: initialLineHeight,
@@ -115,7 +118,9 @@ export const createTerminalSurface = ({
   const fitAddon = new FitAddon();
   fitAddonRef.current = fitAddon;
   terminal.loadAddon(fitAddon);
-  terminal.loadAddon(new WebLinksAddon(createTerminalWebLinksHandler(openLink)));
+  terminal.loadAddon(
+    new WebLinksAddon(createTerminalWebLinksHandler(openLink, isApplicationMouseEvent)),
+  );
   const clipboardDisposable = registerTerminalClipboard(terminal);
   terminal.loadAddon(new ImageAddon());
   terminal.loadAddon(new KittyUnicodePlaceholderAddon());
