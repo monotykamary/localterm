@@ -12,6 +12,9 @@ import {
   MAX_AUTOMATION_CHANGED_FILES,
   MAX_AUTOMATION_COMMAND_LENGTH,
   MAX_AUTOMATION_FINDINGS_LENGTH,
+  MAX_AUTOMATION_INTERVAL,
+  MAX_TIME_ZONE_LENGTH,
+  MAX_DATE_EPOCH_MS,
   MAX_AUTOMATION_LOG_ENTRIES,
   MAX_AUTOMATION_LOG_LENGTH,
   MAX_AUTOMATION_MODEL_LENGTH,
@@ -988,10 +991,9 @@ export const launchInputSchema = z
 // escape hatch) instead of a bare cron string, a run-count limit + lifecycle,
 // and a capped run-history array. In v3 the schedule is wrapped in a top-level
 // `trigger` union so an automation can fire on a schedule OR when a folder
-// changes. The cron engine stays the single timing authority for SCHEDULE
-// triggers: every schedule kind compiles to one (or, for "timesOfDay", several)
-// 5-field cron strings via utils/compile-schedule.ts, computed on the fly — no
-// derived cron is persisted. WATCH triggers are event-driven (fs.watch) and
+// changes. Calendar presets compile to cron; elapsed intervals retain an anchor.
+// nextScheduleOccurrence is the shared timing authority for both forms. No
+// derived calendar occurrence is persisted. WATCH triggers are event-driven (fs.watch) and
 // have no cron / next-run. The wire shape re-derives `cron` (null for watch)
 // and the legacy `lastRun` for back-compat.
 // ----------------------------------------------------------------------------
@@ -1009,6 +1011,14 @@ const scheduleTimeOfDaySchema = z
   .strict();
 
 export const automationScheduleSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("interval"),
+      every: z.number().int().min(1).max(MAX_AUTOMATION_INTERVAL),
+      unit: z.enum(["minutes", "hours", "days"]),
+      anchorAt: z.number().int().nonnegative().max(MAX_DATE_EPOCH_MS),
+    })
+    .strict(),
   // "<minute> * * * *"
   z.object({ kind: z.literal("hourly"), minute: scheduleMinuteSchema }).strict(),
   // "<minute> <hour> * * *"
@@ -1320,6 +1330,9 @@ export const automationRunLimitSchema = z.discriminatedUnion("kind", [
 export const automationLifecycleSchema = z.enum(["active", "finished"]);
 
 export const automationRunStatusSchema = z.enum([
+  "queued",
+  "interrupted",
+  "cancelled",
   "launched", // tab open requested, awaiting a WS claim
   "running", // a tab claimed the run and the command is executing
   "completed", // command finished with exit code 0
@@ -1348,6 +1361,19 @@ const automationRunRecordShape = {
   // Terminal time; null while launched/running.
   finishedAt: z.number().int().nonnegative().nullable(),
   status: automationRunStatusSchema,
+  reason: z
+    .enum([
+      "overlap",
+      "superseded",
+      "downtime",
+      "disabled",
+      "limit",
+      "restart",
+      "capacity",
+      "launch-failed",
+      "cancelled",
+    ])
+    .optional(),
   exitCode: z.number().int().nullable(),
   trigger: z.enum(["schedule", "manual", "watch", "event", "webhook"]),
   // false for manual + skipped; true for scheduled + watch launches.
@@ -1368,7 +1394,22 @@ const automationRunRecordShape = {
 
 // Stored run record (automations.json): the shared shape plus the full log.
 export const automationRunRecordSchema = z
-  .object({ ...automationRunRecordShape, log: automationRunLogSchema.default(null) })
+  .object({
+    ...automationRunRecordShape,
+    log: automationRunLogSchema.default(null),
+    execution: z
+      .object({
+        cwd: z.string().min(1),
+        runner: automationRunnerSchema,
+        requestedSecrets: z
+          .array(z.string().min(1).max(MAX_SECRET_NAME_LENGTH))
+          .max(MAX_AUTOMATION_REQUESTED_SECRETS),
+        redactOutput: z.boolean(),
+        closeOnFinish: z.boolean(),
+      })
+      .strict()
+      .optional(),
+  })
   .strict();
 
 // Wire projection of a run record served by the automations list and the
@@ -1401,9 +1442,16 @@ const secretNameSchema = z
   .min(1)
   .max(MAX_SECRET_NAME_LENGTH);
 
-// Stored shape (automations.json v4). No derived fields (cron/lastRun/nextRunAt
-// live only on the wire).
+const automationPolicyShape = {
+  timezone: z.string().min(1).max(MAX_TIME_ZONE_LENGTH).optional(),
+  concurrencyPolicy: z.enum(["skip", "queue-latest", "allow"]).optional(),
+  missedRunPolicy: z.enum(["skip", "run-latest"]).optional(),
+};
+
+// Absent policy fields preserve legacy local-clock schedules and skip missed work.
 const automationStoredShape = {
+  ...automationPolicyShape,
+  lastScheduledAt: z.number().int().nonnegative().optional(),
   id: z.string().min(1),
   name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
   trigger: automationTriggerSchema,
@@ -1451,6 +1499,10 @@ export const automationWithNextRunSchema = z
     cron: z.string().min(1).nullable(),
     lastRun: automationLastRunSchema.nullable(),
   })
+  .strict();
+
+export const automationsFileV4Schema = z
+  .object({ version: z.literal(4), automations: z.array(automationSchema) })
   .strict();
 
 export const automationsFileSchema = z
@@ -1552,6 +1604,7 @@ export const automationsFileV3Schema = z
 
 export const createAutomationInputSchema = z
   .object({
+    ...automationPolicyShape,
     name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH),
     trigger: triggerInputSchema,
     cwd: z.string().min(1),
@@ -1566,6 +1619,7 @@ export const createAutomationInputSchema = z
 
 export const updateAutomationInputSchema = z
   .object({
+    ...automationPolicyShape,
     name: z.string().min(1).max(MAX_AUTOMATION_NAME_LENGTH).optional(),
     trigger: triggerInputSchema.optional(),
     cwd: z.string().min(1).optional(),

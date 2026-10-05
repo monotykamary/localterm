@@ -13,6 +13,7 @@ import {
   automationsFileV1Schema,
   automationsFileV2Schema,
   automationsFileV3Schema,
+  automationsFileV4Schema,
 } from "./schemas.js";
 import type {
   Automation,
@@ -27,6 +28,8 @@ import type {
 import { normalizeScheduleInput } from "./utils/compile-schedule.js";
 import { generateWebhookId } from "./utils/generate-webhook-id.js";
 import { normalizeTriggerInput } from "./utils/normalize-trigger.js";
+import { isActiveAutomationRun } from "./utils/is-active-automation-run.js";
+import { trimAutomationRuns } from "./utils/trim-automation-runs.js";
 
 // A run is terminal once it has a definitive outcome; only those carry a
 // finishedAt when migrated from a v1 lastRun.
@@ -197,6 +200,9 @@ export class AutomationStore {
       closeOnFinish: input.closeOnFinish ?? false,
       requestedSecrets: input.requestedSecrets ?? [],
       redactOutput: input.redactOutput ?? false,
+      timezone: input.timezone,
+      concurrencyPolicy: input.concurrencyPolicy ?? "skip",
+      missedRunPolicy: input.missedRunPolicy ?? "skip",
       runCount: 0,
       lifecycle: "active",
       runs: [],
@@ -229,6 +235,14 @@ export class AutomationStore {
       ...(patch.closeOnFinish !== undefined ? { closeOnFinish: patch.closeOnFinish } : {}),
       ...(patch.requestedSecrets !== undefined ? { requestedSecrets: patch.requestedSecrets } : {}),
       ...(patch.redactOutput !== undefined ? { redactOutput: patch.redactOutput } : {}),
+      ...(patch.timezone !== undefined ? { timezone: patch.timezone } : {}),
+      ...(patch.concurrencyPolicy !== undefined
+        ? { concurrencyPolicy: patch.concurrencyPolicy }
+        : {}),
+      ...(patch.missedRunPolicy !== undefined ? { missedRunPolicy: patch.missedRunPolicy } : {}),
+      ...(patch.trigger !== undefined || patch.timezone !== undefined || patch.enabled === true
+        ? { lastScheduledAt: Date.now() }
+        : {}),
       limit,
       lifecycle,
       updatedAt: Date.now(),
@@ -271,12 +285,31 @@ export class AutomationStore {
     return changed;
   }
 
-  // Push a new run onto the newest-first history ring, trimming to the cap.
+  // One atomic file replacement commits a queue decision, its occurrence watermark,
+  // and run-count changes together. A failed write must not reserve work in memory.
+  transact(id: string, update: (automation: Automation) => Automation): Automation | null {
+    const index = this.automations.findIndex((automation) => automation.id === id);
+    if (index === -1) return null;
+    const previous = this.automations;
+    const updated = update(previous[index]);
+    this.automations = previous.map((automation, position) =>
+      position === index ? updated : automation,
+    );
+    try {
+      this.persist();
+    } catch (error) {
+      this.automations = previous;
+      throw error;
+    }
+    return updated;
+  }
+
+  // Push a new run onto the newest-first history ring, preserving active work.
   appendRun(id: string, record: AutomationRunRecord): Automation | null {
     const index = this.automations.findIndex((automation) => automation.id === id);
     if (index === -1) return null;
     const current = this.automations[index];
-    const runs = [record, ...current.runs].slice(0, AUTOMATION_RUN_HISTORY_CAP);
+    const runs = trimAutomationRuns([record, ...current.runs]);
     const updated: Automation = { ...current, runs };
     this.automations[index] = updated;
     this.persist();
@@ -286,18 +319,13 @@ export class AutomationStore {
   // Advance an existing run in place (launched -> running -> completed/failed/
   // missed). No-op (null) if the run has already aged out of the ring.
   updateRun(id: string, runId: string, patch: Partial<AutomationRunRecord>): Automation | null {
-    const index = this.automations.findIndex((automation) => automation.id === id);
-    if (index === -1) return null;
-    const current = this.automations[index];
-    const runIndex = current.runs.findIndex((run) => run.runId === runId);
-    if (runIndex === -1) return null;
-    const runs = current.runs.map((run, position) =>
-      position === runIndex ? { ...run, ...patch } : run,
-    );
-    const updated: Automation = { ...current, runs };
-    this.automations[index] = updated;
-    this.persist();
-    return updated;
+    if (!this.get(id)?.runs.some((run) => run.runId === runId)) return null;
+    return this.transact(id, (current) => ({
+      ...current,
+      runs: trimAutomationRuns(
+        current.runs.map((run) => (run.runId === runId ? { ...run, ...patch } : run)),
+      ),
+    }));
   }
 
   // Clear a single run's Triage unread flag (the user opened it). No-op if the
@@ -348,7 +376,7 @@ export class AutomationStore {
     if (index === -1) return null;
     const current = this.automations[index];
     if (current.runs.length === 0) return current;
-    const updated: Automation = { ...current, runs: [] };
+    const updated: Automation = { ...current, runs: current.runs.filter(isActiveAutomationRun) };
     this.automations[index] = updated;
     this.persist();
     return updated;
@@ -361,7 +389,9 @@ export class AutomationStore {
   clearAllRuns(): boolean {
     if (this.automations.every((automation) => automation.runs.length === 0)) return false;
     this.automations = this.automations.map((automation) =>
-      automation.runs.length === 0 ? automation : { ...automation, runs: [] },
+      automation.runs.length === 0
+        ? automation
+        : { ...automation, runs: automation.runs.filter(isActiveAutomationRun) },
     );
     this.persist();
     return true;
@@ -395,7 +425,8 @@ export class AutomationStore {
       runCount: 0,
       lifecycle: "active",
       enabled: true,
-      runs: clearHistory ? [] : current.runs,
+      runs: clearHistory ? current.runs.filter(isActiveAutomationRun) : current.runs,
+      lastScheduledAt: Date.now(),
       updatedAt: Date.now(),
     };
     this.automations[index] = updated;
@@ -440,12 +471,12 @@ export class AutomationStore {
       console.warn(`automations file invalid; starting with an empty list (${this.filePath})`);
       return;
     }
-    // Fast path: already v4. Trim any runs left above the cap by an older
+    // Fast path: current file version. Trim any runs left above the cap by an older
     // (higher) cap and persist, so lowering the trim cap never strands a
     // user's automations behind a schema rejection.
-    const v4 = automationsFileSchema.safeParse(json);
-    if (v4.success) {
-      this.automations = v4.data.automations;
+    const current = automationsFileSchema.safeParse(json);
+    if (current.success) {
+      this.automations = current.data.automations;
       if (this.trimRunsToCap()) this.persist();
       return;
     }
@@ -461,6 +492,13 @@ export class AutomationStore {
         this.persist();
         return;
       }
+    }
+    const legacyV4 = automationsFileV4Schema.safeParse(json);
+    if (legacyV4.success) {
+      this.automations = legacyV4.data.automations;
+      this.trimRunsToCap();
+      this.persist();
+      return;
     }
     // Migrate v3 -> v4 (wrap the bare command in a shell runner), then persist
     // so later loads hit the fast path.
@@ -497,8 +535,9 @@ export class AutomationStore {
     let changed = false;
     for (const automation of this.automations) {
       if (automation.runs.length > AUTOMATION_RUN_HISTORY_CAP) {
-        automation.runs = automation.runs.slice(0, AUTOMATION_RUN_HISTORY_CAP);
-        changed = true;
+        const trimmed = trimAutomationRuns(automation.runs);
+        changed ||= trimmed.length !== automation.runs.length;
+        automation.runs = trimmed;
       }
     }
     return changed;

@@ -3,8 +3,13 @@ import type {
   AutomationWithNextRun,
 } from "@monotykamary/localterm-server/protocol";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { AutomationsModal } from "../../src/components/automations-modal";
+import {
+  AutomationListPopover,
+  AutomationSidebar,
+} from "../../src/components/automation-navigation";
 
 vi.mock("@tanstack/react-virtual", () => {
   const ROW_HEIGHT = 32;
@@ -87,6 +92,20 @@ const renderModal = (automations: AutomationWithNextRun[] | null = []) =>
     />,
   );
 
+const LiveAutomationModal = ({ initial }: { initial: AutomationWithNextRun }) => {
+  const [items, setItems] = useState([initial]);
+  return (
+    <AutomationsModal
+      open
+      onClose={() => {}}
+      automations={items}
+      onAutomationsLoaded={setItems}
+      defaultCwd="/tmp/project"
+      isMac
+    />
+  );
+};
+
 describe("AutomationsModal", () => {
   beforeEach(() => {
     vi.stubGlobal(
@@ -119,6 +138,190 @@ describe("AutomationsModal", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it("navigates from Upcoming to the detail and supports arrow-key tabs", async () => {
+    renderModal([automation({ timezone: "UTC" })]);
+    const tab = await screen.findByRole("tab", { name: "Automations" });
+    fireEvent.keyDown(tab, { key: "End" });
+    expect(screen.getByRole("tab", { name: "Upcoming" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: /open nightly build scheduled/ })[0]);
+    expect(screen.getByRole("tab", { name: "Automations" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    expect(screen.getByText("Shell: pnpm build")).toBeDefined();
+  });
+
+  it.each(["queued", "skipped"])(
+    "reports a %s run-now response instead of claiming a launch",
+    async (status) => {
+      const original = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input, init) =>
+        String(input).endsWith("/run")
+          ? new Response(JSON.stringify({ runId: "manual-1", status }))
+          : original(input, init),
+      );
+      renderModal([automation()]);
+      fireEvent.click(await screen.findByRole("button", { name: "run nightly build now" }));
+      expect(
+        await screen.findByText(
+          status === "queued" ? /Run queued — waiting/ : /Run skipped — nothing new launched/,
+        ),
+      ).toBeDefined();
+    },
+  );
+
+  it("sends queued cancellation and explains the no-longer-queued race", async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, init) =>
+      String(input).endsWith("/cancel")
+        ? new Response("{}", { status: 409 })
+        : original(input, init),
+    );
+    const run: AutomationRunWireRecord = {
+      runId: "waiting",
+      scheduledFor: 1000,
+      startedAt: null,
+      finishedAt: null,
+      status: "queued",
+      exitCode: null,
+      trigger: "manual",
+      countsTowardLimit: false,
+      findings: null,
+      changedFiles: [],
+      unread: false,
+      hasLog: false,
+    };
+    renderModal([automation({ runs: [run] })]);
+    fireEvent.click(await screen.findByRole("button", { name: "cancel queued run waiting" }));
+    expect(await screen.findByText(/no longer queued; it may have started/)).toBeDefined();
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.some((call) => String(call[0]).endsWith("/automation-1/runs/waiting/cancel")),
+    ).toBe(true);
+  });
+
+  it("round-trips an anchored interval and saved zone while serializing an old thread allow policy", async () => {
+    const schedule = {
+      kind: "interval",
+      every: 17,
+      unit: "minutes",
+      anchorAt: 1712345678123,
+    } as const;
+    renderModal([
+      automation({
+        timezone: "Pacific/Chatham",
+        concurrencyPolicy: "allow",
+        missedRunPolicy: "run-latest",
+        trigger: { kind: "schedule", schedule },
+        runner: { kind: "agent", prompt: "review", sessionMode: "thread", harness: PI_HARNESS },
+      }),
+    ]);
+    fireEvent.click(await screen.findByRole("button", { name: "edit nightly build" }));
+    expect((screen.getByLabelText("Schedule time zone") as HTMLInputElement).value).toBe(
+      "Pacific/Chatham",
+    );
+    expect(
+      (screen.getByRole("radio", { name: /Run alongside it/ }) as HTMLInputElement).disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const patch = vi.mocked(fetch).mock.calls.find((call) => call[1]?.method === "PATCH");
+    expect(patch).toBeDefined();
+    expect(JSON.parse(String(patch?.[1]?.body))).toMatchObject({
+      timezone: "Pacific/Chatham",
+      concurrencyPolicy: "queue-latest",
+      missedRunPolicy: "run-latest",
+      trigger: { kind: "schedule", schedule },
+    });
+  });
+
+  it("applies cancelled queued work returned when pausing, even if the following refresh fails", async () => {
+    const queued: AutomationRunWireRecord = {
+      runId: "waiting",
+      scheduledFor: 1000,
+      startedAt: null,
+      finishedAt: null,
+      status: "queued",
+      exitCode: null,
+      trigger: "manual",
+      countsTowardLimit: false,
+      findings: null,
+      changedFiles: [],
+      unread: false,
+      hasLog: false,
+    };
+    const initial = automation({ runs: [queued] });
+    const paused = automation({
+      enabled: false,
+      runs: [{ ...queued, status: "cancelled", reason: "disabled", finishedAt: 2000 }],
+    });
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (init?.method === "PATCH") return new Response(JSON.stringify({ automation: paused }));
+      if (String(input).endsWith("/api/automations"))
+        return new Response("unavailable", { status: 503 });
+      return original(input, init);
+    });
+    render(<LiveAutomationModal initial={initial} />);
+    fireEvent.click(await screen.findByRole("switch", { name: "toggle nightly build" }));
+    expect(
+      await screen.findByText(
+        /Automation paused. Future triggers are off and queued work was cancelled/,
+      ),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: "cancel queued run waiting" })).toBeNull();
+    expect(screen.getByText("cancelled")).toBeDefined();
+    expect(
+      screen.getByRole("switch", { name: "toggle nightly build" }).getAttribute("aria-checked"),
+    ).toBe("false");
+  });
+
+  it("distinguishes no future occurrence from paused in both navigation variants", () => {
+    const navigation = (enabled: boolean) => (
+      <>
+        <AutomationSidebar
+          automations={[automation({ enabled, nextRunAt: null })]}
+          sortBy="last-run"
+          search=""
+          selectedId={null}
+          nowMs={0}
+          onSortChange={() => {}}
+          onSearchChange={() => {}}
+          onSelect={() => {}}
+        />
+        <AutomationListPopover
+          automations={[automation({ enabled, nextRunAt: null })]}
+          selectedId={null}
+          nowMs={0}
+          onSelect={() => {}}
+        />
+      </>
+    );
+    const { rerender } = render(navigation(true));
+    expect(screen.getAllByText("No next occurrence")).toHaveLength(2);
+    expect(screen.queryByText("paused")).toBeNull();
+    rerender(navigation(false));
+    expect(screen.getAllByText("paused")).toHaveLength(2);
+    expect(screen.queryByText("No next occurrence")).toBeNull();
+  });
+
+  it("keeps full tab labels on a second row at mobile modal widths", async () => {
+    const width = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(350);
+    try {
+      renderModal([]);
+      const upcoming = await screen.findByRole("tab", { name: "Upcoming" });
+      expect(upcoming.textContent).toBe("Upcoming");
+      expect(screen.getByRole("tab", { name: "Automations" }).textContent).toBe("Automations");
+      expect(screen.getByRole("tab", { name: "Triage" }).textContent).toBe("Triage");
+      expect(screen.getByRole("tablist").className).toContain("order-last basis-full");
+      expect(screen.getByRole("heading", { name: "Automations" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "close automations" })).toBeDefined();
+    } finally {
+      width.mockRestore();
+    }
   });
 
   it("shows the empty state", async () => {
@@ -331,6 +534,9 @@ describe("AutomationsModal", () => {
       expect(postCalls).toHaveLength(1);
       const body = JSON.parse(String(Reflect.get(postCalls[0][1] ?? {}, "body")));
       expect(body).toEqual({
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        concurrencyPolicy: "skip",
+        missedRunPolicy: "skip",
         name: "demo",
         trigger: { kind: "schedule", schedule: { kind: "daily", hour: 9, minute: 0 } },
         cwd: "/tmp/project",

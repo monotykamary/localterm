@@ -9,6 +9,7 @@ import type {
 // weekdaysPreset variants surfaced as first-class options; "cron" is the
 // advanced escape hatch.
 export const SCHEDULE_FREQUENCIES = [
+  "interval",
   "hourly",
   "daily",
   "timesOfDay",
@@ -41,6 +42,9 @@ export interface ScheduleFormState {
   stepMinutes: number;
   stepHours: number;
   cron: string;
+  intervalEvery: number;
+  intervalUnit: "minutes" | "hours" | "days";
+  intervalAnchorAt: number;
 }
 
 // Step choices restricted to divisors so the cadence is uniform across the
@@ -49,6 +53,7 @@ export const MINUTE_STEP_OPTIONS = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30] as con
 export const HOUR_STEP_OPTIONS = [1, 2, 3, 4, 6, 8, 12] as const;
 
 export const FREQUENCY_LABELS: Record<ScheduleFrequency, string> = {
+  interval: "Fixed interval (from a start time)",
   hourly: "Hourly",
   daily: "Daily",
   timesOfDay: "Multiple times a day",
@@ -56,8 +61,8 @@ export const FREQUENCY_LABELS: Record<ScheduleFrequency, string> = {
   weekends: "Weekends (Sat–Sun)",
   weekly: "Specific days of the week",
   monthly: "Days of the month",
-  everyNMinutes: "Every N minutes",
-  everyNHours: "Every N hours",
+  everyNMinutes: "Every N minutes (clock-aligned)",
+  everyNHours: "Every N hours (clock-aligned)",
   cron: "Advanced (cron)",
 };
 
@@ -76,6 +81,9 @@ export const defaultScheduleForm = (): ScheduleFormState => ({
   stepMinutes: 15,
   stepHours: 4,
   cron: "",
+  intervalEvery: 1,
+  intervalUnit: "hours",
+  intervalAnchorAt: Date.now(),
 });
 
 const sortTimes = (times: readonly TimeOfDay[]): TimeOfDay[] =>
@@ -83,6 +91,13 @@ const sortTimes = (times: readonly TimeOfDay[]): TimeOfDay[] =>
 
 export const buildScheduleFromForm = (form: ScheduleFormState): AutomationSchedule => {
   switch (form.frequency) {
+    case "interval":
+      return {
+        kind: "interval",
+        every: form.intervalEvery,
+        unit: form.intervalUnit,
+        anchorAt: form.intervalAnchorAt,
+      };
     case "hourly":
       return { kind: "hourly", minute: form.minute };
     case "daily":
@@ -128,6 +143,14 @@ export const buildScheduleFromForm = (form: ScheduleFormState): AutomationSchedu
 export const recognizeScheduleForm = (schedule: AutomationSchedule): ScheduleFormState => {
   const base = defaultScheduleForm();
   switch (schedule.kind) {
+    case "interval":
+      return {
+        ...base,
+        frequency: "interval",
+        intervalEvery: schedule.every,
+        intervalUnit: schedule.unit,
+        intervalAnchorAt: schedule.anchorAt,
+      };
     case "hourly":
       return { ...base, frequency: "hourly", minute: schedule.minute };
     case "daily":
@@ -199,6 +222,8 @@ const ordinal = (value: number): string => {
 // A compact human-readable label for the list rows and detail header.
 export const scheduleLabel = (schedule: AutomationSchedule): string => {
   switch (schedule.kind) {
+    case "interval":
+      return `Every ${schedule.every} ${schedule.unit} · fixed interval`;
     case "hourly":
       return `Hourly at :${String(schedule.minute).padStart(2, "0")}`;
     case "daily":
@@ -223,11 +248,11 @@ export const scheduleLabel = (schedule: AutomationSchedule): string => {
         .map(ordinal)
         .join(", ")} at ${formatClockTime(schedule.hour, schedule.minute)}`;
     case "everyNMinutes":
-      return schedule.step === 1 ? "Every minute" : `Every ${schedule.step} minutes`;
+      return `${schedule.step === 1 ? "Every minute" : `Every ${schedule.step} minutes`} · clock-aligned`;
     case "everyNHours":
       return `Every ${schedule.step === 1 ? "hour" : `${schedule.step} hours`} at :${String(
         schedule.minute,
-      ).padStart(2, "0")}`;
+      ).padStart(2, "0")} · clock-aligned`;
     case "cron":
       return `Cron: ${schedule.expression}`;
     default: {

@@ -1,4 +1,6 @@
 import { Clock, Plus, X } from "lucide-react";
+import { AUTOMATION_INTERVAL_MAX } from "@/lib/constants";
+import { localDatetimeValue } from "@/utils/local-datetime-value";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/number-stepper";
@@ -111,6 +113,70 @@ export const AutomationScheduleBuilder = ({
         }
       />
 
+      {schedule.frequency === "interval" ? (
+        <div className="flex flex-col gap-2 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex min-w-0 flex-1 flex-col gap-1">
+              Every
+              <Input
+                type="number"
+                min={1}
+                max={AUTOMATION_INTERVAL_MAX}
+                step={1}
+                aria-label="interval amount"
+                value={Number.isFinite(schedule.intervalEvery) ? schedule.intervalEvery : ""}
+                onChange={(event) =>
+                  onChange({
+                    ...schedule,
+                    intervalEvery: event.target.value === "" ? NaN : Number(event.target.value),
+                  })
+                }
+              />
+            </label>
+            <SettingsSelect
+              value={schedule.intervalUnit}
+              ariaLabel="interval unit"
+              placeholder="Unit"
+              items={[
+                { id: "minutes", label: "Minutes" },
+                { id: "hours", label: "Hours" },
+                { id: "days", label: "Days (24 hours)" },
+              ]}
+              onValueChange={(unit) => {
+                if (unit === "minutes" || unit === "hours" || unit === "days")
+                  onChange({ ...schedule, intervalUnit: unit });
+              }}
+            />
+          </div>
+          <label className="flex flex-col gap-1">
+            Start time · browser local ({Intl.DateTimeFormat().resolvedOptions().timeZone})
+            <Input
+              type="datetime-local"
+              step="0.001"
+              aria-label="interval start time"
+              value={localDatetimeValue(schedule.intervalAnchorAt)}
+              onChange={(event) =>
+                onChange({ ...schedule, intervalAnchorAt: new Date(event.target.value).getTime() })
+              }
+            />
+          </label>
+          {Number.isFinite(schedule.intervalAnchorAt) ? (
+            <p className="break-all font-mono text-[10px]">
+              Start instant: {new Date(schedule.intervalAnchorAt).toISOString()}
+            </p>
+          ) : null}
+          <p className="text-[11px]">
+            Anchored to this exact instant, not rounded to the clock. A day is always 24 hours, even
+            across daylight saving. A past start keeps its original cadence.
+          </p>
+        </div>
+      ) : null}
+      {schedule.frequency === "everyNMinutes" || schedule.frequency === "everyNHours" ? (
+        <p className="text-[11px] text-muted-foreground">
+          Clock-aligned legacy schedule. Resets on clock boundaries; use Fixed interval for elapsed
+          time from an exact start.
+        </p>
+      ) : null}
       {(schedule.frequency === "daily" ||
         schedule.frequency === "weekdays" ||
         schedule.frequency === "weekends" ||
@@ -239,10 +305,12 @@ export const AutomationScheduleBuilder = ({
       {schedule.frequency === "everyNMinutes" && (
         <SettingsSelect
           value={String(schedule.stepMinutes)}
-          items={MINUTE_STEP_OPTIONS.map((step) => ({
-            id: String(step),
-            label: step === 1 ? "Every minute" : `Every ${step} minutes`,
-          }))}
+          items={[...new Set([...MINUTE_STEP_OPTIONS, schedule.stepMinutes])]
+            .sort((a, b) => a - b)
+            .map((step) => ({
+              id: String(step),
+              label: step === 1 ? "Every minute" : `Every ${step} minutes`,
+            }))}
           ariaLabel="minute interval"
           placeholder="Interval"
           onValueChange={(next) =>
@@ -255,10 +323,12 @@ export const AutomationScheduleBuilder = ({
         <div className="flex flex-col gap-2">
           <SettingsSelect
             value={String(schedule.stepHours)}
-            items={HOUR_STEP_OPTIONS.map((step) => ({
-              id: String(step),
-              label: step === 1 ? "Every hour" : `Every ${step} hours`,
-            }))}
+            items={[...new Set([...HOUR_STEP_OPTIONS, schedule.stepHours])]
+              .sort((a, b) => a - b)
+              .map((step) => ({
+                id: String(step),
+                label: step === 1 ? "Every hour" : `Every ${step} hours`,
+              }))}
             ariaLabel="hour interval"
             placeholder="Interval"
             onValueChange={(next) =>

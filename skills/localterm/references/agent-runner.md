@@ -116,8 +116,9 @@ metacharacters is safe):
 
 Agent runs are **headless** — there is no browser tab and no PTY:
 
-1. The run record is created straight at status `running` (there is no
-   `launched → tab-claim` step, so an agent run is never `launched`).
+1. The dispatcher persists a `queued` request and its execution snapshot. When
+   admitted, it moves to `running` (no `launched → tab-claim` step). Persistent
+   thread runs are serialized, including manual launches.
 2. The daemon resolves the automation's `requestedSecrets` from the Keychain
    into env (fail-closed: a deleted/no-value secret is skipped, never clobbers
    an existing env var).
@@ -127,9 +128,10 @@ Agent runs are **headless** — there is no browser tab and no PTY:
 4. On finish the run lands at `completed` (exit 0) or `failed`, with
    `findings`/`log`/`changedFiles` filled in and `unread: true` when there are
    findings. A run with no findings stays `unread: false`.
-5. A daemon restart mid-run: the startup sweep moves a still-`running` agent
-   run to `missed` (it can't resume a subprocess it didn't spawn), so an
-   interrupted agent run shows up as missed, not stuck.
+5. A daemon restart mid-run marks a still-`running` agent run `interrupted`.
+   It is not replayed because side effects may have happened. Only accepted,
+   unstarted `queued` work resumes. Controlled shutdown aborts and awaits the
+   harness subprocesses before returning.
 
 A single agent run is capped at **10 minutes wall-clock**
 (`AUTOMATION_AGENT_RUN_TIMEOUT_MS`). An agent that hangs (stuck tool, a model

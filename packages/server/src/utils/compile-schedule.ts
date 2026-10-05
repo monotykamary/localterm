@@ -1,7 +1,6 @@
-// The cron engine is the single timing authority. Every structured schedule
-// kind compiles here to one — or, for "timesOfDay", several — 5-field cron
-// strings that the scheduler and next-run util parse directly. Nothing derived
-// is persisted; this runs on the fly.
+// Calendar schedules compile to one or more 5-field cron strings. Anchored
+// intervals cannot be represented by cron and compile to no expressions.
+// Nothing derived is persisted; this runs on the fly.
 //
 // recognizePreset() goes the other way (a raw cron string -> a friendly preset)
 // and is the v1->v2 migration's and the bare-string API's only path to friendly
@@ -26,6 +25,8 @@ const sortUnique = (values: readonly number[]): number[] =>
 
 export const compileScheduleAll = (schedule: AutomationSchedule): string[] => {
   switch (schedule.kind) {
+    case "interval":
+      return [];
     case "hourly":
       return [`${schedule.minute} * * * *`];
     case "daily":
@@ -66,9 +67,9 @@ export const compileScheduleAll = (schedule: AutomationSchedule): string[] => {
 };
 
 // The canonical cron for display/back-compat. For "timesOfDay" it is the
-// earliest time's cron; the scheduler always reads compileScheduleAll().
-export const compileSchedule = (schedule: AutomationSchedule): string =>
-  compileScheduleAll(schedule)[0];
+// earliest time's cron; intervals have no equivalent cron.
+export const compileSchedule = (schedule: AutomationSchedule): string | null =>
+  compileScheduleAll(schedule)[0] ?? null;
 
 const numericSetEqual = (a: ReadonlySet<number>, b: ReadonlySet<number>): boolean => {
   if (a.size !== b.size) return false;

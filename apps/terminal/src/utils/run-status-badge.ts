@@ -12,6 +12,12 @@ export interface RunBadge {
 // status palette. Colors stay consistent across the list, history, and feed.
 export const runStatusBadge = (status: AutomationRunStatus, exitCode: number | null): RunBadge => {
   switch (status) {
+    case "queued":
+      return { label: "queued · waiting", className: "text-[var(--localterm-yellow)]" };
+    case "interrupted":
+      return { label: "interrupted · needs attention", className: "text-destructive" };
+    case "cancelled":
+      return { label: "cancelled", className: "text-muted-foreground" };
     case "launched":
       return { label: "launching…", className: "text-[var(--localterm-yellow)]" };
     case "running":

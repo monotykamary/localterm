@@ -13,6 +13,7 @@ import { formatRelativeTime } from "@/utils/format-relative-time";
 import { getAutomationRunTimestamp } from "@/utils/get-automation-run-timestamp";
 import { groupTriageRuns } from "@/utils/group-triage-runs";
 import { runStatusBadge } from "@/utils/run-status-badge";
+import { automationRunReason } from "@/utils/automation-run-reason";
 
 const TRIAGE_FILTERS = ["all", "unread", "failed", "skipped"] as const;
 type TriageFilter = (typeof TRIAGE_FILTERS)[number];
@@ -53,7 +54,7 @@ interface AutomationRecentRunsViewProps {
 
 const TriageRunRow = ({ automation, run, nowMs, onOpenLog, onSelect }: TriageRunRowProps) => {
   const badge = runStatusBadge(run.status, run.exitCode);
-  const findingsPreview = findFirstFindingsLine(run.findings);
+  const findingsPreview = automationRunReason(run) ?? findFirstFindingsLine(run.findings);
   return (
     <div className="flex items-center gap-3 rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-foreground/5">
       <button
@@ -61,7 +62,7 @@ const TriageRunRow = ({ automation, run, nowMs, onOpenLog, onSelect }: TriageRun
         aria-label={`open ${automation.name} run log`}
         title="Open run log"
         onClick={() => onOpenLog(automation.id, run)}
-        className="flex min-w-0 flex-1 items-center gap-5 text-left outline-none"
+        className="grid min-w-0 flex-1 grid-cols-2 items-center gap-2 text-left focus-visible:outline-2 focus-visible:outline-ring sm:flex sm:gap-3"
       >
         <span className="flex shrink-0 items-center gap-1.5">
           <span
@@ -110,7 +111,8 @@ const TriageThreadRow = ({
   const latestRun = runs[0];
   const [open, setOpen] = useState(unreadCount > 0);
   const badge = runStatusBadge(latestRun.status, latestRun.exitCode);
-  const findingsPreview = findFirstFindingsLine(latestRun.findings);
+  const findingsPreview =
+    automationRunReason(latestRun) ?? findFirstFindingsLine(latestRun.findings);
   const hasUnread = unreadCount > 0;
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="rounded-sm">
@@ -121,7 +123,7 @@ const TriageThreadRow = ({
               type="button"
               title={open ? "Collapse thread" : "Expand thread"}
               aria-label={`${automation.name}, ${runs.length} runs${hasUnread ? `, ${unreadCount} unread` : ""}`}
-              className="group flex min-w-0 flex-1 items-center gap-5 text-left outline-none"
+              className="group grid min-w-0 flex-1 grid-cols-2 items-center gap-2 text-left focus-visible:outline-2 focus-visible:outline-ring sm:flex sm:gap-3"
             />
           }
         >
@@ -205,12 +207,13 @@ export const AutomationRecentRunsView = ({
   const sections = useMemo(() => groupTriageRuns(runs, nowMs), [runs, nowMs]);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border/40 px-3 py-2">
         {TRIAGE_FILTERS.map((value) => (
           <button
             key={value}
             type="button"
             onClick={() => onFilterChange(value)}
+            aria-pressed={filter === value}
             className={cn(
               "rounded-sm px-2 py-0.5 text-[11px] capitalize transition-colors",
               filter === value
@@ -218,7 +221,7 @@ export const AutomationRecentRunsView = ({
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {value}
+            {value === "failed" ? "Needs attention" : value}
           </button>
         ))}
         {hasUnread ? (

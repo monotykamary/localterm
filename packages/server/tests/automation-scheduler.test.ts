@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { AutomationScheduler } from "../src/automation-scheduler.js";
 import { AutomationStore } from "../src/automation-store.js";
 import type { Automation, CreateAutomationInput } from "../src/types.js";
@@ -12,6 +12,8 @@ describe("AutomationScheduler", () => {
   let scheduler: AutomationScheduler;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 0, 1));
     stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "localterm-scheduler-"));
     store = new AutomationStore(path.join(stateDirectory, "automations.json"));
     scheduler = new AutomationScheduler(store);
@@ -19,6 +21,7 @@ describe("AutomationScheduler", () => {
 
   afterEach(() => {
     scheduler.dispose();
+    vi.useRealTimers();
     fs.rmSync(stateDirectory, { recursive: true, force: true });
   });
 

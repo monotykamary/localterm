@@ -104,9 +104,11 @@ export const AutomationListPopover = ({
                           ? automation.enabled
                             ? "on webhook"
                             : "paused"
-                          : automation.nextRunAt !== null
-                            ? formatRelativeTime(automation.nextRunAt, nowMs)
-                            : "paused"}
+                          : !automation.enabled
+                            ? "paused"
+                            : automation.nextRunAt !== null
+                              ? formatRelativeTime(automation.nextRunAt, nowMs)
+                              : "No next occurrence"}
                 </span>
               </button>
             );
@@ -268,9 +270,11 @@ export const AutomationSidebar = ({
                               ? automation.enabled
                                 ? "on webhook"
                                 : "paused"
-                              : automation.nextRunAt !== null
-                                ? formatRelativeTime(automation.nextRunAt, nowMs)
-                                : "paused"}
+                              : !automation.enabled
+                                ? "paused"
+                                : automation.nextRunAt !== null
+                                  ? formatRelativeTime(automation.nextRunAt, nowMs)
+                                  : "No next occurrence"}
                     </span>
                   </span>
                 </button>

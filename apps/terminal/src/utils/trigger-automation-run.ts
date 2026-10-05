@@ -1,13 +1,25 @@
-const AUTOMATIONS_ENDPOINT = "/api/automations";
+import {
+  automationRunStatusSchema,
+  type AutomationRunStatus,
+} from "@monotykamary/localterm-server/protocol";
 
-export const triggerAutomationRun = async (id: string): Promise<boolean> => {
+interface RunReceipt {
+  runId: string;
+  status: AutomationRunStatus;
+}
+export const triggerAutomationRun = async (id: string): Promise<RunReceipt | null> => {
   try {
     const response = await fetch(
-      new URL(`${AUTOMATIONS_ENDPOINT}/${encodeURIComponent(id)}/run`, window.location.href),
+      new URL(`/api/automations/${encodeURIComponent(id)}/run`, window.location.href),
       { method: "POST" },
     );
-    return response.ok;
+    if (!response.ok) return null;
+    const body: unknown = await response.json();
+    if (!body || typeof body !== "object") return null;
+    const runId: unknown = Reflect.get(body, "runId");
+    const status = automationRunStatusSchema.safeParse(Reflect.get(body, "status"));
+    return typeof runId === "string" && status.success ? { runId, status: status.data } : null;
   } catch {
-    return false;
+    return null;
   }
 };

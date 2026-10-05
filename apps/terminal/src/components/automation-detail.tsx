@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { useCallback, useState } from "react";
 import { AutomationRunRow } from "@/components/automation-run-row";
+import { AutomationScheduleSummary } from "@/components/automation-schedule-summary";
+import { automationRunReason } from "@/utils/automation-run-reason";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
@@ -31,6 +33,9 @@ interface AutomationDetailProps {
   nowMs: number;
   armedDelete: boolean;
   onRunNow: () => void;
+  runPending?: boolean;
+  runFeedback?: string | null;
+  onCancelQueued?: (run: AutomationRunWireRecord) => void;
   onEdit: () => void;
   onDelete: () => void;
   onToggleEnabled: (enabled: boolean) => void;
@@ -48,6 +53,9 @@ export const AutomationDetail = ({
   nowMs,
   armedDelete,
   onRunNow,
+  runPending = false,
+  runFeedback,
+  onCancelQueued,
   onEdit,
   onDelete,
   onToggleEnabled,
@@ -60,6 +68,9 @@ export const AutomationDetail = ({
   onOpenLog,
 }: AutomationDetailProps) => {
   const finished = lifecycleBadge(automation.lifecycle);
+  const activeWork = automation.runs.filter(
+    (run) => run.status === "running" || run.status === "launched" || run.status === "queued",
+  );
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const compactable =
     automation.runner.kind === "agent" && automation.runner.sessionMode === "thread";
@@ -96,6 +107,8 @@ export const AutomationDetail = ({
               aria-label={`run ${automation.name} now`}
               className="rounded-full hover:bg-foreground/10 hover:text-foreground"
               onClick={onRunNow}
+              disabled={runPending}
+              title="Run now — safety settings still apply"
             >
               <Play />
             </Button>
@@ -107,6 +120,7 @@ export const AutomationDetail = ({
                 title="Compact the thread session now"
                 className="rounded-full hover:bg-foreground/10 hover:text-foreground"
                 onClick={onCompact}
+                disabled={activeWork.length > 0 || runPending}
               >
                 <Minimize2 />
               </Button>
@@ -132,6 +146,7 @@ export const AutomationDetail = ({
                     : "hover:bg-foreground/10 hover:text-foreground",
                 )}
                 onClick={onClearThread}
+                disabled={activeWork.length > 0 || runPending}
               >
                 <RefreshCw />
               </Button>
@@ -156,6 +171,7 @@ export const AutomationDetail = ({
                 armedDelete ? "text-destructive hover:text-destructive" : "hover:text-foreground",
               )}
               onClick={onDelete}
+              disabled={activeWork.length > 0 || runPending}
             >
               <Trash2 />
             </Button>
@@ -164,12 +180,78 @@ export const AutomationDetail = ({
             size="sm"
             aria-label={`toggle ${automation.name}`}
             checked={automation.enabled}
+            disabled={runPending}
             onCheckedChange={onToggleEnabled}
           />
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-border/60 bg-foreground/[0.02] p-3 text-[11px]">
+      {activeWork.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Delete and thread maintenance are unavailable while work is active or queued. Cancel
+          waiting runs first, then wait for running work to finish. Clearing history keeps active
+          and queued work.
+        </p>
+      ) : null}
+      {runFeedback ? (
+        <p role="status" className="rounded-md border border-border/60 bg-foreground/5 p-3 text-xs">
+          {runFeedback}
+        </p>
+      ) : null}
+      {automation.runs.some((run) => run.status === "interrupted") ? (
+        <p
+          role="status"
+          className="rounded-md border border-destructive/40 p-3 text-xs text-destructive"
+        >
+          Needs attention: an interrupted run may have left partial work. Review its history or
+          transcript before retrying.
+        </p>
+      ) : null}
+
+      <section className="space-y-2">
+        <h4 className={SECTION_LABEL_CLASSES}>Active & queued work</h4>
+        {activeWork.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Nothing running or waiting.</p>
+        ) : (
+          activeWork.map((run) => (
+            <div
+              key={run.runId}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 p-3 text-xs"
+            >
+              <span>
+                <span className="block font-medium">
+                  {run.status === "queued"
+                    ? "Queued — not started"
+                    : "Active — " + runStatusBadge(run.status, run.exitCode).label}
+                </span>
+                <span className="block break-all font-mono text-[10px] text-muted-foreground">
+                  {run.runId}
+                </span>
+                <span className="text-muted-foreground">{automationRunReason(run)}</span>
+              </span>
+              {run.status === "queued" && onCancelQueued ? (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  disabled={runPending}
+                  aria-label={`cancel queued run ${run.runId}`}
+                  onClick={() => onCancelQueued(run)}
+                >
+                  Cancel waiting run
+                </Button>
+              ) : run.hasLog ? (
+                <Button variant="outline" size="xs" onClick={() => onOpenLog(run)}>
+                  View live log
+                </Button>
+              ) : null}
+            </div>
+          ))
+        )}
+      </section>
+
+      <AutomationScheduleSummary automation={automation} nowMs={nowMs} />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-border/60 bg-foreground/[0.02] p-3 text-[11px]">
         <div className="flex flex-col gap-0.5">
           <span className={SECTION_LABEL_CLASSES}>Trigger</span>
           <span className="text-foreground/90">{triggerLabel(automation.trigger)}</span>
@@ -197,7 +279,7 @@ export const AutomationDetail = ({
           ) : null}
         </div>
         <div className="flex flex-col gap-0.5">
-          <span className={SECTION_LABEL_CLASSES}>Next run</span>
+          <span className={SECTION_LABEL_CLASSES}>Next scheduled run</span>
           <span className="text-foreground/90">
             {automation.lifecycle === "finished"
               ? "Finished"
@@ -213,9 +295,11 @@ export const AutomationDetail = ({
                     ? automation.enabled
                       ? "On webhook"
                       : "Paused"
-                    : automation.nextRunAt !== null
-                      ? formatRelativeTime(automation.nextRunAt, nowMs)
-                      : "Paused"}
+                    : !automation.enabled
+                      ? "Paused"
+                      : automation.nextRunAt !== null
+                        ? formatRelativeTime(automation.nextRunAt, nowMs)
+                        : "No next occurrence"}
           </span>
         </div>
         <div className="flex flex-col gap-0.5">

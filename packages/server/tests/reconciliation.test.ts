@@ -94,7 +94,7 @@ describe("enumerateMissedOccurrences", () => {
   });
 });
 
-describe("startup downtime reconciliation (integration)", () => {
+describe("startup downtime reconciliation", { tags: ["integration"] }, () => {
   let stateDirectory: string;
 
   const boot = () =>
@@ -147,6 +147,10 @@ describe("startup downtime reconciliation (integration)", () => {
   it("records skipped runs for downtime and downgrades stale launched runs", async () => {
     const first = await boot();
     const id = await createHourly(first);
+    first.automationStore.transact(id, (automation) => ({
+      ...automation,
+      createdAt: Date.now() - 4 * 60 * 60 * 1000,
+    }));
     // A manual run leaves a "launched" record the dead process can't resolve.
     await api(first, `/${id}/run`, { method: "POST" });
     await first.stop();
@@ -162,7 +166,7 @@ describe("startup downtime reconciliation (integration)", () => {
       expect(run.countsTowardLimit).toBe(false);
       expect(run.trigger).toBe("schedule");
     }
-    expect(runs.some((run) => run.status === "missed")).toBe(true);
+    expect(runs.some((run) => run.status === "interrupted" && run.reason === "restart")).toBe(true);
     await second.stop();
   });
 

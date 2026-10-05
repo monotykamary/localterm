@@ -74,6 +74,10 @@ describe("buildScheduleFromForm", () => {
 
 describe("recognizeScheduleForm", () => {
   const schedules: AutomationSchedule[] = [
+    { kind: "interval", every: 17, unit: "minutes", anchorAt: 1712345678123 },
+    { kind: "interval", every: 3, unit: "days", anchorAt: 1712345678123 },
+    { kind: "everyNMinutes", step: 7 },
+    { kind: "everyNHours", step: 5, minute: 13 },
     { kind: "hourly", minute: 15 },
     { kind: "daily", hour: 9, minute: 30 },
     { kind: "weekdaysPreset", preset: "weekdays", hour: 8, minute: 0 },
@@ -106,7 +110,9 @@ describe("scheduleLabel", () => {
     expect(scheduleLabel({ kind: "weekdaysPreset", preset: "weekdays", hour: 9, minute: 0 })).toBe(
       "Weekdays at 9:00 AM",
     );
-    expect(scheduleLabel({ kind: "everyNMinutes", step: 15 })).toBe("Every 15 minutes");
+    expect(scheduleLabel({ kind: "everyNMinutes", step: 15 })).toBe(
+      "Every 15 minutes · clock-aligned",
+    );
     expect(scheduleLabel({ kind: "monthly", daysOfMonth: [1, 2], hour: 0, minute: 0 })).toContain(
       "1st, 2nd",
     );

@@ -5,9 +5,13 @@ import type { Automation, PendingAutomationRun } from "./types.js";
 export class AutomationRunTracker {
   private readonly pendingRuns = new Map<string, PendingAutomationRun>();
 
-  create(automation: Automation, now: number = Date.now()): PendingAutomationRun {
+  create(
+    automation: Automation,
+    now: number = Date.now(),
+    runId: string = randomUUID(),
+  ): PendingAutomationRun {
     const run: PendingAutomationRun = {
-      runId: randomUUID(),
+      runId,
       automationId: automation.id,
       cwd: automation.cwd,
       runner: automation.runner,

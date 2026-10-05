@@ -17,14 +17,13 @@ import {
   AUTOMATION_AGENT_COMPACT_ERROR_PREVIEW_LENGTH,
   AUTOMATION_AGENT_COMPACT_STDERR_BYTES,
   AUTOMATION_AGENT_COMPACT_TIMEOUT_MS,
-  AUTOMATION_AGENT_FORCE_KILL_DELAY_MS,
   AUTOMATION_AGENT_RPC_COMMAND_TIMEOUT_MS,
   AUTOMATION_AGENT_RUN_TIMEOUT_MS,
   AUTOMATION_CUSTOM_HARNESS_CAPTURE_BYTES,
   AUTOMATION_SESSION_MAX_PENDING_TOOL_CALLS,
 } from "./constants.js";
 import { resolvePiAndPath } from "./pi-binary-resolver.js";
-import { RpcClient } from "./pi-rpc-client.js";
+import { closeChildProcess, RpcClient } from "./pi-rpc-client.js";
 import { appendBoundedBufferText } from "./utils/append-bounded-buffer-text.js";
 import { sendRpcCommand } from "./utils/send-rpc-command.js";
 import type { AgentHarnessConfig, AgentLogEntry, AutomationRunner } from "./types.js";
@@ -38,6 +37,8 @@ type CustomHarnessConfig = Extract<AgentHarnessConfig, { kind: "custom" }>;
 
 export interface AgentRunRequest {
   runner: AgentRunner;
+  // Shutdown cancellation resolves with exitCode null after child teardown.
+  signal?: AbortSignal;
   cwd: string;
   // Resolved secret env (from requestedSecrets), merged onto the subprocess env.
   env: Record<string, string>;
@@ -138,170 +139,202 @@ const runPi = async (request: AgentRunRequest, piBinaryPath?: string): Promise<A
   // pi unable to spawn node/git/etc. The shim dir is stripped so pi's tools
   // don't double-inject secrets (the automation injects its requestedSecrets
   // as env directly).
-  const client = new RpcClient(piBinary, args, request.cwd, {
-    ...process.env,
-    PATH: pathEnv || process.env.PATH,
-    ...request.env,
-  });
+  const client = new RpcClient(
+    piBinary,
+    args,
+    request.cwd,
+    {
+      ...process.env,
+      PATH: pathEnv || process.env.PATH,
+      ...request.env,
+    },
+    process.platform !== "win32",
+  );
+  const onAbort = (): void => {
+    void client.close("SIGTERM");
+  };
+  request.signal?.addEventListener("abort", onAbort, { once: true });
+  if (request.signal?.aborted) onAbort();
 
-  const logEntries: AgentLogEntry[] = [{ type: "user", text: runner.prompt }];
-  const modelSeparatorIndex = runner.model?.indexOf("/") ?? -1;
-  if (runner.model && modelSeparatorIndex > 0 && modelSeparatorIndex < runner.model.length - 1) {
-    const modelResult = await sendRpcCommand(
-      client,
-      {
-        type: "set_model",
-        provider: runner.model.slice(0, modelSeparatorIndex),
-        modelId: runner.model.slice(modelSeparatorIndex + 1),
-      },
-      AUTOMATION_AGENT_RPC_COMMAND_TIMEOUT_MS,
-    );
-    if (!modelResult.success) {
-      const message = `Failed to select model ${runner.model}: ${modelResult.error ?? "unknown error"}`;
-      client.close();
-      return {
-        exitCode: 1,
-        findings: message,
-        log: [...logEntries, { type: "assistant", text: message }],
-        changedFiles: computeChangedFiles(before, request.cwd),
-      };
-    }
-  }
-  if (runner.thinking) {
-    const thinkingResult = await sendRpcCommand(
-      client,
-      { type: "set_thinking_level", level: runner.thinking },
-      AUTOMATION_AGENT_RPC_COMMAND_TIMEOUT_MS,
-    );
-    if (!thinkingResult.success) {
-      const message = `Failed to select thinking level ${runner.thinking}: ${thinkingResult.error ?? "unknown error"}`;
-      client.close();
-      return {
-        exitCode: 1,
-        findings: message,
-        log: [...logEntries, { type: "assistant", text: message }],
-        changedFiles: computeChangedFiles(before, request.cwd),
-      };
-    }
-  }
-
-  let lastAssistantText = "";
-  let lastErrorMessage = "";
-  let errored = false;
-  let agentEnded = false;
-  // Tool-call inputs (the path/command), recovered from a message_end's
-  // tool_use blocks by call id, then attached to the matching tool_execution_end
-  // entry so the per-run log shows what a tool was invoked with.
-  const toolInputById = new Map<string, string>();
-  client.send({ type: "prompt", message: runner.prompt, id: "prompt" });
-
-  const deadline = Date.now() + AUTOMATION_AGENT_RUN_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const line = await client.nextLine(Math.min(1000, deadline - Date.now()));
-    if (line === null) {
-      if (client.closed) {
-        if (!agentEnded) errored = true;
-        break;
+  const run = async (): Promise<AgentRunResult> => {
+    const logEntries: AgentLogEntry[] = [{ type: "user", text: runner.prompt }];
+    const modelSeparatorIndex = runner.model?.indexOf("/") ?? -1;
+    if (runner.model && modelSeparatorIndex > 0 && modelSeparatorIndex < runner.model.length - 1) {
+      const modelResult = await sendRpcCommand(
+        client,
+        {
+          type: "set_model",
+          provider: runner.model.slice(0, modelSeparatorIndex),
+          modelId: runner.model.slice(modelSeparatorIndex + 1),
+        },
+        AUTOMATION_AGENT_RPC_COMMAND_TIMEOUT_MS,
+      );
+      if (!modelResult.success) {
+        const message = `Failed to select model ${runner.model}: ${modelResult.error ?? "unknown error"}`;
+        return {
+          exitCode: 1,
+          findings: message,
+          log: [...logEntries, { type: "assistant", text: message }],
+          changedFiles: [],
+        };
       }
-      continue;
     }
-    let event: Record<string, unknown>;
-    try {
-      event = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    if (event.type === "response") {
-      if (event.id === "prompt" && event.success === false) {
-        errored = true;
-        lastErrorMessage = String(event.error ?? "prompt rejected");
+    if (runner.thinking) {
+      const thinkingResult = await sendRpcCommand(
+        client,
+        { type: "set_thinking_level", level: runner.thinking },
+        AUTOMATION_AGENT_RPC_COMMAND_TIMEOUT_MS,
+      );
+      if (!thinkingResult.success) {
+        const message = `Failed to select thinking level ${runner.thinking}: ${thinkingResult.error ?? "unknown error"}`;
+        return {
+          exitCode: 1,
+          findings: message,
+          log: [...logEntries, { type: "assistant", text: message }],
+          changedFiles: [],
+        };
       }
-    } else if (event.type === "message_end") {
-      const message = event.message as {
-        role?: string;
-        stopReason?: string;
-        errorMessage?: string;
-        content?: unknown;
-      } | null;
-      if (message?.role === "assistant") {
-        const text = extractAssistantText(event.message as { content?: unknown } | null);
-        if (text) {
-          const thinking = extractAssistantThinking(event.message as { content?: unknown } | null);
-          lastAssistantText = text;
-          logEntries.push(
-            thinking ? { type: "assistant", text, thinking } : { type: "assistant", text },
-          );
-        } else if (message.errorMessage) {
-          lastErrorMessage = message.errorMessage;
-          logEntries.push({ type: "assistant", text: message.errorMessage });
+    }
+
+    let lastAssistantText = "";
+    let lastErrorMessage = "";
+    let errored = false;
+    let agentEnded = false;
+    // Tool-call inputs (the path/command), recovered from a message_end's
+    // tool_use blocks by call id, then attached to the matching tool_execution_end
+    // entry so the per-run log shows what a tool was invoked with.
+    const toolInputById = new Map<string, string>();
+    client.send({ type: "prompt", message: runner.prompt, id: "prompt" });
+
+    const deadline = Date.now() + AUTOMATION_AGENT_RUN_TIMEOUT_MS;
+    while (!request.signal?.aborted && Date.now() < deadline) {
+      const line = await client.nextLine(Math.min(1000, deadline - Date.now()));
+      if (request.signal?.aborted) break;
+      if (line === null) {
+        if (client.closed) {
+          if (!agentEnded) errored = true;
+          break;
         }
-        if (Array.isArray(message.content)) {
-          for (const part of message.content) {
-            const block = part as {
-              type?: string;
-              id?: unknown;
-              name?: unknown;
-              arguments?: unknown;
-              input?: unknown;
-            };
-            if (block.type === "tool_use" || block.type === "toolCall") {
-              const formatted = truncateToolInput(formatToolInput(block.arguments ?? block.input));
-              const toolCallId = String(block.id ?? "");
-              if (formatted && toolCallId) {
-                toolInputById.delete(toolCallId);
-                toolInputById.set(toolCallId, formatted);
-                while (toolInputById.size > AUTOMATION_SESSION_MAX_PENDING_TOOL_CALLS) {
-                  const oldestToolCallId = toolInputById.keys().next().value;
-                  if (oldestToolCallId === undefined) break;
-                  toolInputById.delete(oldestToolCallId);
+        continue;
+      }
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (event.type === "response") {
+        if (event.id === "prompt" && event.success === false) {
+          errored = true;
+          lastErrorMessage = String(event.error ?? "prompt rejected");
+        }
+      } else if (event.type === "message_end") {
+        const message = event.message as {
+          role?: string;
+          stopReason?: string;
+          errorMessage?: string;
+          content?: unknown;
+        } | null;
+        if (message?.role === "assistant") {
+          const text = extractAssistantText(event.message as { content?: unknown } | null);
+          if (text) {
+            const thinking = extractAssistantThinking(
+              event.message as { content?: unknown } | null,
+            );
+            lastAssistantText = text;
+            logEntries.push(
+              thinking ? { type: "assistant", text, thinking } : { type: "assistant", text },
+            );
+          } else if (message.errorMessage) {
+            lastErrorMessage = message.errorMessage;
+            logEntries.push({ type: "assistant", text: message.errorMessage });
+          }
+          if (Array.isArray(message.content)) {
+            for (const part of message.content) {
+              const block = part as {
+                type?: string;
+                id?: unknown;
+                name?: unknown;
+                arguments?: unknown;
+                input?: unknown;
+              };
+              if (block.type === "tool_use" || block.type === "toolCall") {
+                const formatted = truncateToolInput(
+                  formatToolInput(block.arguments ?? block.input),
+                );
+                const toolCallId = String(block.id ?? "");
+                if (formatted && toolCallId) {
+                  toolInputById.delete(toolCallId);
+                  toolInputById.set(toolCallId, formatted);
+                  while (toolInputById.size > AUTOMATION_SESSION_MAX_PENDING_TOOL_CALLS) {
+                    const oldestToolCallId = toolInputById.keys().next().value;
+                    if (oldestToolCallId === undefined) break;
+                    toolInputById.delete(oldestToolCallId);
+                  }
                 }
               }
             }
           }
+          if (message.stopReason === "error" || message.errorMessage) {
+            errored = true;
+            lastErrorMessage = message.errorMessage ?? lastErrorMessage;
+          }
         }
-        if (message.stopReason === "error" || message.errorMessage) {
-          errored = true;
-          lastErrorMessage = message.errorMessage ?? lastErrorMessage;
-        }
+      } else if (event.type === "tool_execution_end") {
+        const result = event.result as { content?: unknown } | null;
+        const text = truncateToolResult(
+          extractAssistantText(result as { content?: unknown } | null),
+        );
+        const toolCallId = String(event.toolCallId ?? "");
+        const input = toolInputById.get(toolCallId);
+        toolInputById.delete(toolCallId);
+        logEntries.push({
+          type: "tool",
+          name: String(event.toolName ?? "tool"),
+          ...(input !== undefined ? { input } : {}),
+          text,
+        });
+      } else if (event.type === "turn_end") {
+        const message = event.message as { stopReason?: string } | null;
+        if (message?.stopReason === "error") errored = true;
+      } else if (event.type === "agent_end") {
+        agentEnded = true;
+        break;
       }
-    } else if (event.type === "tool_execution_end") {
-      const result = event.result as { content?: unknown } | null;
-      const text = truncateToolResult(extractAssistantText(result as { content?: unknown } | null));
-      const toolCallId = String(event.toolCallId ?? "");
-      const input = toolInputById.get(toolCallId);
-      toolInputById.delete(toolCallId);
-      logEntries.push({
-        type: "tool",
-        name: String(event.toolName ?? "tool"),
-        ...(input !== undefined ? { input } : {}),
-        text,
-      });
-    } else if (event.type === "turn_end") {
-      const message = event.message as { stopReason?: string } | null;
-      if (message?.stopReason === "error") errored = true;
-    } else if (event.type === "agent_end") {
-      agentEnded = true;
-      break;
+    }
+
+    // If the run errored without an assistant message carrying the error (a
+    // crash or a rejected prompt), surface it as a final assistant entry so the
+    // log explains the failure instead of ending on the prompt.
+    if (errored && lastErrorMessage) {
+      const last = logEntries[logEntries.length - 1];
+      if (!last || last.type !== "assistant" || last.text !== lastErrorMessage) {
+        logEntries.push({ type: "assistant", text: lastErrorMessage });
+      }
+    }
+
+    const findingsSource = lastAssistantText || (errored ? lastErrorMessage : "");
+    const findings = truncateFindings(findingsSource);
+    const log = capLogEntries(logEntries);
+    const exitCode = errored || !agentEnded ? 1 : 0;
+    return { exitCode, findings, log, changedFiles: [] };
+  };
+
+  let result: AgentRunResult;
+  try {
+    result = await run();
+  } finally {
+    try {
+      await client.close();
+    } finally {
+      request.signal?.removeEventListener("abort", onAbort);
     }
   }
-
-  // If the run errored without an assistant message carrying the error (a
-  // crash or a rejected prompt), surface it as a final assistant entry so the
-  // log explains the failure instead of ending on the prompt.
-  if (errored && lastErrorMessage) {
-    const last = logEntries[logEntries.length - 1];
-    if (!last || last.type !== "assistant" || last.text !== lastErrorMessage) {
-      logEntries.push({ type: "assistant", text: lastErrorMessage });
-    }
-  }
-  client.close();
-
-  const findingsSource = lastAssistantText || (errored ? lastErrorMessage : "");
-  const findings = truncateFindings(findingsSource);
-  const log = capLogEntries(logEntries);
-  const changedFiles = computeChangedFiles(before, request.cwd);
-  const exitCode = errored || !agentEnded ? 1 : 0;
-  return { exitCode, findings, log, changedFiles };
+  return {
+    ...result,
+    ...(request.signal?.aborted ? { exitCode: null, findings: "Agent run aborted." } : {}),
+    changedFiles: computeChangedFiles(before, request.cwd),
+  };
 };
 
 // Compact a thread session in place via a short-lived `pi --mode rpc` session:
@@ -412,8 +445,9 @@ const runCustom = async (
       shell: true,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      detached: process.platform !== "win32",
     }) as ChildProcess;
-    child.stdout?.on("data", (chunk: Buffer) => {
+    const onStdout = (chunk: Buffer): void => {
       const captured = appendBoundedBufferText(
         stdout,
         stdoutBytes,
@@ -423,8 +457,8 @@ const runCustom = async (
       stdout = captured.text;
       stdoutBytes = captured.bytes;
       stdoutTruncated ||= captured.truncated;
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
+    };
+    const onStderr = (chunk: Buffer): void => {
       const captured = appendBoundedBufferText(
         stderr,
         stderrBytes,
@@ -434,27 +468,42 @@ const runCustom = async (
       stderr = captured.text;
       stderrBytes = captured.bytes;
       stderrTruncated ||= captured.truncated;
-    });
-    const timer = setTimeout(() => {
-      killed = true;
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (!child.killed) child.kill("SIGKILL");
-      }, AUTOMATION_AGENT_FORCE_KILL_DELAY_MS).unref?.();
-    }, AUTOMATION_AGENT_RUN_TIMEOUT_MS);
-    timer.unref?.();
-    child.on("close", (code, signal) => {
+    };
+    const finish = (): void => {
       clearTimeout(timer);
-      if (killed || signal) exitCode = null;
-      else exitCode = code ?? 0;
+      request.signal?.removeEventListener("abort", stop);
+      child.stdout?.off("data", onStdout);
+      child.stderr?.off("data", onStderr);
+      child.off("close", onClose);
+      child.off("error", onError);
       resolve();
-    });
-    child.on("error", () => {
+    };
+    const stop = (): void => {
+      if (killed) return;
+      killed = true;
+      exitCode = null;
       clearTimeout(timer);
+      void closeChildProcess(child, process.platform !== "win32", "SIGTERM").then(finish);
+    };
+    const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
+      if (killed) return;
+      exitCode = signal ? null : (code ?? 0);
+      finish();
+    };
+    const onError = (): void => {
+      if (killed) return;
       spawnFailed = true;
       stderr += `\nfailed to spawn harness: ${config.command}`;
-      resolve();
-    });
+      finish();
+    };
+    const timer = setTimeout(stop, AUTOMATION_AGENT_RUN_TIMEOUT_MS);
+    timer.unref?.();
+    child.stdout?.on("data", onStdout);
+    child.stderr?.on("data", onStderr);
+    child.on("close", onClose);
+    child.on("error", onError);
+    request.signal?.addEventListener("abort", stop, { once: true });
+    if (request.signal?.aborted) stop();
   });
   const changedFiles = computeChangedFiles(before, request.cwd);
   const stdoutCapture = stdoutTruncated ? `${stdout}\n…[capture truncated]` : stdout;
@@ -464,7 +513,12 @@ const runCustom = async (
     stdoutCapture + (stderrCapture.length > 0 ? `\n--- stderr ---\n${stderrCapture}` : ""),
   );
   if (spawnFailed) exitCode = 1;
-  return { exitCode, findings, log, changedFiles };
+  return {
+    exitCode: request.signal?.aborted ? null : exitCode,
+    findings: request.signal?.aborted ? "Agent run aborted." : findings,
+    log,
+    changedFiles,
+  };
 };
 
 const compactCustom = async (
@@ -530,7 +584,14 @@ const resolveHarness = (harness: AgentHarnessConfig, piBinaryPath?: string): Age
   harness.kind === "pi" ? PiHarness(piBinaryPath) : CustomHarness(harness);
 
 export const runAgent = (request: AgentRunRequest): Promise<AgentRunResult> =>
-  resolveHarness(request.runner.harness, request.piBinaryPath).run(request);
+  request.signal?.aborted
+    ? Promise.resolve({
+        exitCode: null,
+        findings: "Agent run aborted.",
+        log: null,
+        changedFiles: [],
+      })
+    : resolveHarness(request.runner.harness, request.piBinaryPath).run(request);
 
 export const compactAgent = (request: AgentCompactRequest): Promise<AgentCompactResult> =>
   resolveHarness(request.harness, request.piBinaryPath).compact(request);

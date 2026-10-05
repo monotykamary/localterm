@@ -1,8 +1,5 @@
 import {
   AUTOMATION_RUN_LIMIT_MAX,
-  compileScheduleAll,
-  nextCronOccurrence,
-  parseCronExpression,
   type AutomationRunWireRecord,
   type AutomationWithNextRun,
   type SecretEntryResponse,
@@ -10,6 +7,11 @@ import {
 import { CalendarClock, ChevronDown, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AutomationDetail } from "@/components/automation-detail";
+import { AutomationAgenda } from "@/components/automation-agenda";
+import { automationPolicyInput } from "@/utils/automation-policy-input";
+import { scheduleValidationError } from "@/utils/schedule-validation-error";
+import { cancelAutomationRun } from "@/utils/cancel-automation-run";
+import { runStatusBadge } from "@/utils/run-status-badge";
 import { AutomationForm } from "@/components/automation-form";
 import { AutomationListPopover, AutomationSidebar } from "@/components/automation-navigation";
 import { AutomationRecentRunsView } from "@/components/automation-recent-runs-view";
@@ -58,7 +60,6 @@ import {
   runnerSummary,
 } from "@/utils/runner-form";
 import {
-  buildScheduleFromForm,
   buildTriggerFromForm,
   defaultScheduleForm,
   recognizeTriggerForm,
@@ -75,7 +76,7 @@ interface AutomationsModalProps {
   isMac: boolean;
 }
 
-type ModalTab = "automations" | "recent-runs";
+type ModalTab = "automations" | "recent-runs" | "upcoming";
 type FormMode = "view" | "create" | "edit";
 
 interface AutomationLogViewState {
@@ -88,6 +89,9 @@ const emptyForm = (defaultCwd: string | null): AutomationFormState => ({
   runner: defaultRunnerForm(),
   cwd: defaultCwd ?? "",
   enabled: true,
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  concurrencyPolicy: "skip",
+  missedRunPolicy: "skip",
   triggerType: "schedule",
   schedule: defaultScheduleForm(),
   watchRecursive: true,
@@ -108,11 +112,16 @@ const formForAutomation = (automation: AutomationWithNextRun): AutomationFormSta
     runner: recognizeRunnerForm(automation.runner),
     cwd: automation.cwd,
     enabled: automation.enabled,
+    timezone: automation.timezone,
+    concurrencyPolicy: automation.concurrencyPolicy ?? "skip",
+    missedRunPolicy: automation.missedRunPolicy ?? "skip",
     triggerType: trigger.triggerType,
     schedule: trigger.schedule,
     watchRecursive: trigger.watchRecursive,
     watchFilter: trigger.watchFilter,
     eventNames: trigger.eventNames,
+    runCount: automation.runCount,
+    lifecycle: automation.lifecycle,
     limitMode: automation.limit.kind === "count" ? "count" : "forever",
     limitMax:
       automation.limit.kind === "count" ? automation.limit.max : AUTOMATION_RUN_LIMIT_DEFAULT_COUNT,
@@ -151,6 +160,12 @@ export const AutomationsModal = ({
   const [form, setForm] = useState<AutomationFormState>(() => emptyForm(defaultCwd));
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [runAction, setRunAction] = useState<{
+    id: string;
+    pending: boolean;
+    message: string;
+  } | null>(null);
   const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
   const [armedClearId, setArmedClearId] = useState<string | null>(null);
   const [armedClearThreadId, setArmedClearThreadId] = useState<string | null>(null);
@@ -169,6 +184,7 @@ export const AutomationsModal = ({
 
   const refreshAutomations = useCallback(async () => {
     const fetched = await fetchAutomations();
+    setLoadError(fetched === null);
     if (fetched) onAutomationsLoaded(fetched);
   }, [onAutomationsLoaded]);
 
@@ -363,23 +379,7 @@ export const AutomationsModal = ({
     setSaveError(false);
   };
 
-  const builtSchedule = useMemo(() => buildScheduleFromForm(form.schedule), [form.schedule]);
-  const compiledCrons = useMemo(() => compileScheduleAll(builtSchedule), [builtSchedule]);
-  const isScheduleValid = useMemo(
-    () =>
-      compiledCrons.length > 0 && compiledCrons.every((cron) => parseCronExpression(cron) !== null),
-    [compiledCrons],
-  );
-  const nextPreviewAt = useMemo(() => {
-    if (!isScheduleValid) return null;
-    const from = new Date(nowMs);
-    const candidates = compiledCrons
-      .map((cron) => parseCronExpression(cron))
-      .filter((parsed): parsed is NonNullable<typeof parsed> => parsed !== null)
-      .map((parsed) => nextCronOccurrence(parsed, from)?.getTime() ?? null)
-      .filter((value): value is number => value !== null);
-    return candidates.length > 0 ? Math.min(...candidates) : null;
-  }, [compiledCrons, isScheduleValid, nowMs]);
+  const isScheduleValid = scheduleValidationError(form.schedule, form.timezone) === null;
 
   const isFormValid =
     form.name.trim().length > 0 &&
@@ -394,9 +394,11 @@ export const AutomationsModal = ({
       (form.limitMax >= 1 && form.limitMax <= AUTOMATION_RUN_LIMIT_MAX));
 
   const handleSave = async () => {
+    if (!isFormValid || isSaving) return;
     setIsSaving(true);
     setSaveError(false);
     const input = {
+      ...automationPolicyInput(form),
       name: form.name.trim(),
       trigger: buildTriggerFromForm(form),
       cwd: form.cwd.trim(),
@@ -416,18 +418,66 @@ export const AutomationsModal = ({
       setSaveError(true);
       return;
     }
+    onAutomationsLoaded([...(automations ?? []).filter((item) => item.id !== saved.id), saved]);
     setSelectedId(saved.id);
     setMode("view");
     await refreshAutomations();
   };
 
   const handleRunNow = async (automation: AutomationWithNextRun) => {
-    await triggerAutomationRun(automation.id);
+    if (runAction?.pending) return;
+    setRunAction({ id: automation.id, pending: true, message: "Requesting a run…" });
+    const receipt = await triggerAutomationRun(automation.id);
+    const message = !receipt
+      ? "Couldn’t confirm the run request. Refresh history before retrying to avoid duplicate work."
+      : receipt.status === "queued"
+        ? "Run queued — waiting for current work or capacity. You can cancel it below."
+        : receipt.status === "skipped"
+          ? "Run skipped — nothing new launched. See its reason in history."
+          : `Run ${runStatusBadge(receipt.status, null).label} · ${receipt.runId}`;
+    setRunAction({ id: automation.id, pending: false, message });
+    await refreshAutomations();
+  };
+
+  const handleCancelQueued = async (
+    automation: AutomationWithNextRun,
+    run: AutomationRunWireRecord,
+  ) => {
+    if (runAction?.pending || run.status !== "queued") return;
+    setRunAction({ id: automation.id, pending: true, message: "Cancelling waiting work…" });
+    const result = await cancelAutomationRun(automation.id, run.runId);
+    setRunAction({
+      id: automation.id,
+      pending: false,
+      message:
+        result === "cancelled"
+          ? "Queued run cancelled. No running work was stopped."
+          : result === "not-queued"
+            ? "This run is no longer queued; it may have started. Refreshing its status."
+            : "Couldn’t cancel the queued run. Refresh and try again.",
+    });
     await refreshAutomations();
   };
 
   const handleToggleEnabled = async (automation: AutomationWithNextRun, enabled: boolean) => {
-    await updateAutomation(automation.id, { enabled });
+    if (runAction?.pending) return;
+    setRunAction({
+      id: automation.id,
+      pending: true,
+      message: enabled ? "Enabling automation…" : "Pausing automation…",
+    });
+    const updated = await updateAutomation(automation.id, { enabled });
+    if (updated && automations)
+      onAutomationsLoaded(automations.map((item) => (item.id === updated.id ? updated : item)));
+    setRunAction({
+      id: automation.id,
+      pending: false,
+      message: !updated
+        ? "Couldn’t change this automation’s enabled state. Refresh and try again."
+        : enabled
+          ? "Automation enabled. Future triggers follow its schedule and safety settings."
+          : "Automation paused. Future triggers are off and queued work was cancelled. Running work is not stopped.",
+    });
     await refreshAutomations();
   };
 
@@ -437,7 +487,14 @@ export const AutomationsModal = ({
       return;
     }
     setArmedDeleteId(null);
-    await deleteAutomation(automation.id);
+    const deleted = await deleteAutomation(automation.id);
+    if (!deleted)
+      setRunAction({
+        id: automation.id,
+        pending: false,
+        message:
+          "Couldn’t delete. Work may have become active; cancel queued runs and wait for running work, then retry.",
+      });
     await refreshAutomations();
   };
 
@@ -457,7 +514,15 @@ export const AutomationsModal = ({
   };
 
   const handleCompact = async (automation: AutomationWithNextRun) => {
-    await compactAutomation(automation.id);
+    setRunAction({ id: automation.id, pending: true, message: "Compacting thread…" });
+    const result = await compactAutomation(automation.id);
+    setRunAction({
+      id: automation.id,
+      pending: false,
+      message: result.ok
+        ? "Thread compacted."
+        : "Couldn’t compact the thread. Cancel queued work and wait for active runs before retrying.",
+    });
     await refreshAutomations();
   };
 
@@ -470,7 +535,15 @@ export const AutomationsModal = ({
       return;
     }
     setArmedClearThreadId(null);
-    await clearThreadSession(automation.id);
+    setRunAction({ id: automation.id, pending: true, message: "Clearing thread…" });
+    const result = await clearThreadSession(automation.id);
+    setRunAction({
+      id: automation.id,
+      pending: false,
+      message: result.ok
+        ? "Thread cleared. The next run starts fresh."
+        : "Couldn’t clear the thread. Cancel queued work and wait for active runs before retrying.",
+    });
     await refreshAutomations();
   };
 
@@ -496,7 +569,7 @@ export const AutomationsModal = ({
     );
     const filtered = flattened.filter(({ run }) => {
       if (runFilter === "unread") return run.unread;
-      if (runFilter === "failed") return run.status === "failed";
+      if (runFilter === "failed") return run.status === "failed" || run.status === "interrupted";
       if (runFilter === "skipped") return run.status === "skipped";
       return true;
     });
@@ -541,39 +614,60 @@ export const AutomationsModal = ({
         <header
           ref={headerRef}
           className={cn(
-            "flex shrink-0 items-center border-b border-border/40 py-2.5",
-            headerLayout.showTitle
-              ? "gap-3 px-4"
-              : headerLayout.headerPadding === 24
-                ? "gap-2 px-3"
-                : "gap-3 px-4",
+            "flex flex-wrap shrink-0 items-center border-b border-border/40 py-2.5",
+            headerLayout.tabsOnSecondRow ? "gap-2 px-3" : "gap-3 px-4",
           )}
         >
-          {headerLayout.showIcon ? (
-            <CalendarClock className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          ) : null}
-          {headerLayout.showTitle ? (
-            <h2 className="shrink-0 text-sm font-medium text-foreground">Automations</h2>
-          ) : null}
+          <CalendarClock className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <h2 className="shrink-0 text-sm font-medium text-foreground">Automations</h2>
           <div
             role="tablist"
             aria-label="automations view"
-            className="shrink-0 flex items-center rounded-md border border-border/60 p-0.5"
+            className={cn(
+              "flex min-w-0 max-w-full items-center overflow-x-auto rounded-md border border-border/60 p-0.5",
+              headerLayout.tabsOnSecondRow ? "order-last basis-full" : "shrink-0",
+            )}
           >
-            {(headerLayout.tabLabels === "full"
-              ? ([
-                  ["automations", "Automations"],
-                  ["recent-runs", "Triage"],
-                ] as const)
-              : ([
-                  ["automations", "A"],
-                  ["recent-runs", "T"],
-                ] as const)
+            {(
+              [
+                ["automations", "Automations"],
+                ["recent-runs", "Triage"],
+                ["upcoming", "Upcoming"],
+              ] as const
             ).map(([value, label]) => (
               <button
                 key={value}
                 type="button"
                 role="tab"
+                id={`automation-tab-${value}`}
+                aria-controls="automation-tab-panel"
+                aria-label={
+                  value === "recent-runs"
+                    ? "Triage"
+                    : value === "upcoming"
+                      ? "Upcoming"
+                      : "Automations"
+                }
+                tabIndex={tab === value ? 0 : -1}
+                onKeyDown={(event) => {
+                  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                  event.preventDefault();
+                  const tabs = Array.from(
+                    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                      "[role=tab]",
+                    ) ?? [],
+                  );
+                  const index = tabs.indexOf(event.currentTarget);
+                  const next =
+                    event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? tabs.length - 1
+                        : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+                          tabs.length;
+                  tabs[next]?.focus();
+                  tabs[next]?.click();
+                }}
                 aria-selected={tab === value}
                 onClick={() => {
                   setLogView(null);
@@ -621,151 +715,170 @@ export const AutomationsModal = ({
           </div>
         </header>
 
-        {logView ? (
-          <AutomationRunLogView
-            automationId={logView.automationId}
-            runId={logView.runId}
-            automations={automations ?? []}
-            nowMs={nowMs}
-            onBack={() => setLogView(null)}
-            onOpenAutomation={(id) => {
-              setLogView(null);
-              setSelectedId(id);
-              setTab("automations");
-              setMode("view");
-            }}
-          />
-        ) : tab === "recent-runs" ? (
-          <AutomationRecentRunsView
-            runs={recentRuns}
-            nowMs={nowMs}
-            filter={runFilter}
-            onFilterChange={setRunFilter}
-            onSelect={async (automationId, run) => {
-              if (run.unread) {
-                await markAutomationRunRead(automationId, run.runId);
+        <div
+          id="automation-tab-panel"
+          role="tabpanel"
+          aria-labelledby={`automation-tab-${tab}`}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          {logView ? (
+            <AutomationRunLogView
+              automationId={logView.automationId}
+              runId={logView.runId}
+              automations={automations ?? []}
+              nowMs={nowMs}
+              onBack={() => setLogView(null)}
+              onOpenAutomation={(id) => {
+                setLogView(null);
+                setSelectedId(id);
+                setTab("automations");
+                setMode("view");
+              }}
+            />
+          ) : tab === "upcoming" ? (
+            <AutomationAgenda
+              automations={automations}
+              nowMs={nowMs}
+              error={loadError}
+              onRetry={() => void refreshAutomations()}
+              onSelect={(id) => {
+                setSelectedId(id);
+                setTab("automations");
+                setMode("view");
+              }}
+            />
+          ) : tab === "recent-runs" ? (
+            <AutomationRecentRunsView
+              runs={recentRuns}
+              nowMs={nowMs}
+              filter={runFilter}
+              onFilterChange={setRunFilter}
+              onSelect={async (automationId, run) => {
+                if (run.unread) {
+                  await markAutomationRunRead(automationId, run.runId);
+                  await refreshAutomations();
+                }
+                setSelectedId(automationId);
+                setTab("automations");
+                setMode("view");
+              }}
+              onOpenLog={(automationId, run) => void openRunLog(automationId, run)}
+              onMarkAllRead={async () => {
+                await markAllTriageRead();
                 await refreshAutomations();
-              }
-              setSelectedId(automationId);
-              setTab("automations");
-              setMode("view");
-            }}
-            onOpenLog={(automationId, run) => void openRunLog(automationId, run)}
-            onMarkAllRead={async () => {
-              await markAllTriageRead();
-              await refreshAutomations();
-            }}
-            onClearHistory={async () => {
-              await clearAutomationHistory();
-              await refreshAutomations();
-            }}
-          />
-        ) : (
-          <div ref={contentRowRef} className="flex min-h-0 flex-1">
-            <div
-              style={{ width: sidebarCollapsed ? 0 : AUTOMATIONS_SIDEBAR_WIDTH_PX }}
-              className="h-full shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-snappy"
-            >
+              }}
+              onClearHistory={async () => {
+                await clearAutomationHistory();
+                await refreshAutomations();
+              }}
+            />
+          ) : (
+            <div ref={contentRowRef} className="flex min-h-0 flex-1">
               <div
-                style={{ width: AUTOMATIONS_SIDEBAR_WIDTH_PX }}
-                className={cn(
-                  "flex h-full flex-col border-r border-border/40 opacity-100 transition-opacity duration-200 ease-snappy",
-                  sidebarCollapsed && "opacity-0",
-                )}
+                style={{ width: sidebarCollapsed ? 0 : AUTOMATIONS_SIDEBAR_WIDTH_PX }}
+                className="h-full shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-snappy"
               >
-                <AutomationSidebar
-                  automations={filteredAutomations}
-                  sortBy={sortBy}
-                  search={search}
-                  selectedId={selectedId}
-                  nowMs={nowMs}
-                  onSortChange={handleSortChange}
-                  onSearchChange={setSearch}
-                  onSelect={(id) => {
-                    setSelectedId(id);
-                    setMode("view");
-                  }}
-                />
+                <div
+                  style={{ width: AUTOMATIONS_SIDEBAR_WIDTH_PX }}
+                  className={cn(
+                    "flex h-full flex-col border-r border-border/40 opacity-100 transition-opacity duration-200 ease-snappy",
+                    sidebarCollapsed && "opacity-0",
+                  )}
+                >
+                  <AutomationSidebar
+                    automations={filteredAutomations}
+                    sortBy={sortBy}
+                    search={search}
+                    selectedId={selectedId}
+                    nowMs={nowMs}
+                    onSortChange={handleSortChange}
+                    onSearchChange={setSearch}
+                    onSelect={(id) => {
+                      setSelectedId(id);
+                      setMode("view");
+                    }}
+                  />
+                </div>
               </div>
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <div
-                className={cn(
-                  "flex shrink-0 items-center gap-2 border-b border-border/40 px-3 py-1.5 font-mono text-xs text-muted-foreground transition-opacity duration-200 ease-snappy",
-                  sidebarCollapsed && mode === "view"
-                    ? "opacity-100"
-                    : "opacity-0 absolute pointer-events-none",
-                )}
-                aria-hidden={!(sidebarCollapsed && mode === "view")}
-              >
-                <Popover>
-                  <PopoverTrigger
-                    className="flex min-w-0 flex-1 items-center gap-1 rounded-sm border border-border/50 px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5"
-                    aria-label="select automation"
-                  >
-                    <span className="min-w-0 flex-1 truncate">{selected?.name ?? "Select…"}</span>
-                    <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
-                  </PopoverTrigger>
-                  <PopoverContent align="start" side="bottom" className="w-72 p-0">
-                    <AutomationListPopover
-                      automations={filteredAutomations}
-                      selectedId={selectedId}
+              <div className="flex min-w-0 flex-1 flex-col">
+                <div
+                  className={cn(
+                    "flex shrink-0 items-center gap-2 border-b border-border/40 px-3 py-1.5 font-mono text-xs text-muted-foreground transition-opacity duration-200 ease-snappy",
+                    sidebarCollapsed && mode === "view"
+                      ? "opacity-100"
+                      : "opacity-0 absolute pointer-events-none",
+                  )}
+                  aria-hidden={!(sidebarCollapsed && mode === "view")}
+                >
+                  <Popover>
+                    <PopoverTrigger
+                      className="flex min-w-0 flex-1 items-center gap-1 rounded-sm border border-border/50 px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5"
+                      aria-label="select automation"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{selected?.name ?? "Select…"}</span>
+                      <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
+                    </PopoverTrigger>
+                    <PopoverContent align="start" side="bottom" className="w-72 p-0">
+                      <AutomationListPopover
+                        automations={filteredAutomations}
+                        selectedId={selectedId}
+                        nowMs={nowMs}
+                        onSelect={(id) => {
+                          setSelectedId(id);
+                          setMode("view");
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+                  {mode !== "view" ? (
+                    <AutomationForm
+                      form={form}
+                      onChange={setForm}
+                      onCancel={closeForm}
+                      onSave={() => void handleSave()}
+                      isSaving={isSaving}
+                      isValid={isFormValid}
+                      saveError={saveError}
                       nowMs={nowMs}
-                      onSelect={(id) => {
-                        setSelectedId(id);
-                        setMode("view");
-                      }}
+                      cdp={cdpHealth?.cdp ?? null}
+                      secrets={secrets}
                     />
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <div className="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
-                {mode !== "view" ? (
-                  <AutomationForm
-                    form={form}
-                    onChange={setForm}
-                    onCancel={closeForm}
-                    onSave={() => void handleSave()}
-                    isSaving={isSaving}
-                    isValid={isFormValid}
-                    saveError={saveError}
-                    cronCaption={compiledCrons.join(", ")}
-                    scheduleValid={isScheduleValid}
-                    nextPreviewAt={nextPreviewAt}
-                    nowMs={nowMs}
-                    cdp={cdpHealth?.cdp ?? null}
-                    secrets={secrets}
-                  />
-                ) : selected ? (
-                  <AutomationDetail
-                    automation={selected}
-                    nowMs={nowMs}
-                    armedDelete={armedDeleteId === selected.id}
-                    onRunNow={() => void handleRunNow(selected)}
-                    onEdit={() => openEdit(selected)}
-                    onDelete={() => void handleDelete(selected)}
-                    onToggleEnabled={(enabled) => void handleToggleEnabled(selected, enabled)}
-                    onReset={() => void handleReset(selected)}
-                    onCompact={() => void handleCompact(selected)}
-                    onClearThread={() => void handleClearThread(selected)}
-                    armedClearThread={armedClearThreadId === selected.id}
-                    onClearHistory={() => void handleClearRuns(selected)}
-                    armedClear={armedClearId === selected.id}
-                    onOpenLog={(run) => void openRunLog(selected.id, run)}
-                  />
-                ) : filteredAutomations !== null && filteredAutomations.length === 0 ? (
-                  <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    No automations yet. Create one to get started.
-                  </div>
-                ) : (
-                  <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    Select an automation, or create one.
-                  </div>
-                )}
+                  ) : selected ? (
+                    <AutomationDetail
+                      automation={selected}
+                      nowMs={nowMs}
+                      armedDelete={armedDeleteId === selected.id}
+                      onRunNow={() => void handleRunNow(selected)}
+                      runPending={runAction?.pending ?? false}
+                      runFeedback={runAction?.id === selected.id ? runAction.message : null}
+                      onCancelQueued={(run) => void handleCancelQueued(selected, run)}
+                      onEdit={() => openEdit(selected)}
+                      onDelete={() => void handleDelete(selected)}
+                      onToggleEnabled={(enabled) => void handleToggleEnabled(selected, enabled)}
+                      onReset={() => void handleReset(selected)}
+                      onCompact={() => void handleCompact(selected)}
+                      onClearThread={() => void handleClearThread(selected)}
+                      armedClearThread={armedClearThreadId === selected.id}
+                      onClearHistory={() => void handleClearRuns(selected)}
+                      armedClear={armedClearId === selected.id}
+                      onOpenLog={(run) => void openRunLog(selected.id, run)}
+                    />
+                  ) : filteredAutomations !== null && filteredAutomations.length === 0 ? (
+                    <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                      No automations yet. Create one to get started.
+                    </div>
+                  ) : (
+                    <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                      Select an automation, or create one.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

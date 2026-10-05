@@ -429,7 +429,7 @@ describe("automations REST API", { tags: ["integration"] }, () => {
     );
   });
 
-  it("reset reactivates and can clear history", async () => {
+  it("reset reactivates without discarding active work", async () => {
     const created = await request("POST", "", createInput());
     const automation = automationWithNextRunSchema.parse(created.body.automation);
     await request("POST", `/${automation.id}/run`);
@@ -437,7 +437,8 @@ describe("automations REST API", { tags: ["integration"] }, () => {
     expect(reset.status).toBe(200);
     const afterReset = automationWithNextRunSchema.parse(reset.body.automation);
     expect(afterReset.lifecycle).toBe("active");
-    expect(afterReset.runs).toEqual([]);
+    expect(afterReset.runs).toHaveLength(1);
+    expect(afterReset.runs[0].status).toBe("launched");
     expect((await request("POST", "/missing/reset")).status).toBe(404);
   });
 
@@ -909,6 +910,12 @@ describe("automations REST API", { tags: ["integration"] }, () => {
       });
       const automationId = ((await a.json()) as { automation: { id: string } }).automation.id;
       await fetch(`${base}/automations/${automationId}/run`, { method: "POST" });
+      const run = triageServer.automationStore.get(automationId)!.runs[0];
+      triageServer.automationStore.updateRun(automationId, run.runId, {
+        status: "completed",
+        finishedAt: Date.now(),
+        exitCode: 0,
+      });
       const before = (
         (await (await fetch(`${base}/automations`)).json()) as {
           automations: Array<{ runs: unknown[]; runCount: number }>;
@@ -940,6 +947,12 @@ describe("automations REST API", { tags: ["integration"] }, () => {
     const bId = (b.body.automation as { id: string }).id;
     await request("POST", `/${aId}/run`);
     await request("POST", `/${bId}/run`);
+    const run = testContext.server.automationStore.get(aId)!.runs[0];
+    testContext.server.automationStore.updateRun(aId, run.runId, {
+      status: "completed",
+      finishedAt: Date.now(),
+      exitCode: 0,
+    });
 
     const listBefore = (await request("GET", "")).body as {
       automations: Array<{ id: string; runs: unknown[]; runCount: number }>;
@@ -964,6 +977,89 @@ describe("automations REST API", { tags: ["integration"] }, () => {
     // unlike /reset, which zeroes the count and reactivates.
     expect(aAfter.runCount).toBe(aBefore.runCount);
     expect(listAfter.automations.length).toBe(listBefore.automations.length);
+  });
+
+  it("round-trips interval and timezone policies and rejects invalid zones", async () => {
+    const input = {
+      ...createInput(),
+      timezone: "America/New_York",
+      concurrencyPolicy: "queue-latest",
+      missedRunPolicy: "run-latest",
+      trigger: {
+        kind: "schedule",
+        schedule: { kind: "interval", every: 40, unit: "minutes", anchorAt: Date.now() + 60_000 },
+      },
+    };
+    const created = await request("POST", "", input);
+    expect(created.status).toBe(201);
+    const automation = automationWithNextRunSchema.parse(created.body.automation);
+    expect(automation).toMatchObject({
+      timezone: input.timezone,
+      concurrencyPolicy: "queue-latest",
+      missedRunPolicy: "run-latest",
+      cron: null,
+      nextRunAt: input.trigger.schedule.anchorAt,
+    });
+    expect((await request("POST", "", { ...input, timezone: "Not/A_Zone" })).status).toBe(400);
+    expect((await request("PATCH", `/${automation.id}`, { timezone: "Not/A_Zone" })).status).toBe(
+      400,
+    );
+  });
+
+  it("reports queued and skipped admission, protects active history and cancels pending work", async () => {
+    const created = await request("POST", "", {
+      ...createInput(),
+      concurrencyPolicy: "queue-latest",
+    });
+    const automation = automationWithNextRunSchema.parse(created.body.automation);
+    const first = await request("POST", `/${automation.id}/run`);
+    const second = await request("POST", `/${automation.id}/run`);
+    expect(first.body.status).toBe("launched");
+    expect(second.body.status).toBe("queued");
+    expect((await request("DELETE", `/${automation.id}`)).status).toBe(409);
+    expect((await request("POST", `/${automation.id}/clear-history`)).status).toBe(200);
+    const listed = (await request("GET", "")).body.automations as Array<Record<string, unknown>>;
+    const runs = listed[0].runs as Array<Record<string, unknown>>;
+    expect(runs).toHaveLength(2);
+    expect(runs.every((run) => !("execution" in run))).toBe(true);
+    expect(
+      (await request("POST", `/${automation.id}/runs/${first.body.runId}/cancel`)).status,
+    ).toBe(409);
+    expect(
+      (await request("POST", `/${automation.id}/runs/${second.body.runId}/cancel`)).status,
+    ).toBe(200);
+    await request("PATCH", `/${automation.id}`, { concurrencyPolicy: "skip" });
+    expect((await request("POST", `/${automation.id}/run`)).body.status).toBe("skipped");
+  });
+
+  it("rejects parallel persistent threads and blocks thread maintenance while queued", async () => {
+    const input = {
+      ...createInput(),
+      runner: { kind: "agent", prompt: "Review", sessionMode: "thread" },
+      concurrencyPolicy: "allow",
+    };
+    expect((await request("POST", "", input)).status).toBe(400);
+    const created = await request("POST", "", { ...input, concurrencyPolicy: "queue-latest" });
+    const automation = automationWithNextRunSchema.parse(created.body.automation);
+    expect(
+      (await request("PATCH", `/${automation.id}`, { concurrencyPolicy: "allow" })).status,
+    ).toBe(400);
+    testContext.server.automationStore.appendRun(automation.id, {
+      runId: "queued",
+      status: "queued",
+      scheduledFor: Date.now(),
+      startedAt: null,
+      finishedAt: null,
+      exitCode: null,
+      trigger: "manual",
+      countsTowardLimit: false,
+      findings: null,
+      log: null,
+      changedFiles: [],
+      unread: false,
+    });
+    expect((await request("POST", `/${automation.id}/compact`)).status).toBe(409);
+    expect((await request("POST", `/${automation.id}/clear-thread`)).status).toBe(409);
   });
 
   it("returns the thread-mode session transcript for an agent automation", async () => {

@@ -1,0 +1,45 @@
+import type {
+  AutomationRunWireRecord,
+  AutomationWithNextRun,
+} from "@monotykamary/localterm-server/protocol";
+export const automationFixture = (
+  overrides: Partial<AutomationWithNextRun> = {},
+): AutomationWithNextRun => ({
+  id: "build",
+  name: "Nightly build",
+  cwd: "/project/alpha",
+  runner: { kind: "shell", command: "true" },
+  trigger: { kind: "schedule", schedule: { kind: "daily", hour: 9, minute: 0 } },
+  timezone: "UTC",
+  cron: "0 9 * * *",
+  enabled: true,
+  lifecycle: "active",
+  limit: { kind: "forever" },
+  runCount: 0,
+  runs: [],
+  lastRun: null,
+  nextRunAt: null,
+  createdAt: 0,
+  updatedAt: 0,
+  closeOnFinish: false,
+  requestedSecrets: [],
+  redactOutput: false,
+  ...overrides,
+});
+export const runFixture = (
+  overrides: Partial<AutomationRunWireRecord> = {},
+): AutomationRunWireRecord => ({
+  runId: "run-1",
+  scheduledFor: 1704067200000,
+  startedAt: null,
+  finishedAt: null,
+  status: "queued",
+  exitCode: null,
+  trigger: "manual",
+  countsTowardLimit: false,
+  findings: null,
+  changedFiles: [],
+  unread: false,
+  hasLog: false,
+  ...overrides,
+});

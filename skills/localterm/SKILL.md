@@ -46,7 +46,9 @@ don't depend on which surface the browser happens to use.
 
 ## Automations
 
-An automation is `{name, trigger, cwd, runner, enabled, limit, closeOnFinish, requestedSecrets}`:
+An automation is `{name, trigger, cwd, runner, enabled, limit, closeOnFinish, requestedSecrets}` with optional `timezone`, `concurrencyPolicy` (`skip` / `queue-latest` / `allow`), and `missedRunPolicy` (`skip` / `run-latest`). Defaults skip overlap and missed work; persistent threads are always serialized. True elapsed schedules use `{kind:"interval", every, unit:"minutes"|"hours"|"days", anchorAt}` (epoch ms). Existing clock-aligned schedule kinds keep their timing. See [run states](references/run-states.md) for durable queues, cancellation, restart behavior, and status-aware Run now responses.
+
+Fields:
 
 - `trigger` — what makes the automation run, a tagged union on `kind`:
   - `{kind:"schedule", schedule}` — time-based (the common case; `daily` is shown in the create examples below).

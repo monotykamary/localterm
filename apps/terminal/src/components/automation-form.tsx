@@ -6,6 +6,8 @@ import {
 import type { ReactNode } from "react";
 import { AgentComposer } from "@/components/agent-composer";
 import { AutomationScheduleBuilder } from "@/components/automation-schedule-builder";
+import { AutomationSchedulePreview } from "@/components/automation-schedule-preview";
+import { AutomationSafetyFields } from "@/components/automation-safety-fields";
 import { EventTriggerSelector } from "@/components/event-trigger-selector";
 import { NumberStepper } from "@/components/number-stepper";
 import { SecretSelector } from "@/components/secret-selector";
@@ -22,10 +24,10 @@ import {
 } from "@/lib/automation-form-styles";
 import type { AutomationFormState } from "@/lib/automation-form-state";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/utils/format-relative-time";
 import { isHarnessKind } from "@/utils/is-harness-kind";
 import { isRunnerType } from "@/utils/is-runner-type";
 import { isTriggerType } from "@/utils/is-trigger-type";
+import { isRunnerFormValid } from "@/utils/runner-form";
 import {
   SESSION_EVENT_DESCRIPTIONS,
   SESSION_EVENT_LABELS,
@@ -45,9 +47,6 @@ interface AutomationFormProps {
   isSaving: boolean;
   isValid: boolean;
   saveError: boolean;
-  cronCaption: string;
-  scheduleValid: boolean;
-  nextPreviewAt: number | null;
   nowMs: number;
   cdp: CdpHealth;
   secrets: SecretEntryResponse[] | null;
@@ -68,9 +67,6 @@ export const AutomationForm = ({
   isSaving,
   isValid,
   saveError,
-  cronCaption,
-  scheduleValid,
-  nextPreviewAt,
   nowMs,
   cdp,
   secrets,
@@ -90,6 +86,7 @@ export const AutomationForm = ({
           autoFocus
           placeholder="nightly build"
           aria-label="automation name"
+          aria-required="true"
           className={cn(FORM_INPUT_CLASSES, "font-medium")}
           onChange={(event) => onChange({ ...form, name: event.target.value })}
         />
@@ -116,6 +113,7 @@ export const AutomationForm = ({
               value={form.runner.command}
               placeholder="pnpm build"
               aria-label="automation command"
+              aria-required="true"
               className={cn(FORM_INPUT_CLASSES, "font-mono")}
               onChange={(event) =>
                 onChange({ ...form, runner: { ...form.runner, command: event.target.value } })
@@ -236,6 +234,7 @@ export const AutomationForm = ({
             value={form.cwd}
             placeholder="/path/to/project"
             aria-label="automation directory"
+            aria-required="true"
             className={cn(FORM_INPUT_CLASSES, "font-mono")}
             onChange={(event) => onChange({ ...form, cwd: event.target.value })}
           />
@@ -260,13 +259,7 @@ export const AutomationForm = ({
               schedule={form.schedule}
               onChange={(schedule) => onChange({ ...form, schedule })}
             />
-            <span className="text-[10px] tabular-nums text-muted-foreground">
-              {!scheduleValid
-                ? "invalid schedule"
-                : nextPreviewAt !== null
-                  ? `next run ${formatRelativeTime(nextPreviewAt, nowMs)} · cron ${cronCaption}`
-                  : `schedule never fires · cron ${cronCaption}`}
-            </span>
+            <AutomationSchedulePreview form={form} onChange={onChange} nowMs={nowMs} />
           </>
         ) : form.triggerType === "watch" ? (
           <div className="flex flex-col gap-2">
@@ -298,8 +291,9 @@ export const AutomationForm = ({
               />
             </div>
             <span className="text-[10px] text-muted-foreground">
-              Runs the command when the directory changes — no polling. Won't start a new run while
-              one is still going; counts toward the run limit.
+              Runs the command when the directory changes — no polling. File changes during active
+              work are suppressed to prevent feedback loops. Run now follows your safety settings;
+              only automatic launches count toward the run limit.
             </span>
           </div>
         ) : form.triggerType === "webhook" ? (
@@ -307,7 +301,8 @@ export const AutomationForm = ({
             <span className="text-[10px] text-muted-foreground">
               Fires the command when a POST hits the automation's webhook URL. The URL is generated
               when you save — copy it from the automation's detail view. Anyone with the URL can
-              fire it; won't start a new run while one is still going; counts toward the run limit.
+              fire it. Your safety settings below control overlap; launches count toward the run
+              limit.
             </span>
           </div>
         ) : (
@@ -327,19 +322,26 @@ export const AutomationForm = ({
             </span>
             <span className="text-[10px] text-muted-foreground">
               Fires when any localterm session in this directory emits one of the selected events.
-              Won't start a new run while one is still going; counts toward the run limit.
+              Session events during active work are suppressed to prevent feedback loops. Run now
+              follows your safety settings; only automatic launches count toward the run limit.
             </span>
           </div>
         )}
       </FormSection>
 
+      <AutomationSafetyFields form={form} onChange={onChange} />
+
       <FormSection label="Limits">
+        <p className="text-[11px] text-muted-foreground">
+          Only automatic launches use this budget; manual Run now never counts. Reaching the limit
+          finishes the automation. Use Reset to resume a finished automation.
+        </p>
         <div className="flex items-center gap-2">
           <SettingsSelect
             value={form.limitMode}
             items={[
               { id: "forever", label: "Runs forever" },
-              { id: "count", label: "Stop after N runs" },
+              { id: "count", label: "Stop after N automatic runs" },
             ]}
             ariaLabel="run limit"
             placeholder="Limit"
@@ -440,8 +442,21 @@ export const AutomationForm = ({
         ) : null}
       </FormSection>
 
+      {!isValid ? (
+        <p className="text-xs text-muted-foreground" aria-live="polite">
+          {!form.name.trim()
+            ? "Add a name to identify this automation."
+            : !isRunnerFormValid(form.runner)
+              ? "Complete the command or agent prompt and harness settings."
+              : !form.cwd.trim()
+                ? "Choose the directory where this automation should run."
+                : form.triggerType === "event" && form.eventNames.length === 0
+                  ? "Select at least one event."
+                  : "Check the schedule, time zone and run limit above before saving."}
+        </p>
+      ) : null}
       {saveError ? (
-        <p className="text-[10px] text-destructive">
+        <p role="alert" className="text-xs text-destructive">
           Couldn't save — check the schedule and that the directory exists.
         </p>
       ) : null}

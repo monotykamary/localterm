@@ -272,7 +272,15 @@ describe("AutomationStore", () => {
     const store = new AutomationStore(filePath);
     const automation = store.create(createInput);
     for (let index = 0; index < AUTOMATION_RUN_HISTORY_CAP + 5; index += 1) {
-      store.appendRun(automation.id, runRecord({ runId: `run-${index}`, scheduledFor: index }));
+      store.appendRun(
+        automation.id,
+        runRecord({
+          runId: `run-${index}`,
+          scheduledFor: index,
+          status: "completed",
+          finishedAt: index + 1,
+        }),
+      );
     }
     const stored = store.get(automation.id);
     expect(stored?.runs).toHaveLength(AUTOMATION_RUN_HISTORY_CAP);
@@ -322,7 +330,10 @@ describe("AutomationStore", () => {
   it("reset re-activates, zeroes the count, re-enables, and preserves history by default", () => {
     const store = new AutomationStore(filePath);
     const automation = store.create({ ...createInput, limit: { kind: "count", max: 1 } });
-    store.appendRun(automation.id, runRecord({ runId: "r1" }));
+    store.appendRun(
+      automation.id,
+      runRecord({ runId: "r1", status: "completed", finishedAt: 1001 }),
+    );
     store.incrementRunCount(automation.id);
     store.update(automation.id, { enabled: false });
 
@@ -383,7 +394,7 @@ describe("AutomationStore", () => {
 
     // The migration persists as v4 so later loads hit the fast path.
     const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    expect(persisted.version).toBe(4);
+    expect(persisted.version).toBe(AUTOMATIONS_FILE_VERSION);
   });
 
   it("migrates a v1 automation with a null lastRun to empty history", () => {
@@ -488,7 +499,7 @@ describe("AutomationStore", () => {
 
     // The migration persists as v4 (no leftover top-level schedule).
     const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    expect(persisted.version).toBe(4);
+    expect(persisted.version).toBe(AUTOMATIONS_FILE_VERSION);
     expect(persisted.automations[0].schedule).toBeUndefined();
   });
 

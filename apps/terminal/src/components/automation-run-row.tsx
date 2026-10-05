@@ -5,7 +5,7 @@ import { formatAutomationRunTrigger } from "@/utils/format-automation-run-trigge
 import { formatRelativeTime } from "@/utils/format-relative-time";
 import { getAutomationRunTimestamp } from "@/utils/get-automation-run-timestamp";
 import { runStatusBadge } from "@/utils/run-status-badge";
-import { formatClockTime } from "@/utils/schedule-builder";
+import { automationRunReason } from "@/utils/automation-run-reason";
 
 interface AutomationRunRowProps {
   run: AutomationRunWireRecord;
@@ -22,7 +22,7 @@ export const AutomationRunRow = ({ run, nowMs, onOpenLog }: AutomationRunRowProp
       type="button"
       onClick={() => onOpenLog(run)}
       disabled={!hasLog}
-      className="flex w-full items-center gap-5 px-2.5 py-1.5 text-left text-xs outline-none transition-colors enabled:hover:bg-foreground/5 disabled:cursor-default"
+      className="flex w-full flex-wrap items-center gap-2 px-2.5 py-2 text-left text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring enabled:hover:bg-foreground/5 disabled:cursor-default"
     >
       <span className="flex shrink-0 items-center gap-1.5">
         <span
@@ -33,10 +33,10 @@ export const AutomationRunRow = ({ run, nowMs, onOpenLog }: AutomationRunRowProp
           {badge.label}
         </span>
       </span>
-      <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/80">
-        {run.status === "skipped"
-          ? `was due ${formatClockTime(new Date(run.scheduledFor).getHours(), new Date(run.scheduledFor).getMinutes())} · machine off`
-          : preview}
+      <span className="min-w-0 flex-1 text-[11px] text-muted-foreground/80">
+        {automationRunReason(run) ||
+          preview ||
+          (run.status === "skipped" ? "Not launched; reason unavailable for this older run." : "")}
       </span>
       <span className="flex shrink-0 items-center gap-2">
         <span className="min-w-[4.5rem] text-right text-[11px] text-muted-foreground/70">

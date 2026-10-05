@@ -685,6 +685,17 @@ export const MAX_AUTOMATION_NAME_LENGTH = 120;
 export const MAX_AUTOMATION_COMMAND_LENGTH = 4096;
 export const MAX_CRON_EXPRESSION_LENGTH = 256;
 export const MAX_AUTOMATION_REQUESTED_SECRETS = 32;
+export const MAX_AUTOMATION_INTERVAL = 100_000;
+export const MAX_TIME_ZONE_LENGTH = 128;
+export const MAX_AUTOMATION_CONCURRENT_RUNS = 8;
+export const MAX_DATE_EPOCH_MS = 8_640_000_000_000_000;
+export const SCHEDULE_MINUTE_MS = 60_000;
+export const SCHEDULE_HOUR_MS = 60 * SCHEDULE_MINUTE_MS;
+export const SCHEDULE_DAY_MS = 24 * SCHEDULE_HOUR_MS;
+export const SCHEDULE_OFFSET_SAMPLE_MS = 12 * SCHEDULE_HOUR_MS;
+export const SCHEDULE_CALENDAR_SCAN_LIMIT_DAYS = 8 * 366;
+export const SCHEDULE_TIME_ZONE_CACHE_MAX_ENTRIES = 32;
+export const SCHEDULE_OFFSET_CACHE_MAX_DAYS = 32;
 // v1 stored a raw cron string + a single lastRun. v2 stores a structured
 // schedule (with a derived cron computed on the fly), a run-count limit, a
 // lifecycle, and a capped run-history array. v3 wraps the schedule in a
@@ -693,7 +704,8 @@ export const MAX_AUTOMATION_REQUESTED_SECRETS = 32;
 // `runner` union (shell command vs agent prompt) and adds findings/changed-
 // files/unread to run records. AutomationStore.load() migrates v1/v2/v3 -> v4
 // in place on first boot so existing automations are never lost.
-export const AUTOMATIONS_FILE_VERSION = 4;
+// v5 adds durable queued runs, occurrence watermarks, and explicit timing policies.
+export const AUTOMATIONS_FILE_VERSION = 5;
 // Largest "stop after N runs" budget. Generous — a limit is opt-in; the common
 // case is "forever".
 export const AUTOMATION_RUN_LIMIT_MAX = 100_000;

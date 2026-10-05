@@ -265,6 +265,8 @@ export type {
   UpdateAutomationInput,
 } from "./types.js";
 export { compileSchedule, compileScheduleAll } from "./utils/compile-schedule.js";
+export { isValidTimeZone } from "./utils/is-valid-time-zone.js";
+export { nextScheduleOccurrence } from "./utils/next-schedule-occurrence.js";
 export type { BrowserCandidate, DetectedBrowser } from "./cdp/detect-chromium.js";
 export {
   extensionForImageContentType,
