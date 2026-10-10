@@ -22,6 +22,7 @@ import { getTerminalMinimumContrastRatio } from "@/utils/get-terminal-minimum-co
 import { preserveTerminalMouseWheelMagnitude } from "@/utils/preserve-terminal-mouse-wheel-magnitude";
 import { registerTerminalClipboard } from "@/utils/register-terminal-clipboard";
 import { isTerminalApplicationMouseEvent } from "@/utils/is-terminal-application-mouse-event";
+import { installTerminalLinkMouseGuard } from "@/utils/install-terminal-link-mouse-guard";
 import { EmojiWidthUnicodeProvider } from "@/utils/emoji-width-unicode-provider";
 import { KittyUnicodePlaceholderAddon } from "@/lib/terminal-runtime/kitty-unicode-placeholder-addon";
 import {
@@ -86,13 +87,13 @@ export const createTerminalSurface = ({
   openLink,
   setSearchResults,
 }: CreateTerminalSurfaceOptions): TerminalSurface => {
-  const isApplicationMouseEvent = (event: MouseEvent): boolean =>
-    isTerminalApplicationMouseEvent(terminal, event);
+  const shouldOpenLink = (event: MouseEvent): boolean =>
+    linkMouseGuard?.shouldOpenLink(event) ?? !isTerminalApplicationMouseEvent(terminal, event);
   const terminal = new XtermTerminal({
     allowProposedApi: true,
     cursorBlink: initialCursorBlink,
     cursorStyle: initialCursorStyle,
-    linkHandler: createTerminalLinkHandler(openLink, isApplicationMouseEvent),
+    linkHandler: createTerminalLinkHandler(openLink, shouldOpenLink),
     fontFamily: familyForFont(initialFont, initialNerdFontEnabled),
     fontSize: initialFontSize,
     lineHeight: initialLineHeight,
@@ -118,9 +119,7 @@ export const createTerminalSurface = ({
   const fitAddon = new FitAddon();
   fitAddonRef.current = fitAddon;
   terminal.loadAddon(fitAddon);
-  terminal.loadAddon(
-    new WebLinksAddon(createTerminalWebLinksHandler(openLink, isApplicationMouseEvent)),
-  );
+  terminal.loadAddon(new WebLinksAddon(createTerminalWebLinksHandler(openLink, shouldOpenLink)));
   const clipboardDisposable = registerTerminalClipboard(terminal);
   terminal.loadAddon(new ImageAddon());
   terminal.loadAddon(new KittyUnicodePlaceholderAddon());
@@ -147,6 +146,7 @@ export const createTerminalSurface = ({
   const searchResultsDisposable = searchAddon.onDidChangeResults(setSearchResults);
 
   terminal.open(container);
+  const linkMouseGuard = installTerminalLinkMouseGuard(terminal);
   const mouseWheelMagnitudeDisposable = preserveTerminalMouseWheelMagnitude(terminal);
 
   // Expose viewport serializers to the daemon's CDP automation (capture-pane
@@ -205,6 +205,7 @@ export const createTerminalSurface = ({
     },
     dispose: () => {
       searchResultsDisposable.dispose();
+      linkMouseGuard?.dispose();
       mouseWheelMagnitudeDisposable?.dispose();
       clipboardDisposable.dispose();
       delete windowProperties[LOCALTERM_PANE_TEXT_PROPERTY];

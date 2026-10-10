@@ -130,37 +130,52 @@ const installMouseGeometry = (terminal: XtermTerminal) => {
     terminal as unknown as {
       _core: {
         _mouseCoordsService: {
-          getCoords: () => [number, number];
-          getMouseReportCoords: () => { col: number; row: number; x: number; y: number };
+          getCoords: (event: MouseEvent) => [number, number];
+          getMouseReportCoords: (event: MouseEvent) => {
+            col: number;
+            row: number;
+            x: number;
+            y: number;
+          };
         };
       };
     }
   )._core;
-  vi.spyOn(_mouseCoordsService, "getCoords").mockImplementation(() => [2, 1]);
-  vi.spyOn(_mouseCoordsService, "getMouseReportCoords").mockReturnValue({
-    col: 1,
-    row: 0,
-    x: 10,
-    y: 10,
+  vi.spyOn(_mouseCoordsService, "getCoords").mockImplementation((event) => [
+    event.clientX,
+    event.clientY,
+  ]);
+  vi.spyOn(_mouseCoordsService, "getMouseReportCoords").mockImplementation((event) => ({
+    col: event.clientX - 1,
+    row: event.clientY - 1,
+    x: event.clientX,
+    y: event.clientY,
+  }));
+};
+
+const dispatchMouse = (
+  terminal: XtermTerminal,
+  type: string,
+  options: MouseEventInit = {},
+  target = terminal.element?.querySelector(".xterm-screen") as EventTarget | null,
+) => {
+  if (!target) throw new Error("xterm screen missing");
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    buttons: type === "mousedown" ? 1 : 0,
+    clientX: 2,
+    clientY: 1,
+    detail: 1,
+    ...options,
   });
+  target.dispatchEvent(event);
 };
 
 const clickTerminal = (terminal: XtermTerminal, modifiers: MouseEventInit = {}) => {
-  const screen = terminal.element?.querySelector(".xterm-screen");
-  if (!screen) throw new Error("xterm screen missing");
   for (const type of ["mousemove", "mousedown", "mouseup", "click"]) {
-    screen.dispatchEvent(
-      new MouseEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        button: 0,
-        buttons: type === "mousedown" ? 1 : 0,
-        clientX: 10,
-        clientY: 10,
-        detail: 1,
-        ...modifiers,
-      }),
-    );
+    dispatchMouse(terminal, type, modifiers);
   }
 };
 
@@ -216,8 +231,27 @@ describe("createTerminalSurface link handling", () => {
 
     describe.each(MOUSE_ENCODINGS)("$name mouse encoding", ({ enable, press, release }) => {
       describe.each([9, 1000, 1002, 1003])("tracking mode %i", (mode) => {
+        it("preserves non-link application clicks", async () => {
+          const openLink = vi.fn();
+          const { surface, dispose } = createSurface(openLink);
+          try {
+            const { terminal } = surface;
+            installMouseGeometry(terminal);
+            const input: string[] = [];
+            terminal.onData((report) => input.push(report));
+            terminal.onBinary((report) => input.push(report));
+            await writeTerminal(terminal, `${enter}\u001b[?${mode}h${enable}not a link`);
+            clickTerminal(terminal);
+            expect(openLink).not.toHaveBeenCalled();
+            expect(input).toContain(press);
+            if (mode === 9) expect(input).not.toContain(release);
+            else expect(input).toContain(release);
+          } finally {
+            dispose();
+          }
+        });
         it.each(ALL_LINK_OUTPUTS)(
-          "delegates $name and restores local handling dynamically",
+          "opens $name once with or without application mouse tracking",
           async ({ data, uri }) => {
             const openLink = vi.fn();
             const { surface, dispose } = createSurface(openLink);
@@ -234,10 +268,10 @@ describe("createTerminalSurface link handling", () => {
 
               await writeTerminal(terminal, `\u001b[?${mode}h${enable}`);
               clickTerminal(terminal);
-              expect(openLink).not.toHaveBeenCalled();
-              expect(input).toContain(press);
-              if (mode === 9) expect(input).not.toContain(release);
-              else expect(input).toContain(release);
+              expect(openLink).toHaveBeenCalledExactlyOnceWith(uri);
+              expect(input).not.toContain(press);
+              expect(input).not.toContain(release);
+              openLink.mockClear();
 
               await writeTerminal(terminal, `\u001b[?${mode}l\u001b[?1006l`);
               input.length = 0;
@@ -253,6 +287,130 @@ describe("createTerminalSurface link handling", () => {
     });
   });
 
+  describe("link gesture ownership", () => {
+    const createMouseSurface = async () => {
+      const openLink = vi.fn();
+      const result = createSurface(openLink);
+      const { terminal } = result.surface;
+      installMouseGeometry(terminal);
+      const input: string[] = [];
+      terminal.onData((report) => input.push(report));
+      await writeTerminal(terminal, `\u001b[?1002h\u001b[?1006h${EXTERNAL_URL}`);
+      dispatchMouse(terminal, "mousemove");
+      return { ...result, terminal, openLink, input };
+    };
+
+    it("defers the press, then forwards a link drag without opening a tab", async () => {
+      const { terminal, openLink, input, dispose } = await createMouseSurface();
+      try {
+        dispatchMouse(terminal, "mousedown");
+        expect(input).toEqual([]);
+        dispatchMouse(terminal, "mousemove", { clientX: 4, buttons: 1 });
+        dispatchMouse(terminal, "mouseup", { clientX: 4 });
+        expect(openLink).not.toHaveBeenCalled();
+        expect(input).toEqual(["\u001b[<0;2;1M", "\u001b[<32;4;1M", "\u001b[<0;4;1m"]);
+        input.length = 0;
+        clickTerminal(terminal);
+        expect(openLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+        expect(input).toEqual([]);
+      } finally {
+        dispose();
+      }
+    });
+
+    it("does not activate a drag that returns to the original link cell", async () => {
+      const { terminal, openLink, input, dispose } = await createMouseSurface();
+      try {
+        dispatchMouse(terminal, "mousedown");
+        dispatchMouse(terminal, "mousemove", { clientX: 40, buttons: 1 });
+        dispatchMouse(terminal, "mousemove", { buttons: 1 });
+        dispatchMouse(terminal, "mouseup");
+        expect(openLink).not.toHaveBeenCalled();
+        expect(input).toEqual([
+          "\u001b[<0;2;1M",
+          "\u001b[<32;40;1M",
+          "\u001b[<32;2;1M",
+          "\u001b[<0;2;1m",
+        ]);
+      } finally {
+        dispose();
+      }
+    });
+
+    it("keeps same-cell pointer movement part of a local click", async () => {
+      const { terminal, openLink, input, dispose } = await createMouseSurface();
+      try {
+        dispatchMouse(terminal, "mousedown");
+        dispatchMouse(terminal, "mousemove", { buttons: 1 });
+        dispatchMouse(terminal, "mouseup");
+        expect(openLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+        expect(input).toEqual([]);
+      } finally {
+        dispose();
+      }
+    });
+
+    it.each(["non-link cell", "outside the terminal"])(
+      "replays an unactivated press released on %s",
+      async (target) => {
+        const { terminal, openLink, input, dispose } = await createMouseSurface();
+        try {
+          dispatchMouse(terminal, "mousedown");
+          if (target === "non-link cell") dispatchMouse(terminal, "mouseup", { clientX: 40 });
+          else dispatchMouse(terminal, "mouseup", { clientX: 40 }, document);
+          expect(openLink).not.toHaveBeenCalled();
+          expect(input).toEqual(["\u001b[<0;2;1M", "\u001b[<0;40;1m"]);
+        } finally {
+          dispose();
+        }
+      },
+    );
+
+    it.each(["blur", "lost mouseup"])(
+      "cancels a deferred gesture after %s without orphan mouse reports",
+      async (reason) => {
+        const { terminal, openLink, input, dispose } = await createMouseSurface();
+        try {
+          dispatchMouse(terminal, "mousedown");
+          if (reason === "blur") window.dispatchEvent(new Event("blur"));
+          else dispatchMouse(terminal, "mousemove");
+          dispatchMouse(terminal, "mouseup");
+          expect(openLink).not.toHaveBeenCalled();
+          expect(input).toEqual([]);
+          clickTerminal(terminal);
+          expect(openLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+          expect(input).toEqual([]);
+        } finally {
+          dispose();
+        }
+      },
+    );
+
+    it("opens middle-clicked links once without leaking a middle-button report", async () => {
+      const { terminal, openLink, input, dispose } = await createMouseSurface();
+      try {
+        dispatchMouse(terminal, "mousedown", { button: 1, buttons: 4 });
+        dispatchMouse(terminal, "mouseup", { button: 1 });
+        expect(openLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+        expect(input).toEqual([]);
+      } finally {
+        dispose();
+      }
+    });
+
+    it("preserves right-click input instead of opening the hovered link", async () => {
+      const { terminal, openLink, input, dispose } = await createMouseSurface();
+      try {
+        dispatchMouse(terminal, "mousedown", { button: 2, buttons: 2 });
+        dispatchMouse(terminal, "mouseup", { button: 2 });
+        expect(openLink).not.toHaveBeenCalled();
+        expect(input).toEqual(["\u001b[<2;2;1M", "\u001b[<2;2;1m"]);
+      } finally {
+        dispose();
+      }
+    });
+  });
+
   it("does not mistake leaving the alternate screen for disabling mouse reporting", async () => {
     const openLink = vi.fn();
     const { surface, dispose } = createSurface(openLink);
@@ -262,7 +420,8 @@ describe("createTerminalSurface link handling", () => {
       await writeTerminal(terminal, EXTERNAL_URL + "\u001b[?1049h\u001b[?1002h\u001b[?1049l");
       expect(terminal.buffer.active.type).toBe("normal");
       clickTerminal(terminal);
-      expect(openLink).not.toHaveBeenCalled();
+      expect(openLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+      openLink.mockClear();
       terminal.reset();
       await writeTerminal(terminal, EXTERNAL_URL);
       expect(terminal.modes.mouseTrackingMode).toBe("none");
@@ -300,7 +459,7 @@ describe("createTerminalSurface link handling", () => {
     );
   });
 
-  it("delegates Alt-gated application clicks when Alt is held", async () => {
+  it("opens Alt-gated links locally without forwarding the gesture when Alt is held", async () => {
     const openLink = vi.fn();
     const { surface, dispose } = createSurface(openLink);
     try {
@@ -311,9 +470,8 @@ describe("createTerminalSurface link handling", () => {
       terminal.onData(input);
       await writeTerminal(terminal, "\u001b[?1002h\u001b[?1006h" + EXTERNAL_URL);
       clickTerminal(terminal, { altKey: true });
-      expect(openLink).not.toHaveBeenCalled();
-      expect(input).toHaveBeenCalledWith("\u001b[<0;2;1M");
-      expect(input).toHaveBeenCalledWith("\u001b[<0;2;1m");
+      expect(openLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+      expect(input).not.toHaveBeenCalled();
     } finally {
       dispose();
     }
@@ -342,7 +500,7 @@ describe("createTerminalSurface link handling", () => {
 
   describe.each([1000, 1002, 1003])("application mouse mode %i", (mode) => {
     it.each(LINK_OUTPUTS)(
-      "leaves $name activation to the application until tracking ends",
+      "opens $name once even when the application opens links itself",
       async ({ data }) => {
         const openLink = vi.fn();
         const applicationOpenLink = vi.fn();
@@ -353,17 +511,19 @@ describe("createTerminalSurface link handling", () => {
           const input: string[] = [];
           terminal.onData((report) => {
             input.push(report);
-            // Pi's fullscreen TUI activates the pressed link on mouse release.
-            if (report === "\u001b[<0;2;1m") applicationOpenLink(EXTERNAL_URL);
+            // A TUI may open on press or release (Pi uses release).
+            if (report === "\u001b[<0;2;1M" || report === "\u001b[<0;2;1m")
+              applicationOpenLink(EXTERNAL_URL);
           });
           await writeTerminal(terminal, `\u001b[?${mode}h\u001b[?1006h${data}`);
 
           clickTerminal(terminal);
 
-          expect(openLink).not.toHaveBeenCalled();
-          expect(applicationOpenLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
-          expect(input).toContain("\u001b[<0;2;1M");
-          expect(input).toContain("\u001b[<0;2;1m");
+          expect(openLink).toHaveBeenCalledExactlyOnceWith(EXTERNAL_URL);
+          expect(applicationOpenLink).not.toHaveBeenCalled();
+          expect(input).not.toContain("\u001b[<0;2;1M");
+          expect(input).not.toContain("\u001b[<0;2;1m");
+          openLink.mockClear();
 
           await writeTerminal(terminal, `\u001b[?${mode}l\u001b[?1006l`);
           input.length = 0;
