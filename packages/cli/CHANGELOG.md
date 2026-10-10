@@ -1,5 +1,13 @@
 # localterm
 
+## 2.81.1
+
+### Patch Changes
+
+- aaa3305: Restore links in mouse-reporting TUIs such as Claude Code without reopening duplicate tabs in applications such as Pi. LocalTerm now owns recognized link clicks and consumes their PTY press/release reports, while forwarding non-link clicks, drags, and unactivated gestures normally.
+- Updated dependencies [aaa3305]
+  - @monotykamary/localterm-server@2.81.1
+
 ## 2.81.0
 
 ### Minor Changes
