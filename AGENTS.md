@@ -71,34 +71,29 @@ or test run alone does **not** prove a package is publishable.
 - Keep `packages/cli/tests/publish-manifest.test.ts` green. It checks the
   local-only protocol ban and exact CLI/server version alignment; do not weaken
   it to make a version bump pass.
-- Build before packing. Run `bun pm pack --destination <temp-dir>` from each
-  package directory, not the private root. Let the CLI prepack hook run: it
-  copies the built terminal UI, README, and LICENSE and checks native resources.
-- Inspect **the tarballs**, not only the source manifests. Check package names
-  and versions, runtime dependency protocols, the exact server pin, all server
-  export targets, CLI entry points, terminal HTML/assets, and executable native
-  resources. Every new production import needs a shipped runtime dependency.
-- Smoke-test installation in a fresh directory outside the monorepo, without
-  workspace links or a global LocalTerm install masking missing dependencies.
-  CLI `--version`/`--help` and importing server modules do not require starting
-  a daemon. A test-only dependency override is not proof of registry resolution.
-  For Bun, use `--linker hoisted --backend copyfile --cache-dir ./package-cache`
-  and verify resolved realpaths stay inside the consumer directory: the default
-  linker can otherwise reuse the global virtual store.
-- Publish the **inspected tarballs** from their corresponding package directories
-  with `bun publish --access public <tarball>`; Bun's bin-path validation is
-  cwd-sensitive even when the archive already contains the executable.
-  Publish the server first and confirm that exact version is available from the
-  registry before publishing the CLI that depends on it. Never rely on Bun to
-  rewrite a workspace protocol during publishing. A publish acknowledgement is
-  not download readiness: metadata and tarballs can take minutes to propagate.
-  Check the registry's `?write=true` package metadata and download its actual
-  `dist.tarball` URL. Retry bounded, read-only verification on temporary 404s;
-  do not blindly republish a version that the registry has already accepted.
-- Verify registry versions, dependency metadata, and tarball integrity afterward.
-  Commit the version/changelog/lockfile changes and push the release commits and
-  matching package-version tags. Never republish different bytes under an
-  existing version; fix forward with a new version.
+- Releases are published by CI, not from a workstation. Commit the versioned
+  packages (`bun run version`, the lockfile refresh above) as the
+  `chore(release): ...` commit and push it to `main`; `.github/workflows/publish.yml`
+  then publishes every package version npm does not have, through npm Trusted
+  Publishing; do not publish from a workstation. It runs on macOS,
+  builds the workspace and the native resources, runs `bun run check` and the
+  publish-manifest test, and packs each package from its own directory so the
+  CLI prepack hook copies the terminal UI, README, and LICENSE.
+- Before publishing anything, the workflow checks the tarballs as consumers
+  receive them: no `workspace:`, `file:`, or `link:` runtime, optional, or peer
+  dependency, the CLI pinning the server at their shared exact version, and a
+  clean `npm install` of both tarballs outside the monorepo running
+  `localterm --version` and `--help`. It publishes the server first and waits
+  until its tarball downloads before publishing the CLI, then pushes the
+  `<package>@<version>` tags. Rerun it from the Actions tab to retry; never
+  republish different bytes under an existing version, fix forward instead.
+- For changes the workflow cannot see (a new export target, native resource, or
+  terminal asset), inspect locally first: `bun run build`, then
+  `bun pm pack --destination <temp-dir>` from each package directory, and check
+  package names and versions, all server export targets, CLI entry points,
+  terminal HTML/assets, and executable native resources. Every new production
+  import needs a shipped runtime dependency. The publish workflow's `dry_run`
+  input builds, checks, and packs on CI without publishing.
 - Do not restart or update a running LocalTerm daemon as a release smoke test.
   The repository's `bun run start` actually invokes `localterm restart` and can
   terminate the very session doing the release. Use isolated consumer checks.

@@ -30,8 +30,7 @@
     "format:check": "vp fmt --check",
     "check": "bun run format:check && bun run lint && bun run lint:range && bun run typecheck",
     "changeset": "changeset",
-    "version": "changeset version",
-    "release": "bun run build && changeset publish"
+    "version": "changeset version"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",

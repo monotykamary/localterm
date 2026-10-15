@@ -1,0 +1,174 @@
+name: Publish
+
+# Releases of @monotykamary/localterm-server, @monotykamary/localterm, @monotykamary/pi-localterm go out from here, and only from here.
+#
+#   1. Version the packages (`bun run version` applies the pending changesets)
+#      and commit that as `chore(release): ...`.
+#   2. Push it to main. This workflow publishes every version that npm does
+#      not have yet; any other push is a no-op.
+#
+# Run it from the Actions tab to retry a failed release, or tick "dry_run" to
+# build, check and pack without publishing.
+#
+# Auth is npm Trusted Publishing (OIDC): npm trusts this file, so no npm token
+# is stored anywhere. Registered once with
+#   npm trust github @monotykamary/localterm-server --repo monotykamary/localterm --file publish.yml --allow-publish
+#   npm trust github @monotykamary/localterm --repo monotykamary/localterm --file publish.yml --allow-publish
+#   npm trust github @monotykamary/pi-localterm --repo monotykamary/localterm --file publish.yml --allow-publish
+#
+# Bun installs and packs exactly as `bun publish` does; npm uploads the
+# tarballs because only the npm CLI speaks trusted publishing.
+
+on:
+  push:
+    branches: [main]
+    paths: ["packages/*/package.json"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build, check and pack, but do not publish
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # existing release tags
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Find versions npm does not have
+        id: release
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          specs=$(
+          for p in server cli pi-extension; do
+            node -p "const p = require('./packages/$p/package.json'); p.name + '@' + p.version"
+          done
+          )
+          missing=""
+          for spec in $specs; do
+            # npm runs from outside the checkout so the repo's devEngines do not apply.
+            if (cd "$RUNNER_TEMP" && npm view "$spec" version >/dev/null 2>&1); then
+              echo "$spec is already on npm"
+            else
+              missing="$missing $spec"
+            fi
+          done
+          if [ "$DRY_RUN" = "true" ]; then
+            mode=dry-run
+          elif [ -n "$missing" ]; then
+            mode=publish
+            echo "::notice::Publishing$missing"
+          else
+            mode=skip
+            echo "::notice::Nothing to publish"
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        if: steps.release.outputs.mode != 'skip'
+        run: bun install --frozen-lockfile
+
+      - name: Build the workspace and the macOS native resources
+        if: steps.release.outputs.mode != 'skip'
+        run: |
+          bun run build
+          bun run --filter @monotykamary/localterm build:macos-launcher
+
+      - name: Check
+        if: steps.release.outputs.mode != 'skip'
+        run: bun run check && (cd packages/cli && bunx vp test --run tests/publish-manifest.test.ts)
+
+      - name: Pack
+        if: steps.release.outputs.mode != 'skip'
+        run: |
+          mkdir -p "$RUNNER_TEMP/pack"
+          (cd packages/server && bun pm pack --filename "$RUNNER_TEMP/pack/1-server.tgz" --quiet)
+          (cd packages/cli && bun pm pack --filename "$RUNNER_TEMP/pack/2-cli.tgz" --quiet)
+          (cd packages/pi-extension && bun pm pack --filename "$RUNNER_TEMP/pack/3-pi-extension.tgz" --quiet)
+
+      # AGENTS.md "Release packaging": check what consumers receive, before
+      # anything is published.
+      - name: Verify the tarballs as consumers receive them
+        if: steps.release.outputs.mode != 'skip'
+        run: |
+          mkdir -p "$RUNNER_TEMP/manifests"
+          for t in server cli pi-extension; do
+            tar -xOzf "$RUNNER_TEMP"/pack/*-$t.tgz package/package.json > "$RUNNER_TEMP/manifests/$t.json"
+          done
+          node -e '
+            const fs = require("fs");
+            const read = (name) => JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/manifests/" + name + ".json", "utf8"));
+            const [server, cli, extension] = ["server", "cli", "pi-extension"].map(read);
+            for (const manifest of [server, cli, extension])
+              for (const field of ["dependencies", "optionalDependencies", "peerDependencies"])
+                for (const [name, range] of Object.entries(manifest[field] ?? {}))
+                  if (/^(workspace|file|link):/.test(range)) throw new Error(manifest.name + " " + field + "." + name + " is " + range);
+            if (cli.version !== server.version || cli.dependencies["@monotykamary/localterm-server"] !== server.version)
+              throw new Error("the CLI must pin the server at their shared exact version");
+          '
+          # A clean install outside the monorepo, with no workspace links.
+          consumer=$(mktemp -d)
+          cd "$consumer"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/pack/*-server.tgz "$RUNNER_TEMP"/pack/*-cli.tgz
+          npx --no-install localterm --version
+          npx --no-install localterm --help >/dev/null
+
+      - name: Publish
+        if: steps.release.outputs.mode != 'skip'
+        env:
+          MODE: ${{ steps.release.outputs.mode }}
+        run: |
+          # Trusted publishing needs npm 11.5.1 or newer.
+          npm install --global npm@latest
+          cd "$RUNNER_TEMP"
+          # ./ keeps npm from reading pack/name.tgz as a GitHub repo shorthand.
+          for tarball in ./pack/*.tgz; do
+            spec=$(tar -xOzf "$tarball" package/package.json | node -p "const p = JSON.parse(require('fs').readFileSync(0, 'utf8')); p.name + '@' + p.version")
+            echo "::group::$spec"
+            tar -tzf "$tarball"
+            echo "::endgroup::"
+            if [ "$MODE" = "dry-run" ]; then
+              echo "Dry run: not publishing $spec"
+            elif npm view "$spec" version >/dev/null 2>&1; then
+              echo "$spec is already on npm"
+            else
+              npm publish "$tarball" --access public --provenance
+              # Published is not downloadable yet; wait before the next package.
+              for attempt in $(seq 1 60); do
+                url=$(npm view "$spec" dist.tarball 2>/dev/null) && curl -fsI "$url" >/dev/null && break
+                [ "$attempt" = 60 ] && { echo "::error::$spec is not downloadable after 10 minutes"; exit 1; }
+                sleep 10
+              done
+            fi
+          done
+
+      - name: Tag released versions
+        if: steps.release.outputs.mode == 'publish'
+        run: |
+          for p in server cli pi-extension; do
+            spec=$(node -p "const p = require('./packages/$p/package.json'); p.name + '@' + p.version")
+            if (cd "$RUNNER_TEMP" && npm view "$spec" version >/dev/null 2>&1) && ! git rev-parse -q --verify "refs/tags/$spec" >/dev/null; then
+              git tag "$spec"
+              git push origin "refs/tags/$spec"
+            fi
+          done
