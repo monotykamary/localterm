@@ -1,5 +1,12 @@
 # @monotykamary/pi-localterm
 
+## 0.5.1
+
+### Patch Changes
+
+- 0bfce47: Develop and test pi-localterm against Pi 1.2.0. Pi remains a host-provided wildcard peer.
+- 4ca4a76: Develop and test pi-localterm against Pi 1.3.0. Pi remains a host-provided wildcard peer.
+
 ## 0.5.0
 
 ### Minor Changes
