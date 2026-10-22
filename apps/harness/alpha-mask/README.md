@@ -2,7 +2,7 @@
 
 A standalone reproducer for the intermittent "every glyph renders semibold/bold"
 bug in the patched `@xterm/addon-webgl` alpha-mask renderer
-(`patches/@xterm__addon-webgl@0.20.0-beta.290.patch`). It loads the **real**
+(`patches/@xterm__addon-webgl@0.20.0-beta.309.patch`). It loads the **real**
 patched addon + `@xterm/xterm` + Geist Mono, spawns many terminals sharing the
 module-level atlas cache (`acquireTextureAtlas` → global `e0`), and measures the
 rendered glyph ink coverage from each terminal's WebGL canvas to classify the

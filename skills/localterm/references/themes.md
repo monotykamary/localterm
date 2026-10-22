@@ -89,7 +89,7 @@ curl -s -X POST "$BASE/themes/migrate" -H 'content-type: application/json' \
 
 - `POST /themes/import` → `400 {"error":"invalid_body"}` (bad request shape) or
   `400 {"error":"invalid_theme","message":"…"}` (unparseable/empty file); `409
-{"error":"capacity"}` when the custom-theme cap (`MAX_CUSTOM_THEMES`) is reached.
+  {"error":"capacity"}` when the custom-theme cap (`MAX_CUSTOM_THEMES`) is reached.
 - `PUT /themes/active` → `400 {"error":"invalid_body"}` or `404 {"error":"not_found"}`
   for an id that isn't a built-in, `auto`, or a stored custom theme (a typo is
   rejected rather than silently falling back to the default).
@@ -107,7 +107,7 @@ the CLI):
 - **Bare colors object** — `{background:"#…", foreground:"#…", …}` (the xterm
   `ITheme` directly); the name is derived from the filename.
 - **iTerm `.itermcolors`** — an Apple plist XML; the parser maps `Background
-Color`/`Ansi 0 Color`/… components (`Red/Green/Blue Component` 0–1 floats) to
+  Color`/`Ansi 0 Color`/… components (`Red/Green/Blue Component` 0–1 floats) to
   the ITheme keys. The name is derived from the filename.
 
 ## The active theme

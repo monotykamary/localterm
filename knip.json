@@ -2,13 +2,8 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "vite": false,
   "vitest": { "config": [] },
-  "ignoreBinaries": ["pmset", "xattr", "osascript", "^c[+][+]$"],
-  "ignoreDependencies": [
-    "vitest",
-    "@voidzero-dev/vite-plus-core",
-    "@azurity/pure-nerd-font",
-    "jsdom"
-  ],
+  "ignoreBinaries": ["pmset", "xattr", "osascript", "localterm", "^c[+][+]$"],
+  "ignoreDependencies": ["vitest", "@voidzero-dev/vite-plus-core", "jsdom"],
   "ignoreWorkspaces": ["apps/harness", "apps/harness/alpha-mask"],
   "ignoreIssues": {
     "apps/harness/light-theme-rendering/main.mjs": ["unresolved"],

@@ -77,7 +77,7 @@ and the session cookie keeps you signed in across tabs.
 ## Notes
 
 - Identity is built once at daemon start, so changing it needs a `localterm
-restart` (unlike `cdpPort`/`graceSeconds`, which are live).
+  restart` (unlike `cdpPort`/`graceSeconds`, which are live).
 - `passkey` needs a WebAuthn-capable browser and a **hostname** origin
   (`localhost` or a real domain) — WebAuthn RP IDs must be registrable domains,
   so a bare IP like `127.0.0.1` fails ("This is an invalid domain"), but

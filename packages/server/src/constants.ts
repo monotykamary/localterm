@@ -990,6 +990,10 @@ export const IDENTITY_USER_MAX_LENGTH = 256;
 // ceremony so subsequent tabs (and WS upgrades) re-authenticate silently. The
 // HMAC secret is generated once and persisted; challenges are short-lived.
 export const IDENTITY_RP_NAME_DEFAULT = "localterm";
+// EdDSA, ES256, RS256. SimpleWebAuthn 14 prefers ML-DSA-44 when the running
+// Node supports it; a passkey registered that way stops verifying if the
+// daemon later runs on a supported Node without ML-DSA (>=22).
+export const IDENTITY_PASSKEY_ALGORITHM_IDS = [-8, -7, -257];
 export const IDENTITY_RP_NAME_MAX_LENGTH = 64;
 export const IDENTITY_USERNAME_MIN_LENGTH = 1;
 export const IDENTITY_USERNAME_MAX_LENGTH = 256;

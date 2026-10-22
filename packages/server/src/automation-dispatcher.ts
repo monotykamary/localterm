@@ -77,11 +77,10 @@ export class AutomationDispatcher {
       ...(trigger === "schedule" ? { lastScheduledAt: scheduledFor } : {}),
       runs: trimAutomationRuns([
         run,
-        ...current.runs.map(
-          (previous): AutomationRunRecord =>
-            !reason && policy === "queue-latest" && previous.status === "queued"
-              ? { ...previous, status: "skipped", reason: "superseded", finishedAt: now }
-              : previous,
+        ...current.runs.map((previous): AutomationRunRecord =>
+          !reason && policy === "queue-latest" && previous.status === "queued"
+            ? { ...previous, status: "skipped", reason: "superseded", finishedAt: now }
+            : previous,
         ),
       ]),
     }));

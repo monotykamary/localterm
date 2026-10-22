@@ -22,12 +22,12 @@ describe("failed PTY allocation", () => {
     vi.mocked(spawnPty).mockImplementation(() => {
       throw cause;
     });
-    vi.spyOn(ShellHookBuilder.prototype, "prepare").mockImplementation(
-      function (this: ShellHookBuilder) {
-        this.hookCleanupPaths.push(directory);
-        return [[], null];
-      },
-    );
+    vi.spyOn(ShellHookBuilder.prototype, "prepare").mockImplementation(function (
+      this: ShellHookBuilder,
+    ) {
+      this.hookCleanupPaths.push(directory);
+      return [[], null];
+    });
     try {
       let failure: unknown;
       try {

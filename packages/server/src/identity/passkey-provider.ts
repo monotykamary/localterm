@@ -16,6 +16,7 @@ import {
   AUTH_CHALLENGE_TTL_MS,
   HTTP_STATUS_BAD_REQUEST,
   HTTP_STATUS_FORBIDDEN,
+  IDENTITY_PASSKEY_ALGORITHM_IDS,
   IDENTITY_RP_NAME_DEFAULT,
   IDENTITY_USERNAME_MAX_LENGTH,
   IDENTITY_USERNAME_MIN_LENGTH,
@@ -149,6 +150,7 @@ const buildPasskeyRoutes = (deps: PasskeyRouteDeps): Hono => {
       userName: username,
       excludeCredentials,
       authenticatorSelection: { residentKey: "preferred", userVerification: "preferred" },
+      supportedAlgorithmIDs: IDENTITY_PASSKEY_ALGORITHM_IDS,
     });
     deps.challenges.set(options.challenge, "register");
     return context.json(options);
@@ -174,6 +176,7 @@ const buildPasskeyRoutes = (deps: PasskeyRouteDeps): Hono => {
         expectedOrigin: rp.origin,
         expectedRPID: rp.rpID,
         requireUserVerification: true,
+        supportedAlgorithmIDs: IDENTITY_PASSKEY_ALGORITHM_IDS,
       });
     } catch {
       return context.json({ error: "verification_failed" }, HTTP_STATUS_BAD_REQUEST);

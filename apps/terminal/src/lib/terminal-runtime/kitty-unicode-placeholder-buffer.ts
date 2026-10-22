@@ -67,7 +67,7 @@ export interface KittyBufferLine {
   _combined: Record<number, string | undefined>;
   _data: Uint32Array;
   _extendedAttrs: Record<number, KittyPlaceholderExtendedAttributes | undefined>;
-  _invalidateStringCache(): void;
+  _cacheValid: boolean;
 }
 
 interface PendingPlaceholder {
@@ -83,6 +83,7 @@ class PlaceholderExtendedAttributes implements KittyPlaceholderExtendedAttribute
   private rawExt: number;
   private rawUrlId: number;
   kittyPlaceholder: KittyPlaceholderMetadata | undefined;
+  payload: object | undefined;
 
   constructor(
     source: KittyPlaceholderExtendedAttributes | undefined,
@@ -93,6 +94,7 @@ class PlaceholderExtendedAttributes implements KittyPlaceholderExtendedAttribute
     this.rawUrlId =
       source instanceof PlaceholderExtendedAttributes ? source.rawUrlId : (source?.urlId ?? 0);
     this.kittyPlaceholder = kittyPlaceholder;
+    this.payload = source?.payload;
   }
 
   get ext(): number {
@@ -154,11 +156,18 @@ class PlaceholderExtendedAttributes implements KittyPlaceholderExtendedAttribute
   clone(): KittyPlaceholderExtendedAttributes {
     const clone = new PlaceholderExtendedAttributes(this, this.kittyPlaceholder);
     clone.kittyPlaceholder = this.kittyPlaceholder ? { ...this.kittyPlaceholder } : undefined;
+    // Matches xterm's ExtendedAttrs.clone(), which does not carry addon payloads.
+    clone.payload = undefined;
     return clone;
   }
 
   isEmpty(): boolean {
-    return !this.kittyPlaceholder && this.underlineStyle === 0 && this.rawUrlId === 0;
+    return (
+      !this.kittyPlaceholder &&
+      this.underlineStyle === 0 &&
+      this.rawUrlId === 0 &&
+      this.payload === undefined
+    );
   }
 }
 
@@ -290,7 +299,7 @@ export const sanitizeKittyPlaceholderCells = (
     delete line._combined[column];
     sanitized = true;
   }
-  if (sanitized) line._invalidateStringCache();
+  if (sanitized) line._cacheValid = false;
   return sanitized;
 };
 

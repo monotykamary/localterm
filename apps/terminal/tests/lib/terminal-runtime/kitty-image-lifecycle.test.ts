@@ -17,10 +17,17 @@ interface Bitmap {
   close: () => void;
 }
 interface InternalAddon {
+  _renderer: {
+    hasLayer: (layer: string) => boolean;
+    rescaleCanvas: () => void;
+    clearLines: (start: number, end: number) => void;
+    draw: (spec: unknown, tileId: number, col: number, row: number, count: number) => void;
+  };
   _storage: {
     _images: Map<number, unknown>;
     deleteImage: (id: number) => void;
     _evictOnAlternate: () => void;
+    render: (range: { start: number; end: number }) => void;
   };
   _handlers: Map<
     string,
@@ -133,6 +140,24 @@ describe.each([
     h.internal._storage._evictOnAlternate();
     expect(h.internal._storage._images.size).toBe(4);
     expect(h.storage.images.size).toBe(4);
+  });
+
+  it("keeps drawing image tiles after text is written over them", async () => {
+    const h = setup();
+    await h.upload(42);
+    await write(h.terminal, `${ESC}[1;1Htext`);
+    const renderer = h.internal._renderer;
+    vi.spyOn(renderer, "hasLayer").mockReturnValue(true);
+    vi.spyOn(renderer, "rescaleCanvas").mockImplementation(() => {});
+    vi.spyOn(renderer, "clearLines").mockImplementation(() => {});
+    const draw = vi.spyOn(renderer, "draw").mockImplementation(() => {});
+    h.internal._storage.render({ start: 0, end: 1 });
+    expect(draw.mock.calls.map(([, tileId, col, row, count]) => [tileId, col, row, count])).toEqual(
+      [
+        [0, 0, 0, 2],
+        [2, 0, 1, 2],
+      ],
+    );
   });
 
   it("deletes only the specified placement, retaining data while another placement exists", async () => {

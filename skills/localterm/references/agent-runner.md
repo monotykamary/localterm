@@ -27,7 +27,7 @@ automation. Only _what runs_ differs.
   `command`, it's natural language, not a shell one-liner.
 - `sessionMode` —
   - `fresh` (ephemeral): each fire starts a brand-new agent session (`pi
---no-session`). Nothing persists between fires. The 90% case.
+    --no-session`). Nothing persists between fires. The 90% case.
   - `thread` (persistent): every fire resumes **one** session file per
     automation, kept under `~/.localterm/agent-sessions/<id>.jsonl`, so the
     agent accumulates context across fires. Use it for a recurring task that

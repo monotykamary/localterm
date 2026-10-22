@@ -33,6 +33,7 @@ export interface KittyPlaceholderExtendedAttributes {
     imageColumn: number;
     imageRow: number;
   };
+  payload?: object;
   underlineColor: number;
   underlineStyle: number;
   underlineVariantOffset: number;

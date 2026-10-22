@@ -97,6 +97,9 @@ describe("passkey provider", () => {
     expect(options.rp.id).toBe("node.ts.net");
     expect(options.user.name).toBe("alice");
     expect(options.challenge).toBeTruthy();
+    expect(options.pubKeyCredParams.map((param: { alg: number }) => param.alg)).toEqual([
+      -8, -7, -257,
+    ]);
   });
 
   it("register/options 400 without a username", async () => {
